@@ -202,14 +202,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `theme-light-dark-gtk-settings`
 - [x] `theme-user-theme-directory-applies`
 - [x] `theme-user-overlay-on-stock-theme`
-- [ ] `theme-legacy-alacritty-only-theme`
-- [ ] `theme-install-git-url-drops-code-files`
-- [ ] `theme-install-community-via-menu`
-- [ ] `theme-install-refuses-hostile-urls-and-names`
-- [ ] `theme-remove-menu-and-cli-guards`
-- [ ] `theme-remove-active-user-theme-unguarded`
-- [ ] `theme-user-templates-render-on-switch`
-- [ ] `theme-refresh-repairs-rendered-file`
+- [x] `theme-legacy-alacritty-only-theme`
+- [x] `theme-install-git-url-drops-code-files`
+- [x] `theme-install-community-via-menu`
+- [x] `theme-install-refuses-hostile-urls-and-names`
+- [x] `theme-remove-menu-and-cli-guards`
+- [x] `theme-remove-active-user-theme-unguarded`
+- [x] `theme-user-templates-render-on-switch`
+- [x] `theme-refresh-repairs-rendered-file`
 - [ ] `theme-terminal-and-tmux-retint-live`
 - [ ] `restart-helpers-quiet-when-target-absent`
 - [ ] `theme-btop-retint`

@@ -8832,25 +8832,27 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type on one line: `mkdir -p ~/.config/omarchy/themes/legacy && printf '[colors.primary]\nbackground = "#301010"\nforeground = "#f0e0e0"\n[colors.normal]\nblack = "#301010"\nred = "#ff5555"\ngreen = "#50fa7b"\nyellow = "#f1fa8c"\nblue = "#6272a4"\nmagenta = "#ff79c6"\ncyan = "#8be9fd"\nwhite = "#f0e0e0"\n' > ~/.config/omarchy/themes/legacy/alacritty.toml`
-  * Type `omarchy-theme-set legacy`. The bar and the terminal turn dark maroon (a toast about no background is expected).
-  * Type `mkdir -p ~/.config/omarchy/themes/broken && printf '[colors.normal]\nblack = "#000000"\n' > ~/.config/omarchy/themes/broken/alacritty.toml && omarchy-theme-set broken; echo "exit=$?"`.
-  ** Expected: `Warning: Cannot extract all normal colors from …/alacritty.toml, skipping generation`; the command still returns `exit=0`.
-  * Press Super+Space: the menu still opens and the bar is still visible (the desktop survived a palette-less theme). Escape.
-  * Type `omarchy-theme-set tokyo-night && rm -rf ~/.config/omarchy/themes/legacy ~/.config/omarchy/themes/broken`; the desktop is fully Tokyo Night.
+  * Press Super+Enter. A terminal opens.
+  * Type `mkdir -p ~/.config/omarchy/themes/legacy && printf '[colors.primary]\nbackground = "#301010"\nforeground = "#f0e0e0"\n[colors.normal]\nblack = "#301010"\nred = "#ff5555"\ngreen = "#50fa7b"\nyellow = "#f1fa8c"\nblue = "#6272a4"\nmagenta = "#ff79c6"\ncyan = "#8be9fd"\nwhite = "#f0e0e0"\n' > ~/.config/omarchy/themes/legacy/alacritty.toml` and press Return.
+  * Type `omarchy-theme-set legacy` and press Return. The bar and the terminal turn dark maroon. A missing-background toast is expected.
+  * Type `mkdir -p ~/.config/omarchy/themes/broken && printf '[colors.normal]\nblack = "#000000"\n' > ~/.config/omarchy/themes/broken/alacritty.toml && omarchy-theme-set broken; echo "exit=$?"` and press Return. A warning says it cannot extract all normal colors. The last line is `exit=0`.
+  * Press Super+Space. The menu opens. The bar is still visible.
+  * Press Escape. The menu closes.
+  * Type `omarchy-theme-set tokyo-night && rm -rf ~/.config/omarchy/themes/legacy ~/.config/omarchy/themes/broken` and press Return. The desktop switches to Tokyo Night.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If the bar disappears or the shell crashes after `broken`, that is the finding — capture it and recover with the last step from the terminal.
+  * If the bar disappears after the broken theme, capture it and run the restore command.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Maroon bar/terminal for `legacy`; the Warning line with `exit=0`; an open menu after `broken`; restored Tokyo Night
+  * On success
+  ** A dark maroon desktop for `legacy`, the warning with `exit=0`, the menu still opening, and Tokyo Night restored
   * If unsuccessful
-  ** Screenshot of the broken desktop
+  ** A desktop that does not survive the broken theme
 covers: bin/omarchy-theme-colors-from-alacritty, bin/omarchy-theme-set (colors.toml generation), bin/omarchy-theme-set-templates (only with colors.toml)
 
 ### theme-install-git-url-drops-code-files   [VM-OK]
@@ -8860,32 +8862,49 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F to maximise it, and build a fake upstream repo by typing on one line:
-  ** `mkdir -p /tmp/omarchy-forest-theme && cd /tmp/omarchy-forest-theme && sed 's/#2e3440/#003300/' /usr/share/omarchy/themes/nord/colors.toml > colors.toml && echo 'Yaru-red' > icons.theme && echo 'os.execute("touch /tmp/theme-pwned")' > hyprland.lua && echo 'font_family Evil' > kitty.conf && echo '{"name":"x","extension":"evil.ext"}' > vscode.json && echo '# notes' > README.md && mkdir backgrounds && cp /usr/share/omarchy/themes/nord/backgrounds/1-city-view.webp backgrounds/ && ln -s /etc/passwd unlock.png && git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm init && cd ~`
-  * Before installing: press Super+Space → `Update` — there is no `Extra Themes` row; Escape. Type `omarchy theme remove; echo "exit=$?"` → `No extra themes installed.`, `exit=1`.
-  * Type `omarchy theme install file:///tmp/omarchy-forest-theme 2>&1 | sudo tee /dev/ttyS0` (password `prime`).
-  ** After the clone lines: `Ignored in /home/prime/.config/omarchy/themes/forest: hyprland.lua kitty.conf unlock.png vscode.json` and `A theme installed from a git repo cannot supply Lua, a terminal config, or vscode.json.` (order may vary); `README.md` is NOT mentioned. The desktop becomes dark green with the Nord city-view wallpaper.
-  * Type `ls ~/.local/state/omarchy/current/theme/ | sudo tee /dev/ttyS0` and read the serial: no `vscode.json`, no `unlock.png`; `kitty.conf` and `hyprland.lua` are present but generated: `grep -c Evil ~/.local/state/omarchy/current/theme/kitty.conf` → `0`, `grep -c theme-pwned ~/.local/state/omarchy/current/theme/hyprland.lua` → `0`, `ls /tmp/theme-pwned` → No such file, `cat ~/.local/state/omarchy/current/theme/icons.theme` → `Yaru-red` (colour-ish files are kept), `hyprctl configerrors` → prints nothing.
-  * Press Super+Space → `Update`: an `Extra Themes` row is now listed. Select it → floating terminal `Updating: forest` and `Already up to date.` (a file:// remote works offline) → `● Done!`. Press a key.
-  * Contrast — the user's own theme is trusted: type `mkdir -p ~/.config/omarchy/themes/mine && cp /usr/share/omarchy/themes/tokyo-night/colors.toml ~/.config/omarchy/themes/mine/ && echo '-- mine marker' > ~/.config/omarchy/themes/mine/hyprland.lua && omarchy-theme-set mine` → nothing is reported ignored and `grep -c 'mine marker' ~/.local/state/omarchy/current/theme/hyprland.lua` → `1`.
-  ** A `.git` directory alone marks a theme as installed (`git init` with no commit is enough); the same directory without `.git` is the user's own.
-  * Restore: type `omarchy theme set tokyo-night && omarchy theme remove forest && rm -rf ~/.config/omarchy/themes/mine /tmp/omarchy-forest-theme`. Press Super+Space → `Update`: the `Extra Themes` row is gone. Escape.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `mkdir -p /tmp/omarchy-forest-theme && cd /tmp/omarchy-forest-theme && sed 's/#2e3440/#003300/' /usr/share/omarchy/themes/nord/colors.toml > colors.toml && echo 'Yaru-red' > icons.theme && echo 'os.execute("touch /tmp/theme-pwned")' > hyprland.lua && echo 'font_family Evil' > kitty.conf && echo '{"name":"x","extension":"evil.ext"}' > vscode.json && echo '# notes' > README.md && mkdir backgrounds && cp /usr/share/omarchy/themes/nord/backgrounds/1-city-view.webp backgrounds/ && ln -s /etc/passwd unlock.png && git init -q && git add -A && git -c user.email=a@b -c user.name=a commit -qm init && cd ~` and press Return.
+  * Press Super+Space. The menu opens.
+  * Click Update. There is no Extra Themes row.
+  * Press Escape. The menu closes.
+  * Type `omarchy theme remove; echo "exit=$?"` and press Return. The output says no extra themes are installed. The last line is `exit=1`.
+  * Type `omarchy theme install file:///tmp/omarchy-forest-theme 2>&1 | sudo tee /dev/ttyS0` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Read the serial log. It says those files were ignored: `hyprland.lua`, `kitty.conf`, `unlock.png`, and `vscode.json`. It does not name `README.md`. The desktop turns dark green.
+  * Type `ls ~/.local/state/omarchy/current/theme/` and press Return. There is no `vscode.json` and no `unlock.png`.
+  * Type `grep -c Evil ~/.local/state/omarchy/current/theme/kitty.conf` and press Return. The line is `0`.
+  * Type `grep -c theme-pwned ~/.local/state/omarchy/current/theme/hyprland.lua` and press Return. The line is `0`.
+  * Type `ls /tmp/theme-pwned` and press Return. The file is not there.
+  * Type `cat ~/.local/state/omarchy/current/theme/icons.theme` and press Return. The line is `Yaru-red`.
+  * Type `hyprctl configerrors` and press Return. Nothing is printed.
+  * Press Super+Space. The menu opens.
+  * Click Update.
+  * Click Extra Themes. A floating terminal says forest is already up to date.
+  * Press a key. That terminal closes.
+  * Type `mkdir -p ~/.config/omarchy/themes/mine && cp /usr/share/omarchy/themes/tokyo-night/colors.toml ~/.config/omarchy/themes/mine/` and press Return.
+  * Type `echo '-- mine marker' > ~/.config/omarchy/themes/mine/hyprland.lua` and press Return.
+  * Type `omarchy-theme-set mine` and press Return. Nothing is reported ignored.
+  * Type `grep -c 'mine marker' ~/.local/state/omarchy/current/theme/hyprland.lua` and press Return. The line is `1`.
+  * Type `omarchy theme set tokyo-night && omarchy theme remove forest && rm -rf ~/.config/omarchy/themes/mine /tmp/omarchy-forest-theme` and press Return. The desktop switches to Tokyo Night.
+  * Press Super+Space. The menu opens.
+  * Click Update. There is no Extra Themes row.
+  * Press Escape. The menu closes.
+  * Press Super+F. The terminal returns to a tile.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * On a 4.0.2 disk the staging filter may not exist: if there is no `Ignored in` line and `vscode.json` was staged, record `omarchy-version` and report "staging filter not on this build" rather than failing the install.
-  * The stderr lines scroll quickly; the serial copy is authoritative. The theme name is derived from the directory: `omarchy-forest-theme` → `forest`.
-  * Do not put real payloads in the user theme — Hyprland would run them by design. The same drop list fires for a community repo over the network (OldJobobo/omarchy-aonagi-theme ships alacritty.toml, foot.ini, ghostty.conf, gum_env.lua, hyprland.lua, kitty.conf, neovim.lua); that path is `theme-install-community-via-menu`.
+  * If there is no ignored-files line and `vscode.json` was staged, record `omarchy-version` and report that the staging filter is not on this build.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial text with the `Ignored in …: hyprland.lua kitty.conf unlock.png vscode.json` message and the cannot-supply line, not naming README.md; the dark-green Forest desktop; serial listing without vscode.json/unlock.png; the grep counts 0/0, `Yaru-red`, no `/tmp/theme-pwned`, empty `hyprctl configerrors`
-  ** The `Extra Themes` row and its update terminal; the user theme keeping its `mine marker` with nothing reported ignored; Extra Themes hidden again after removal; restored Tokyo Night
+  * On success
+  ** The ignored-files list, a dark-green desktop, no `Evil` or `theme-pwned` in the generated files, `Yaru-red` kept, Extra Themes updating forest, the user theme keeping `mine marker`, and Extra Themes gone after removal
   * If unsuccessful
-  ** The marker found in the staged hyprland.lua or `/tmp/theme-pwned` existing (code not filtered), `vscode.json` staged, the clone failing, Extra Themes missing/present at the wrong time; full install output, `ls -la ~/.local/state/omarchy/current/theme/`, `omarchy-version`
+  ** `/tmp/theme-pwned` existing, or `vscode.json` staged
 covers: bin/omarchy-theme-install; bin/omarchy-git-url-check (file transport); bin/omarchy-theme-set (stage_installed_theme, denylist, symlink drop; l.20-30, l.234-280); bin/omarchy-theme-extras; bin/omarchy-theme-update; bin/omarchy-theme-remove; omarchy-menu.jsonc install.style.theme, remove.theme, update.themes; test/shell.d/theme-staging-test.sh; test/shell.d/menu-guards-test.sh; docs/theming.md (What an installed theme may not ship); manual/43-making-your-own-theme.md (What an installed theme can contain, Distributing your theme); manual/06-themes.md; default/agents/skills/omarchy/theming.md §What a Theme Installed From a Repo May Not Contain; omarchy-theme-registry README "What gets checked"
 
 ### theme-install-community-via-menu   [VM-OK] [NET]
@@ -8895,29 +8914,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space → `Install` → `Style` → `Theme`. A floating terminal shows the Omarchy logo, `See https://omarchy.org/themes/` and the prompt `Git repo URL (https or git@host:org/repo.git)`.
-  * Unhappy path first: press Escape. The prompt closes with `● Failed (exit code 1)! Press any key to close...`; press a key. Open a terminal with Super+Enter: `ls ~/.config/omarchy/themes/` → nothing was installed.
-  * Repeat the menu path; type `https://github.com/bjarneo/omarchy-ash-theme` and press Enter.
-  ** Clone progress (30–60 s over user-mode NAT; poll with screenshots), then the desktop, bar and terminal recolour to Ash's grey palette, then `● Done! Press any key to close...`. Press a key.
-  ** If the clone reports the repository does not exist, use `https://github.com/OldJobobo/omarchy-aonagi-theme` instead (violet/blue; it ships extra config files that are dropped and named as `Ignored in …`) and record which URL you used.
-  * Press Super+Shift+Ctrl+Space: the picker lists `Ash` with a preview among the built-in themes. Escape.
-  * In the terminal type `omarchy theme update` → `Updating: ash` and `Already up to date.`
-  * Press Super+Space → `Style` → `Theme` → `Tokyo Night`: stock colours return. Switch away *before* removing — removing the current theme leaves the desktop pointing at a deleted directory.
-  * Press Super+Space → `Remove` → `Theme`; click `ash` with the mouse → a `Theme removed` notification with `ash`. Press Super+Shift+Ctrl+Space: Ash is no longer listed. Escape. The desktop is as found.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Style.
+  * Click Theme. A floating terminal asks for a git repo URL.
+  * Press Escape. The terminal says the command failed.
+  * Press a key. That terminal closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `ls ~/.config/omarchy/themes/` and press Return. Nothing new is listed.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Style.
+  * Click Theme. A floating terminal asks for a git repo URL.
+  * Type `https://github.com/bjarneo/omarchy-ash-theme` and press Enter. The theme installs. The desktop recolours.
+  ** If that repository does not exist, use `https://github.com/OldJobobo/omarchy-aonagi-theme` instead and record which URL you used.
+  * Press a key. That terminal closes.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. Ash is listed.
+  * Press Escape. The picker closes.
+  * Type `omarchy theme update` and press Return. The output says ash is already up to date.
+  * Press Super+Space. The menu opens.
+  * Click Style.
+  * Click Theme.
+  * Click Tokyo Night. The desktop switches to Tokyo Night.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click Theme. A picker lists extra themes.
+  * Click ash. A notification says the theme was removed.
+  * Press Super+Shift+Ctrl+Space. The theme picker opens. Ash is not listed.
+  * Press Escape. The picker closes.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The "marketplace" is a URL paste; there is no in-desktop browser. The prompt takes literal text — do not type angle brackets. The theme name becomes the repo name minus `omarchy-`/`-theme`.
-  * The clone is a few MB; retry once on a network error. A mirror/DNS failure is a NET failure, not an Omarchy one — capture the text either way.
+  * The clone can take a minute. Retry once on a network error.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The URL prompt; the Failed banner after Escape and the empty themes directory; clone output and Done; the recoloured desktop and the picker listing Ash; `Already up to date.`; the Remove picker, the notification and the picker without Ash; restored Tokyo Night
+  * On success
+  ** The cancelled prompt installing nothing, the installed theme in the picker, the update saying it is already current, and the theme gone after removal
   * If unsuccessful
-  ** The floating terminal's error text (`Error: Failed to clone theme repo.` or git's message) and the URL used; `ls -la ~/.config/omarchy/themes/`
+  ** The clone error and the URL used
 covers: bin/omarchy-theme-install (gum prompt, empty URL); bin/omarchy-theme-update; bin/omarchy-theme-remove; omarchy-menu.jsonc install.style.theme, remove.theme, style.theme; bin/omarchy-show-done; manual/43-making-your-own-theme.md "Distributing your theme"; omarchy-theme-registry README "Browse and install"
 
 ### theme-install-refuses-hostile-urls-and-names   [VM-OK]
@@ -8927,34 +8965,57 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F to maximise it, and type `ls ~/.config/omarchy/themes/ 2>/dev/null | wc -l; omarchy-theme-current` → record N (stock: `0`) and `Tokyo Night`.
-  * Transport/option refusals — run each with `; echo "exit=$?"` appended; every one is refused instantly on stderr by `omarchy-git-url-check`, exits 1, and creates nothing under `~/.config/omarchy/themes/`:
-  ** `omarchy-theme-install "ext::sh -c id"` → `omarchy-git-url-check: 'ext::sh -c id' names a git option or transport helper, not a repository.` (also try the URL-encoded form `ext::sh%20-c%20id`)
-  ** `omarchy-theme-install "--upload-pack=touch /tmp/pwned"` and `omarchy-theme-install --upload-pack=/bin/sh` → refused
-  ** `omarchy-theme-install "gcrypt://example.com/x"` → refused; `omarchy-theme-install "gopher://x/omarchy-y-theme.git"` → `… names the 'gopher' transport, which Omarchy does not clone from.`
-  * Name refusals — each `Error: '…' does not give a usable theme name.`, `exit=1`, before any clone:
-  ** `omarchy-theme-install "https://example.com/.git"`, `omarchy-theme-install "https://example.org/..git"`, `omarchy-theme-install "https://example.com/omarchy-..-theme.git"`
-  ** `omarchy-theme-install "https://example.com/omarchy-a';id;'b-theme.git"`, `omarchy-theme-install "https://example.com/a b.git"`, `omarchy-theme-install "https://github.com/x/omarchy-bad%20name-theme"`, `omarchy-theme-install "https://example.com/-a.git"`
-  * Clone failure (offline): type `omarchy theme install file:///home/prime/no-such-theme; echo "exit=$?"` → a git clone error, then `Error: Failed to clone theme repo.`, `exit=1`, no half-installed directory.
-  ** The manual's own example name passes the rule: `omarchy theme install 'https://example.com/omarchy-c++-theme.git'; echo "exit=$?"` reaches `git clone`, which fails against example.com (this one touches the network; `https://github.com/omacom/omarchy-does-not-exist-theme.git` behaves the same) → `Error: Failed to clone theme repo.`, `exit=1`.
-  * Type `ls /tmp/pwned` → no such file. Type `touch ~/.config/omarchy/canary`, then `omarchy-theme-remove ..; echo "exit=$?"`, `omarchy-theme-remove .; echo "exit=$?"`, `omarchy-theme-remove ../../evil; echo "exit=$?"` — each fails with `exit=1`, and `ls ~/.config/omarchy/canary` still exists. Type `rm ~/.config/omarchy/canary`.
-  * Prompt cancel: type `omarchy theme install` with no argument → a green `See https://omarchy.org/themes/` line and a gum input `Git repo URL (…)`; press Escape → the prompt closes, `echo "exit=$?"` → `exit=1`. Press Super+Space → `Install` → `Style` → `Theme`: the floating terminal shows the same prompt; press Escape → `● Failed (exit code 1)!`, press a key.
-  * Type `ls ~/.config/omarchy/themes/ 2>/dev/null | wc -l; omarchy-theme-current` → still N and `Tokyo Night`; the desktop colours are unchanged.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `ls ~/.config/omarchy/themes/ 2>/dev/null | wc -l` and press Return. Note the count.
+  * Type `omarchy-theme-current` and press Return. Note the theme name.
+  * Type `omarchy-theme-install "ext::sh -c id"; echo "exit=$?"` and press Return. The output says that URL is not a repository. The last line is `exit=1`.
+  * Type `omarchy-theme-install "--upload-pack=touch /tmp/pwned"; echo "exit=$?"` and press Return. The command is refused. Git does not run. The last line is `exit=1`.
+  * Type `omarchy-theme-install --upload-pack=/bin/sh; echo "exit=$?"` and press Return. The command is refused. Git does not run. The last line is `exit=1`.
+  * Type `omarchy-theme-install "gcrypt://example.com/x"; echo "exit=$?"` and press Return. The command is refused. Git does not run. The last line is `exit=1`.
+  * Type `omarchy-theme-install "gopher://x/omarchy-y-theme.git"; echo "exit=$?"` and press Return. The output says the gopher transport is not cloned. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://example.com/.git"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://example.org/..git"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://example.com/omarchy-..-theme.git"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://example.com/omarchy-a';id;'b-theme.git"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://example.com/a b.git"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://github.com/x/omarchy-bad%20name-theme"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy-theme-install "https://example.com/-a.git"; echo "exit=$?"` and press Return. The output says the URL does not give a usable theme name. The last line is `exit=1`.
+  * Type `omarchy theme install file:///home/prime/no-such-theme; echo "exit=$?"` and press Return. The output says the clone failed. The last line is `exit=1`.
+  * Type `omarchy theme install 'https://example.com/omarchy-c++-theme.git'; echo "exit=$?"` and press Return. Git is reached and the clone fails. The last line is `exit=1`.
+  * Type `ls /tmp/pwned` and press Return. The file is not there.
+  * Type `touch ~/.config/omarchy/canary` and press Return.
+  * Type `omarchy-theme-remove ..; echo "exit=$?"` and press Return. The command fails. The last line is `exit=1`.
+  * Type `omarchy-theme-remove .; echo "exit=$?"` and press Return. The command fails. The last line is `exit=1`.
+  * Type `omarchy-theme-remove ../../evil; echo "exit=$?"` and press Return. The command fails. The last line is `exit=1`.
+  * Type `ls ~/.config/omarchy/canary` and press Return. The file is still there.
+  * Type `rm ~/.config/omarchy/canary` and press Return.
+  * Type `omarchy theme install` and press Return. A prompt asks for a git repo URL.
+  * Press Escape. The prompt closes.
+  * Type `echo "exit=$?"` and press Return. The line is `exit=1`.
+  * Press Super+Space. The menu opens.
+  * Click Install.
+  * Click Style.
+  * Click Theme. A floating terminal asks for a git repo URL.
+  * Press Escape. The terminal says the command failed.
+  * Press a key. That terminal closes.
+  * Type `ls ~/.config/omarchy/themes/ 2>/dev/null | wc -l` and press Return. The count matches the number you noted.
+  * Type `omarchy-theme-current` and press Return. The theme name is unchanged.
+  * Press Super+F. The terminal returns to a tile.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * For the transport, option and name refusals, any `Cloning into` / `Error: Failed to clone theme repo.` output means git was reached — report that as a failure; for the two clone-failure steps that message *is* the expected result. The `ext::`/option checks may be absent on a 4.0.2 disk: record `omarchy-version`.
-  * example.com resolves but serves no git repo; that clone error appears within seconds. The gum input has a placeholder; Escape (not Ctrl+C) is the cancel path under test.
+  * A `Cloning into` line on a helper or bad-name URL is a failure. It is expected only on the two clone-failure steps.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of each transport/option/name refusal with its exact message and `exit=1`; the clone-failure output ending `Error: Failed to clone theme repo.` with `exit=1`; the unchanged `~/.config/omarchy/themes/` count and `Tokyo Night`
-  ** Screenshot of `/tmp/pwned` absent and `~/.config/omarchy/canary` present after the remove attempts; the gum URL prompt in the terminal and in the floating terminal, both cancelled
+  * On success
+  ** Every helper, option, and bad-name URL refused with `exit=1` before a useful clone, the missing repo and the example.com URL failing the clone, `/tmp/pwned` absent, the canary still present after the path removals, and the theme count unchanged
   * If unsuccessful
-  ** Screenshot of a clone running for a helper/option/bad-name URL, a new or half-installed theme directory, a changed theme, or a missing canary; output of `omarchy-version`; `./client get-serial`
+  ** Git running for a helper URL, or a new theme directory
 covers: bin/omarchy-theme-install (name allowlist, clone failure, gum prompt; l.19-59); bin/omarchy-git-url-check; bin/omarchy-theme-remove; omarchy-menu.jsonc install.style.theme; test/shell.d/theme-install-guards-test.sh; docs/theming.md:64 (git URLs only); manual/06-themes.md; manual/43-making-your-own-theme.md (Distributing your theme — naming rules; l.41)
 
 ### theme-remove-menu-and-cli-guards   [VM-OK]
@@ -8964,27 +9025,39 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `for n in alpha beta; do mkdir -p ~/.config/omarchy/themes/$n && cp /usr/share/omarchy/themes/nord/colors.toml ~/.config/omarchy/themes/$n/; done`.
-  * Type `omarchy theme remove alpha` → `Removed alpha` and a toast titled `Theme removed` with body `alpha`.
-  * Press Super+Space → `Remove` → `Theme`. A small picker titled `Remove extra theme` lists only `beta` (no stock names). Click it with the mouse.
-  ** Toast `Theme removed` / `beta`.
-  * Press Super+Space → `Remove` → `Theme` again: with no extras nothing is removed; in the terminal `omarchy-theme-remove; echo "exit=$?"` → `No extra themes installed.`, `exit=1`.
-  * Refusals: type `omarchy theme remove tokyo-night; echo "exit=$?"` → `Error: Theme 'tokyo-night' not found.`, `exit=1`; `omarchy theme remove nope; echo "exit=$?"` → `Error: Theme 'nope' not found.`, `exit=1`; `omarchy theme remove ../themes; echo "exit=$?"` → no message, `exit=1`; `omarchy theme remove /tmp; echo "exit=$?"` → no message, `exit=1`; `ls /tmp` still works.
-  * Type `ls /usr/share/omarchy/themes | wc -l` → `22` and `ls ~/.config/omarchy/themes/` → empty; the desktop is unchanged.
+  * Press Super+Enter. A terminal opens.
+  * Type `for n in alpha beta; do mkdir -p ~/.config/omarchy/themes/$n && cp /usr/share/omarchy/themes/nord/colors.toml ~/.config/omarchy/themes/$n/; done` and press Return.
+  * Type `omarchy theme remove alpha` and press Return. The line says `Removed alpha`. A toast says the theme was removed.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click Theme. A picker lists `beta` and no stock theme.
+  * Click beta. A toast says beta was removed.
+  * Press Super+Space. The menu opens.
+  * Click Remove.
+  * Click Theme. Record what the empty picker does. Nothing is removed.
+  * Press Escape. The picker closes if it is still open.
+  * Type `omarchy-theme-remove; echo "exit=$?"` and press Return. The output says no extra themes are installed. The last line is `exit=1`.
+  * Type `omarchy theme remove tokyo-night; echo "exit=$?"` and press Return. The output says the theme was not found. The last line is `exit=1`.
+  * Type `omarchy theme remove nope; echo "exit=$?"` and press Return. The output says the theme was not found. The last line is `exit=1`.
+  * Type `omarchy theme remove ../themes; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy theme remove /tmp; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `ls /tmp` and press Return. The listing works.
+  * Type `ls /usr/share/omarchy/themes | wc -l` and press Return. The line is `22`.
+  * Type `ls ~/.config/omarchy/themes/` and press Return. The directory is empty.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The picker is a compact list; Escape cancels it. Stock themes can never be removed — the command looks only in `~/.config/omarchy/themes`.
-  * All CLI refusals are instant; one maximised terminal screenshot at the end covers them.
+  * Stock themes cannot be removed. The command only looks in `~/.config/omarchy/themes`.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** `Removed alpha` with its toast; the picker showing only beta; the beta toast; `No extra themes installed.`; the two `not found` errors, two silent exit-1s, `22`, and the empty directory
+  * On success
+  ** Alpha removed from the CLI, beta removed from the picker, no extras left, the stock and path names refused with `exit=1`, and 22 stock themes still present
   * If unsuccessful
-  ** The command output, the picker screenshot, any removal exiting 0 or a count below 22
+  ** A stock theme removed, or a refusal that exits `0`
 covers: bin/omarchy-theme-remove (guards); omarchy-menu.jsonc remove.theme; bin/omarchy-menu-select; bin/omarchy-notification-send; test/shell.d/theme-install-guards-test.sh (remove section)
 
 ### theme-remove-active-user-theme-unguarded   [VM-OK]
@@ -8994,27 +9067,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `mkdir -p ~/.config/omarchy/themes/gone && cp /usr/share/omarchy/themes/gruvbox/colors.toml ~/.config/omarchy/themes/gone/ && omarchy-theme-set gone`. The bar recolours to Gruvbox tones (a toast about no background is expected); `omarchy-theme-current` → `Gone`.
-  * Type `omarchy theme remove gone; echo "exit=$?"`.
-  ** Intended: a refusal naming it as the active theme with a non-zero exit (or an automatic switch to another theme before the removal), and `ls ~/.config/omarchy/themes/` still lists `gone` (or the desktop is already on another theme).
-  ** Observed at HEAD: `Removed gone`, `exit=0`, no warning that it was active — record this as the defect and continue.
-  * Type `omarchy-theme-current` → still `Gone` while the desktop is unchanged (the rendered copy keeps it alive).
-  * Type `omarchy-theme-set gone; echo "exit=$?"` and `omarchy-theme-refresh; echo "exit=$?"` → each `Theme 'gone' does not exist`, `exit=1`.
-  * Type `omarchy-theme-set tokyo-night`; the desktop recovers. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `mkdir -p ~/.config/omarchy/themes/gone && cp /usr/share/omarchy/themes/gruvbox/colors.toml ~/.config/omarchy/themes/gone/` and press Return.
+  * Type `omarchy-theme-set gone` and press Return. The desktop switches to that theme. A missing-background toast is expected.
+  * Type `omarchy-theme-current` and press Return. The line is `Gone`.
+  * Type `omarchy theme remove gone; echo "exit=$?"` and press Return. Record the output and the exit code.
+  ** The intended result is a refusal because it is the active theme, or a switch away before removal. `Removed gone` with `exit=0` is the known defect. Record which one happened, with `omarchy-version`.
+  * Type `omarchy-theme-current` and press Return. Record whether it still says `Gone`.
+  * Type `omarchy-theme-set gone; echo "exit=$?"` and press Return. Record whether it says the theme does not exist.
+  * Type `omarchy-theme-refresh; echo "exit=$?"` and press Return. Record whether it says the theme does not exist.
+  * Type `omarchy-theme-set tokyo-night` and press Return. The desktop switches to Tokyo Night.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The intended behaviour is the pass condition; the HEAD behaviour above is the expected *failure* today. Report which one you saw, with `omarchy-version`.
-  * The manual does not describe theme removal at all, so this is a code regression, not a doc disagreement.
+  * Report which behaviour you saw. A desktop with no bar after the removal is a second failure.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** The refusal (or the automatic switch) on `omarchy theme remove gone`, `gone` still present or the desktop already elsewhere; recovered Tokyo Night
+  * On success
+  ** Either a refusal of the active theme, or the recorded defect of `Removed gone` with `exit=0`, followed by Tokyo Night restored
   * If unsuccessful
-  ** `Removed gone` with `exit=0`; `Gone` still current; `Theme 'gone' does not exist` with `exit=1` from both `theme-set` and `theme-refresh` (the defect, recorded); a broken desktop (no bar) after the removal would be a second, worse finding; `omarchy-version`
+  ** A desktop that cannot be switched back to Tokyo Night
 covers: bin/omarchy-theme-remove (no active-theme guard), bin/omarchy-theme-refresh, bin/omarchy-theme-current, bin/omarchy-theme-set
 
 ### theme-user-templates-render-on-switch   [VM-OK]
@@ -9024,28 +9100,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter, press Super+F to maximise it, and type `ls ~/.config/omarchy/themed/` → `alacritty.toml.tpl.sample`.
-  * Type `printf 'bg={{ background }}\nacc={{ accent_strip }}\nfg_rgb={{ foreground_rgb }}\nmixed={{ mix background foreground 50%% }}\nunknown={{ nope }}\n' > ~/.config/omarchy/themed/mytest.txt.tpl && printf '# user kitty template\n' > ~/.config/omarchy/themed/kitty.conf.tpl`.
-  * Type `omarchy-theme-refresh` (re-renders without changing the wallpaper — confirm it did not move), then `cat ~/.local/state/omarchy/current/theme/mytest.txt ~/.local/state/omarchy/current/theme/kitty.conf`.
-  ** Expected on Tokyo Night: `bg=#1a1b26`, `acc=7aa2f7`, `fg_rgb=169,177,214`, `mixed=#62667e`, `unknown={{ nope }}` left literally, then the single line `# user kitty template` (the 27-line built-in was replaced).
-  * Type `omarchy-theme-set nord && head -1 ~/.local/state/omarchy/current/theme/mytest.txt` → `bg=#2e3440`.
-  * Override a shipped template from the sample: type `sed 's/^# HOW TO USE.*//' ~/.config/omarchy/themed/alacritty.toml.tpl.sample > ~/.config/omarchy/themed/alacritty.toml.tpl && echo '# PROBE-USER-TEMPLATE' >> ~/.config/omarchy/themed/alacritty.toml.tpl && omarchy-theme-set tokyo-night && grep -c PROBE-USER-TEMPLATE ~/.local/state/omarchy/current/theme/alacritty.toml` → `1`.
-  * Restore: type `rm ~/.config/omarchy/themed/*.tpl && omarchy-theme-set tokyo-night && wc -l ~/.local/state/omarchy/current/theme/kitty.conf` → `27` (built-in back) and `ls ~/.local/state/omarchy/current/theme/mytest.txt` → `No such file`.
-  ** Re-applying tokyo-night advances its wallpaper each time; expected.
+  * Press Super+Enter. A terminal opens.
+  * Press Super+F. The terminal fills the screen.
+  * Type `ls ~/.config/omarchy/themed/` and press Return. The sample template is listed.
+  * Type `printf 'bg={{ background }}\nacc={{ accent_strip }}\nfg_rgb={{ foreground_rgb }}\nmixed={{ mix background foreground 50%% }}\nunknown={{ nope }}\n' > ~/.config/omarchy/themed/mytest.txt.tpl` and press Return.
+  * Type `printf '# user kitty template\n' > ~/.config/omarchy/themed/kitty.conf.tpl` and press Return.
+  * Type `omarchy-theme-bg-current` and press Return. Note the background name.
+  * Type `omarchy-theme-refresh` and press Return.
+  * Type `omarchy-theme-bg-current` and press Return. The background name is unchanged.
+  * Type `cat ~/.local/state/omarchy/current/theme/mytest.txt` and press Return. The values are rendered. The unknown placeholder is left literal.
+  * Type `cat ~/.local/state/omarchy/current/theme/kitty.conf` and press Return. The file is the one-line user template.
+  * Type `omarchy-theme-set nord && head -1 ~/.local/state/omarchy/current/theme/mytest.txt` and press Return. The first line starts with `bg=#`.
+  * Type `sed 's/^# HOW TO USE.*//' ~/.config/omarchy/themed/alacritty.toml.tpl.sample > ~/.config/omarchy/themed/alacritty.toml.tpl` and press Return.
+  * Type `echo '# PROBE-USER-TEMPLATE' >> ~/.config/omarchy/themed/alacritty.toml.tpl` and press Return.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Type `grep -c PROBE-USER-TEMPLATE ~/.local/state/omarchy/current/theme/alacritty.toml` and press Return. The line is `1`.
+  * Type `rm ~/.config/omarchy/themed/*.tpl` and press Return.
+  * Type `omarchy-theme-set tokyo-night` and press Return.
+  * Type `wc -l ~/.local/state/omarchy/current/theme/kitty.conf` and press Return. The line is `27`.
+  * Type `ls ~/.local/state/omarchy/current/theme/mytest.txt` and press Return. The file is not there.
+  * Press Super+F. The terminal returns to a tile.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * This feature only shows in files, so the maximised terminal is the screen here.
-  * Templates only render for themes with colors.toml; every shipped theme has one.
+  * Re-applying the current theme advances its wallpaper. That is expected.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Terminal showing the five rendered values (exact hex above) and the one-line kitty.conf; `bg=#2e3440` on Nord; grep count 1 for the user alacritty template; the clean-up state (`27`, No such file)
+  * On success
+  ** The rendered test file, the one-line kitty template, a new background colour after Nord, the probe line in alacritty, and the built-in kitty file of 27 lines after cleanup
   * If unsuccessful
-  ** `ls ~/.config/omarchy/themed/`, the rendered file contents or placeholders unreplaced, `./client get-serial`
+  ** A placeholder that should have been rendered, or the user kitty template still in place after cleanup
 covers: bin/omarchy-theme-set-templates (user templates first, mix/strip/rgb); bin/omarchy-theme-refresh (SKIP_BACKGROUND); config/omarchy/themed/alacritty.toml.tpl.sample; docs/theming.md "Template placeholders"; manual/43-making-your-own-theme.md (Theming apps Omarchy doesn't cover)
 
 ### theme-refresh-repairs-rendered-file   [VM-OK]
@@ -9055,23 +9143,28 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `echo 'broken=garbage' > ~/.local/state/omarchy/current/theme/foot.ini`.
-  * Open a new terminal with Super+Enter. It opens in plain default colours (black background, white text) instead of Tokyo Night — the symptom.
-  * In either terminal type `omarchy-theme-refresh; echo "exit=$?"`. It returns silently with `exit=0`. The wallpaper does not change.
-  * Open another new terminal with Super+Enter; it opens in Tokyo Night navy again. Close the extra terminals with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `echo 'broken=garbage' > ~/.local/state/omarchy/current/theme/foot.ini` and press Return.
+  * Press Super+Enter. A second terminal opens. Its colours are the plain default, not the theme.
+  * Click the first terminal. It has focus.
+  * Type `omarchy-theme-refresh; echo "exit=$?"` and press Return. The last line is `exit=0`. The wallpaper does not change.
+  * Press Super+Enter. A third terminal opens. Its colours match the theme.
+  * Press Super+W. One extra terminal closes.
+  * Press Super+W. The other extra terminal closes.
+  * Press Super+W. The first terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * If foot refuses to start with the broken include, use the first terminal for the refresh and report it.
+  * If a new terminal will not start with the broken file, refresh from the first terminal and report that.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** A plain black-and-white new terminal; a navy new terminal after the refresh; the same wallpaper throughout
+  * On success
+  ** A plain new terminal before the refresh, a themed new terminal after it, and the same wallpaper throughout
   * If unsuccessful
-  ** The `omarchy-theme-refresh` exit code and `head -3 ~/.local/state/omarchy/current/theme/foot.ini`
+  ** The refresh exit code and the first lines of `foot.ini`
 covers: bin/omarchy-theme-refresh, bin/omarchy-theme-set (OMARCHY_THEME_SKIP_BACKGROUND)
 
 ### theme-terminal-and-tmux-retint-live   [VM-OK]
