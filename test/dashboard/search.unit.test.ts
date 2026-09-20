@@ -24,9 +24,21 @@ class Element {
 
   append(...nodes: Element[]): void {
     for (const node of nodes) {
-      node.parent = this;
-      this.children.push(node);
+      this.appendChild(node);
     }
+  }
+
+  // Moving a node, as the browser does: the script reorders the list with appendChild.
+  appendChild(node: Element): Element {
+    if (node.parent !== null) {
+      const index = node.parent.children.indexOf(node);
+      if (index !== -1) {
+        node.parent.children.splice(index, 1);
+      }
+    }
+    node.parent = this;
+    this.children.push(node);
+    return node;
   }
 
   get textContent(): string {
@@ -116,13 +128,15 @@ vm.runInContext(
 const names = (list: Element): Array<{ readonly name: string; readonly hidden: boolean }> =>
   list.querySelectorAll("li").map((item) => ({ name: item.textContent, hidden: item.hidden }));
 
-const index = (): { readonly input: Element; readonly list: Element; readonly miss: Element } => {
+const index = (
+  listed: ReadonlyArray<string> = ["install", "lock-screen"],
+): { readonly input: Element; readonly list: Element; readonly miss: Element } => {
   const search = new Element("search");
   const input = new Element("input");
   input.type = "search";
   search.append(input);
   const list = new Element("ul", "definition-list");
-  for (const name of ["install", "lock-screen"]) {
+  for (const name of listed) {
     const item = new Element("li");
     const link = new Element("a");
     link.text = name;
@@ -138,19 +152,14 @@ const index = (): { readonly input: Element; readonly list: Element; readonly mi
 };
 
 describe("dashboard.js definition search happy path", () => {
-  it("narrows the names as the box is typed, ignoring case, and a blank box is every name", () => {
+  it("narrows the names as the box is typed, ignoring case, and puts the match first", () => {
     const { input, list, miss } = index();
     input.value = "LOCK";
     document.dispatch("input", input);
     expect(names(list)).toEqual([
-      { name: "install", hidden: true },
       { name: "lock-screen", hidden: false },
+      { name: "install", hidden: true },
     ]);
-    expect(miss.hidden).toBe(true);
-
-    input.value = "   ";
-    document.dispatch("input", input);
-    expect(names(list).every((item) => !item.hidden)).toBe(true);
     expect(miss.hidden).toBe(true);
   });
 
@@ -170,18 +179,74 @@ describe("dashboard.js definition search happy path", () => {
 
     input.value = "LOCK";
     document.dispatch("input", input);
-    expect(names(list)[1]).toEqual({ name: "lock-screen15 out of 17", hidden: false });
+    expect(names(list)).toEqual([
+      { name: "lock-screen15 out of 17", hidden: false },
+      { name: "install", hidden: true },
+    ]);
     expect(miss.hidden).toBe(true);
   });
 
-  it("brings the names back when the box is cleared", () => {
-    const { input, list, miss } = index();
+  it("matches a name a letter at a time and lists a tighter match ahead of a looser one", () => {
+    const { input, list, miss } = index(["spin", "install", "inner", "wide layout"]);
+    input.value = "IN";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
+      { name: "inner", hidden: false },
+      { name: "install", hidden: false },
+      { name: "spin", hidden: false },
+      { name: "wide layout", hidden: true },
+    ]);
+    expect(miss.hidden).toBe(true);
+
+    input.value = "wl";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
+      { name: "wide layout", hidden: false },
+      { name: "inner", hidden: true },
+      { name: "install", hidden: true },
+      { name: "spin", hidden: true },
+    ]);
+    expect(miss.hidden).toBe(true);
+
+    const listed = index(["install", "lock-screen", "screen-lock"]);
+    listed.input.value = "LSCR";
+    document.dispatch("input", listed.input);
+    expect(names(listed.list)).toEqual([
+      { name: "lock-screen", hidden: false },
+      { name: "install", hidden: true },
+      { name: "screen-lock", hidden: true },
+    ]);
+    expect(listed.miss.hidden).toBe(true);
+
+    listed.input.value = "scr";
+    document.dispatch("input", listed.input);
+    expect(names(listed.list)).toEqual([
+      { name: "screen-lock", hidden: false },
+      { name: "lock-screen", hidden: false },
+      { name: "install", hidden: true },
+    ]);
+  });
+
+  it("sorts every name alphabetically when the box is blank, whatever order was rendered", () => {
+    const { input, list, miss } = index(["lock-screen", "inner", "install"]);
+    input.value = "   ";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
+      { name: "inner", hidden: false },
+      { name: "install", hidden: false },
+      { name: "lock-screen", hidden: false },
+    ]);
+    expect(miss.hidden).toBe(true);
+
     input.value = "lock";
     document.dispatch("input", input);
-    expect(names(list)[0]).toEqual({ name: "install", hidden: true });
     input.value = "";
     document.dispatch("input", input);
-    expect(names(list).every((item) => !item.hidden)).toBe(true);
+    expect(names(list)).toEqual([
+      { name: "inner", hidden: false },
+      { name: "install", hidden: false },
+      { name: "lock-screen", hidden: false },
+    ]);
     expect(miss.hidden).toBe(true);
   });
 });
@@ -196,6 +261,15 @@ describe("dashboard.js definition search unhappy path", () => {
     const code = miss.querySelector("code");
     expect(code?.textContent).toBe("<script>");
     expect(code?.children).toEqual([]);
+  });
+
+  it("does not match letters that are in a name but not in order", () => {
+    const { input, list, miss } = index(["install", "inner", "spin"]);
+    input.value = "ni";
+    document.dispatch("input", input);
+    expect(names(list).every((item) => item.hidden)).toBe(true);
+    expect(miss.hidden).toBe(false);
+    expect(miss.querySelector("code")?.textContent).toBe("ni");
   });
 
   it("does nothing on a page that has no list", () => {
