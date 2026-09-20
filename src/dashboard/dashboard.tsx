@@ -26,7 +26,7 @@ import {
   type TestBasePrompt,
 } from "./query.ts";
 import { clickerPage } from "./clicker.ts";
-import { DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
+import { definitionHref, DefinitionsPage, RunningList, type EditNotice } from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
 import { abortLinearIssue, type LinearEnv } from "./linear.ts";
 import { createTestSuiteRun, SuiteRequestError } from "./suite.ts";
@@ -268,10 +268,8 @@ const Home: FC<HomeProps> = ({ sessions }) => (
   </Shell>
 );
 
-const definitionHref = (name: string): string => `/definitions?name=${encodeURIComponent(name)}`;
-
 const editHref = (name: string, notice: EditNotice): string =>
-  `${definitionHref(name)}&edit=${notice}`;
+  `${definitionHref(name)}?edit=${notice}`;
 
 type PromptsProps = {
   prompts: TestBasePrompt[] | null;
@@ -363,33 +361,41 @@ app.get("/results", async (context) => {
   }
 });
 
-// Text, served whole, the same document as the servers page. `groups` is absent only when the
-// database could not be read.
+// Text, served whole, the same document as the servers page.
 const definitionsPage = (
   context: Context<{ Bindings: Bindings }>,
   status: 200 | 404 | 500,
   props: Parameters<typeof DefinitionsPage>[0],
 ) => context.html(html`<!doctype html>${<DefinitionsPage {...props} />}`, status);
 
+// An old ?name link is the previous address of a definition's page. Empty is the index.
+const legacyDefinition = (name: string, edit: string | undefined): string =>
+  name === ""
+    ? "/definitions"
+    : `${definitionHref(name)}${edit === undefined ? "" : `?edit=${encodeURIComponent(edit)}`}`;
+
+// Only the two refusals the edit route redirects with are a notice; anything else in ?edit is
+// a stale or hand-made link and shows nothing.
+const editNotice = (edit: string | undefined): EditNotice | undefined =>
+  edit === "unchanged" || edit === "empty" ? edit : undefined;
+
 app.get("/definitions", async (context) => {
   const name = context.req.query("name");
-  const edit = context.req.query("edit");
-  // Only the two refusals the edit route redirects with are a notice; anything else in ?edit is
-  // a stale or hand-made link and shows nothing.
-  const notice = edit === "unchanged" || edit === "empty" ? edit : undefined;
+  if (name !== undefined) {
+    return context.redirect(legacyDefinition(name, context.req.query("edit")), 302);
+  }
+  const query = context.req.query("q") ?? "";
   try {
     const [definitions, running] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
     ]);
-    const groups = groupDefinitions(definitions);
-    const selected = selectDefinition(groups, name);
-    // A stale link: the page still lists what exists, the status says the name does not.
-    return definitionsPage(context, name !== undefined && selected === undefined ? 404 : 200, {
-      groups,
-      name,
-      selected,
-      notice,
+    return definitionsPage(context, 200, {
+      groups: groupDefinitions(definitions),
+      query,
+      name: undefined,
+      selected: undefined,
+      notice: undefined,
       error: undefined,
       running,
     });
@@ -398,7 +404,8 @@ app.get("/definitions", async (context) => {
     console.error("dashboard: loading the definitions page:", errorMessage(error));
     return definitionsPage(context, 500, {
       groups: null,
-      name,
+      query,
+      name: undefined,
       selected: undefined,
       notice: undefined,
       error: "Test definitions are unavailable.",
@@ -408,7 +415,8 @@ app.get("/definitions", async (context) => {
 });
 
 // What the running strip polls for: the jobs in flight, not the rest of the page. `name` is the
-// definition an abort without htmx returns to, echoed into the forms the swap inserts.
+// definition an abort without htmx returns to, echoed into the forms the swap inserts. Registered
+// before /definitions/:name so this path is the fragment, not a definition named running.
 app.get("/definitions/running", async (context) => {
   const definition = context.req.query("name");
   try {
@@ -418,6 +426,40 @@ app.get("/definitions/running", async (context) => {
     Sentry.captureException(error);
     console.error("dashboard: listing running tests:", errorMessage(error));
     return context.html(<p>error: internal error</p>, 500);
+  }
+});
+
+// One definition: /definitions/lock-screen. A name nobody carries is 404, not another definition.
+app.get("/definitions/:name", async (context) => {
+  const name = context.req.param("name");
+  const notice = editNotice(context.req.query("edit"));
+  try {
+    const [definitions, running] = await Promise.all([
+      listTestDefinitions(context.env.HYPERDRIVE.connectionString),
+      listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
+    ]);
+    const selected = selectDefinition(groupDefinitions(definitions), name);
+    return definitionsPage(context, selected === undefined ? 404 : 200, {
+      groups: null,
+      query: "",
+      name,
+      selected,
+      notice,
+      error: undefined,
+      running,
+    });
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: loading a definition:", errorMessage(error));
+    return definitionsPage(context, 500, {
+      groups: null,
+      query: "",
+      name,
+      selected: undefined,
+      notice: undefined,
+      error: "Test definitions are unavailable.",
+      running: null,
+    });
   }
 });
 
@@ -461,6 +503,7 @@ app.post("/definitions", async (context) => {
     console.error("dashboard: saving a definition:", errorMessage(error));
     return definitionsPage(context, 500, {
       groups: null,
+      query: "",
       name,
       selected: undefined,
       notice: undefined,
@@ -679,7 +722,8 @@ app.post("/abort", async (context) => {
   let definition: unknown;
   const reply = async () => {
     const definitionsView = view === "definitions";
-    const back = typeof definition === "string" ? definition : undefined;
+    // An empty name is not a page: the index is. A name goes back to that definition's page.
+    const back = typeof definition === "string" && definition !== "" ? definition : undefined;
     if (wantsFragment) {
       try {
         if (definitionsView) {

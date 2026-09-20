@@ -135,7 +135,7 @@ describe("POST /abort unhappy path", () => {
       env,
     );
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/definitions?name=lock-screen");
+    expect(response.headers.get("location")).toBe("/definitions/lock-screen");
   });
 
   it("sends a definitions-page abort with no definition back to the definitions page", async () => {
@@ -152,7 +152,7 @@ describe("POST /abort unhappy path", () => {
     expect(response.headers.get("location")).toBe("/definitions");
   });
 
-  it("sends a definitions-page abort whose definition is empty back to that empty name", async () => {
+  it("sends a definitions-page abort whose definition is empty back to the definitions index", async () => {
     const response = await app.request(
       "/abort",
       {
@@ -163,6 +163,50 @@ describe("POST /abort unhappy path", () => {
       env,
     );
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/definitions?name=");
+    expect(response.headers.get("location")).toBe("/definitions");
+  });
+});
+
+describe("definition pages happy path", () => {
+  it("sends an old ?name link to that definition's page", async () => {
+    const response = await app.request("/definitions?name=lock-screen", undefined, env);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/definitions/lock-screen");
+  });
+
+  it("keeps an edit notice on the definition's page", async () => {
+    const response = await app.request(
+      "/definitions?name=wide%20layout&edit=unchanged",
+      undefined,
+      env,
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/definitions/wide%20layout?edit=unchanged");
+  });
+
+  it("sends an empty ?name back to the definitions index", async () => {
+    const response = await app.request("/definitions?name=", undefined, env);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/definitions");
+  });
+});
+
+describe("definition pages unhappy path", () => {
+  it("answers a definition's page as the definitions document when the database cannot be read", async () => {
+    const response = await app.request("/definitions/lock-screen", undefined, env);
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain("<title>oligarchy definitions</title>");
+    expect(html).toContain("<p>error: Test definitions are unavailable.</p>");
+    expect(html).toContain('href="/definitions" aria-current="page"');
+    expect(html).not.toContain("<h1>oligarchy servers</h1>");
+    expect(html).not.toContain("No test definition named");
+    expect(html).not.toContain("postgres://");
+  });
+
+  it("keeps /definitions/running a fragment, not a definition named running", async () => {
+    const response = await app.request("/definitions/running", undefined, env);
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("<p>error: internal error</p>");
   });
 });
