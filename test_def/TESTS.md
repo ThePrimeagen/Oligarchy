@@ -2997,12 +2997,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+K and type "Close window": exactly one row `SUPER + W / SUPER + Q → Close window` (W first). Escape once.
-  * Type "scratch": `SUPER + S / SUPER + ~ → Toggle scratchpad` and `SUPER + ALT + S / SUPER + SHIFT + ~ → Move window to scratchpad`; the word `grave` appears nowhere. Escape once.
-  ** The scratchpad grave aliases may be absent on 4.0.2; report "absent on this build" rather than a failure.
-  * Type "Calculator": both `SUPER + CTRL + Q` and `XF86Calculator` appear (on one row or two). Escape once. Type "Reveal active": two separate rows (`ALT + TAB` and `ALT + SHIFT + TAB`), not merged. Escape twice.
-  * Open a terminal with Super+Enter and type `omarchy-menu-keybindings --print | sudo tee /dev/ttyS0 >/dev/null` Enter (password prime), then read ./client get-serial: every `→` is at the same column, no line is longer than 78 characters, `→ Close window`, `→ Toggle scratchpad` and `→ Calculator` each appear once, `grave` never.
-  * Type `omarchy-menu-keybindings --print | awk -F '→' '{print length($1)}' | sort -u; omarchy-menu-keybindings --print | awk '{print length($0)}' | sort -rn | head -1` Enter: a single `36`, then a number ≤ 78. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+K. The keybindings viewer opens.
+  * Type `Close window`. One merged close row is shown.
+  * Press Escape. The filter clears. The viewer stays open.
+  * Type `qqqzzz`. No matches are shown.
+  * Press Escape. The filter clears.
+  * Press Escape. The viewer closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-menu-keybindings --print | awk -F '→' '{print length($1)}' | sort -u` and press Enter. One width prints.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3025,15 +3028,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space, Down eight times (About), Enter (or type "about", Return). The menu closes and a floating, centred terminal (class `org.omarchy.about`) shows the green Omarchy ASCII logo on the left and, on the right, three boxes: `Hardware` (PC, CPU with 2 cores, GPU like `Red Hat, Inc. Virtio 1.0 GPU`, display, disk, ~4 GB memory, ~4 GB zram swap), `Software` (`OS  Omarchy <version>`, branch, channel, kernel, WM `Hyprland`, terminal `foot`, packages, theme name followed by eight coloured dots, terminal font) and `Age / Uptime / Update`; no large empty area and no clipped lines.
-  * Take four screenshots about 0.4 s apart: a lighter band moves across the logo between frames while the logo's shape and text stay identical; one more screenshot after 3 s shows it settled.
-  ** The glint is subtle: compare the same logo row across frames. If the first attempt shows no band, reopen once — a resize during the first paint stops the sweep by design.
-  * Note the theme name shown. Press any key (q or Space): the window closes. Open Super+Space → Style → Theme: the checked theme matches the name; Escape.
-  * Press Super+Enter and type `omarchy-launch-about` Enter: About reopens at the same fitted size without a visible resize jump. Click the terminal with the mouse (any key would close About) and type `omarchy-launch-about` Enter again: the existing About window is focused; there is only one About window on screen. Press a key in About to close it.
-  * Type `mkdir -p ~/.config/fastfetch && cp /etc/fastfetch/config.jsonc ~/.config/fastfetch/config.jsonc` Enter, open About again and take three screenshots 0.4 s apart: the logo is completely still. Close it. Type `rm -r ~/.config/fastfetch` Enter and open About once more: it animates again; close it.
-  * Press Super+Enter: only the prompt appears, no fastfetch banner. Type `fastfetch | head -12` Enter: the same layout inline. Press Ctrl+D in both terminals.
-  * Press Super+Escape, then Enter on "Screensaver" (the first row): the menu closes and the whole screen is taken over by the screensaver animation. Press Space: the screensaver exits and the desktop returns exactly as left.
-  ** A notification "Screensaver only runs in Alacritty, Foot, Ghostty, or Kitty" would mean the default terminal is unsupported — report it. If the screensaver does not exit on a key, move the mouse, press Escape, then Super+W.
+  * Press Super+Space. The menu opens.
+  * Click About. Use the mouse only. About opens. The menu closes.
+  * Press Space. About closes.
+  * Press Super+Enter. A terminal opens.
+  * Run `omarchy-launch-about` and press Enter. About opens.
+  * Press Space. About closes.
+  * Press Super+Enter. A second terminal opens. Fastfetch does not print on its own.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The other terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3056,13 +3059,13 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Space and open Learn. Rows exactly: Keybindings, Omarchy, Hyprland, Arch, Neovim, Bash, Tmux, Herdr, Community.
-  * Select "Omarchy": a browser window with no tab strip or address bar opens on omarchy.org/manual. Close it with Super+W.
-  * Learn → "Hyprland": a web-app window loads wiki.hypr.land. Learn → "Bash": web-app window on devhints.io/bash. Close each.
-  ** A Chromium "not responding" dialog on 2 vCPU is not a hang: click Wait.
-  * Learn → "Community": Discord is not installed, so a web-app window of the discord.gg invite page opens. Close it.
-  * Learn → "Tmux": picker "Tmux keybindings…" whose first row starts with PREFIX. Escape.
-  * Unhappy path: if any page cannot be reached, the window still opens with the site in its title — that still proves the launch; report the error page. Press Ctrl+Alt+Delete if any window is left; the desktop is as before.
+  * Press Super+Space. The menu opens.
+  * Click Learn. Use the mouse only. Learn opens.
+  * Click Omarchy. Use the mouse only. A web-app window opens. The menu closes.
+  * Press Super+W. The window closes.
+  * Press Super+Space. The menu opens.
+  * Click Learn, then Tmux. Use the mouse only. The tmux keybindings viewer opens.
+  * Press Escape. The viewer closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3085,13 +3088,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Alt+Space. Within 15 seconds the header reads "Apps…" over an alphabetical list with square image icons (Basecamp, Chromium, Discord, Disk Usage, Docker, Google Contacts, … YouTube, Zoom); the shipped web apps and TUIs show distinct icons, not a blank glyph, and the last visible row is clipped. Press PageDown twice, then PageUp twice: the list scrolls and returns to the top.
-  ** The list can take a second to fill the first time. ChatGPT and Grok are hotkey-only web apps with no `.desktop` file and are absent by design.
-  * Type "btop": no btop row (hidden by launcher.hides). Escape once; type "fcitx": No matches. Escape once.
-  * Type "contact": the rows are direct matches only (e.g. Google Contacts); `Calculator` is not among them. Press Backspace until empty and type "gc": Google Contacts is the first row. Clear and type "obs": OBS Studio is the first row. Clear.
-  * Type "omawrite": Omawrite is the top row. Press Enter: within 15 seconds the menu closes and within 60 seconds an Omawrite window is open (a rocket "Launching…" OSD may show first). Press Super+W: within 30 seconds it is gone.
-  * Press Super+Alt+Space, type "calc", Enter: Omacalc opens (the menu closes; allow a few seconds). Press Super+W. Press Super+Alt+Space, type "disk", Enter: a floating terminal running dua opens; press q to quit.
-  * Unhappy path: press Super+Alt+Space and type "zzqqxx": the card shows No matches for “zzqqxx”. Press Escape: the menu closes and no application launched; the desktop is exactly as at the start.
+  * Press Super+Alt+Space. The Apps menu opens.
+  * Type `btop`. No btop row is shown.
+  * Press Escape. The filter clears. The menu stays open.
+  * Type `omawrite`. Omawrite is the top row.
+  * Press Enter. Omawrite opens. The menu closes.
+  * Press Super+W. Omawrite closes.
+  * Press Super+Alt+Space. The Apps menu opens.
+  * Type `zzqqxx`. No matches are shown.
+  * Press Escape. The menu closes. Nothing launches.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3115,13 +3120,15 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `printf '[Desktop Entry]\nType=Application\nName=Zz Test Entry\nExec=true\n' > ~/.local/share/applications/zz-test.desktop` Enter.
-  * Press Super+Alt+Space, type `zz test`, press Delete and confirm: the menu closes. Type `ls ~/.local/share/applications/zz-test.desktop` Enter: gone, and no toast appeared.
-  ** The confirmation is a small yes/no inside the menu; Enter confirms.
-  * Press Super+Alt+Space, type `basecamp`, press Delete and confirm. Type `ls ~/.local/share/applications/ | grep -ci basecamp` Enter → `0`; the Apps menu no longer lists Basecamp.
-  * Press Super+Alt+Space, type `docker`, press Delete and confirm: the Docker TUI entry is gone the same way.
-  * Type `omarchy-refresh-applications` Enter and reopen the Apps menu: Basecamp and Docker are back. Escape.
-  * Unhappy path: do not delete a package-owned entry (e.g. Nautilus) — that opens an `Uninstalling …; sudo pacman -Rns …` terminal; if one opens by mistake, press Ctrl+C and report it. Close the terminal with Super+W; the desktop is as before.
+  * Press Super+Enter. A terminal opens.
+  * Run `printf '[Desktop Entry]\nType=Application\nName=Zz Test Entry\nExec=true\n' > ~/.local/share/applications/zz-test.desktop` and press Enter. The entry exists.
+  * Press Super+Alt+Space. The Apps menu opens.
+  * Type `zz test`. The test entry is shown.
+  * Press Delete. A confirm prompt appears.
+  * Press Enter. The entry is removed. The menu closes.
+  * Run `ls ~/.local/share/applications/zz-test.desktop` and press Enter. The file is gone.
+  * Run `omarchy-refresh-applications` and press Enter. Stock entries are restored.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
@@ -3144,15 +3151,16 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Take a screenshot: no windows are open. Press Super+Enter: within 45 seconds a terminal with a shell prompt appears, tiled. Type `omarchy-default-terminal` Enter: it prints `foot`.
-  * Type `cd /tmp` Enter, then press Super+Enter again: the second terminal's prompt shows `/tmp` (type `pwd` Enter if the prompt abbreviates it). Close the second with Super+W.
-  ** The cwd helper reads the focused terminal's shell directory; give it a second after `cd`.
-  * Press Super+Shift+F: Files (Nautilus) opens tiled at Home (allow 15 s; GTK renders oversized at 1× — expected). Press Super+W. Focus the terminal (still in /tmp) and press Super+Alt+Shift+F: Nautilus opens showing `tmp` in its path bar. Press Super+W.
-  * Press Super+Alt+Enter: a terminal with a tmux status bar and the session "Work". Type `exit` Enter until it closes. Press Super+Ctrl+Enter: a terminal running herdr; screenshot it and close the window with Super+W.
-  ** Herdr may be absent on 4.0.2 — check the Super+K row first and report "absent on this build", not "broken".
-  * Press Super+Ctrl+Q: the omacalc calculator floats; type `2+2` Return and see 4. Press Super+W.
-  * Close the first terminal with Super+W. Unhappy path: with no terminal focused press Super+Alt+Shift+F — Files still opens (falls back to Home). Press Super+W. Press Super+W again on the empty desktop: nothing appears or crashes.
-  * The desktop must look exactly as at the start.
+  * Press Super+Enter. A terminal opens.
+  * Run `cd /tmp` and press Enter. The shell is in /tmp.
+  * Press Super+Enter. A second terminal opens in /tmp.
+  * Press Super+W. The second terminal closes.
+  * Press Super+Shift+F. Files opens.
+  * Press Super+W. Files closes.
+  * Press Super+Ctrl+Q. The calculator opens.
+  * Press Super+W. The calculator closes.
+  * Press Super+W. The first terminal closes.
+  * Press Super+W. Nothing happens. The desktop stays empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>

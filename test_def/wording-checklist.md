@@ -76,12 +76,12 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `menu-timezone-set-filter-and-cancel`
 - [x] `keybindings-viewer-opens-filters-and-variants`
 - [x] `keybindings-viewer-runs-selected-binding`
-- [ ] `keybindings-viewer-merges-alternative-chords`
-- [ ] `about-window-fastfetch-sheen-and-focus`
-- [ ] `menu-learn-rows-open-docs-webapps`
-- [ ] `apps-launcher-search-rank-and-launch`
-- [ ] `apps-launcher-delete-key-removes-entry`
-- [ ] `launch-terminal-files-calculator-chords`
+- [x] `keybindings-viewer-merges-alternative-chords`
+- [x] `about-window-fastfetch-sheen-and-focus`
+- [x] `menu-learn-rows-open-docs-webapps`
+- [x] `apps-launcher-search-rank-and-launch`
+- [x] `apps-launcher-delete-key-removes-entry`
+- [x] `launch-terminal-files-calculator-chords`
 - [ ] `launch-browser-chords-url-follow-and-private`
 - [ ] `launch-editor-chord-and-config-rows-open-right-file`
 - [ ] `xdg-open-lands-in-default-apps`
