@@ -6132,30 +6132,53 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter; its top edge sits just below the bar. Type `hyprctl -j monitors | jq '.[0].reserved'` Enter: the top value is non-zero.
-  * Press Super+Shift+Space: within 15 s the bar is gone and the terminal reaches the very top of the screen. Type `omarchy-toggle-enabled bar-off; echo "exit=$?"` → `exit=0`; `hyprctl -j monitors | jq '.[0].reserved'` → top `0`; `hyprctl -j layers | jq '.[].levels."2"[] | select(.namespace|test("bar")) | {y,h}'` → a bar layer still exists with a negative `y` (parked off screen).
-  ** A missing bar is the expected state here, not a crash; a one-pixel sliver at the top edge may remain.
-  * Press Super+Shift+Space again: the bar is back within 15 s with the same widgets and the terminal has shrunk below it; `omarchy-toggle-enabled bar-off; echo "exit=$?"` → `exit=1`.
-  * Type `omarchy-toggle-bar on` Enter: the bar disappears. Type `omarchy-toggle-bar off` Enter: it reappears. Type `omarchy-toggle-bar on; omarchy-toggle-bar on; omarchy-toggle-bar off` Enter: it ends shown (idempotent).
-  ** `on` means "hidden on" — this is the command's wording, not a bug.
-  * Press Super+Space → Trigger → Toggle → Menu Bar: the bar hides from the menu; repeat the row: it returns.
-  * Type `omarchy-toggle-fullscreen-desktop` Enter: the bar disappears AND the window gaps collapse (the terminal touches the screen edges); `ls ~/.local/state/omarchy/toggles/ ~/.local/state/omarchy/toggles/hypr/` shows `bar-off` and `window-no-gaps.lua`. Type `omarchy-toggle-fullscreen-desktop` Enter again: bar and gaps restored, both flags gone.
-  ** If the command is missing on this build (`command not found`), report "absent on this build" and skip this step.
-  * Unhappy path: after each hide, `Super+Space` must still open the menu (Escape to close it). Type `omarchy toggle bar sideways; echo "exit=$?"` → a usage line mentioning `toggle|on|off`, non-zero, and the bar stays visible. Close the terminal with Super+W: the desktop is as it started, bar visible.
+  * Press Super+Enter. A terminal opens. Its top edge is below the bar.
+  * Type `hyprctl -j monitors | jq '.[0].reserved'` and press Return. The top value is not `0`.
+  * Press Super+Shift+Space. The bar hides. The terminal reaches the top of the screen.
+  ** A missing bar is expected here. A one-pixel sliver at the top is fine.
+  * Press Super+Space. The menu opens. The bar stays hidden.
+  * Press Escape. The menu closes.
+  * Type `omarchy-toggle-enabled bar-off; echo "exit=$?"` and press Return. The last line is `exit=0`.
+  * Type `hyprctl -j monitors | jq '.[0].reserved'` and press Return. The top value is `0`.
+  * Type `hyprctl -j layers | jq '.[].levels."2"[] | select(.namespace|test("bar")) | {y,h}'` and press Return. A bar layer is listed with a negative `y`.
+  * Press Super+Shift+Space. The bar returns. The terminal sits below it.
+  * Type `omarchy-toggle-enabled bar-off; echo "exit=$?"` and press Return. The last line is `exit=1`.
+  * Type `omarchy-toggle-bar on` and press Return. The bar hides.
+  ** In this command, `on` means hidden.
+  * Type `omarchy-toggle-bar off` and press Return. The bar returns.
+  * Type `omarchy-toggle-bar on` and press Return. The bar hides.
+  * Type `omarchy-toggle-bar on` and press Return. The bar stays hidden.
+  * Type `omarchy-toggle-bar off` and press Return. The bar returns.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Menu Bar. The menu closes. The bar hides.
+  * Press Super+Space. The menu opens. The bar stays hidden.
+  * Press Escape. The menu closes.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Menu Bar. The menu closes. The bar returns.
+  * Type `omarchy-toggle-fullscreen-desktop` and press Return. The bar hides. The gaps go away.
+  ** If the command is not found, report "absent on this build" and skip the rest of the fullscreen-desktop steps.
+  * Type `ls ~/.local/state/omarchy/toggles/ ~/.local/state/omarchy/toggles/hypr/` and press Return. The listing includes `bar-off` and `window-no-gaps.lua`.
+  * Type `omarchy-toggle-fullscreen-desktop` and press Return. The bar returns. The gaps return.
+  * Type `ls ~/.local/state/omarchy/toggles/ ~/.local/state/omarchy/toggles/hypr/` and press Return. `bar-off` and `window-no-gaps.lua` are gone.
+  * Type `omarchy toggle bar sideways; echo "exit=$?"` and press Return. A usage line appears. The exit is not `0`. The bar stays visible.
+  * Press Super+W. The terminal closes. The bar is visible.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The bar normally moves instantly; the 15-second allowance is the acceptance suite's. If it never returns, `omarchy-shell shell ping` tells a dead shell from a stuck bar.
-  * If `Menu Bar` does not match in the menu search, navigate Trigger → Toggle → Menu Bar with the arrow keys; the first Return in a fresh menu only settles the cursor.
+  * If the bar never returns, type `omarchy-shell shell ping` and press Return.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots in order: bar visible with the terminal below it; hidden with the terminal at the top edge and `exit=0` / reserved `0` / the parked layer; visible again with `exit=1`; hidden and shown by `omarchy-toggle-bar on`/`off`; the menu pair; bar and gaps gone together with both flag files, then restored with none
+  * On success
+  ** The bar hidden with `exit=0`, reserved top `0`, and a parked layer; the bar back with `exit=1`; hide and show from `omarchy-toggle-bar`; both flags present then gone; the usage refusal with the bar still visible
   * If unsuccessful
-  ** Screenshot of the state where the bar failed to hide or return (a stranded bar), the flag listing, the usage refusal, and the `omarchy-shell shell ping` / `omarchy-shell omarchy.bar syncHidden` output
+  ** A bar that does not hide, or a bar that does not return
 covers: shell/plugins/bar/Bar.qml (barHidden, barHiddenProbe, omarchy.bar syncHidden); bin/omarchy-toggle-bar; bin/omarchy-toggle; bin/omarchy-toggle-enabled; bin/omarchy-toggle-fullscreen-desktop; default/hypr/bindings/utilities.lua:16 (Super+Shift+Space); default/omarchy/omarchy-menu.jsonc:95 trigger.toggle.top-bar; test/acceptance.d/session-test.sh:30-45; test/shell.d/bar-test.sh (hidden bar stays mapped, parks past its edge, reserves no space); test/shell.d/toggle-test.sh; manual/05-the-top-bar.md:106; manual/07:191; manual/13-toggles-idle-screensaver.md:18
 
 ### bar-drag-to-edge-and-widget-reorder   [VM-OK]
@@ -6165,27 +6188,37 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Move the mouse to empty bar space at x≈0.25, y≈0.01, press and hold the left button for one second: the cursor becomes a closed hand and a translucent slab outlines the current (top) edge.
-  * Still holding, drag to x≈0.5, y≈0.95: the slab now outlines the BOTTOM edge. Release: the bar is along the bottom edge.
-  * Press Super+Enter: the terminal tiles from the top down to just above the bar. From the bottom bar (y≈0.99) hold, drag up to y≈0.05 and release: the bar is back on top and the terminal re-tiles below it.
-  * Screenshot the right section and note the order (ethernet glyph, speaker, monitor glyph). Hold the left button on the monitor glyph (x≈0.985, y≈0.01), drag left past the ethernet glyph to x≈0.93 and screenshot while holding: a faded copy of the icon follows the pointer and a thin accent-coloured vertical marker shows the landing spot. Release: the monitor glyph is now LEFT of the ethernet glyph and the bar has stayed on top.
-  * Press Super+Enter then Super+W to open and close a second terminal: the new order is still there (it was persisted).
-  * In the terminal type `omarchy bar defaults` Enter: it prints `Restored the default Omarchy bar` and the original order is back.
-  * Unhappy path: a press that moves less than 4 px is a click and opens the monitor panel instead — press Escape and retry with a longer drag; releasing on the same edge changes nothing.
-  * Round trip: type `rm -f ~/.config/omarchy/shell.json` Enter and close the terminal with Super+W; the bar is as found.
+  * Move the pointer to empty bar space.
+  * Press and hold the left button for one second. A translucent slab outlines the top edge.
+  * Drag to the bottom of the screen. The slab outlines the bottom edge.
+  * Release. The bar is along the bottom edge.
+  * Press Super+Enter. A terminal opens. Its bottom edge stops above the bar.
+  * Press and hold empty space on the bottom bar.
+  * Drag to the top of the screen. The slab outlines the top edge.
+  * Release. The bar is back on top. The terminal sits below it.
+  * Take a screenshot of the right side of the bar. Note the glyph order.
+  * Press and hold the monitor glyph.
+  * Drag it left past the wired-network glyph. A faded copy follows the pointer. A marker shows the landing spot.
+  * Release. The monitor glyph is left of the wired-network glyph. The bar stays on top.
+  * Press Super+Enter. A second terminal opens.
+  * Press Super+W. That terminal closes. The new glyph order is still there.
+  * Click the first terminal. It has focus.
+  * Type `omarchy bar defaults` and press Return. The line says the default bar was restored. The original glyph order is back.
+  * Type `rm -f ~/.config/omarchy/shell.json` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use `./client mouse hold`, then `mouse drag`, then `mouse release`; the move starts after 200 ms or 4 px, so keep the press on bar background for the edge move and on the icon for the reorder. A mid-drag screenshot shows the preview.
+  * Hold for about a second before dragging. A press that barely moves is a click and may open a panel. Press Escape and drag farther.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot with the bottom-edge slab preview while dragging; the bar on the bottom edge with the terminal above it; the bar back on top; the mid-drag ghost with the accent marker; the swapped order surviving a window open/close; the restored order after `omarchy bar defaults`
+  * On success
+  ** The slab on the bottom edge, the bar on the bottom, the bar back on top, the monitor glyph moved and still moved after a window opens and closes, and the original order after `omarchy bar defaults`
   * If unsuccessful
-  ** Screenshot of a stuck preview slab, an unmoved bar, or a misplaced/duplicated widget
+  ** A slab that stays, a bar that does not move, or a duplicated glyph
 covers: shell/plugins/bar/Bar.qml (CenterGestureArea, beginBarMove/updateBarMove/finishBarMove, BarMoveGhostPanel, nearestScreenEdge, ModuleSlot.modulePointer, captureBarDragGhost, DragGhostPanel, moduleDropAtScene, dropBarModuleAtTarget); shell/plugins/bar/BarModel.nearestDropTarget; bin/omarchy-bar cmd_defaults; test/shell.d/bar-test.sh; manual/05:83
 
 ### bar-custom-command-module   [VM-OK]
@@ -6195,28 +6228,30 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy bar position top` (this creates the user `~/.config/omarchy/shell.json` without changing anything visible).
-  * Type and run: `jq '.bar.layout.right += [{"id":"hello","type":"command","exec":"echo HELLO-VM","interval":5,"tooltip":"Custom module","onClick":"xdg-terminal-exec"}]' ~/.config/omarchy/shell.json > /tmp/s.json && mv /tmp/s.json ~/.config/omarchy/shell.json`
-  ** Send `>` as `<GT>`; the file is watched, so no reload is needed.
-  * Within three seconds the text `HELLO-VM` appears at the right end of the bar.
-  * Hover it for a second: tooltip `Custom module`.
-  * Left-click it: a new terminal opens. Close that terminal with Super+W.
-  * Unhappy path: a shell error from the jq line (a mistyped command) leaves the bar unchanged — fix the line and rerun before reporting a shell defect.
-  * Round trip: run `rm ~/.config/omarchy/shell.json`: `HELLO-VM` is gone and the bar is as found. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy bar position top` and press Return. The bar stays where it is.
+  * Type `jq '.bar.layout.right += [{"id":"hello","type":"command","exec":"echo HELLO-VM","interval":5,"tooltip":"Custom module","onClick":"xdg-terminal-exec"}]' ~/.config/omarchy/shell.json > /tmp/s.json && mv /tmp/s.json ~/.config/omarchy/shell.json` and press Return.
+  * Wait 3 seconds. `HELLO-VM` appears at the right end of the bar.
+  ** If jq prints an error, fix the line and run it again before reporting a shell defect.
+  * Hover `HELLO-VM`. A tooltip says `Custom module`.
+  * Click `HELLO-VM`. A terminal opens.
+  * Press Super+W. That terminal closes.
+  * Click the first terminal. It has focus.
+  * Type `rm ~/.config/omarchy/shell.json` and press Return. `HELLO-VM` is gone.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use ./client-with-image after typing the jq line to check it before pressing Enter.
-  * `shell.json` is replace-not-merge: never hand-write a minimal file — that swaps the bar to the built-in minimal layout.
+  * Do not hand-write a minimal `shell.json`. That replaces the bar layout.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of `HELLO-VM` in the bar; its tooltip; the terminal opened by the click; the bar restored after the file is removed
+  * On success
+  ** `HELLO-VM` in the bar, the tooltip, a terminal opened by the click, and the text gone after the file is removed
   * If unsuccessful
-  ** Screenshot of the bar with no module and the terminal output of the jq command
+  ** No `HELLO-VM`, and the jq output
 covers: shell/plugins/bar/Bar.qml CustomCommandModule (exec/interval/tooltip/onClick); shell/plugins/bar/BarModel.customModuleType; docs/omarchy-shell.md "Custom bar modules"; shell/plugins/bar/README.md
 
 ### bar-widget-enable-disable-and-placement   [VM-OK]
@@ -6226,30 +6261,102 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and run `omarchy plugin list | sudo tee /dev/ttyS0` (password `prime`): a header `ID STATE SOURCE KINDS NAME`; every id starts with `omarchy.` (`omarchy.clock enabled first-party bar-widget`, omarchy.network, omarchy.notifications, `omarchy.bar enabled first-party bar`, omarchy.audio, omarchy.microphone …), STATE is enabled/disabled, SOURCE first-party, KINDS e.g. bar-widget, service, panel. Run `omarchy plugin list --json | jq length` → ≥ 20; `omarchy plugin list --json | jq -r '.[] | select(.id=="omarchy.clock") | .enabled'` → `true`; `omarchy plugin list --help` → `Usage: omarchy plugin list [--json]`.
-  * Run `omarchy plugin disable omarchy.weather`: prints `Disabled omarchy.weather`; within a couple of seconds the weather widget leaves the bar centre. Run `omarchy plugin disable omarchy.audio`: the speaker widget leaves the right section; `omarchy-shell shell listShellConfig | jq -c '[.bar.layout.right[]|.id//.]'` no longer contains `omarchy.audio`. Run `omarchy plugin enable omarchy.audio --section right`: the speaker is back.
-  * Press Super+Space → Setup → Plugins → Enable Plugin: a picker `Enable plugin…` lists disabled plugins with a glyph, the name (Weather, Tailscale, Dropbox, Dev gallery …) and the id in grey underneath; choose Weather: the widget returns to the bar centre and `omarchy plugin list | grep weather` says `enabled`. Setup → Plugins → Disable Plugin → Weather removes it again; enable it once more the same way.
-  * Enable Plugin → type `tail`, Enter: a new icon (a 3×3 dot grid with a cross) appears in the right section; click it: hero `Tailscale` / `TAILSCALE IS DISCONNECTED`, no on/off switch, a row `Tailscale CLI is not installed or not on PATH.`; press t: nothing changes; Escape. Enable Plugin → `drop`, Enter: a diamond icon; click it: rows `Dropbox CLI is not installed` / `Install Dropbox from the service menu` with a greyed button; Escape. Disable Plugin → Tailscale, then Dropbox: both icons disappear. Enable Plugin → Escape: the bar is unchanged.
-  * Run `omarchy plugin enable omarchy.microphone --section right`: prints `Enabled and moved omarchy.microphone` and a microphone icon appears in the right section; `omarchy plugin disable omarchy.microphone` removes it. Run `omarchy plugin disable omarchy.workspaces`: the numbers 1–5 vanish from the left section; `omarchy plugin enable omarchy.workspaces`: they return (note which section they landed in).
-  * Run `omarchy bar put omarchy.active-window`: prints `omarchy.active-window is on the bar` and the terminal's window title appears in the LEFT section after the workspaces (elided at 280 px, ending in `…`). Open a second terminal with Super+Enter: the title changes; hover it for a second: a tooltip with the full title; middle-click the title in the bar: the focused terminal closes. Run `omarchy plugin disable omarchy.active-window`: the title widget disappears.
-  * Run `omarchy-bar put omarchy.keyboard-layout --after omarchy.clock` then `omarchy-shell shell listShellConfig | jq -c '[.bar.layout.center[]|.id//.]'`: `omarchy.keyboard-layout` sits immediately after `omarchy.clock`. Run `omarchy-bar put omarchy.keyboard-layout --section right` and re-run the jq for both sections: nothing moved and there is no second `omarchy.keyboard-layout` (put never duplicates).
-  ** `omarchy bar put` is newer than 4.0.2; if it prints `Unknown Omarchy command`, report "absent on this build" and continue.
-  * Unhappy path, each with `; echo "exit=$?"`: `omarchy plugin enable acme.nonexistent` → `omarchy-plugin-enable: plugin 'acme.nonexistent' is not known; run: omarchy-shell shell rescanPlugins`, `exit=1`; `omarchy plugin disable` → `plugin id is required`, `exit=1`; `omarchy plugin enable omarchy.bar --section right` → `'omarchy.bar' is a bar; it replaces the bar in use rather than taking a place in one`, `exit=1`; `omarchy plugin enable omarchy.weather nowhere` → `section must be left, center, or right`, `exit=1`; `omarchy plugin list --bogus` → `omarchy-plugin-list: unknown option: --bogus`, `exit=1`; `omarchy bar put omarchy.no-such-widget` → a message containing `is not a known widget`, non-zero. Nothing on the bar changes.
-  * Round trip: run `omarchy bar defaults` (`Restored the default Omarchy bar`) then `rm -f ~/.config/omarchy/shell.json`: the shipped bar is back — weather and speaker present, no keyboard-layout, title, Tailscale or Dropbox entry. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy plugin list | sudo tee /dev/ttyS0` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Read the serial log. The header includes `ID`, `STATE`, `SOURCE`, `KINDS`, and `NAME`. The ids start with `omarchy.`.
+  * Type `omarchy plugin list --json | jq length` and press Return. The number is at least 20.
+  * Type `omarchy plugin list --json | jq -r '.[] | select(.id=="omarchy.clock") | .enabled'` and press Return. The line is `true`.
+  * Type `omarchy plugin list --help` and press Return. The line includes `Usage: omarchy plugin list [--json]`.
+  * Type `omarchy plugin disable omarchy.weather` and press Return. The line says weather was disabled. The weather widget leaves the bar.
+  * Type `omarchy plugin disable omarchy.audio` and press Return. The speaker widget leaves the bar.
+  * Type `omarchy-shell shell listShellConfig | jq -c '[.bar.layout.right[]|.id//.]'` and press Return. The line does not include `omarchy.audio`.
+  * Type `omarchy plugin enable omarchy.audio --section right` and press Return. The speaker is back.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Enable Plugin. A picker opens.
+  * Select Weather. The weather widget returns.
+  * Click the terminal. It has focus.
+  * Type `omarchy plugin list | grep weather` and press Return. The line says `enabled`.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Disable Plugin. A picker opens.
+  * Select Weather. The weather widget leaves.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Enable Plugin. A picker opens.
+  * Select Weather. The weather widget returns.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Enable Plugin. A picker opens.
+  * Type `tail` and press Return. A Tailscale icon appears.
+  * Click the Tailscale icon. A panel opens. It says the CLI is not installed.
+  * Press t. Nothing changes.
+  * Press Escape. The panel closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Enable Plugin. A picker opens.
+  * Type `drop` and press Return. A Dropbox icon appears.
+  * Click the Dropbox icon. A panel opens. It says the Dropbox CLI is not installed.
+  * Press Escape. The panel closes.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Disable Plugin. A picker opens.
+  * Select Tailscale. The Tailscale icon is gone.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Disable Plugin. A picker opens.
+  * Select Dropbox. The Dropbox icon is gone.
+  * Press Super+Space. The menu opens.
+  * Click Setup.
+  * Click Plugins.
+  * Click Enable Plugin. A picker opens.
+  * Press Escape. The picker closes. The bar is unchanged.
+  * Type `omarchy plugin enable omarchy.microphone --section right` and press Return. A microphone icon appears in the right section.
+  * Type `omarchy plugin disable omarchy.microphone` and press Return. The microphone icon is gone.
+  * Type `omarchy plugin disable omarchy.workspaces` and press Return. The workspace numbers leave the bar.
+  * Type `omarchy plugin enable omarchy.workspaces` and press Return. The numbers return. Record which section they landed in.
+  * Type `omarchy bar put omarchy.active-window` and press Return. The line says it is on the bar. The window title appears in the left section.
+  ** If the command is unknown, report "absent on this build" and skip the rest of the put steps.
+  * Press Super+Enter. A second terminal opens. The title in the bar changes.
+  * Hover the title. A tooltip shows the full title.
+  * Middle-click the title. The focused terminal closes.
+  * Click the remaining terminal. It has focus.
+  * Type `omarchy plugin disable omarchy.active-window` and press Return. The title widget is gone.
+  * Type `omarchy-bar put omarchy.keyboard-layout --after omarchy.clock` and press Return.
+  * Type `omarchy-shell shell listShellConfig | jq -c '[.bar.layout.center[]|.id//.]'` and press Return. `omarchy.keyboard-layout` sits after `omarchy.clock`.
+  * Type `omarchy-bar put omarchy.keyboard-layout --section right` and press Return.
+  * Type `omarchy-shell shell listShellConfig | jq -c '[.bar.layout.right[]|.id//.]'` and press Return. The right section did not gain `omarchy.keyboard-layout`.
+  * Type `omarchy-shell shell listShellConfig | jq -c '[.bar.layout.center[]|.id//.]'` and press Return. `omarchy.keyboard-layout` is still after `omarchy.clock`.
+  * Type `omarchy plugin enable acme.nonexistent; echo "exit=$?"` and press Return. The output says the plugin is not known. The last line is `exit=1`. The bar does not change.
+  * Type `omarchy plugin disable; echo "exit=$?"` and press Return. The output says a plugin id is required. The last line is `exit=1`.
+  * Type `omarchy plugin enable omarchy.bar --section right; echo "exit=$?"` and press Return. The output says `omarchy.bar` is a bar. The last line is `exit=1`.
+  * Type `omarchy plugin enable omarchy.weather nowhere; echo "exit=$?"` and press Return. The output says the section must be left, center, or right. The last line is `exit=1`.
+  * Type `omarchy plugin list --bogus; echo "exit=$?"` and press Return. The output says the option is unknown. The last line is `exit=1`.
+  * Type `omarchy bar put omarchy.no-such-widget; echo "exit=$?"` and press Return. The output says it is not a known widget. The exit is not `0`. The bar does not change.
+  * Type `omarchy bar defaults` and press Return. The line says the default bar was restored.
+  * Type `rm -f ~/.config/omarchy/shell.json` and press Return. The shipped bar is back.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The bar hot-reloads `~/.config/omarchy/shell.json`; give it two seconds after each command. Un-fullscreen the terminal (Super+F) whenever you need to see the bar; the plugin table is wide, so the serial copy is the reliable read.
-  * The pickers are omarchy-menu-select overlays: arrow keys + Enter select; the picker filters on name and id, so `tail` and `drop` are enough. Menu guards paint from the previous open — reopen the picker twice before asserting a row moved.
+  * Wait a couple of seconds after each plugin command. The picker filters as you type.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Serial text of the plugin table with only omarchy.* ids and omarchy.clock enabled, the jq count and the help line; the bar without and with the weather widget (CLI and picker) and without/with the speaker matching the jq output; the picker with name + id rows; the Tailscale icon and its "not installed" panel, the Dropbox icon and its login rows, the bar after both disables; the microphone icon present then absent; the workspaces gone and back; the window title in the left section, its tooltip and the terminal closed by the middle-click; the keyboard-layout entry after the clock and the unchanged config after the second put; the six refusals; the restored bar
+  * On success
+  ** The plugin list, weather and audio off and back, Tailscale and Dropbox panels for a missing CLI, the title widget, the keyboard-layout placement that does not duplicate, the six refusals, and the restored bar
   * If unsuccessful
-  ** Screenshot of a duplicated widget, a widget that did not disappear or return, a picker missing plugins, a panel error, or the failing command's output (e.g. an IPC timeout to omarchy-shell); `omarchy-shell shell listPlugins | jq '.[] | select(.id=="omarchy.weather")'`; `cat ~/.config/omarchy/shell.json | sudo tee /dev/ttyS0` read via get-serial; `omarchy-version`
+  ** A duplicated widget, a widget that does not leave or return, or a refusal that changes the bar
 covers: bin/omarchy-plugin-list; bin/omarchy-plugin-enable; bin/omarchy-plugin-disable; bin/omarchy-menu-plugin; bin/omarchy-bar (cmd_put, cmd_defaults); shell/shell.qml (putBarWidget, setPluginEnabled, listPlugins); shell/services/PluginRegistry.setEnabled; shell/plugins/bar/widgets/ActiveWindow.qml + ActiveWindow.manifest.json defaultSection; shell/plugins/panels/tailscale/Panel.qml (missing-CLI row, Service.whichProcess); shell/plugins/panels/dropbox/Panel.qml (LoginButton texts); shell/plugins/menu/Menu.qml (dmenu subtext rows); config/omarchy/shell.json; default/omarchy/omarchy-menu.jsonc setup.plugin.enable/disable; test/shell.d/plugin-enable-test.sh; test/shell.d/menu-plugin-test.sh; test/shell.d/runtime-smoke-test.sh; manual/05:88-101,132; manual/32-shell-plugins.md (Seeing what you have; Turning them on and off)
 
 ### shell-ipc-and-bar-cli-with-shell-down   [VM-OK]
@@ -6259,31 +6366,68 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Open a terminal with Super+Enter and type `omarchy-shell shell ping` → `ok`; `env -u WAYLAND_DISPLAY omarchy-shell shell ping` → `ok` (display recovered from the runtime dir); `omarchy-shell` → usage text, exit 0; `omarchy-shell --help | head -3` → the usage; `omarchy-shell shell; echo "exit=$?"` → `Usage: omarchy-shell <target> <method> [args...]`, `exit=1`. Screenshot the bar: the clock is in the centre.
-  * Type `omarchy-shell shell listPlugins | jq -r '.[].id' | sort | sudo tee /dev/ttyS0` (password `prime`): the list includes every one of omarchy.audio, omarchy.background, omarchy.bar, omarchy.bluetooth, omarchy.clipboard, omarchy.emojis, omarchy.menu, omarchy.monitor, omarchy.network, omarchy.notifications, omarchy.power, omarchy.reminders, omarchy.weather (name any that is absent — the 4.0.2 set may differ). `omarchy-shell shell listShellConfig | jq -c '.version, (.bar.layout|keys)'` → `1` and `["center","left","right"]`.
-  * Drive the UI over IPC: `omarchy-shell osd show '{"message":"Runtime smoke","duration":0}'` → an OSD card `Runtime smoke`; `omarchy-shell osd close` → gone. `omarchy-shell shell summon omarchy.menu '{"menu":"apps"}'` → the app launcher opens; `omarchy-shell shell hide omarchy.menu` → closed. `omarchy-shell omarchy.network open` → the network panel; `omarchy-shell omarchy.network close`; the same for `omarchy.audio` and `omarchy.monitor`. `omarchy-shell shell toggle omarchy.clock` → the calendar opens (payload defaults to `{}`); again → closes. `omarchy-shell media status | jq .hasPlayer` → `false`; `omarchy-shell idle status | jq .enabled` and `omarchy-shell lock status | jq .locked` → booleans.
-  * Type `omarchy bar move omarchy.clock --section right` → the clock moves to the right section within a second. Type `omarchy bar reset` → the clock is back in the centre.
-  * Unhappy path, each with `; echo "exit=$?"`: `omarchy bar move nosuch.widget --section right` → an error, non-zero, bar unchanged; `omarchy-shell nosuch ping` → `Target not found.`, `exit=1`; `omarchy-shell shell nosuchmethod` → `Function not found.` (report the exit code — the docs say IPC-level misses still exit 0); `omarchy-shell -q nosuch ping` → nothing, `exit=0`; `omarchy-shell shell summon missing.plugin "{}"` → `unknown` and no overlay opens; `OMARCHY_PATH=/nonexistent omarchy-shell shell ping` → `omarchy-shell config not found: /nonexistent/shell/shell.qml`, `exit=1`.
-  * Type `pkill -9 -x quickshell; omarchy-shell shell ping; echo "exit=$?"` as one line → `omarchy-shell is not running`, `exit=1`; wait 4 s (screenshot): `omarchy-shell shell ping` → `ok` and the bar is back (the supervisor relaunched a single kill).
-  * Type `for i in 1 2 3 4 5 6; do kill -9 $(pgrep -x quickshell); sleep 1.5; done; sleep 3; pgrep -x quickshell || echo shell-gone` → `shell-gone` and the bar is absent (six quick deaths make the supervisor give up). Then `omarchy-shell shell ping; echo "exit=$?"` → `omarchy-shell is not running`, `exit=1`; `omarchy-shell -q shell ping; echo "exit=$?"` → silent, `exit=0`.
-  ** The loop prints an error on rounds where the shell was already gone; that is fine. Killing quickshell also removes the notification daemon for a moment.
-  * Type `omarchy bar put omarchy.keyboard-layout --after omarchy.clock; echo "status=$?"` → `omarchy-shell is not running; omarchy.keyboard-layout was not put on the bar` and `status=0`.
-  ** `omarchy bar put` is newer than 4.0.2; if it prints `Unknown Omarchy command`, report "absent on this build" and skip to the restart.
-  * Round trip: type `omarchy restart shell` → the bar returns within ~15 s with the clock centred; `omarchy-shell shell ping` → `ok`; `jq -c '[.bar.layout.center[]|.id//.]' ~/.config/omarchy/shell.json` lists `omarchy.keyboard-layout` right after `omarchy.clock` (the config was written while the shell was down; the pill itself stays hidden while only one layout is configured). Type `omarchy bar put omarchy.keyboard-layout --after omarchy.clock` → `omarchy.keyboard-layout is on the bar`. Type `omarchy bar defaults` → stock bar. Close the terminal with Super+W.
+  * Press Super+Enter. A terminal opens.
+  * Type `omarchy-shell shell ping` and press Return. The line is `ok`.
+  * Type `env -u WAYLAND_DISPLAY omarchy-shell shell ping` and press Return. The line is `ok`.
+  * Type `omarchy-shell` and press Return. A usage line appears.
+  * Type `omarchy-shell --help | head -3` and press Return. A usage line appears.
+  * Type `omarchy-shell shell; echo "exit=$?"` and press Return. A usage line appears. The last line is `exit=1`.
+  * Take a screenshot of the bar. The clock is in the center.
+  * Type `omarchy-shell shell listPlugins | jq -r '.[].id' | sort | sudo tee /dev/ttyS0` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Read the serial log. Record any of these ids that are absent: `omarchy.audio`, `omarchy.background`, `omarchy.bar`, `omarchy.bluetooth`, `omarchy.clipboard`, `omarchy.emojis`, `omarchy.menu`, `omarchy.monitor`, `omarchy.network`, `omarchy.notifications`, `omarchy.power`, `omarchy.reminders`, `omarchy.weather`.
+  * Type `omarchy-shell shell listShellConfig | jq -c '.version, (.bar.layout|keys)'` and press Return. The output includes `1` and the keys `center`, `left`, and `right`.
+  * Type `omarchy-shell osd show '{"message":"Runtime smoke","duration":0}'` and press Return. An OSD card says `Runtime smoke`.
+  * Type `omarchy-shell osd close` and press Return. The card is gone.
+  * Type `omarchy-shell shell summon omarchy.menu '{"menu":"apps"}'` and press Return. The app menu opens.
+  * Type `omarchy-shell shell hide omarchy.menu` and press Return. The app menu closes.
+  * Type `omarchy-shell omarchy.network open` and press Return. The network panel opens.
+  * Type `omarchy-shell omarchy.network close` and press Return. The network panel closes.
+  * Type `omarchy-shell omarchy.audio open` and press Return. The audio panel opens.
+  * Type `omarchy-shell omarchy.audio close` and press Return. The audio panel closes.
+  * Type `omarchy-shell omarchy.monitor open` and press Return. The display panel opens.
+  * Type `omarchy-shell omarchy.monitor close` and press Return. The display panel closes.
+  * Type `omarchy-shell shell toggle omarchy.clock` and press Return. The calendar opens.
+  * Type `omarchy-shell shell toggle omarchy.clock` and press Return. The calendar closes.
+  * Type `omarchy-shell media status | jq .hasPlayer` and press Return. The line is `false`.
+  * Type `omarchy-shell idle status | jq .enabled` and press Return. The line is `true` or `false`.
+  * Type `omarchy-shell lock status | jq .locked` and press Return. The line is `true` or `false`.
+  * Type `omarchy bar move omarchy.clock --section right` and press Return. The clock moves to the right section.
+  * Type `omarchy bar reset` and press Return. The clock is back in the center.
+  * Type `omarchy bar move nosuch.widget --section right; echo "exit=$?"` and press Return. An error appears. The exit is not `0`. The bar does not change.
+  * Type `omarchy-shell nosuch ping; echo "exit=$?"` and press Return. The output says `Target not found.` The last line is `exit=1`.
+  * Type `omarchy-shell shell nosuchmethod; echo "exit=$?"` and press Return. The output says `Function not found.` Record the exit code.
+  * Type `omarchy-shell -q nosuch ping; echo "exit=$?"` and press Return. Nothing else is printed. The last line is `exit=0`.
+  * Type `omarchy-shell shell summon missing.plugin "{}"` and press Return. The output says `unknown`. No overlay opens.
+  * Type `OMARCHY_PATH=/nonexistent omarchy-shell shell ping; echo "exit=$?"` and press Return. The output says the config was not found. The last line is `exit=1`.
+  * Type `pkill -9 -x quickshell; omarchy-shell shell ping; echo "exit=$?"` and press Return. The output says `omarchy-shell is not running`. The last line is `exit=1`.
+  * Wait 4 seconds.
+  * Type `omarchy-shell shell ping` and press Return. The line is `ok`. The bar is back.
+  * Type `for i in 1 2 3 4 5 6; do kill -9 $(pgrep -x quickshell); sleep 1.5; done; sleep 3; pgrep -x quickshell || echo shell-gone` and press Return. The last line is `shell-gone`. The bar is gone.
+  ** An error inside the loop means the shell was already gone for that round. Continue.
+  * Type `omarchy-shell shell ping; echo "exit=$?"` and press Return. The output says `omarchy-shell is not running`. The last line is `exit=1`.
+  * Type `omarchy-shell -q shell ping; echo "exit=$?"` and press Return. Nothing else is printed. The last line is `exit=0`.
+  * Type `omarchy bar put omarchy.keyboard-layout --after omarchy.clock; echo "status=$?"` and press Return. The output says the shell is not running and the widget was not put on the bar. The last line is `status=0`.
+  ** If the command is unknown, report "absent on this build" and skip to the restart.
+  * Type `omarchy restart shell` and press Return. The bar returns. The clock is in the center.
+  * Type `omarchy-shell shell ping` and press Return. The line is `ok`.
+  * Type `jq -c '[.bar.layout.center[]|.id//.]' ~/.config/omarchy/shell.json` and press Return. `omarchy.keyboard-layout` is listed after `omarchy.clock`.
+  * Type `omarchy bar put omarchy.keyboard-layout --after omarchy.clock` and press Return. The line says it is on the bar.
+  * Type `omarchy bar defaults` and press Return. The stock bar is back.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Copy the "is not running", `Target not found.` and `Function not found.` wording from the screenshot; the messages come from the wrapper, not from Quickshell, and the exact spelling is the contract. If a call prints `omarchy-shell is not ready` the shell is still starting; wait five seconds and retry once.
-  * If the bar does not return within ~15 seconds, run `omarchy restart shell` once more and report it. The plugin list is short enough to fit on screen; the serial copy is the fallback.
+  * If a call says the shell is not ready, wait 5 seconds and retry once.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of `ok` for both pings and the usage lines; the serial plugin list with all thirteen ids and the config JSON; the OSD, launcher, panels and calendar appearing and closing on command with the JSON answers; the clock centre → right → centre; the refusals with their exact texts and exit codes and `unknown` with no overlay; the single-kill `not running` then `ok` with the bar back; `shell-gone` with no bar, the `omarchy-shell is not running` line with `exit=1` and the quiet `exit=0`; the `put` message with `status=0`; the bar back after restart with `ok`, the jq placement, the ready-shell confirmation and the restored bar
+  * On success
+  ** `ok` from both pings, the plugin ids, the OSD and panels opening and closing, the clock moved and returned, the exact refusal lines, the bar gone after six kills, `status=0` while the shell is down, and the bar back after restart
   * If unsuccessful
-  ** A missing or garbled message, `ok` printed while the shell was dead, a non-zero exit for `-q`, a missing plugin id, a panel that did not open, `put` hanging or erroring without a shell, no bar after restart, or a stale clock position; `qs list`, `echo $OMARCHY_PATH $WAYLAND_DISPLAY`, `journalctl --user -n 40 | grep -i quickshell | sudo tee /dev/ttyS0` read via get-serial; `omarchy-version`
+  ** `ok` while the shell is dead, a panel that does not open, or no bar after restart
 covers: bin/omarchy-shell; bin/omarchy-launch-shell; bin/omarchy-bar (cmd_move, cmd_reset, cmd_put); bin/omarchy-restart-shell; shell/shell.qml (IPC, listPlugins, summon); shell/plugins/osd/OsdModel.js; shell/plugins/services/media/MediaModel.js; docs/omarchy-shell.md §IPC, §Installing a third-party plugin (bar CLI); default/agents/skills/omarchy/plugins.md §Bar Layout; test/shell.d/bar-test.sh (put with no shell running / through a ready shell); test/shell.d/launch-shell-test.sh (give-up path); test/shell.d/restart-shell-test.sh (IPC cases, timeout/starting); test/shell.d/shell-ipc-display-test.sh; test/shell.d/runtime-smoke-test.sh:364-373,412-415; test/shell.d/osd-test.sh; test/shell.d/media-test.sh; test/acceptance.d/session-test.sh:16-24; manual/14-omarchy-cli.md
 
 ### keyboard-layout-pill-two-layouts   [VM-OK]
@@ -6293,29 +6437,53 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the bar centre: no two-letter code near the clock. Open a terminal with Super+Enter and run `hyprctl devices -j | jq -r '.keyboards[] | select(.main) | .layout, .active_keymap'` → `us`, `English (US)`.
-  * Run `printf '\nhl.config({ input = { kb_layout = "us,de", kb_options = "compose:caps,shift:both_capslock_cancel,grp:alts_toggle" } })\n' >> ~/.config/hypr/input.lua` then `hyprctl reload`: within two seconds `EN` appears right of the clock; hover it: tooltip `English (US)`.
-  ** Send `>>` as `<GT><GT>`; check the line with ./client-with-image before Enter.
-  * Left-click `EN`: it becomes `DE` with tooltip `German`. In the terminal type `zy`: the letters come out as `yz` (German swaps Y/Z). Press Backspace twice.
-  * Press Left Alt and Right Alt together (`<A-alt_r>`): the pill returns to `EN`; type `zy` → `zy`. Backspace twice.
-  ** If the chord does not switch, click the pill instead and note it.
-  * Run `hyprctl keyword input:kb_layout 'us,br,de'` and click the pill: `PT`; again: `DE`; again: `EN` — labels are languages, never country codes.
-  * Run `sudo cp /etc/vconsole.conf /tmp/vconsole.orig; sudo sh -c 'printf "KEYMAP=us\nXKBLAYOUT=ru\nXKBVARIANT=phonetic\n" > /etc/vconsole.conf'; hyprctl reload; hyprctl getoption input:kb_layout | head -1; hyprctl getoption input:kb_variant | head -1` (password `prime`) → `us,ru` and `,phonetic` (Omarchy puts `us` in front of the non-latin layout). Click the pill → `RU`; click again → `EN`.
-  ** The terminal still types Latin while `EN` is shown; type all commands under `EN`.
-  * Round trip: run `sudo cp /tmp/vconsole.orig /etc/vconsole.conf; sed -i '/kb_layout = "us,de"/d' ~/.config/hypr/input.lua; hyprctl reload`: the pill disappears from the bar and `hyprctl getoption input:kb_layout | head -1` is `str: us` again. Close the terminal with Super+W.
+  * Take a screenshot of the bar center. There is no two-letter code next to the clock.
+  * Press Super+Enter. A terminal opens.
+  * Type `hyprctl devices -j | jq -r '.keyboards[] | select(.main) | .layout, .active_keymap'` and press Return. The lines are `us` and `English (US)`.
+  * Type `printf '\nhl.config({ input = { kb_layout = "us,de", kb_options = "compose:caps,shift:both_capslock_cancel,grp:alts_toggle" } })\n' >> ~/.config/hypr/input.lua` and press Return.
+  * Type `hyprctl reload` and press Return. `EN` appears to the right of the clock.
+  * Hover `EN`. The tooltip says `English (US)`.
+  * Click `EN`. It becomes `DE`.
+  * Hover `DE`. The tooltip says `German`.
+  * Type `zy`. The letters come out as `yz`.
+  * Press Backspace. One character is deleted.
+  * Press Backspace. The other character is deleted.
+  * Press Left Alt and Right Alt together. The pill returns to `EN`.
+  ** If the chord does not switch, click the pill and record that.
+  * Type `zy`. The letters come out as `zy`.
+  * Press Backspace. One character is deleted.
+  * Press Backspace. The other character is deleted.
+  * Type `hyprctl keyword input:kb_layout 'us,br,de'` and press Return.
+  * Click the pill. It becomes `PT`.
+  * Click the pill. It becomes `DE`.
+  * Click the pill. It becomes `EN`.
+  * Type `sudo cp /etc/vconsole.conf /tmp/vconsole.orig` and press Return.
+  ** If a password is asked, type `prime` and press Return.
+  * Type `sudo sh -c 'printf "KEYMAP=us\nXKBLAYOUT=ru\nXKBVARIANT=phonetic\n" > /etc/vconsole.conf'` and press Return.
+  * Type `hyprctl reload` and press Return.
+  * Type `hyprctl getoption input:kb_layout | head -1` and press Return. The line includes `us,ru`.
+  * Type `hyprctl getoption input:kb_variant | head -1` and press Return. The line includes `,phonetic`.
+  * Click the pill. It becomes `RU`.
+  * Click the pill. It becomes `EN`.
+  ** Type later commands while the pill says `EN`.
+  * Type `sudo cp /tmp/vconsole.orig /etc/vconsole.conf` and press Return.
+  * Type `sed -i '/kb_layout = "us,de"/d' ~/.config/hypr/input.lua` and press Return.
+  * Type `hyprctl reload` and press Return. The pill is gone.
+  * Type `hyprctl getoption input:kb_layout | head -1` and press Return. The line includes `us`.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The pill is two letters right of the clock; if a click hits the clock instead, the calendar opens — Escape and aim slightly right. The widget refreshes on Hyprland's config-reloaded event; allow a second, and click once more if it lags a beat.
+  * The pill is two letters to the right of the clock. If a click opens the calendar, press Escape and aim farther right.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar screenshots: no pill → `EN` with its tooltip → `DE` → `EN` after the Alt chord → `PT`/`DE`/`EN` on clicks → `RU`/`EN` after the vconsole change → no pill after reverting; the terminal showing `yz` under German and `zy` under English; the `us,ru` / `,phonetic` lines
+  * On success
+  ** No pill, then `EN`, `DE` with `yz`, `EN` with `zy`, `PT` then `DE` then `EN`, `us,ru` with `RU` then `EN`, and no pill after restore
   * If unsuccessful
-  ** No pill after two layouts, a country label, a pill that does not switch, or `ru` without `us` in front; `hyprctl -j devices | jq -c '.keyboards[] | {name, layout, active_keymap}'` and the bar screenshot
+  ** No pill after two layouts, a country code instead of a language code, or `ru` without `us` in front
 covers: shell/plugins/bar/widgets/KeyboardLayout.qml (multipleLayouts, cycleLayout, refresh); shell/plugins/bar/widgets/KeyboardLayoutModel.js shortLabel; shell/plugins/bar/widgets/KeyboardLayout.manifest.json; default/hypr/input.lua; config/hypr/input.lua; config/omarchy/shell.json (omarchy.keyboard-layout in center); test/shell.d/keyboard-layout-test.sh; test/shell.d/hyprland-keyboard-layout-test.sh; manual/46:5-17; manual/34-keyboard-mouse-trackpad.md
 
 ### tray-icon-drawer-menu-and-manage   [VM-OK] [SLOW]
@@ -6325,28 +6493,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Screenshot the right section: record whether a chevron `‹` glyph is drawn before the ethernet glyph with zero tray icons (expected: none).
-  * Press Super+Space, type `OBS Studio`, Enter; screenshot every five seconds until OBS appears (slow without a GPU); click `Cancel` on the auto-configuration wizard if it shows.
-  * Screenshot the bar: a chevron now starts the right section. Hover it for a second: a drawer slides open leftward revealing the OBS icon.
-  * Right-click the OBS icon: a menu card with entries such as `Show`/`Hide`, `Start Recording`, `Exit`. Press Escape. Left-click the icon: the OBS window hides (or shows).
-  * Hover the chevron, then right-click the chevron itself: a `Tray icons` popup lists OBS with `Pin` and `Hide` buttons and the text `Pinned icons stay visible. Hidden icons never show.` Click `Pin`: the OBS icon is visible right of the chevron without hovering. Click `Unpin`, then `Hide`: the icon leaves the drawer. Click `Show`, then press Escape.
-  * Right-click the OBS icon and choose `Exit` (confirm if asked): the chevron disappears from the bar.
-  * Unhappy path (negative): press Super+Space, type `LocalSend`, Enter; wait for its window: the bar still shows NO chevron (LocalSend is hidden on purpose — `ownedByOmarchy`). Close it with Super+W. With no tray app running, a right-click on the tray area must do nothing cleanly — a shell error or the bar vanishing is the failure.
-  * Round trip: open a terminal, run `rm -f ~/.config/omarchy/shell.json` (pin/hide state was written there), close it with Super+W; the bar is as found.
+  * Take a screenshot of the right side of the bar. Record whether a tray chevron is there. Expected: none.
+  * Press Super+Space. The menu opens.
+  * Type `OBS Studio` and press Return. OBS starts.
+  ** If an auto-configuration wizard appears, click Cancel.
+  ** If Hyprland says the application is not responding, click Wait.
+  ** If OBS does not start, report that and use qbittorrent after `sudo pacman -S --noconfirm qbittorrent`.
+  * Take a screenshot of the bar. A tray chevron is at the start of the right section.
+  * Hover the chevron for one second. A drawer opens with the OBS icon.
+  * Right-click the OBS icon. A menu opens.
+  * Press Escape. The menu closes.
+  * Left-click the OBS icon. The OBS window hides or shows. Record which.
+  * Hover the chevron.
+  * Right-click the chevron. A tray-icons popup opens. It lists OBS with Pin and Hide.
+  * Click Pin. The OBS icon stays visible without hovering.
+  * Click Unpin.
+  * Click Hide. The OBS icon leaves the drawer.
+  * Click Show.
+  * Press Escape. The popup closes.
+  * Right-click the OBS icon. The menu opens.
+  * Click Exit. The tray chevron is gone.
+  ** If a confirm dialog appears, confirm it. The tray chevron is then gone.
+  * Press Super+Space. The menu opens.
+  * Type `LocalSend` and press Return. LocalSend opens. The tray chevron stays gone.
+  * Press Super+W. LocalSend closes.
+  * Press Super+Enter. A terminal opens.
+  * Type `rm -f ~/.config/omarchy/shell.json` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The drawer animation takes 0.6 s; screenshot after hovering for a second. Use ./client-with-image to aim at the 12 px icon. Click **Wait** if Hyprland raises a "not responding" dialog while OBS starts.
-  * If OBS refuses to start on this VM, report that and run the same steps with `qbittorrent` after `sudo pacman -S --noconfirm qbittorrent` (~20 MB, network).
+  * Wait a second after hovering the chevron. OBS can take a while without a GPU.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots: no chevron at first; the chevron after OBS starts; the drawer open with the OBS icon; the right-click menu; the manage popup with its text; the pinned icon visible without hover; the hidden state; the chevron gone after Exit; LocalSend running with no chevron; the bar as found
+  * On success
+  ** No chevron, a chevron after OBS starts, the drawer, the icon menu, the pin and hide popup, no chevron after Exit, and no chevron while LocalSend is open
   * If unsuccessful
-  ** Screenshot with OBS running but no chevron, a LocalSend icon in the drawer, the right-click doing nothing with an icon present, or a shell error; `./client get-serial`
+  ** OBS running with no chevron, or a LocalSend icon in the tray
 covers: shell/plugins/bar/widgets/Tray.qml (drawer HoverHandler, TrayItem clicks, openTrayMenu, managePopup, togglePin/toggleHide); shell/plugins/bar/widgets/TrayModel.js ownedByOmarchy; shell/Ui/PopupCard.qml; config/omarchy/shell.json (omarchy.tray); test/shell.d/tray-test.sh; test/shell.d/tray-menu-test.sh; manual/42-common-tweaks.md (Reveal all tray icons all the time)
 
 ### calendar-week-start-and-month-stepping   [VM-OK]
@@ -6356,27 +6542,48 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Left-click the clock with the mouse: a wide card under the bar — a large `󰃭 <Month day>` hero, a year rail `<YYYY> ─── NN%`, weekday headings starting `MON`, six rows of days with ISO week numbers in a left gutter (the six-row grid keeps the card height constant), today outlined and bold, and `‹ <MONTH YYYY> ›` at the bottom; an accent dot underlines the clock.
-  * Keys: press `]` twice — the month label advances two months while the hero date stays today; `[` three times — one month before today; `}` — one year later; `t` — back to the current month.
-  * Mouse: click the `›` chevron (tooltip `Next month`), scroll the wheel down once over the grid (another month), then click the hero date (tooltip `Back to today`; only clickable while another month is shown) — the current month with today outlined returns.
-  ** A horizontal wheel does nothing; only vertical scroll steps months.
-  * Week start: hover the small `W` heading above the week-number gutter — tooltip `Start weeks on Sunday`; click it — the headings now start with `SUN` and the grid shifts one column. Open a terminal with Super+Enter and run `jq -r '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | .weekStartDay' ~/.config/omarchy/shell.json` → `sunday`.
-  * Press Escape (card and dot gone), then Super+Ctrl+Alt+D: the calendar opens again and still starts on Sunday (persisted). Press `w`: the headings flip back to Monday; the jq now says `monday`. Run `omarchy-shell omarchy.clock toggleWeekStart` twice from the terminal with the card open: Sunday, then Monday again — the IPC is the same switch.
-  * Unhappy path: with the calendar open press Tab — focus steps to the neighbouring panel (weather, if shown) or stays; no crash. Press Escape — the panel closes; click the clock and Escape once more — it opens and closes again and the bar stays responsive.
-  * Round trip: `rm -f ~/.config/omarchy/shell.json` (the toggle created it on a fresh disk); close the terminal with Super+W; the bar is unchanged.
+  * Click the clock. The calendar opens. The weekday headings start with `MON`. Today is outlined.
+  * Press `]`. The month label advances one month. The hero date stays today.
+  * Press `]`. The month label advances one more month.
+  * Press `[`. The month label goes back one month.
+  * Press `[`. The month label goes back one month.
+  * Press `[`. The month label is one month before today.
+  * Press `}`. The label is one year later.
+  * Press `t`. The current month is showing. Today is outlined.
+  * Click the next-month chevron. The month label advances one month.
+  * Scroll down one notch over the grid. The month label advances one more month.
+  * Click the hero date. The current month is showing. Today is outlined.
+  * Hover the `W` heading. The tooltip says weeks start on Sunday.
+  * Click `W`. The headings start with `SUN`.
+  * Press Super+Enter. A terminal opens.
+  * Type `jq -r '.bar.layout.center[] | select((.id // .) == "omarchy.clock") | .weekStartDay' ~/.config/omarchy/shell.json` and press Return. The line is `sunday`.
+  * Press Escape. The calendar closes.
+  * Press Super+Ctrl+Alt+D. The calendar opens. The headings start with `SUN`.
+  * Press `w`. The headings start with `MON`.
+  * Click the terminal. It has focus.
+  * Type the same jq command and press Return. The line is `monday`.
+  * Type `omarchy-shell omarchy.clock toggleWeekStart` and press Return. The headings start with `SUN`.
+  * Type `omarchy-shell omarchy.clock toggleWeekStart` and press Return. The headings start with `MON`.
+  * Press Tab. Focus moves to a neighbouring panel, or it stays. Nothing crashes.
+  * Press Escape. The panel closes.
+  * Click the clock. The calendar opens.
+  * Press Escape. The calendar closes. The bar stays usable.
+  * Click the terminal. It has focus.
+  * Type `rm -f ~/.config/omarchy/shell.json` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The card is centred under the bar regardless of where the clock label sits; keep it open while running the IPC in the terminal so the header change is visible in the same screenshot. `date` in the terminal is the reference if the highlighted day looks wrong.
+  * Only a vertical scroll steps the month. Keep the calendar open while running the jq commands.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshot of the calendar on today's month with the outlined day and week numbers; after `]]`; after `[[[`; after `}`; after `t`; after chevron + wheel; after clicking the hero; the `W` tooltip; `SUN`-first grid with `weekStartDay` sunday; reopened by hotkey still Sunday; Monday after `w` with `monday`; the IPC round trip; the Tab result; the panel closed and the bar unchanged
+  * On success
+  ** The month label after `]`, `[`, `}`, and `t`; the chevron and scroll; `sunday` then `monday`; the hotkey reopening on Sunday; and the IPC flipping the heading twice
   * If unsuccessful
-  ** Screenshot where the month label or the highlight did not move as described, a header that does not shift or reverts on reopen, or the panel not opening; `date` output for comparison
+  ** A month label that does not move, or a week start that does not persist
 covers: shell/plugins/panels/clock/Panel.qml (moveMonth, moveYear, goToToday, WheelHandler, hero MouseArea, toggleWeekStart, setWeekStart, persistSettings); shell/plugins/panels/clock/BarWidget.qml (left click, togglePanel, IPC toggle); shell/plugins/panels/clock/Model.js (monthGrid, isoWeek, toggledWeekStart, weekStartSettingName); default/hypr/bindings/utilities.lua:101 Super+Ctrl+Alt+D; test/shell.d/clock-test.sh (week start IPC/persistence, grid, month stepping, goToToday); manual/05:46,57
 
 ### calendar-memento-mori-life-bar   [VM-OK]

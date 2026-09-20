@@ -146,14 +146,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `bar-default-widgets-on-vm`
 - [x] `bar-indicators-reveal-and-toggle`
 - [x] `workspaces-indicator-follows-super-number`
-- [ ] `bar-toggle-hide-and-show`
-- [ ] `bar-drag-to-edge-and-widget-reorder`
-- [ ] `bar-custom-command-module`
-- [ ] `bar-widget-enable-disable-and-placement`
-- [ ] `shell-ipc-and-bar-cli-with-shell-down`
-- [ ] `keyboard-layout-pill-two-layouts`
-- [ ] `tray-icon-drawer-menu-and-manage`
-- [ ] `calendar-week-start-and-month-stepping`
+- [x] `bar-toggle-hide-and-show`
+- [x] `bar-drag-to-edge-and-widget-reorder`
+- [x] `bar-custom-command-module`
+- [x] `bar-widget-enable-disable-and-placement`
+- [x] `shell-ipc-and-bar-cli-with-shell-down`
+- [x] `keyboard-layout-pill-two-layouts`
+- [x] `tray-icon-drawer-menu-and-manage`
+- [x] `calendar-week-start-and-month-stepping`
 - [ ] `calendar-memento-mori-life-bar`
 - [ ] `agents-widget-hidden-without-usage`
 - [ ] `bar-panels-open-switch-close-and-numbers`
