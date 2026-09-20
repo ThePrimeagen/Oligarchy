@@ -98,14 +98,14 @@ Checked means the instruction follows `test_def/WORDING.md` and the new wording 
 - [x] `window-close-and-close-all`
 - [x] `window-float-pseudo-split`
 - [x] `window-focus-swap-and-alt-tab`
-- [ ] `window-fullscreen-three-modes`
-- [ ] `window-pop-pinned-follows-workspaces`
-- [ ] `window-resize-chords-and-width-memory`
-- [ ] `window-super-drag-move-and-resize`
-- [ ] `window-groups-tabs-join-eject-dissolve`
-- [ ] `workspace-switch-move-and-silent-move`
-- [ ] `workspace-tab-scroll-and-former`
-- [ ] `workspace-layout-toggle-scrolling-and-default`
+- [x] `window-fullscreen-three-modes`
+- [x] `window-pop-pinned-follows-workspaces`
+- [x] `window-resize-chords-and-width-memory`
+- [x] `window-super-drag-move-and-resize`
+- [x] `window-groups-tabs-join-eject-dissolve`
+- [x] `workspace-switch-move-and-silent-move`
+- [x] `workspace-tab-scroll-and-former`
+- [x] `workspace-layout-toggle-scrolling-and-default`
 - [ ] `scratchpad-quake-console`
 - [ ] `desktop-style-toggles-transparency-gaps-square-fullscreen`
 - [ ] `zoom-and-alt-tab-cycle`

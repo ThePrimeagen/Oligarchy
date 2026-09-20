@@ -3820,26 +3820,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return, then Super+Shift+Return so a terminal and Chromium share the screen (click Wait on a "not responding" dialog).
-  * With Chromium focused press Super+F: Chromium covers the entire screen, top bar included; the terminal is hidden. Press Super+F again: the split returns.
-  * Press Super+Alt+F: Chromium fills the workspace with no gaps but the top bar stays visible. Press Super+Alt+F again.
-  * Press Super+Ctrl+F: Chromium stays in its half of the screen but hides its own tab strip and address bar (the page fills the tile). In the terminal type `hyprctl clients -j | jq '.[] | select(.class|test("chrom";"i")) | .fullscreenClient'` Return → 2. Focus Chromium, press Super+Ctrl+F again: the tab strip returns and the command prints 0; the tile boundary never moved.
-  ** Tiled full screen is a newer chord; if Super+K has no "Tiled full screen" row on this build, report it absent rather than failed.
-  ** A terminal works as the subject too: `hyprctl -j activewindow | jq .fullscreenClient` → 2 then 0 with the tile size unchanged (some terminals drop their padding in client-fullscreen; the tile boundary is what must not change).
-  * Close both windows. Unhappy path: press Super+F, Super+Alt+F and Super+Ctrl+F on the empty desktop: nothing changes; the bar remains.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Shift+Return. Chromium opens beside it.
+  ** If Chromium shows "application not responding", click Wait.
+  * Click Chromium. Chromium has focus.
+  * Press Super+F. Chromium covers the screen. The top bar is hidden.
+  * Press Super+F. The split returns. The top bar is back.
+  * Press Super+Alt+F. Chromium fills the workspace. The top bar stays.
+  * Press Super+Alt+F. The split returns.
+  * Press Super+Ctrl+F. Chromium stays in its tile and hides its tab strip and address bar.
+  ** If Super+K has no "Tiled full screen" row, report the chord absent and skip the Super+Ctrl+F steps.
+  * Click the terminal. The terminal has focus.
+  * Type `hyprctl clients -j | jq '.[] | select(.class|test("chrom";"i")) | .fullscreenClient'` and press Return. The line is `2`.
+  * Click Chromium. Chromium has focus.
+  * Press Super+Ctrl+F. The tab strip returns. The tile boundary does not move.
+  * Click the terminal. The terminal has focus.
+  * Type the same jq command and press Return. The line is `0`.
+  * Press Super+W. The focused window closes.
+  * Press Super+W. The last window closes. The desktop is empty.
+  * Press Super+F. Nothing changes. The bar stays.
+  * Press Super+Alt+F. Nothing changes.
+  * Press Super+Ctrl+F. Nothing changes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The bar being visible or not is the tell between Super+F and Super+Alt+F; judge "bar hidden" by the window's top edge touching the top of the screen.
+  * Judge a hidden bar by the window's top edge touching the top of the screen.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the three states (no bar / bar kept / tile with hidden browser chrome) and the restored split after each; `fullscreenClient` 2 then 0; the empty desktop unchanged
+  * On success
+  ** Screenshots of Chromium covering the screen, the restored split, Chromium filling the workspace with the bar, the tile with the browser chrome hidden, `fullscreenClient` `2` then `0`, and the empty desktop
   * If unsuccessful
-  ** Screenshot of the mode that stuck or of a window covering the whole screen on Super+Ctrl+F; `hyprctl activewindow -j | jq '{fullscreen,fullscreenClient}'`
+  ** Screenshot of the mode that stuck, or of Chromium covering the screen after Super+Ctrl+F
 covers: default/hypr/bindings/tiling.lua:7-10; bin/omarchy-hyprland-window-tiled-fullscreen-toggle; test/shell.d/hyprland-window-test.sh; manual/04:27; manual/07:20-22
 
 ### window-pop-pinned-follows-workspaces   [VM-OK]
@@ -3849,26 +3863,40 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return twice. Press Super+O: the focused terminal becomes floating, centred, drawn above the other, with visibly rounded corners.
-  ** The pop size defaults to 1300×900, larger than the 1280×800 guest screen, so Hyprland clamps it; it may nearly fill the screen. That is expected.
-  * Type `hyprctl activewindow -j | jq '{floating,pinned,size,tags}'` Return → floating true, pinned true, tags include `pop`.
-  * Press Super+2: the popped terminal is still on screen over the empty workspace 2; the other terminal is not. Press Super+Return: a new terminal tiles underneath while the popped one stays on top. Press Super+W to close that new terminal.
-  * Press Super+1, click the popped terminal, press Super+O: it un-pins and tiles beside the first one, corners square; the jq line now shows floating false, pinned false and no `pop` tag; Super+2 is empty (Super+1 to return).
-  * Type `omarchy-hyprland-window-pop 800 500` Return: a centred 800×500 floating pinned window (`hyprctl activewindow -j | jq .size` → [800,500]). Press Super+O to retile.
-  * Close both terminals. Unhappy path: press Super+O on the empty desktop: nothing happens.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens beside it.
+  * Press Super+O. The focused terminal becomes a centred floating window with rounded corners, over the other.
+  ** The default pop is larger than this 1280×800 screen, so Hyprland clamps it. That is expected.
+  * Type `hyprctl activewindow -j | jq '{floating,pinned,size,tags}'` and press Return. `floating` is true, `pinned` is true, and `tags` includes `pop`.
+  * Press Super+2. The popped terminal is still on screen. The other terminal is not.
+  * Press Super+Return. A new terminal opens under the popped one. The popped terminal stays on top.
+  * Press Super+W. That new terminal closes.
+  * Press Super+1. The first terminal is visible. The popped terminal is still on screen.
+  * Click the popped terminal. The popped terminal has focus.
+  * Press Super+O. It tiles beside the first terminal. The corners are square.
+  * Type `hyprctl activewindow -j | jq '{floating,pinned,tags}'` and press Return. `floating` is false, `pinned` is false, and there is no `pop` tag.
+  * Press Super+2. Workspace 2 is empty.
+  * Press Super+1. The two tiled terminals are back.
+  * Type `omarchy-hyprland-window-pop 800 500` and press Return. The focused terminal becomes a centred floating window.
+  * Type `hyprctl activewindow -j | jq .size` and press Return. The line is `[800,500]`.
+  * Press Super+O. That terminal tiles again.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The last terminal closes.
+  * Press Super+O. Nothing changes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Rounded corners (rounding 8) on the popped window are the visual proof of the `pop` tag; a pinned window is drawn above tiled windows on every workspace.
+  * Rounded corners on the popped window are the visual mark of the `pop` tag.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the popped window on workspace 1, the same window over workspace 2 above a tiled terminal, tiled again on 1 with square corners, workspace 2 empty, the 800×500 pop; the jq lines
+  * On success
+  ** Screenshots of the popped window on workspace 1, the same window on workspace 2, tiled again, workspace 2 empty, and the 800×500 pop
+  ** The jq lines show pinned and `pop`, then neither, then size `[800,500]`
   * If unsuccessful
-  ** Screenshot after Super+O with the window still tiled or not following to workspace 2; `hyprctl activewindow -j` after the failing step
+  ** Screenshot after Super+O with the window still tiled, or not following to workspace 2
 covers: default/hypr/bindings/tiling.lua:11; bin/omarchy-hyprland-window-pop; default/hypr/apps/system.lua:54; manual/04:57-61; manual/07:17
 
 ### window-resize-chords-and-width-memory   [VM-OK]
@@ -3878,28 +3906,51 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return twice; the right terminal is focused. Press Super+Home first: a notification "No saved width found for foot on workspace 1 — Use Super + Alt + Home to save one for this workspace." appears and nothing resizes.
-  * Press Super+Minus, then Super+Equal: the split line moves by about 100 px and back. Press Super+Alt+Minus / Super+Alt+Equal: a small (25 px) move and back. Press Super+Ctrl+Minus / Super+Ctrl+Equal: a large (300 px) move and back.
-  * Press Super+J to stack them and focus the bottom one. Press Super+Shift+Equal / Super+Shift+Minus (100 px), Super+Shift+Alt+Equal / Super+Shift+Alt+Minus (25 px), Super+Ctrl+Shift+Equal / Super+Ctrl+Shift+Minus (300 px): the horizontal split moves down and back by the three magnitudes. Press Super+J to unstack.
-  * Press Super+Ctrl+Minus to widen the right terminal; type `hyprctl activewindow -j | jq '.size[0]'` Return and note the width. Press Super+Alt+Home: notification "Saved width for foot on workspace 1 — Restore using Super + Home on this workspace."; `cat ~/.local/state/omarchy/windows/workspace-1-foot.width` Return prints that number.
-  * Press Super+Ctrl+Equal twice so it is much narrower, then Super+Home: it returns to the saved width (the jq width matches the saved number).
-  ** If Super+K has no "Save window width" row on this build, skip the memory steps and report the chord absent.
-  * Close one terminal and press Super+Minus on the lone window: nothing changes.
-  * In the remaining terminal type `rm -r ~/.local/state/omarchy/windows` Return so the disk is clean, then close it.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens beside it. The second one has focus.
+  * Press Super+Home. A notification says no saved width was found for foot on workspace 1. The split does not move.
+  * Press Super+Minus. The split moves by about 100 px.
+  * Press Super+Equal. The split moves back.
+  * Press Super+Alt+Minus. The split moves by about 25 px.
+  * Press Super+Alt+Equal. The split moves back.
+  * Press Super+Ctrl+Minus. The split moves by about 300 px.
+  * Press Super+Ctrl+Equal. The split moves back.
+  * Press Super+J. The terminals stack.
+  * Click the bottom terminal.
+  * Press Super+Shift+Equal. The horizontal split moves by about 100 px.
+  * Press Super+Shift+Minus. The split moves back.
+  * Press Super+Shift+Alt+Equal. The split moves by about 25 px.
+  * Press Super+Shift+Alt+Minus. The split moves back.
+  * Press Super+Ctrl+Shift+Equal. The split moves by about 300 px.
+  * Press Super+Ctrl+Shift+Minus. The split moves back.
+  * Press Super+J. The terminals sit side by side again.
+  * Press Super+Ctrl+Minus. The focused terminal gets wider.
+  * Type `hyprctl activewindow -j | jq '.size[0]'` and press Return. Note the width.
+  * Press Super+Alt+Home. A notification says the width for foot on workspace 1 was saved.
+  ** If Super+K has no "Save window width" row, report the chord absent and skip the width-memory steps.
+  * Type `cat ~/.local/state/omarchy/windows/workspace-1-foot.width` and press Return. The number matches the width you noted.
+  * Press Super+Ctrl+Equal. The focused terminal gets narrower.
+  * Press Super+Ctrl+Equal. It gets narrower again.
+  * Press Super+Home. The width returns to the saved number.
+  * Type `hyprctl activewindow -j | jq '.size[0]'` and press Return. The number matches the saved width.
+  * Press Super+W. One terminal closes.
+  * Press Super+Minus. The remaining terminal does not change.
+  * Type `rm -r ~/.local/state/omarchy/windows` and press Return.
+  * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Minus and Equal are `<M-->` and `<M-=>` (Hyprland binds them as `code:20`/`code:21`). The split line position between the two terminals is the visual measure; 25 px is subtle, compare screenshots side by side.
-  * Notifications appear top-right and fade within seconds.
+  * Minus is `<M-->` and Equal is `<M-=>`. A 25 px move is small. Compare screenshots. Notifications fade within seconds.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the "No saved width" notification; the split at three horizontal and three vertical magnitudes and back; the "Saved width" notification and the state file contents; the restored width after Super+Home matching the saved number
+  * On success
+  ** Screenshots of the no-saved-width notification, the split at 100 px, 25 px, and 300 px and back, both ways, the saved-width notification, and the restored width
+  ** The state file matches the noted width, and the jq width after Super+Home matches it
   * If unsuccessful
-  ** Screenshot after a resize chord with the split unmoved, or after Super+Home with the width unchanged; the width values and `cat ~/.local/state/omarchy/windows/*`
+  ** Screenshot after a resize chord with the split unmoved, or after Super+Home with the width unchanged
 covers: default/hypr/bindings/tiling.lua:12-13,55-68; bin/omarchy-hyprland-window-width; manual/07:34-41
 
 ### window-super-drag-move-and-resize   [VM-OK]
@@ -3909,25 +3960,31 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Ctrl+T: a floating btop is centred on screen (it needs a second to draw its graphs).
-  * Drag with the left button while holding Super from the middle of btop (x≈0.5, y≈0.5) to x≈0.2, y≈0.3: the window moves toward the top-left.
-  * Drag with the right button while holding Super from inside btop toward the bottom-right by about a fifth of the screen: the window grows.
-  * Press Super+Return (a terminal tiles behind), then Super+left-drag btop over the terminal and release: it stays floating where dropped and the terminal keeps its slot.
-  * Click btop and press Super+W. Press Super+Return for a second tiled terminal. Super+left-drag one tiled terminal onto the other: dwindle swaps or re-slots the two (record what happened; it must not crash).
-  * Close both terminals. Unhappy path: Super+left-drag on the empty desktop: nothing moves, nothing crashes.
+  * Press Super+Ctrl+T. btop opens as a floating window. Wait until it has drawn.
+  * Hold Super and left-drag from the middle of btop toward the top-left. btop moves toward the top-left.
+  * Hold Super and right-drag from inside btop toward the bottom-right. btop gets larger.
+  * Press Super+Return. A terminal opens behind btop.
+  * Hold Super and left-drag btop over the terminal, then release. btop stays floating where it was dropped. The terminal keeps its slot.
+  * Click btop. btop has focus.
+  * Press Super+W. btop closes.
+  * Press Super+Return. A second terminal opens.
+  * Hold Super and left-drag one tiled terminal onto the other. The two terminals swap or re-slot. Nothing crashes. Record which one happened.
+  * Press Super+W. One terminal closes.
+  * Press Super+W. The last terminal closes. The desktop is empty.
+  * Hold Super and left-drag on the empty desktop. Nothing moves.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use `mouse drag --modifier super [--button right]`; the pointer is an absolute tablet so fractions are exact. Screenshot after each drag to compare positions; move the mouse before the screenshot if you need the pointer visible.
+  * Use `mouse drag --modifier super`. Add `--button right` for the resize. Screenshot after each drag.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of btop before and after the move (position changed) and before and after the resize (larger); btop floating over the tiled terminal; the tiled-drag outcome; the empty desktop unchanged
+  * On success
+  ** Screenshots of btop before and after the move, before and after the resize, floating over the terminal, the tiled-drag outcome, and the empty desktop
   * If unsuccessful
-  ** Screenshot after the drag with the window unmoved and the exact client command used
+  ** Screenshot after the drag with the window unmoved, and the exact client command used
 covers: default/hypr/bindings/tiling.lua:73-74; manual/04:23; manual/07:42-43
 
 ### window-groups-tabs-join-eject-dissolve   [VM-OK]
@@ -3937,26 +3994,46 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return, type `echo ONE` Return, press Super+G: a tab strip (group bar) appears above the terminal.
-  * Press Super+Return, type `echo TWO` Return, then Super+Shift+F: each opens as a new tab in the group, not a new tile (three tabs: ONE, TWO, Files).
-  * Press Super+Ctrl+Left (TWO shows), Super+Ctrl+Right (Files), Super+Alt+1 (ONE), Super+Alt+2 (TWO), Super+Alt+3 (Files), Super+Alt+Tab (ONE), Super+Alt+Shift+Tab (Files), Super+Alt+4 and Super+Alt+5 (nothing changes — no such tab). Scroll the wheel over the group bar with Super+Alt held: the tab changes each notch.
-  * Press Super+Alt+G: the visible window leaves the group and tiles beside it (two tabs remain). With the ejected window focused press Super+Alt+Left or Super+Alt+Right toward the group: it re-joins as a tab.
-  * Click a group tab with the mouse and press Super+G: the tab strip disappears and the three windows tile normally.
-  * Close all three. Unhappy path: open one terminal, press Super+Alt+G (not grouped): nothing changes. Close it.
+  * Press Super+Return. A terminal opens.
+  * Type `echo ONE` and press Return. The line `ONE` appears.
+  * Press Super+G. A tab strip appears above the terminal.
+  * Press Super+Return. A new tab opens in the group.
+  * Type `echo TWO` and press Return. The line `TWO` appears.
+  * Press Super+Shift+F. Files opens as a third tab. No new tile appears.
+  * Press Super+Ctrl+Left. The TWO terminal is showing.
+  * Press Super+Ctrl+Right. Files is showing.
+  * Press Super+Alt+1. The ONE terminal is showing.
+  * Press Super+Alt+2. The TWO terminal is showing.
+  * Press Super+Alt+3. Files is showing.
+  * Press Super+Alt+Tab. The ONE terminal is showing.
+  * Press Super+Alt+Shift+Tab. Files is showing.
+  * Press Super+Alt+4. The visible tab does not change.
+  * Press Super+Alt+5. The visible tab does not change.
+  * Hold Super+Alt and scroll the wheel over the group bar one notch. The visible tab changes.
+  ** If the client cannot combine Super+Alt with scroll, report that and skip the scroll step.
+  * Press Super+Alt+G. The visible window leaves the group and tiles beside it. Two tabs remain.
+  * Press Super+Alt+Left or Super+Alt+Right, toward the group. The ejected window rejoins as a tab.
+  * Click a group tab. That window has focus.
+  * Press Super+G. The tab strip goes away. The three windows tile.
+  * Press Super+W. One window closes.
+  * Press Super+W. A second window closes.
+  * Press Super+W. The last window closes. The desktop is empty.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Alt+G. The terminal does not change.
+  * Press Super+W. The terminal closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The group bar is a 22 px strip drawn by Hyprland directly above the window content, with each tab showing a window title in the theme colours.
-  * If `mouse scroll` cannot combine the super+alt modifiers, note it and rely on the keyboard variants.
+  * The group bar is the strip drawn directly above the window.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of one tab, three tabs, each tab switch showing the right `echo` text or Files, the ejected window tiled next to a two-tab group, re-joined, and the dissolved tiles
+  * On success
+  ** Screenshots of one tab, three tabs, each tab switch showing ONE, TWO, or Files, the ejected window beside a two-tab group, the window rejoined, and the three tiled windows
   * If unsuccessful
-  ** Screenshot after the chord that did not switch/eject/dissolve, or where the group did not form
+  ** Screenshot after the chord that did not switch, eject, or dissolve
 covers: default/hypr/bindings/tiling.lua:76-95; default/hypr/looknfeel.lua:34-60; manual/04:51-55; manual/07:45-51
 
 ### workspace-switch-move-and-silent-move   [VM-OK]
@@ -3966,28 +4043,79 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return and type `echo MOVER` Return. The bar's left section shows workspace 1 active.
-  * Press Super+2 through Super+9 and Super+0 in turn: after each the bar highlights that number and the desktop is empty; on workspace 10 press Super+Return and type `hyprctl activeworkspace | head -1` Return → `workspace ID 10`, then close it. Press Super+1: MOVER is back.
-  * Press Super+Shift+2: you land on workspace 2 with MOVER; Super+1 shows an empty workspace 1. Walk the rest — Super+Shift+3, Super+Shift+4 … Super+Shift+9, Super+Shift+0 — following MOVER each time, and finish with Super+Shift+1.
-  * Press Super+Shift+Alt+3: MOVER disappears but you stay on workspace 1 (bar shows 1 active, 3 occupied). Press Super+3: MOVER is there. Walk the silent form the same way (Super+Shift+Alt+4 then Super+4, … Super+Shift+Alt+0 then Super+0, Super+Shift+Alt+2 then Super+2), ending with Super+Shift+Alt+1 and Super+1: MOVER is back on 1 and you never moved with it.
-  ** One screenshot per number is enough; the bar highlight staying put is the silent-move proof.
-  * Press Super+Shift+Alt+3 again (MOVER on 3, view on 1). Press Super+Tab: workspace 3 with MOVER; Super+Shift+Tab: back to 1; Super+Ctrl+Tab: 3 again (the former workspace). Click the workspace "1" indicator in the bar with the mouse: workspace 1 becomes active. Press Super+3 and Super+Shift+1 to bring MOVER home.
-  * Unhappy path: press Super+Shift+1 with MOVER already on 1, then Super+5 (empty) and Super+Shift+Alt+4 with no window focused: nothing happens either time, no error. Press Super+1.
-  * Close MOVER; the desktop is empty on workspace 1.
+  * Press Super+Return. A terminal opens on workspace 1.
+  * Type `echo MOVER` and press Return. The line `MOVER` appears. The bar shows workspace 1.
+  * Press Super+2. The bar highlights workspace 2. The workspace is empty.
+  * Press Super+3. The bar highlights workspace 3. The workspace is empty.
+  * Press Super+4. The bar highlights workspace 4. The workspace is empty.
+  * Press Super+5. The bar highlights workspace 5. The workspace is empty.
+  * Press Super+6. The bar highlights workspace 6. The workspace is empty.
+  * Press Super+7. The bar highlights workspace 7. The workspace is empty.
+  * Press Super+8. The bar highlights workspace 8. The workspace is empty.
+  * Press Super+9. The bar highlights workspace 9. The workspace is empty.
+  * Press Super+0. The bar highlights workspace 10. The workspace is empty.
+  * Press Super+Return. A terminal opens on workspace 10.
+  * Type `hyprctl activeworkspace | head -1` and press Return. The line is `workspace ID 10`.
+  * Press Super+W. That terminal closes.
+  * Press Super+1. The bar highlights workspace 1. The MOVER terminal is there.
+  * Press Super+Shift+2. The view moves to workspace 2. MOVER is there.
+  * Press Super+Shift+3. The view moves to workspace 3. MOVER is there.
+  * Press Super+Shift+4. The view moves to workspace 4. MOVER is there.
+  * Press Super+Shift+5. The view moves to workspace 5. MOVER is there.
+  * Press Super+Shift+6. The view moves to workspace 6. MOVER is there.
+  * Press Super+Shift+7. The view moves to workspace 7. MOVER is there.
+  * Press Super+Shift+8. The view moves to workspace 8. MOVER is there.
+  * Press Super+Shift+9. The view moves to workspace 9. MOVER is there.
+  * Press Super+Shift+0. The view moves to workspace 10. MOVER is there.
+  * Press Super+Shift+1. The view moves to workspace 1. MOVER is there.
+  * Press Super+Shift+Alt+3. The view stays on workspace 1. MOVER is gone. The bar lists workspace 3.
+  * Press Super+3. The view moves to workspace 3. MOVER is there.
+  * Press Super+Shift+Alt+4. The view stays on workspace 3. MOVER leaves.
+  * Press Super+4. The view moves to workspace 4. MOVER is there.
+  * Press Super+Shift+Alt+5. The view stays on workspace 4. MOVER leaves.
+  * Press Super+5. The view moves to workspace 5. MOVER is there.
+  * Press Super+Shift+Alt+6. The view stays on workspace 5. MOVER leaves.
+  * Press Super+6. The view moves to workspace 6. MOVER is there.
+  * Press Super+Shift+Alt+7. The view stays on workspace 6. MOVER leaves.
+  * Press Super+7. The view moves to workspace 7. MOVER is there.
+  * Press Super+Shift+Alt+8. The view stays on workspace 7. MOVER leaves.
+  * Press Super+8. The view moves to workspace 8. MOVER is there.
+  * Press Super+Shift+Alt+9. The view stays on workspace 8. MOVER leaves.
+  * Press Super+9. The view moves to workspace 9. MOVER is there.
+  * Press Super+Shift+Alt+0. The view stays on workspace 9. MOVER leaves.
+  * Press Super+0. The view moves to workspace 10. MOVER is there.
+  * Press Super+Shift+Alt+2. The view stays on workspace 10. MOVER leaves.
+  * Press Super+2. The view moves to workspace 2. MOVER is there.
+  * Press Super+Shift+Alt+1. The view stays on workspace 2. MOVER leaves.
+  * Press Super+1. The view moves to workspace 1. MOVER is there.
+  * Press Super+Shift+Alt+3. The view stays on workspace 1. MOVER moves to workspace 3.
+  * Press Super+Tab. Workspace 3 is showing. MOVER is there.
+  * Press Super+Shift+Tab. Workspace 1 is showing.
+  * Press Super+Ctrl+Tab. Workspace 3 is showing.
+  * Click the workspace 1 indicator in the bar. Workspace 1 is showing.
+  * Press Super+3. Workspace 3 is showing. MOVER is there.
+  * Press Super+Shift+1. The view moves to workspace 1. MOVER is there.
+  * Press Super+Shift+1. Nothing changes. MOVER stays on workspace 1.
+  * Press Super+5. Workspace 5 is empty.
+  * Press Super+Shift+Alt+4. Nothing changes. No window is focused.
+  * Press Super+1. Workspace 1 is showing. MOVER is there.
+  * Press Super+W. MOVER closes. The desktop is empty on workspace 1.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+Shift+Alt+3 is `<M-S-A-3>`. Empty workspaces vanish from the bar when you leave them; only occupied ones stay listed. Workspace switching has no animation in Omarchy.
+  * Super+Shift+Alt+3 is `<M-S-A-3>`. Empty workspaces leave the bar when you leave them. Occupied ones stay listed.
   * The workspace indicators sit right of the Omarchy logo.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar screenshots for each Super+N including `workspace ID 10`; MOVER following on the Shift moves; the highlight staying on 1 with 3 listed after the silent move; the Tab trio and the mouse-driven switch; MOVER back on 1
+  * On success
+  ** Bar screenshots for each Super+N, including `workspace ID 10`
+  ** MOVER follows each Super+Shift+N, and the highlight stays put after each Super+Shift+Alt+N until the matching Super+N
+  ** Super+Tab, Super+Shift+Tab, Super+Ctrl+Tab, and the click on workspace 1 land on the named workspace. MOVER ends on workspace 1
   * If unsuccessful
-  ** Screenshot after the chord with the wrong workspace highlighted or the window in the wrong place, plus the bar
+  ** Screenshot after the chord with the wrong workspace highlighted or MOVER in the wrong place
 covers: default/hypr/bindings/tiling.lua:21-35; shell/plugins/bar/widgets/Workspaces.qml; manual/03:21; manual/04:21; manual/07:23,27-28
 
 ### workspace-tab-scroll-and-former   [VM-OK]
@@ -3997,23 +4125,35 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return on workspace 1, Super+3 and Super+Return, Super+5 and Super+Return, then Super+1 (three occupied workspaces).
-  * Press Super+Tab: workspace 3 (the next *existing* one). Super+Tab: 5. Super+Tab once more: record whether it stays on 5 or wraps.
-  * Press Super+Shift+Tab: 3. Again: 1.
-  * Press Super+5, then Super+Ctrl+Tab: 1 (the former workspace). Super+Ctrl+Tab: 5.
-  * Move the mouse over the wallpaper and scroll down one notch with Super held: the bar steps to the next workspace; scroll up with Super held: back. Scroll without Super over a terminal: the workspace does not change.
-  * Press Ctrl+Alt+Delete; the desktop is empty on workspace 1.
+  * Press Super+Return. A terminal opens on workspace 1.
+  * Press Super+3. Workspace 3 is empty.
+  * Press Super+Return. A terminal opens on workspace 3.
+  * Press Super+5. Workspace 5 is empty.
+  * Press Super+Return. A terminal opens on workspace 5.
+  * Press Super+1. Workspace 1 is showing. Its terminal is there.
+  * Press Super+Tab. Workspace 3 is showing.
+  * Press Super+Tab. Workspace 5 is showing.
+  * Press Super+Tab. Record whether the view stays on workspace 5 or wraps. The bar shows which one.
+  * Press Super+Shift+Tab. Workspace 3 is showing.
+  * Press Super+Shift+Tab. Workspace 1 is showing.
+  * Press Super+5. Workspace 5 is showing.
+  * Press Super+Ctrl+Tab. Workspace 1 is showing.
+  * Press Super+Ctrl+Tab. Workspace 5 is showing.
+  * Move the pointer over the wallpaper. Scroll down one notch with Super held. The bar steps to the next workspace.
+  * Scroll up one notch with Super held. The bar steps back.
+  * Move the pointer over a terminal. Scroll one notch without Super. The workspace does not change.
+  * Press Ctrl+Alt+Delete. Every window closes. The desktop is empty on workspace 1.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Use `mouse scroll --modifier super`; if the client cannot combine a modifier with scroll, report the tooling gap and rely on the Tab chords.
+  * Use `mouse scroll --modifier super`. If the client cannot combine a modifier with scroll, report that and rely on the Tab chords.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Bar screenshots showing 1→3→5, back to 1, the 5↔1 bounce, and the Super+scroll steps with the plain scroll leaving the workspace alone
+  * On success
+  ** Bar screenshots showing 1, then 3, then 5, back to 1, the bounce between 5 and 1, the Super+scroll steps, and the plain scroll leaving the workspace alone
   * If unsuccessful
   ** Bar screenshot after the chord that landed on the wrong workspace
 covers: default/hypr/bindings/tiling.lua:33-35,70-71; manual/07:24-26,44
@@ -4025,28 +4165,57 @@ instruction: |
   From the desktop please do the following:
 
   <ActionList>
-  * Press Super+Return three times on workspace 1: dwindle shows all three as a binary tree. Screenshot.
-  * Press Super+L: toast "Workspace layout set to scrolling" and the terminals rearrange into half-width columns with the third pushed off the right edge; Super+Right / Super+Left scroll the row. Type `hyprctl activeworkspace -j | jq -r .tiledLayout` Return → `scrolling`; `cat ~/.local/state/omarchy/workspace-layouts/1.lua` → `hl.workspace_rule({ workspace = "1", layout = "scrolling" })`.
-  * Press Super+2 and open two terminals: they tile dwindle (the choice is per workspace; `tiledLayout` → `dwindle`). Press Super+1 and type `hyprctl reload` Return: workspace 1 is still scrolling (the rule is re-sourced).
-  * Press Super+Space and go to Trigger → Toggle → Workspace Layout (typing `workspace layout` in the root search may jump there): toast "Workspace layout set to dwindle", all three terminals visible again, the file now says `layout = "dwindle"`.
-  * Type `printf '%s\n' 'hl.config({ general = { layout = "scrolling" } })' >> ~/.config/hypr/looknfeel.lua && hyprctl reload` Return, press Super+3 and open three terminals: scrolling columns without pressing Super+L. Then `sed -i '$d' ~/.config/hypr/looknfeel.lua && hyprctl reload`; Super+4 with two new terminals tiles dwindle.
-  ** A broken edit to looknfeel.lua shows a red banner at the top; fix the line and reload before continuing. Style → Hyprland opens the same file in the editor.
-  * Unhappy path: press Super+1, then Ctrl+Alt+Delete (everything closed, empty workspace 1); press Super+L and again straight away: two toasts (scrolling, then dwindle) and the workspace ends dwindle as it started.
-  * Press Super+Return and type `ls ~/.local/state/omarchy/workspace-layouts/` Return (no `null.lua`), then `rm -f ~/.local/state/omarchy/workspace-layouts/*.lua`; close it.
+  * Press Super+Return. A terminal opens on workspace 1.
+  * Press Super+Return. A second terminal opens.
+  * Press Super+Return. A third terminal opens. The three tile as a tree.
+  * Press Super+L. A toast says "Workspace layout set to scrolling". The terminals become columns, and one is past the right edge.
+  * Press Super+Right. The row scrolls.
+  * Press Super+Left. The row scrolls back.
+  * Type `hyprctl activeworkspace -j | jq -r .tiledLayout` and press Return. The line is `scrolling`.
+  * Type `cat ~/.local/state/omarchy/workspace-layouts/1.lua` and press Return. The line includes `layout = "scrolling"`.
+  * Press Super+2. Workspace 2 is showing.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens. They tile as a tree.
+  * Type `hyprctl activeworkspace -j | jq -r .tiledLayout` and press Return. The line is `dwindle`.
+  * Press Super+1. Workspace 1 is showing. The columns are still there.
+  * Type `hyprctl reload` and press Return. Workspace 1 stays scrolling.
+  * Press Super+Space. The menu opens.
+  * Click Trigger.
+  * Click Toggle.
+  * Click Workspace Layout. The menu closes. A toast says "Workspace layout set to dwindle". All three terminals are visible.
+  * Type `cat ~/.local/state/omarchy/workspace-layouts/1.lua` and press Return. The line includes `layout = "dwindle"`.
+  * Type `printf '%s\n' 'hl.config({ general = { layout = "scrolling" } })' >> ~/.config/hypr/looknfeel.lua && hyprctl reload` and press Return. Hyprland reloads.
+  ** If a red banner appears, fix the looknfeel line, reload, and report the banner before continuing.
+  * Press Super+3. Workspace 3 is empty.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens.
+  * Press Super+Return. A third terminal opens. They are scrolling columns. Super+L was not pressed.
+  * Type `sed -i '$d' ~/.config/hypr/looknfeel.lua && hyprctl reload` and press Return. Hyprland reloads. The appended line is gone.
+  * Press Super+4. Workspace 4 is empty.
+  * Press Super+Return. A terminal opens.
+  * Press Super+Return. A second terminal opens. They tile as a tree.
+  * Press Super+1. Workspace 1 is showing.
+  * Press Ctrl+Alt+Delete. Every window closes. The desktop is empty on workspace 1.
+  * Press Super+L. A toast says "Workspace layout set to scrolling".
+  * Press Super+L. A toast says "Workspace layout set to dwindle". The workspace ends as it started.
+  * Press Super+Return. A terminal opens.
+  * Type `ls ~/.local/state/omarchy/workspace-layouts/` and press Return. There is no `null.lua`.
+  * Type `rm -f ~/.local/state/omarchy/workspace-layouts/*.lua` and press Return.
+  * Press Super+W. The terminal closes. The desktop is empty.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * Super+L is the layout toggle, not lock (lock is Super+Ctrl+L). Toasts appear top-right for about five seconds.
-  * In the menu the first Return only settles the cursor if the filter did not match; navigate with the arrows if typing does not filter.
+  * Super+L toggles layout. Lock is Super+Ctrl+L. Toasts appear at the top-right for about five seconds.
   </Hints>
   </Instructions>
 proof: |
-  * on success
-  ** Screenshots of the tree layout, the scrolling columns with one column cut off and the toast, the rule file both ways, workspace 2 still dwindle, scrolling preserved after reload, the dwindle toast with all three fitting, scrolling by default on workspace 3, dwindle again after cleanup, the two toasts of the unhappy path, no `null.lua`
+  * On success
+  ** Screenshots of the tree, the scrolling columns with one column cut off, workspace 2 still a tree, scrolling kept after reload, the dwindle toast with all three visible, scrolling columns on workspace 3, a tree on workspace 4, and the two toasts on the empty workspace
+  ** The rule file shows `scrolling`, then `dwindle`, and `ls` shows no `null.lua`
   * If unsuccessful
-  ** Screenshot after Super+L with the layout unchanged or reverting after reload; `hyprctl activeworkspace -j` and the state file; a banner after the looknfeel edit
+  ** Screenshot after Super+L with the layout unchanged, or the layout lost after reload
 covers: default/hypr/bindings/tiling.lua:14; bin/omarchy-hyprland-workspace-layout-toggle; default/hypr/workspace-layouts.lua; default/hypr/looknfeel.lua:19,96-98; config/hypr/looknfeel.lua:4-14; default/omarchy/omarchy-menu.jsonc:97 (trigger.toggle.workspace-layout); test/shell.d/hyprland-workspace-layout-test.sh; manual/04:29-49 (04-navigation.md); manual/07:18
 
 ### scratchpad-quake-console   [VM-OK]
