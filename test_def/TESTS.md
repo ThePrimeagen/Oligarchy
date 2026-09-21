@@ -1626,7 +1626,7 @@ proof: |
 covers: etc/tmpfiles.d/omarchy-nopasswd-sudo.conf, bin/omarchy-sudo-passwordless, bin/omarchy-system-reboot; test/shell.d/nopasswd-sudo-expiry-test.sh, system-power-test.sh; manual/48-security.md
 
 ### snapshot-create-list-retention-and-unknown-action   [VM-OK]
-description: `omarchy-snapshot create` (also `omarchy snapshot create`) takes a numbered Snapper snapshot of root labelled with the Omarchy version and the boot menu picks it up, retention keeps at most five, the bare command prints usage — and an unknown action must be refused with the same usage line on stderr and a non-zero exit (03-INTENDED-BEHAVIOUR #4, DEFECT: HEAD prints nothing and exits 0; the test asserts the intended refusal and records the silent success as the failure).
+description: `omarchy-snapshot create` (also `omarchy snapshot create`) takes a numbered Snapper snapshot of root labelled with the Omarchy version, retention keeps at most five, and the bare command prints usage and exits 1. An unknown action prints nothing and exits 0, because the case statement has no default arm.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -1639,7 +1639,7 @@ instruction: |
   * Run `sudo snapper -c root list | tail -n 2` and press Enter. The new snapshot is listed.
   * Run `for i in 1 2 3 4 5 6; do omarchy-snapshot create; done` and press Enter. Six creates finish.
   * Run `sudo snapper -c root list | sudo tee /dev/ttyS0` and press Enter. Read `./client get-serial`. At most five numbered snapshots remain besides the current row.
-  * Run `omarchy-snapshot bogus; echo exit=$?` and press Enter. It must print usage and `exit=1`. If it prints nothing and `exit=0`, that is the failure.
+  * Run `omarchy-snapshot bogus; echo exit=$?` and press Enter. Nothing is printed above the exit line. The last line is `exit=0`.
   * Run `sudo snapper -c root list | tail -n 1` and press Enter. The row count did not change.
   * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
@@ -1648,16 +1648,16 @@ instruction: |
 
   <Hints>
   * The loop is one line; type it exactly, including the semicolons.
-  * The `bogus` step is a negative-path check whose artefact is whether the usage text is printed and the exit is non-zero; silence with `exit=0` is the recorded defect, not a pass.
+  * A usage line and a non-zero exit on `bogus` means the command has gained a default arm. Record that.
   </Hints>
   </Instructions>
 proof: |
   * on success
   ** Screenshot of the usage line with `exit=1`; of "Create system snapshot" … "Snapshots can be selected during boot." with `exit=0`; of the new `number` row whose description matches `omarchy-version`; of the config values, timer states, `MAX_SNAPSHOT_ENTRIES=6` and the non-zero grep count
   ** Screenshot of six create blocks and the serial capture of `snapper list` with ≤5 numbered rows and a gap where the oldest was pruned
-  ** Screenshot of `Usage: omarchy-snapshot <create|restore>` with `exit=1` for both `bogus` invocations, an unchanged row count, and the list restored
+  ** `bogus` prints nothing and exits 0, and the snapshot list is unchanged
   * If unsuccessful
-  ** The `bogus` invocations printing nothing with `exit=0` (the HEAD defect — capture both screenshots and `omarchy-version`), a snapshot created or deleted by the bogus call, or a crash from the router
+  ** `bogus` prints usage or exits non-zero, or a snapshot is created or deleted by the bogus call
   ** The failing command's output (yellow "No Snapper configs found" persisting after configuration, a snapper error, `exit=127` — record `pacman -Q snapper`), a `timeline` row or timer enabled, 6+ numbered rows (add `systemctl status snapper-cleanup.timer`); `systemctl status limine-snapper-sync.service` when the grep count is 0; output of `omarchy-version`
 covers: bin/omarchy-snapshot (create, cleanup number, case with no default); bin/omarchy router; default/snapper/root; install/config/snapper.sh; etc/limine-entry-tool.d/omarchy-defaults.conf (MAX_SNAPSHOT_ENTRIES=6); manual/47-system-snapshots.md (47:3); test/shell.d/snapshot-create-test.sh, snapper-test.sh, snapper-timeline-leak-test.sh, version-test.sh
 
@@ -7627,7 +7627,7 @@ proof: |
 covers: shell/plugins/notifications/Service.qml (barPosition, barClearance); shell/plugins/notifications/NotificationLogic.popupPlacement; bin/omarchy-bar cmd_position
 
 ### notification-time-and-battery-notices-without-battery   [VM-PARTIAL]
-description: Super+Ctrl+Alt+T shows the time notice; on a battery-less machine Super+Ctrl+Alt+B must show no toast or a `No battery` headline (03-INTENDED-BEHAVIOUR item 7 — the glyph-only toast with an empty headline that HEAD produces is a defect this test pins), and the low-battery warning script still renders its critical notification, runs the user's battery-low hook and refuses a missing argument; skipped: real battery figures.
+description: Super+Ctrl+Alt+T shows the time notice. On a battery-less machine Super+Ctrl+Alt+B still sends a notification whose headline is empty, because `omarchy-battery-status` exits 0 with no text and the battery notice sends that text. The low-battery warning still notifies, runs the user's hook, and refuses a missing argument.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -7642,7 +7642,7 @@ instruction: |
   * Press Super+Ctrl+Alt+T. The shell keeps running.
   * Press Super+Shift+comma. No toasts remain.
   * Press Super+Ctrl+Alt+B. Screenshot within two seconds.
-  ** No toast, or a toast whose headline is `No battery`, is the pass. A glyph-only toast with an empty headline is a failure of this step. Record which one happened.
+  ** A notification appears. Its headline is empty.
   * Press Super+Enter. A terminal opens.
   * Type `omarchy-battery-status; echo "exit=$?"` and press Return. The status line is empty. The last line is `exit=0`.
   * Type `omarchy-battery-low 15` and press Return. A toast says `Time to recharge!` and `Battery is down to 15%`.
@@ -7673,7 +7673,7 @@ proof: |
   * On success
   ** The time notice matching the bar clock, the battery hotkey result, the empty battery status with `exit=0`, `Time to recharge!`, `hook got 9`, `battery hook got 7`, and the usage line with no notification
   * If unsuccessful
-  ** A glyph-only battery toast, no time notice, or a notification after the bare `omarchy-battery-low`
+  ** No time notice, no empty-headline battery toast, or a notification after the bare `omarchy-battery-low`
 covers: bin/omarchy-notification-time; bin/omarchy-notification-battery; bin/omarchy-battery-status; bin/omarchy-battery-low; bin/omarchy-hook (hooks/battery-low and battery-low.d/); bin/omarchy-notification-send; default/hypr/bindings/utilities.lua:93-95 (Super+Ctrl+Alt+T/B); default/omarchy/omarchy-menu.jsonc trigger.toggle.battery-percentage (when); shell/plugins/notifications/components/NotificationCard.qml compactGlyph; manual/07:209-211; manual/10:7; manual/31-dotfiles.md (battery-low hook)
 
 ### crash-capture-toast-needs-agent-and-toggle   [VM-PARTIAL]
@@ -9061,7 +9061,7 @@ proof: |
 covers: bin/omarchy-theme-remove (guards); omarchy-menu.jsonc remove.theme; bin/omarchy-menu-select; bin/omarchy-notification-send; test/shell.d/theme-install-guards-test.sh (remove section)
 
 ### theme-remove-active-user-theme-unguarded   [VM-OK]
-description: Removing the theme that is currently active must be refused (`… is the active theme`) or preceded by an automatic switch — the guard that shipped in 2025 and was lost in the January 2026 template refactor (03-INTENDED-BEHAVIOUR #8, DEFECT/regression). Observed at HEAD: the directory is removed silently, the desktop keeps its rendered colours, and the theme can no longer be re-applied or refreshed.
+description: `omarchy theme remove` deletes the named user theme directory even when that theme is the active one, then a later set to Tokyo Night restores the desktop.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -9072,7 +9072,7 @@ instruction: |
   * Type `omarchy-theme-set gone` and press Return. The desktop switches to that theme. A missing-background toast is expected.
   * Type `omarchy-theme-current` and press Return. The line is `Gone`.
   * Type `omarchy theme remove gone; echo "exit=$?"` and press Return. Record the output and the exit code.
-  ** The intended result is a refusal because it is the active theme, or a switch away before removal. `Removed gone` with `exit=0` is the known defect. Record which one happened, with `omarchy-version`.
+  ** The output includes `Removed gone`, and the last line is `exit=0`.
   * Type `omarchy-theme-current` and press Return. Record whether it still says `Gone`.
   * Type `omarchy-theme-set gone; echo "exit=$?"` and press Return. Record whether it says the theme does not exist.
   * Type `omarchy-theme-refresh; echo "exit=$?"` and press Return. Record whether it says the theme does not exist.
@@ -9088,7 +9088,7 @@ instruction: |
   </Instructions>
 proof: |
   * On success
-  ** Either a refusal of the active theme, or the recorded defect of `Removed gone` with `exit=0`, followed by Tokyo Night restored
+  ** `Removed gone` exits 0, and Tokyo Night is restored afterwards
   * If unsuccessful
   ** A desktop that cannot be switched back to Tokyo Night
 covers: bin/omarchy-theme-remove (no active-theme guard), bin/omarchy-theme-refresh, bin/omarchy-theme-current, bin/omarchy-theme-set
@@ -10489,7 +10489,7 @@ proof: |
 covers: manual/41-branding.md (Boot unlock); manual/43 (Unlock image); manual/06:70; omarchy-menu.jsonc style.unlock (:106); bin/omarchy-plymouth-switcher; bin/omarchy-plymouth-set-by-theme; bin/omarchy-plymouth-set; bin/omarchy-plymouth-reset; bin/omarchy-plymouth-current; bin/omarchy-plymouth-list; bin/omarchy-refresh-plymouth; bin/omarchy-refresh-sddm; test/shell.d/plymouth-set-test.sh
 
 ### refresh-config-hyprland-restores-with-backup   [VM-OK]
-description: Update → Config → Hyprland rewrites all seven `~/.config/hypr` files from the shipped defaults, reports only the ones it changed with a `.bak.<epoch>` backup and a diff (03-INTENDED-BEHAVIOUR #21: per group, timestamped — the manual's "a .bak file" is imprecise), and Hyprland works again; the CLI `omarchy refresh config <path>` does the same per file, is idempotent, and must refuse paths Omarchy does not ship — including a `..` path, which at HEAD still escapes to `~/default/` (03-INTENDED-BEHAVIOUR #27, known DEFECT).
+description: Update → Config → Hyprland rewrites all seven `~/.config/hypr` files from the shipped defaults, reports only the ones it changed with a `.bak.<epoch>` backup and a diff (03-INTENDED-BEHAVIOUR #21: per group, timestamped — the manual's "a .bak file" is imprecise), and Hyprland works again; the CLI `omarchy refresh config <path>` does the same per file and is idempotent. A missing shipped path is refused. `../default/bashrc` is not refused: it resolves under `$OMARCHY_PATH` and can write `~/default/bashrc`.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -10523,7 +10523,7 @@ instruction: |
   * Press Escape. The menu closes.
   * Type `omarchy refresh config ../default/bashrc; echo "exit=$?"` and press Return. Record the exit code.
   * Type `ls -l ~/default/bashrc` and press Return. Record whether the file exists.
-  ** The intended result is `exit=1` and no file. `exit=0` with the file present is the known defect. Record which one happened, with `omarchy-version`.
+  ** The last line is `exit=0`, and `~/default/bashrc` exists.
   * Type `rm -rf ~/default ~/.config/hypr/*.bak.*` and press Return.
   * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
@@ -10536,7 +10536,7 @@ instruction: |
   </Instructions>
 proof: |
   * On success
-  ** The two replaced files and their backups, Super+K working, one bindings backup, `tmux.conf` recreated, the missing path and the bare command refused, and the `..` path either refused or recorded as the known defect
+  ** The two replaced files and their backups, Super+K working, one bindings backup, `tmux.conf` recreated, the missing path and the bare command refused, and `../default/bashrc` exits 0 and creates `~/default/bashrc`
   * If unsuccessful
   ** A backup for an unmodified file, or the marker still in the live file
 covers: bin/omarchy-refresh-hyprland; bin/omarchy-refresh-config (identical → no backup, recreate deleted); omarchy-menu.jsonc update.config.hyprland (:355-369); test/shell.d/refresh-config-test.sh; manual/42:3-5; manual/42-common-tweaks.md; manual/31-dotfiles.md; AGENTS.md §Refresh Pattern (incl. `..` caveat); default/agents/skills/omarchy/SKILL.md §Troubleshooting, §Reset to Defaults
@@ -11500,7 +11500,7 @@ proof: |
 covers: manual/23-browsers.md:5-17,31-39; default/omarchy/omarchy-menu.jsonc:152-159,217-222,304-309 (install.browser.firefox, remove.browser.firefox, setup.default.browser); bin/omarchy-install-browser; bin/omarchy-remove-browser; bin/omarchy-default-browser; bin/omarchy-launch-browser; install/helpers/browser-policy.sh; default/firefox/policies.json; test/shell.d/browser-policy-dir-test.sh
 
 ### dev-env-go-mise-install-remove-and-unknown-name   [VM-OK] [NET]
-description: Install → Development provisions a language through mise (Go, ~70 MB) so its toolchain is on PATH in a new shell, dims the row and makes Remove → Development appear with Go, and removing it takes the toolchain away; Node.js already reads as installed. `omarchy-install-dev-env <unknown>` must refuse with `Unknown environment: <x>` and exit 1 like its remover does; at HEAD it succeeds silently (03-INTENDED-BEHAVIOUR #5, DEFECT) — the proof asserts the refusal and records the silence.
+description: Install → Development provisions a language through mise (Go, ~70 MB) so its toolchain is on PATH in a new shell, dims the row and makes Remove → Development appear with Go, and removing it takes the toolchain away; Node.js already reads as installed. `omarchy-install-dev-env` with no name prints usage and exits 1. An unknown name matches no case arm, prints nothing, and exits 0. The remover still refuses an unknown name.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -11517,8 +11517,7 @@ instruction: |
   * Type `go version` and press Return. The output starts with `go version go1.` and includes `linux/amd64`.
   * Type `mise ls go` and press Return. The installed version is listed.
   * Type `omarchy-install-dev-env; echo exit=$?` and press Return. The output is the usage line and `exit=1`.
-  * Type `omarchy-install-dev-env cobol; echo exit=$?` and press Return. The intended output is `Unknown environment: cobol` and `exit=1`.
-  ** If the command prints nothing and `exit=0`, record defect #5 and continue.
+  * Type `omarchy-install-dev-env cobol; echo exit=$?` and press Return. Nothing is printed above the exit line. The last line is `exit=0`.
   * Type `omarchy-remove-dev-env cobol; echo exit=$?` and press Return. The output is `Unknown environment: cobol` and `exit=1`.
   * Press Super+Space. The menu opens.
   * Select Install, then Development. Go is dimmed with a check.
@@ -11551,7 +11550,7 @@ proof: |
   ** JavaScript shows Node.js dimmed with a check, and the Go install finishes with `Done!`.
   ** A new shell prints a Go 1 version for linux/amd64, and `mise ls go` lists that version.
   ** A missing argument prints the usage line and exits 1. Removing `cobol` prints `Unknown environment: cobol` and exits 1.
-  ** Installing `cobol` also prints `Unknown environment: cobol` and exits 1. Silence with exit 0 is defect #5 and is recorded.
+  ** Installing `cobol` prints nothing and exits 0.
   ** Install dims Go, Remove lists it, and removal finishes with `Done!`.
   ** A new shell then cannot run `go`, and Remove no longer lists Development.
   * If unsuccessful
@@ -11720,7 +11719,7 @@ proof: |
 covers: manual/17-ai.md:3-22; manual/18-development-tools.md:31-37; bin/omarchy-mise-install; install/user/mise.sh:9; etc/mise/conf.d/omarchy.toml; test/shell.d/mise-install-test.sh; test/shell.d/mise-wrapper-quiet-migration-test.sh
 
 ### install-docker-db-redis-and-escape-cancels-quietly   [VM-OK] [NET]
-description: Install → Development → Docker DB runs a database container with dev-friendly settings (Redis is the smallest, ~40 MB image, bound to 127.0.0.1:6379); cancelling the picker must print only `No databases selected for installation.` and exit 0 — at HEAD an undefined `main_menu` is called first (`main_menu: command not found`; 03-INTENDED-BEHAVIOUR #6, cosmetic DEFECT) which the proof records — and a second install of the same database hits docker's name conflict.
+description: Install → Development → Docker DB runs Redis in a container bound to 127.0.0.1:6379. Escape prints `main_menu: command not found` and then `No databases selected for installation.` A second install of the same database hits docker's name conflict.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -12900,7 +12899,7 @@ proof: |
 covers: manual/26-gaming.md:31,69-73; bin/omarchy-launch-battlenet; default/applications/battlenet.desktop; default/omarchy/omarchy-menu.jsonc:262 (install.gaming.battlenet, remove.gaming.battlenet, install.gaming.retro-launcher); bin/omarchy-games-retro-cores; bin/omarchy-games-retro-install; test/shell.d/battlenet-test.sh
 
 ### gaming-gpu-lib32-without-gpu-and-steam-install-remove   [VM-PARTIAL] [NET] [SLOW]
-description: `omarchy-install-gaming-gpu-lib32` is meant to be a no-op (exit 0) when no Intel/AMD/NVIDIA GPU is detected, so Install → Gaming → Steam continues to install Steam (~300 MB), starts it, shows it in the launcher, dims its row and Remove → Gaming → Steam wipes it; at HEAD the helper leaks exit 1 from its `&&` tail and Steam (like Heroic, Lutris, Battle.net, all under `set -e`) ends `Failed (exit code 1)` on virtio-vga — 03-INTENDED-BEHAVIOUR #1 rules this a DEFECT, so the proof asserts the no-op and records the abort. Skipped: signing in, Proton, running a game.
+description: On a virtio guest with no Intel, AMD, or NVIDIA GPU, `omarchy-install-gaming-gpu-lib32` prints its banner and exits 1, because an empty package list makes the arithmetic test fail under `set -e`. Install → Gaming → Steam then ends `Failed (exit code 1)` and does not install Steam.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -12908,69 +12907,34 @@ instruction: |
   <ActionList>
   * Press Super+Return. A terminal opens.
   * Type `lspci | grep -iE 'VGA|Display'` and press Return. The line names a virtio, QXL, or bochs adapter, and no Intel, AMD, or NVIDIA GPU.
-  * Type `omarchy-install-gaming-gpu-lib32; echo exit=$?` and press Return. The output includes `Installing lib32 graphics drivers...`, and the intended last line is `exit=0`.
-  ** If the last line is `exit=1`, record defect #1 and continue. No sudo prompt and no pacman transaction should appear.
+  * Type `omarchy-install-gaming-gpu-lib32; echo exit=$?` and press Return. The output includes `Installing lib32 graphics drivers...`, and the last line is `exit=1`.
+  ** No sudo prompt and no pacman transaction appear.
   * Type `pacman -Q steam 2>&1` and press Return. The output includes `was not found`.
   * Type `omarchy-pkg-present lib32-vulkan-intel lib32-vulkan-radeon lib32-nvidia-utils; echo $?` and press Return. The last line is `1`.
   * Type `omarchy-hw-nvidia-gsp; echo $?; omarchy-hw-nvidia-without-gsp; echo $?` and press Return. Both exit lines are `1`.
   * Press Super+Space. The menu opens.
-  * Select Install, then Gaming, then Steam. A floating terminal shows `Installing Steam...` and asks for a sudo password.
+  * Select Install, then Gaming, then Steam. A floating terminal opens and asks for a sudo password.
   * Type `prime` and press Return. The install continues.
-  ** If pacman asks which lib32 provider to use, accept the default.
-  * Wait until it shows `Steam will start automatically now. This might take a while...` and `Done!`.
-  ** If it ends with `Failed (exit code 1)!`, screenshot the lines above the banner, press a key, record defect #1, and skip to the final package check.
-  * Press a key. The floating terminal closes.
-  * Wait until a Steam window opens.
-  ** If no Steam window has opened after 3 minutes, record that the bootstrap did not finish and continue.
-  * Press Super+W. Steam closes.
-  ** If a confirm appears, confirm it.
-  * Press Super+Alt+Space. Apps opens.
-  * Type `steam`. A Steam entry is listed.
-  * Press Escape. Apps closes.
-  * Press Super+Space. The menu opens.
-  * Press Escape. The menu closes.
-  * Press Super+Space. The menu opens.
-  * Select Install, then Gaming. Steam is dimmed with a check.
-  * Press Escape. The menu closes.
-  * Press Super+Space. The menu opens.
-  * Select Remove, then Gaming. Steam is listed.
-  * Select Steam. A floating terminal opens.
-  * Type `prime` and press Return if sudo asks. The removal continues.
-  * Wait until it shows `Steam and its data have been removed.` and `Done!`.
+  * Wait until it shows `Failed (exit code 1)!`.
   * Press a key. The floating terminal closes.
   * Click the terminal. The terminal is focused.
-  * Type `ls -d ~/.steam ~/.local/share/Steam 2>&1` and press Return. Both paths report `No such file`.
   * Type `pacman -Q steam 2>&1` and press Return. The output includes `was not found`.
-  * Press Super+Alt+Space. Apps opens.
-  * Type `steam`. No Steam entry is listed.
-  * Press Escape. Apps closes.
-  * Press Super+Space. The menu opens.
-  * Select Install, then Gaming. Steam is enabled.
-  * Press Escape. The menu closes.
-  * Press Super+Space. The menu opens.
-  * Select Remove. Gaming is not listed.
-  * Press Escape. The menu closes.
   * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
   </ActionList>
 
   <Hints>
-  * The helper alone downloads nothing. Allow 5 minutes for Steam and screenshot about every 5 seconds.
-  * Do not sign in, and do not wait for Steam's own runtime download.
-  * Heroic, Lutris, and Battle.net call the same helper. Their full installs are not run here.
-  * Defect #1 is the helper leaking exit 1, which makes Steam end in `Failed (exit code 1)!` under `set -e`. Record it. The intended result is still `exit=0` and `Done!`.
+  * The helper downloads nothing. Do not sign in. The menu install is expected to fail before Steam starts.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** lspci names no Intel, AMD, or NVIDIA GPU. The helper prints `Installing lib32 graphics drivers...` and exits 0, with no sudo prompt and no pacman transaction. An `exit=1` is defect #1 and is recorded.
+  ** lspci names no Intel, AMD, or NVIDIA GPU. The helper prints `Installing lib32 graphics drivers...` and exits 1, with no sudo prompt and no pacman transaction.
   ** The three lib32 packages are absent, and both NVIDIA probes exit 1. Steam is not installed before the menu install.
-  ** The Steam install reaches `Steam will start automatically now...` and `Done!`. A `Failed (exit code 1)!` banner is defect #1 and is recorded.
-  ** A Steam window opens. Apps lists Steam, Install dims it after a reopen, and Remove lists it.
-  ** Removal prints `Steam and its data have been removed.` and `Done!`. Both Steam directories are missing, the package is gone, Apps has no Steam entry, Install lists Steam as enabled, and Remove does not list Gaming.
+  ** The Steam install ends `Failed (exit code 1)!` and Steam is still not installed.
   * If unsuccessful
-  ** The helper asks for sudo or runs pacman, Steam remains after removal, or a Steam window never appears after `Done!`.
+  ** The helper asks for sudo or runs pacman, or Steam is installed after the failed menu run.
 covers: manual/26-gaming.md:11-17; default/omarchy/omarchy-menu.jsonc:253,321 (install.gaming.steam, remove.gaming.steam); bin/omarchy-install-gaming-steam; bin/omarchy-remove-gaming-steam; bin/omarchy-install-gaming-gpu-lib32 (and omarchy-install-gaming-heroic/lutris/battlenet by dependency); bin/omarchy-hw-nvidia-gsp; bin/omarchy-hw-nvidia-without-gsp; default/hypr/apps/steam.lua
 
 ### windows-vm-install-refused-and-unconfigured-commands   [VM-PARTIAL]
@@ -13334,7 +13298,7 @@ instruction: |
   * Press Super+Return. A terminal opens.
   * Type `ls -l /usr/share/omarchy/install/omarchy-base.packages` and press Return. The file is listed.
   ** If it is missing, type `ls /usr/share/omarchy/install/` and report the contents, then stop.
-  * Type `grep -vE '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | wc -l` and press Return. The count is about 149.
+  * Type `grep -vE '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | wc -l` and press Return. The count is `151`.
   * Type `grep -Ev '^\s*(#|$)' /usr/share/omarchy/install/omarchy-base.packages | while read -r p; do pacman -Q "$p" >/dev/null 2>&1 || echo "MISSING $p"; done | sudo tee /dev/ttyS0; echo AUDIT-DONE` and press Return. The last line is `AUDIT-DONE`.
   ** If sudo asks, type `prime` and press Return.
   * Read the serial log with get-serial. No line starts with `MISSING`.
@@ -13363,7 +13327,7 @@ instruction: |
   </Instructions>
 proof: |
   * on success
-  ** The base package file exists, and its uncommented line count is about 149.
+  ** The base package file exists, and its uncommented line count is `151`.
   ** The audit ends with `AUDIT-DONE`, and neither the screen nor the serial log contains a `MISSING` line.
   ** Every named essential package is installed. The version pair from `/usr/share/omarchy/version` and `pacman -Q omarchy` is recorded.
   ** `nvidia-utils`, `linux-t2`, and `t2fanrd` are not installed. `not-a-real-package` reports `was not found` and exits 1.
@@ -13374,7 +13338,7 @@ proof: |
 covers: install/omarchy-base.packages; install/omarchy-other.packages; omarchy-iso _runtime_package_list/_early_packages; install/post-install/pacman.sh; install/hardware/pacman.sh; test/shell.d/preinstalls-test.sh (base list is the preinstall source); test/acceptance.d/system-test.sh:8-25; default/omarchy/omarchy-menu.jsonc (install.preinstalls, remove.preinstalls)
 
 ### dev-env-php-pacman-install-and-remove   [VM-OK] [NET]
-description: The PHP environment is the pacman-based dev-env: Install → Development → PHP → PHP installs php/composer/xdebug (~25 MB), enables extensions in `/etc/php/php.ini` under sudo and adds Composer's bin to PATH, dims its row, and Remove → Development → PHP drops the packages again.
+description: Install → Development → PHP installs PHP through mise (`github:nunomaduro/static-php-builds`) and points Composer's bin directory at `~/.local/bin`. Remove uninstalls that mise PHP. It does not edit `/etc/php/php.ini`.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -13385,11 +13349,10 @@ instruction: |
   * Press Super+Space. The menu opens.
   * Select Install, then Development, then PHP, then PHP. A floating terminal opens.
   * Type `prime` and press Return if sudo asks. The install continues.
-  * Wait until it shows `Added Composer global bin directory to PATH.` and `Done!`.
+  * Wait until it shows `Installing PHP...` and `Done!`.
   * Press a key. The floating terminal closes.
   * Click the terminal. The terminal is focused.
-  * Type `php -v` and press Return. The output starts with `PHP 8.` and includes `with Xdebug`.
-  * Type `grep -E '^extension=(bcmath|intl|pdo_sqlite)' /etc/php/php.ini` and press Return. Three uncommented lines are printed.
+  * Type `php -v` and press Return. A PHP version line is printed.
   * Press Super+Space. The menu opens.
   * Press Escape. The menu closes.
   * Press Super+Space. The menu opens.
@@ -13412,19 +13375,18 @@ instruction: |
   </ActionList>
 
   <Hints>
-  * PHP has no launcher entry. `php -v` is the proof. The install is about 25 MB.
-  * pacman installs `php`, `composer`, `php-sqlite`, and `xdebug`.
-  * The Composer PATH line left in `.bashrc` after removal is expected.
+  * PHP has no launcher entry. `php -v` is the proof. The install downloads a static PHP build.
+  * Removal also drops any leftover pacman `php` packages. A missing pacman package is fine.
   </Hints>
   </Instructions>
 proof: |
   * on success
-  ** `php` is missing. The install finishes with the Composer PATH sentence and `Done!`.
-  ** `php -v` prints PHP 8 with Xdebug, and `php.ini` has uncommented `bcmath`, `intl`, and `pdo_sqlite` lines.
+  ** `php` is missing. The install finishes with `Installing PHP...` and `Done!`.
+  ** `php -v` prints a PHP version.
   ** After a reopen, Install dims PHP and Remove lists it. Removal finishes with `Done!`.
   ** `php` is missing again, and the Install row is enabled.
   * If unsuccessful
-  ** The floating terminal prints a pacman or sed error, `php -v` does not mention Xdebug, or `php` remains after removal.
+  ** The floating terminal prints `Failed`, `php -v` fails after the install, or `php` remains after removal.
 covers: bin/omarchy-install-dev-env (php); bin/omarchy-remove-dev-env (php); default/omarchy/omarchy-menu.jsonc (install.development.php.php, remove.development.php.php)
 
 ### install-editor-helix-theme-alias-and-cleanup   [VM-OK] [NET]
@@ -13723,7 +13685,7 @@ proof: |
 covers: bin/omarchy-plugin-update (fetch/ff/validate/reset ORIG_HEAD); bin/omarchy-plugin-add; bin/omarchy-plugin-validate; bin/omarchy-plugin-enable; bin/omarchy-plugin-disable; bin/omarchy-plugin-remove; bin/omarchy-menu-plugin remove; bin/omarchy-git-url-check; default/omarchy/omarchy-menu.jsonc (setup.plugin.add, setup.plugin.remove when); shell/services/PluginRegistry.qml localPluginWatcher hot reload; manual/32-shell-plugins.md ("Updating is a fast-forward pull", Adding a plugin from git, Removal); test/shell.d/plugin-add-test.sh
 
 ### plugin-add-from-public-git-url-and-unreachable   [VM-PARTIAL] [NET]
-description: `omarchy plugin add <https-url>` clones a public plugin repository over the NAT, validates, enables and removes it, while an unreachable host and a non-existent repository fail cleanly with no `.add.tmp.*` leftovers; partial because the plugin directory listed nothing at review time — `omacom/elsewhen` (03-INTENDED-BEHAVIOUR #24: `omarchy plugin add https://github.com/omacom/elsewhen.git --enable` works) is the URL to use, verified first.
+description: `omarchy plugin add <https-url>` clones a public plugin repository over the NAT, validates, enables and removes it, while an unreachable host and a non-existent repository fail cleanly with no `.add.tmp.*` leftovers; Elsewhen is already a shipped plugin (`omacom.elsewhen`). Adding `https://github.com/omacom/elsewhen.git` is refused because that id is already used, and no `.add.tmp` directory remains.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -13735,16 +13697,9 @@ instruction: |
   * Type `omarchy-plugin-add https://github.com/omacom-io/this-repo-does-not-exist-404.git --yes; echo $?` and press Return. The output includes `failed to clone`, and the last line is `1`.
   * Type `ls -a ~/.config/omarchy/plugins/` and press Return. No `.add.tmp.` entry is listed.
   * Type `git ls-remote https://github.com/omacom/elsewhen.git HEAD` and press Return. The command prints a commit.
-  ** If it fails, open `https://plugins.omarchy.org` and use a listed plugin URL for the remaining steps. If the page lists none, report VM-PARTIAL and stop.
-  * Type `git clone --depth 1 https://github.com/omacom/elsewhen.git /tmp/p && omarchy-plugin-validate /tmp/p; echo "exit=$?"` and press Return. The last line is `exit=0`.
-  * Type `rm -rf /tmp/p` and press Return. The prompt returns.
-  * Type `omarchy-plugin-add https://github.com/omacom/elsewhen.git --enable --yes` and press Return. The output includes `Added` and `Enabled`.
-  ** If it prints `refusing to add: validation failed`, record the error and stop. That is a pass for the guard.
-  * Look at the bar. If the plugin is a bar widget, record that it appeared.
-  * Type `omarchy-plugin-list | grep -v first-party` and press Return. The new row says `enabled` and `third-party`, and its id is recorded.
-  * Type `omarchy-plugin-update` followed by that id and `--yes`, and press Return. The output includes `is up to date.`
-  * Type `omarchy-plugin-remove` followed by that id and `--yes`, and press Return. The output includes `Removed`.
-  * Type `omarchy-plugin-list | grep -v first-party` and press Return. That id is not listed.
+  * Type `omarchy-plugin-add https://github.com/omacom/elsewhen.git --enable --yes; echo "exit=$?"` and press Return. The output says the id `omacom.elsewhen` is already used, and the last line is non-zero.
+  * Type `ls -a ~/.config/omarchy/plugins/` and press Return. No `.add.tmp.` entry is listed.
+  * Type `omarchy-plugin-list` and press Return. `omacom.elsewhen` is still listed.
   * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
@@ -13759,9 +13714,7 @@ instruction: |
 proof: |
   * on success
   ** The invalid host and the missing repository each fail to clone, exit 1, and leave no `.add.tmp.` directory.
-  ** `git ls-remote` prints a commit, and validating the shallow clone exits 0. If no public plugin is listed, the run stops as VM-PARTIAL after the two failures.
-  ** Adding the validated URL prints Added and Enabled, or it refuses with a validation error that is recorded as a guard pass.
-  ** The list row is an enabled third-party plugin. Update says it is up to date. Remove prints `Removed`, and the id is gone from the list.
+  ** `git ls-remote` prints a commit. Adding the Elsewhen URL says `omacom.elsewhen` is already used and exits non-zero. No `.add.tmp.` directory appears, and the shipped plugin stays listed.
   * If unsuccessful
   ** The add error is something other than a clone or validation failure, or a `.add.tmp.` directory remains.
 covers: bin/omarchy-plugin-add (https path, git clone path); bin/omarchy-git-url-check; bin/omarchy-plugin-validate; bin/omarchy-plugin-update; bin/omarchy-plugin-remove; manual/32-shell-plugins.md "Adding a plugin from git"
@@ -14915,7 +14868,7 @@ proof: |
 covers: omareel README "Install", "Usage", "Troubleshooting"; omareel docs/USAGE.md "Launcher window", "record", "Stopping a recording", "Editor keys", "Environment"; omarchy-pkgs/pkgbuilds/omareel
 
 ### plugin-add-elsewhen-from-menu   [VM-OK] [NET]
-description: Setup → Plugins → Add Plugin clones a third-party shell plugin from a pasted git URL after an explicit warning, enables it, and puts the elsewhen globe in the bar with five seeded world clocks; removing it takes the globe away.
+description: Elsewhen ships with Omarchy as `omacom.elsewhen`. Setup → Plugins → Add Plugin with the Elsewhen git URL warns, then refuses the add because that id is already used. The shipped plugin is left installed.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -14924,15 +14877,10 @@ instruction: |
   * Press Super+Space. The menu opens.
   * Select Setup, then Plugins, then Add Plugin. A prompt asks for a git URL.
   * Type `https://github.com/omacom/elsewhen.git` and press Enter. A warning shows that URL and asks whether to clone it.
-  * Choose Yes. A prompt asks `Enable 'omacom.elsewhen' now?`.
-  * Choose Yes. The output includes `Added omacom.elsewhen`.
-  ** If it asks for a bar section, choose `right`.
-  * Look at the bar. A globe icon is on the right.
-  * Click the globe. A panel opens with five city times.
-  * Press Escape. The panel closes.
+  * Choose Yes. The output says the id `omacom.elsewhen` is already used.
+  * Press a key if a prompt waits. The floating terminal closes.
   * Press Super+Return. A terminal opens.
-  * Type `omarchy plugin remove omacom.elsewhen --yes` and press Return. The prompt returns.
-  * Look at the bar. The globe is gone.
+  * Type `omarchy-plugin-list` and press Return. `omacom.elsewhen` is listed.
   * Press Super+W. The terminal closes.
   * any crashes or erroneous behavior must be reported.
   * always take a screen shot of every step
@@ -14947,8 +14895,7 @@ instruction: |
 proof: |
   * on success
   ** Add Plugin warns before cloning `https://github.com/omacom/elsewhen.git`.
-  ** Choosing Yes twice prints `Added omacom.elsewhen`, and a globe appears on the right of the bar.
-  ** Clicking the globe opens a panel with five city times. Removing the plugin takes the globe off the bar.
+  ** Choosing Yes says `omacom.elsewhen` is already used. The shipped plugin stays listed.
   * If unsuccessful
   ** Clone or validation fails, the globe never appears, or the globe remains after removal.
 covers: default/omarchy/omarchy-menu.jsonc "setup.plugin.add"; bin/omarchy-plugin-add; manual/32-shell-plugins.md "Adding a plugin from git"; elsewhen README "Installing", "The first run"
@@ -15514,7 +15461,7 @@ test as written. The cancel exit code (`Done!` at HEAD vs `Failed (exit code 1)`
 build drift. `Update → Timezone` is not in this slice (B and H hold it).
 
 ### update-menu-omarchy   [VM-OK] [NET] [SLOW]
-description: Update → Omarchy carries the 4.0.2 disk to the current stable release end to end — confirm box, snapshot, keyring, packages, the eleven migrations added since 4.0.2 (Kitty config box, `linux-omarchy` kernel), the one-time post-update invitations, the kernel reboot prompt answered Yes — and comes back on the new version with the update icon gone. This is the run whose disk every `post-update-*` test reuses: `save` it.
+description: Update → Omarchy carries the 4.0.2 disk to the current stable release end to end — confirm box, snapshot, keyring, packages, the migrations added since 4.0.2, including `1789581661` (Kitty config box, `linux-omarchy` kernel), the one-time post-update invitations, the kernel reboot prompt answered Yes — and comes back on the new version with the update icon gone. This is the run whose disk every `post-update-*` test reuses: `save` it.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -15580,7 +15527,7 @@ proof: |
 covers: bin/omarchy-update (:30-38 snapshot before packages), bin/omarchy-update-confirm, bin/omarchy-update-pkg-prune, bin/omarchy-snapshot create, bin/omarchy-update-keyring, bin/omarchy-update-system-pkgs, bin/omarchy-update-stay-awake, bin/omarchy-migrate, migrations 1787215483…1789444024 (1788745941 Kitty, 1789325478 kernel), bin/omarchy-update-restart, bin/omarchy-system-reboot, bin/omarchy-update-status, bin/omarchy-update-available, bin/omarchy-hook post-update, default/omarchy/omarchy-menu.jsonc update.omarchy, shell/plugins/bar/widgets/SystemUpdate.qml, docs/update-process.md (Path 1), manual/30-updates.md, manual/47:3, test/shell.d/update-sequence-test.sh, snapshot-create-test.sh, omarchy-kernel-migration-test.sh, update-pkg-prune-test.sh
 
 ### update-terminal-run   [VM-OK] [NET] [SLOW]
-description: `omarchy update -y` typed in a terminal runs the same pipeline as the menu without the confirm box and — by the documented contract, "a promise not to ask anything" — must not stop at a `Reboot?` or orphan question either (it should print that a reboot is required and end `Done!`); at HEAD it still shows the gum `Linux kernel has been updated. Reboot?` box, the pinned defect (#8986). Its transcript in /tmp/omarchy-update.log shows the pacman guard letting the update through and the Hyprland reload hooks pausing and resuming, a snapper snapshot labelled with the old version exists, and an installed post-update hook fired. The reboot is not taken here, so the reboot-required marker stays: reboot before this disk is reused.
+description: `omarchy update -y` skips the opening confirm box, then still asks `Linux kernel has been updated. Reboot?` when the running kernel does not match an installed kernel, because the restart script does not look at `-y`. Answer No. Its transcript in /tmp/omarchy-update.log shows the pacman guard letting the update through and the Hyprland reload hooks pausing and resuming, a snapper snapshot labelled with the old version exists, and an installed post-update hook fired. The reboot is not taken here, so the reboot-required marker stays: reboot before this disk is reused.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -15627,7 +15574,7 @@ instruction: |
 proof: |
   * on success
   ** `omarchy update -y` starts at `Prune package cache` with no confirm box. The snapshot appears before package downloads.
-  ** The Kitty restart box and the `linux-omarchy` install are recorded. An orphan question or a reboot question is answered No and recorded as the unattended-prompt defect. The intended reboot step is a printed line and `Done!`.
+  ** The Kitty restart box and the `linux-omarchy` install are recorded. A reboot question appears and is answered No. The prompt then returns with `Done!`.
   ** `Restarting shell` returns the prompt. The version is newer, the new snapshot is described with the old version, the hook wrote a date, and the reboot-required marker exists.
   ** The update log has the entrypoint, pause, and reload lines, and no `Woah partner`. The reload guard is not paused, autoreload is `int: 0`, and the update lock is free.
   * If unsuccessful
@@ -17351,7 +17298,7 @@ hooks, skill hook) → `hooks-install-run-theme-set-and-reject`; three discovery
 help-safety blocks and three state/done blocks → one test each.
 
 ### cli-discover-commands-and-groups   [VM-OK]
-description: A user discovers what Omarchy can do from the terminal: the bare `omarchy` banner and alphabetical group table, `omarchy commands` with hidden plumbing kept out unless `--all`, the catalogue's self-check and JSON, a hidden group that still routes, and two help-text defects pinned to their intended state — the renamed `omarchy provision user` must work while the stale `finalize` group must not be advertised (issue #7113), and the `agent` group line must describe launching an agent.
+description: A user discovers what Omarchy can do from the terminal: the bare `omarchy` banner and alphabetical group table, `omarchy commands` with hidden plumbing kept out unless `--all`, the catalogue's self-check and JSON, a hidden group that still routes, `omarchy provision user --help` exits 0. `omarchy` advertises a `finalize` group that does not route, and the `agent` group line says `AI coding agent usage data`.
 instruction: |
   <Instructions>
   From the desktop please do the following:
@@ -17391,7 +17338,7 @@ instruction: |
 
   <Hints>
   * The full `omarchy` listing is long. Use the head and the serial dump rather than one screenshot of the whole table.
-  * A listed `finalize` group and an `agent` row that says `AI coding agent usage data` are known defects. Quote them. They do not fail the other checks.
+  * The `finalize` count must be `1`. The `agent` row must say `AI coding agent usage data`.
   * Capture rows include qr, screenrecording, screenshot, text, and webcam resize.
   </Hints>
   </Instructions>
@@ -17399,7 +17346,7 @@ proof: |
   * on success
   ** The version is recorded. `omarchy` starts with `Omarchy command center`.
   ** The serial group table includes `theme`, `update`, `crash`, and `agent`, and excludes `show`, `upgrade`, `apply`, `provision`, `state`, `done`, `upload`, and `git`.
-  ** The `finalize` count and the `agent` row text are recorded. `0` and a launch description are the intended result. `1` and `AI coding agent usage data` are the known defects.
+  ** The `finalize` count is `1`. The `agent` row says `AI coding agent usage data`.
   ** `omarchy capture` prints the capture header. `omarchy apply` says no documented commands were found.
   ** `omarchy provision user --help` exits 0. Both `finalize` routes exit 127.
   ** Hidden commands are absent from the default list and present with `--all`. `--check` passes. `--json` prints `true` and at least 200, or the version skew is recorded. `--bogus` exits 2.
@@ -21425,10 +21372,10 @@ instruction: |
 proof: |
   * on success
   ** sshd starts disabled with no port 22 rule. `--gh-keys` without a user, both key flags together, and `--bogus` each exit 2 with no password prompt, and sshd stays disabled.
-  ** `not-a-key` exits 1 and writes no authorized-keys file. An empty paste and Escape each fail. Record whether sshd stayed inactive.
+  ** `not-a-key` exits 1 and writes no authorized-keys file. An empty paste and Escape each fail. After each of those, sshd is active, port 22 is limited, and password authentication is still yes, because setup opens the server before it reads the key.
   ** After removal, sshd is `disabled` and the port 22 count is `0`.
   * If unsuccessful
-  ** A flag error asks for a password or starts sshd. A bad key is written to authorized_keys. After the bad key or the cancel, sshd is active, port 22 is limited, and password authentication is still yes.
+  ** A flag error asks for a password or starts sshd. A bad key is written to authorized_keys. After the bad key, sshd stays disabled.
 covers: bin/omarchy-setup-security-sshd (require_github_user, option parsing, authorize_key, prompt paths, setup_sshd/open_firewall ordering); default/omarchy/omarchy-menu.jsonc setup.security.sshd; test/shell.d/setup-security-sshd-test.sh; 13-manual-rest.md Observations #17; manual/48:6; manual/35-networking.md:33; 03-INTENDED-BEHAVIOUR.md item 2
 
 ### sshd-setup-github-keys   [VM-OK] [NET]
@@ -22238,7 +22185,7 @@ proof: |
 covers: manual/26-gaming.md:19-33; default/omarchy/omarchy-menu.jsonc:254,262,322 (install.gaming.retroarch, remove.gaming.retroarch); bin/omarchy-install-gaming-retroarch; bin/omarchy-remove-gaming-retroarch; bin/omarchy-games-retro-install
 
 ### install-gaming-heroic-lutris-lib32-full-round-trip   [VM-NO] [NET] [SLOW]
-description: Install → Gaming → Heroic (Epic Games) and → Lutris install their launchers with the lib32 driver set (Lutris also Wine, umu and winetricks with a pinned Python shebang), open them, and their removers wipe configs, libraries and Wine caches. Both call `omarchy-install-gaming-gpu-lib32` under `set -e`, which at HEAD leaks exit 1 without a GPU (03-INTENDED-BEHAVIOUR #1 DEFECT, pinned by the Steam test), and need ~120–600 MB — recorded for hardware runs.
+description: On this GPU-less guest, Install → Gaming → Heroic and → Lutris stop at `Failed (exit code 1)` because `omarchy-install-gaming-gpu-lib32` exits 1 under `set -e`. The launchers are not installed.
 instruction: |
   <Instructions>
   From the desktop please do the following:
