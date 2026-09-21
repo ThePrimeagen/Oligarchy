@@ -244,8 +244,8 @@ const Shell: FC<PropsWithChildren<{ page: PageId }>> = ({ page, children }) => (
   <main data-page={page}>
     <Menu page={page} />
     <header class="hero">
-      <div class="brand" aria-label="Omarchy">
-        OMARCHY
+      <div class="brand" aria-label="oligarchy">
+        oligarchy
       </div>
     </header>
     {children}
@@ -353,7 +353,7 @@ app.use(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#1a1b26" />
-        <title>Omarchy</title>
+        <title>oligarchy</title>
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/dashboard.css" />
         <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>

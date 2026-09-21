@@ -2129,7 +2129,7 @@ describe.skipIf(dbUrl === "")("dashboard ticket follow", () => {
     const page = await getPage("/tickets/FOL-1", dbUrl);
     expect(page.status).toBe(200);
     expect(page.html).toContain(
-      `<h1 id="follow-heading">following <a href="https://linear.app/issue/FOL-1">FOL-1</a> · <code>${sessionId.slice(0, 8)}</code> running</h1>`,
+      `<h1 id="follow-heading"><a href="https://linear.app/issue/FOL-1">FOL-1</a> · <code>${sessionId}</code> running</h1>`,
     );
     expect(page.html).toContain('<p class="follow__step">1/2</p>');
     expect(page.html).toContain("screendump");

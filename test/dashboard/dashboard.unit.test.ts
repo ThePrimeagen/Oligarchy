@@ -37,6 +37,9 @@ describe("test results page unhappy path", () => {
     expect(html).toContain("Sessions are unavailable.");
     expect(html).toContain("Test results");
     expect(html).toContain('href="/results"');
+    expect(html).toContain("oligarchy");
+    expect(html).not.toContain("OMARCHY");
+    expect(html).not.toContain("Omarchy");
   });
 });
 
