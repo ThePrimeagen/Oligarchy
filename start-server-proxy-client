@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# start-server-proxy-client <max-jobs>
+#
+# The QEMU half of the fleet on this machine: one qemu reverse proxy on 127.0.0.1:55555 (what the
+# tunnel's server hostname points at) and one qemu server on 127.0.0.1:42069 that runs <max-jobs>
+# sessions at once, both in the foreground of this shell. Ctrl-C or a TERM stops both; one of them
+# exiting stops the other. Exit 0 when both ended cleanly, 1 otherwise.
+#
+# Runs from the current directory, as ./qemu-server does: its .env fills what the environment
+# lacks. The iso cache and minted disks go where --data-dir defaults (OLIGARCHY_DATA_DIR, else
+# ~/.oligarchy).
+set -u
+
+ROOT=$(dirname "$0")
+PROXY_PORT=55555
+SERVER_PORT=42069
+
+usage() {
+  echo "usage: start-server-proxy-client <max-jobs>" >&2
+  echo "  max-jobs  how many sessions the qemu server runs at once, a positive integer" >&2
+  exit 1
+}
+
+[ $# -eq 1 ] || usage
+case "$1" in
+  '' | *[!0-9]* | 0*) usage ;;
+esac
+MAX_JOBS=$1
+
+# A session directory on tmpfs has killed QEMU mid-screendump, and the qemu server takes TMPDIR
+# from its environment, never from .env: unless the operator says where, sessions live under HOME.
+export TMPDIR="${TMPDIR:-$HOME/.oligarchy/sessions}"
+mkdir -p "$TMPDIR" || exit 1
+
+"$ROOT/qemu-reverse-proxy" --port "$PROXY_PORT" &
+PROXY=$!
+"$ROOT/qemu-server" --name "qemu-server-$(uname -n)" --max-jobs "$MAX_JOBS" \
+  --port "$SERVER_PORT" --url "http://127.0.0.1:$SERVER_PORT" &
+SERVER=$!
+
+stop() {
+  kill -TERM "$PROXY" "$SERVER" 2>/dev/null
+}
+trap stop INT TERM
+# Returns when the first of the two exits, or at once when a signal arrives (its trap has run).
+wait -n "$PROXY" "$SERVER"
+# One is down or a signal came: stop the other and wait for both, undisturbed by a second signal.
+trap '' INT TERM
+stop
+wait "$PROXY"
+PROXY_CODE=$?
+wait "$SERVER"
+SERVER_CODE=$?
+[ "$PROXY_CODE" -eq 0 ] && [ "$SERVER_CODE" -eq 0 ]
