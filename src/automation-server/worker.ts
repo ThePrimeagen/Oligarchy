@@ -73,7 +73,6 @@ const place = Effect.fn("place")(function* (
   if (job.action === "mint" && Option.isNone(pinned)) {
     return yield* Errors.AutomationClientError.make({
       message: `mint ${ticket} has no pinned server`,
-      agentId: ticket,
     });
   }
   let lastCapacity: string | undefined;

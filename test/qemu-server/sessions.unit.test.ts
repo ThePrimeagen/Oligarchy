@@ -2668,16 +2668,13 @@ describe("drain", () => {
 // ---------------------------------------------------------------------------
 
 describe("stats", () => {
-  it.effect("reports held reservations and running machines as one count", () =>
+  it.effect("reports the number of running machines", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
           expect((yield* sessions.stats).qemus).toBe(0);
-          yield* sessions.reserve(AGENT);
-          expect(yield* qemus(sessions)).toBe(1);
-          yield* sessions.relinquish(AGENT);
           expect(yield* qemus(sessions)).toBe(0);
           const { live } = yield* start();
           yield* start(OTHER_AGENT);

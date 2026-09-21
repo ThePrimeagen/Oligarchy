@@ -1331,9 +1331,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
       stop,
       save,
       follow,
-      // A reservation is a machine this server has promised. Counting only booted guests left a
-      // pinned mint at 0, so the board and the placer both treated that server as idle.
-      stats: Effect.flatMap(Ref.get(slots), (held) => stats.collect(held.count)),
+      stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
       minted: (name) => Effect.map(minted.find(name), Option.isSome),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };

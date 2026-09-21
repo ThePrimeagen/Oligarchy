@@ -40,7 +40,7 @@ const memory = () => {
   const layer = Layer.succeed(SetupRequests.SetupRequestStore)(
     SetupRequests.SetupRequestStore.of({
       insert: (iso, serverUrl) =>
-        Effect.gen(function* () {
+        Effect.sync(() => {
           if (failInsert) {
             return false;
           }
@@ -67,16 +67,15 @@ const memory = () => {
           return true;
         }),
       remove: (iso, serverUrl) =>
-        Effect.gen(function* () {
-          if (failRemove) {
-            return yield* Effect.die(new Error("unlock failed"));
-          }
-          const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
-          if (index >= 0) {
-            rows.splice(index, 1);
-            removed += 1;
-          }
-        }),
+        failRemove
+          ? Effect.die(new Error("unlock failed"))
+          : Effect.sync(() => {
+              const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
+              if (index >= 0) {
+                rows.splice(index, 1);
+                removed += 1;
+              }
+            }),
       removeServer: (serverUrl) =>
         Effect.sync(() => {
           const before = rows.length;
