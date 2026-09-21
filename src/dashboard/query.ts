@@ -382,16 +382,49 @@ export function modelStats(rows: ReadonlyArray<TestResultOutcome>): ModelStat[] 
     }));
 }
 
+// Session time when the run opened one, otherwise the result's own span. A negative span is
+// not a duration an operator can read, and neither is a result that has not finished.
+export const resultDurationMs = (
+  createdAt: Date,
+  finishedAt: Date | null,
+  sessionStartedAt: Date | null,
+  sessionEndedAt: Date | null,
+): number | null => {
+  if (sessionStartedAt !== null && sessionEndedAt !== null) {
+    const ms = sessionEndedAt.getTime() - sessionStartedAt.getTime();
+    return ms < 0 ? null : ms;
+  }
+  if (finishedAt === null) {
+    return null;
+  }
+  const ms = finishedAt.getTime() - createdAt.getTime();
+  return ms < 0 ? null : ms;
+};
+
 const durationOf = (row: TestResultOutcome): number | undefined => {
-  if (row.sessionStartedAt !== null && row.sessionEndedAt !== null) {
-    const ms = row.sessionEndedAt.getTime() - row.sessionStartedAt.getTime();
-    return ms < 0 ? undefined : ms;
+  const ms = resultDurationMs(
+    row.createdAt,
+    row.finishedAt,
+    row.sessionStartedAt,
+    row.sessionEndedAt,
+  );
+  return ms === null ? undefined : ms;
+};
+
+// The diagnosis the reviewer wrote, or the result's own reason when nobody diagnosed it.
+// An error type names the cause; the summary is what they said. A blank is not a diagnosis.
+export const failureDiagnosis = (
+  errorType: string | null,
+  summary: string | null,
+  reason: string | null,
+): string | null => {
+  if (summary !== null && summary !== "") {
+    return errorType === null || errorType === "" ? summary : `${errorType}: ${summary}`;
   }
-  if (row.finishedAt === null) {
-    return undefined;
+  if (reason === null || reason === "") {
+    return null;
   }
-  const ms = row.finishedAt.getTime() - row.createdAt.getTime();
-  return ms < 0 ? undefined : ms;
+  return reason;
 };
 
 const finishedAt = (row: TestResultOutcome): number =>
@@ -847,6 +880,101 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
         failed: countOf(verdicts, "failed"),
       },
     };
+  });
+}
+
+// The index lists every job in flight. A definition's page, and the poll and abort that
+// rewrite its list, keep only that name's.
+export const runningForDefinition = (
+  jobs: ReadonlyArray<AutomationJob>,
+  name: string,
+): AutomationJob[] => jobs.filter((job) => job.test === name);
+
+// Ten is what a definition's own page shows. The index strip is the last twenty-five.
+const DEFINITION_PAGE_RUNS = 10;
+
+// One verdict on a definition's page. durationMs is a pass's length; a fail has none, it
+// has the diagnosis instead. Newest first.
+export type DefinitionRun = {
+  readonly id: string;
+  readonly status: "passed" | "failed";
+  readonly durationMs: number | null;
+  readonly diagnosis: string | null;
+};
+
+export type DefinitionRunSource = {
+  readonly id: string;
+  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly at: number;
+  readonly durationMs: number | null;
+  readonly errorType: string | null;
+  readonly summary: string | null;
+  readonly reason: string | null;
+};
+
+export function recentDefinitionRuns(rows: ReadonlyArray<DefinitionRunSource>): DefinitionRun[] {
+  return rows
+    .flatMap((row) =>
+      row.status === "passed" || row.status === "failed" ? [{ ...row, status: row.status }] : [],
+    )
+    .sort((left, right) => right.at - left.at || left.id.localeCompare(right.id))
+    .slice(0, DEFINITION_PAGE_RUNS)
+    .map((row) => ({
+      id: row.id,
+      status: row.status,
+      durationMs: row.status === "passed" ? row.durationMs : null,
+      diagnosis:
+        row.status === "failed" ? failureDiagnosis(row.errorType, row.summary, row.reason) : null,
+    }));
+}
+
+// Passed and failed results of one definition, newest ten after recentDefinitionRuns. Older
+// wordings of the name count: a result hangs off the wording it ran. The clock keeps the
+// page out of Hyperdrive's cache.
+export function listDefinitionRuns(
+  connectionString: string,
+  name: string,
+): Promise<DefinitionRun[]> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .select({
+        id: testResults.id,
+        status: testResults.status,
+        reason: testResults.reason,
+        createdAt: testResults.createdAt,
+        finishedAt: testResults.finishedAt,
+        sessionStartedAt: sessions.startedAt,
+        sessionEndedAt: sessions.endedAt,
+        errorType: postRunDiagnosis.errorType,
+        summary: postRunDiagnosis.summary,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .leftJoin(sessions, eq(sessions.id, testResults.sessionId))
+      .leftJoin(postRunDiagnosis, eq(postRunDiagnosis.sessionId, testResults.sessionId))
+      .where(
+        and(eq(testDefinitions.name, name), inArray(testResults.status, ["passed", "failed"])),
+      );
+    return recentDefinitionRuns(
+      rows.map((row) => ({
+        id: row.id,
+        status: row.status,
+        at: row.at.getTime(),
+        durationMs: resultDurationMs(
+          row.createdAt,
+          row.finishedAt,
+          row.sessionStartedAt,
+          row.sessionEndedAt,
+        ),
+        errorType: row.errorType,
+        summary: row.summary,
+        reason: row.reason,
+      })),
+    );
   });
 }
 

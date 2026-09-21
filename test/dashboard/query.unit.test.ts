@@ -4,6 +4,10 @@ import {
   actionName,
   definitionHistories,
   definitionStats,
+  failureDiagnosis,
+  recentDefinitionRuns,
+  resultDurationMs,
+  runningForDefinition,
   durationChart,
   followEvents,
   groupDefinitions,
@@ -11,6 +15,8 @@ import {
   modelStats,
   selectDefinition,
   versionStats,
+  type AutomationJob,
+  type DefinitionRunSource,
   type FollowAction,
   type FollowLog,
   type ProcessStat,
@@ -202,6 +208,167 @@ describe("definitionHistories unhappy path", () => {
         recent: Array.from({ length: 25 }, (_, index) => shown("lock-screen", "passed", index + 2)),
       },
     ]);
+  });
+});
+
+const source = (
+  id: string,
+  status: DefinitionRunSource["status"],
+  at: number,
+  extra: {
+    readonly durationMs?: number | null;
+    readonly errorType?: string | null;
+    readonly summary?: string | null;
+    readonly reason?: string | null;
+  } = {},
+): DefinitionRunSource => ({
+  id,
+  status,
+  at,
+  durationMs: extra.durationMs ?? null,
+  errorType: extra.errorType ?? null,
+  summary: extra.summary ?? null,
+  reason: extra.reason ?? null,
+});
+
+describe("recentDefinitionRuns happy path", () => {
+  it("keeps the newest ten verdicts, a pass's time, and a fail's diagnosis", () => {
+    const rows = [
+      source("pass-old", "passed", 1, { durationMs: 1_000 }),
+      source("pass-mid", "passed", 2, { durationMs: 2_000, summary: "ignored on a pass" }),
+    ];
+    for (let at = 3; at <= 11; at += 1) {
+      rows.push(source(`pass-${String(at)}`, "passed", at, { durationMs: at * 1_000 }));
+    }
+    rows.push(
+      source("fail-new", "failed", 12, {
+        durationMs: 9_000,
+        errorType: "unlocked",
+        summary: "the screen stayed unlocked",
+        reason: "driver gave up",
+      }),
+    );
+    expect(recentDefinitionRuns(rows)).toEqual([
+      {
+        id: "fail-new",
+        status: "failed",
+        durationMs: null,
+        diagnosis: "unlocked: the screen stayed unlocked",
+      },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        id: `pass-${String(11 - index)}`,
+        status: "passed" as const,
+        durationMs: (11 - index) * 1_000,
+        diagnosis: null,
+      })),
+    ]);
+  });
+});
+
+describe("recentDefinitionRuns unhappy path", () => {
+  it("returns nothing when there are no verdicts", () => {
+    expect(recentDefinitionRuns([])).toEqual([]);
+  });
+
+  it("drops pending, running, aborted and timed out, and does not invent a time or a diagnosis", () => {
+    expect(
+      recentDefinitionRuns([
+        source("pending", "pending", 5, { durationMs: 1, reason: "no" }),
+        source("running", "running", 4, { summary: "still going" }),
+        source("aborted", "aborted", 3, { reason: "aborted" }),
+        source("timed", "timed_out", 2, { reason: "timed out" }),
+        source("bare-pass", "passed", 1),
+        source("bare-fail", "failed", 6, { reason: "" }),
+      ]),
+    ).toEqual([
+      { id: "bare-fail", status: "failed", durationMs: null, diagnosis: null },
+      { id: "bare-pass", status: "passed", durationMs: null, diagnosis: null },
+    ]);
+  });
+
+  it("uses the result's reason when nobody diagnosed the failure, and the summary alone when the type is blank", () => {
+    expect(
+      recentDefinitionRuns([
+        source("reason", "failed", 1, { reason: "driver gave up" }),
+        source("blank-type", "failed", 2, { errorType: "", summary: "the screen stayed unlocked" }),
+        source("blank", "failed", 3, { summary: "", reason: "" }),
+      ]),
+    ).toEqual([
+      { id: "blank", status: "failed", durationMs: null, diagnosis: null },
+      {
+        id: "blank-type",
+        status: "failed",
+        durationMs: null,
+        diagnosis: "the screen stayed unlocked",
+      },
+      { id: "reason", status: "failed", durationMs: null, diagnosis: "driver gave up" },
+    ]);
+  });
+
+  it("breaks a tie on the result id so the newest ten stay stable", () => {
+    expect(
+      recentDefinitionRuns([
+        source("b", "passed", 1, { durationMs: 1 }),
+        source("a", "failed", 1, { reason: "no" }),
+      ]).map((row) => row.id),
+    ).toEqual(["a", "b"]);
+  });
+});
+
+describe("resultDurationMs", () => {
+  const start = new Date("2026-09-01T00:00:00Z");
+  const four = new Date("2026-09-01T00:04:00Z");
+  const two = new Date("2026-09-01T00:02:00Z");
+
+  it("prefers the session's span, then the result's, and never a negative one", () => {
+    expect(resultDurationMs(start, four, start, two)).toBe(2 * 60_000);
+    expect(resultDurationMs(start, four, null, null)).toBe(4 * 60_000);
+    expect(resultDurationMs(start, four, start, null)).toBe(4 * 60_000);
+    expect(resultDurationMs(start, null, null, null)).toBeNull();
+    expect(resultDurationMs(four, start, null, null)).toBeNull();
+    expect(resultDurationMs(start, four, four, start)).toBeNull();
+  });
+});
+
+describe("failureDiagnosis", () => {
+  it("names the error type with the summary, and falls back when either is missing", () => {
+    expect(failureDiagnosis("unlocked", "the screen stayed unlocked", "driver gave up")).toBe(
+      "unlocked: the screen stayed unlocked",
+    );
+    expect(failureDiagnosis(null, "the screen stayed unlocked", "driver gave up")).toBe(
+      "the screen stayed unlocked",
+    );
+    expect(failureDiagnosis(null, null, "driver gave up")).toBe("driver gave up");
+    expect(failureDiagnosis(null, "", "")).toBeNull();
+    expect(failureDiagnosis(null, null, null)).toBeNull();
+  });
+});
+
+const runningJob = (test: string, ticket: string): AutomationJob => ({
+  ticket,
+  test,
+  action: "drive",
+  status: "running",
+  reason: null,
+  createdAt: new Date("2026-09-09T15:59:50Z"),
+  startedAt: new Date("2026-09-09T15:59:50Z"),
+  finishedAt: null,
+  queriedAt: new Date("2026-09-09T16:00:00Z"),
+});
+
+describe("runningForDefinition", () => {
+  it("keeps the jobs of that definition and drops the rest", () => {
+    const jobs = [
+      runningJob("lock-screen", "RUN-1"),
+      runningJob("install", "OTHER"),
+      runningJob("lock-screen", "RUN-2"),
+    ];
+    expect(runningForDefinition(jobs, "lock-screen").map((job) => job.ticket)).toEqual([
+      "RUN-1",
+      "RUN-2",
+    ]);
+    expect(runningForDefinition(jobs, "missing")).toEqual([]);
+    expect(runningForDefinition([], "lock-screen")).toEqual([]);
   });
 });
 

@@ -223,12 +223,14 @@ describe("definition pages unhappy path", () => {
 
 describe("test diagnostic page unhappy path", () => {
   it("does not look up an id that is not a result id", async () => {
-    const response = await app.request("/tests/not-a-uuid", undefined, env);
-    expect(response.status).toBe(404);
-    const html = await response.text();
-    expect(html).toContain("<p>No test result.</p>");
-    expect(html).not.toContain("postgres://");
-    expect(html).not.toContain("not-a-uuid");
+    for (const path of ["/tests/not-a-uuid", "/test-results/not-a-uuid"]) {
+      const response = await app.request(path, undefined, env);
+      expect(response.status).toBe(404);
+      const html = await response.text();
+      expect(html).toContain("<p>No test result.</p>");
+      expect(html).not.toContain("postgres://");
+      expect(html).not.toContain("not-a-uuid");
+    }
   });
 
   it("says the test result is unavailable when the database cannot be read", async () => {
