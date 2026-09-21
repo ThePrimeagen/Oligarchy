@@ -49,13 +49,20 @@ export type RouterService = {
   // that gave no answer of its own.
   readonly minted: (iso: string) => Effect.Effect<Contract.MintedServers, Errors.Internal>;
   // Places a reserve on an answering server with a free slot and remembers the agent. A body
-  // naming a server goes to that server and nowhere else.
+  // naming a server goes to that server and nowhere else. A resume lands on the least-busy
+  // server that holds that iso's minted disk; when none can and one with a free slot does
+  // not, SetupNeeded names that server and the max-jobs setting it up would add.
   readonly reserve: (
     request: HttpServerRequest.HttpServerRequest,
     body: Contract.ReserveAgentBody,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.BadRequest | Errors.NotFound | Errors.NoServer | Errors.ServerFailed | Errors.Internal
+    | Errors.BadRequest
+    | Errors.NotFound
+    | Errors.NoServer
+    | Errors.SetupNeeded
+    | Errors.ServerFailed
+    | Errors.Internal
   >;
   // Forwards relinquish to the server that reserved this agent and forgets the agent when
   // that server accepts it or already holds nothing for it. There is no placement here:
@@ -110,6 +117,19 @@ const serverFailed = (
       who.agentId === undefined ? undefined : { agentId: who.agentId },
     ),
   );
+
+// A qemu server's own 409: it has room, and no minted disk for this resume. The number is
+// the slots setting that machine up would add, which is its max-jobs, not its idle count.
+const SETUP_NEEDED = /^setup needed: max-jobs is (\d+)$/;
+
+const maxJobsGained = (text: string): number | undefined => {
+  const matched = SETUP_NEEDED.exec(ProxyClient.apiError(text));
+  if (matched === null) {
+    return undefined;
+  }
+  const jobs = Number(matched[1]);
+  return Number.isSafeInteger(jobs) ? jobs : undefined;
+};
 
 // node:http buries the reason (ECONNREFUSED, a reset) in the reason's cause; the error's own
 // message is the request it was making.
@@ -421,6 +441,10 @@ const make = Effect.gen(function* () {
           ranked.push({ url, qemus: result.success.qemus });
         }
         ranked.sort((left, right) => left.qemus - right.qemus);
+        const resume = body.resume !== undefined;
+        // The least-busy server that has room and no disk. A later server that holds the disk
+        // still wins; this one is the answer only when none does.
+        let setup: { readonly url: string; readonly maxJobs: number } | undefined;
         let lastCapacity:
           | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
           | undefined;
@@ -430,9 +454,22 @@ const make = Effect.gen(function* () {
             lastCapacity = answer;
             continue;
           }
+          const gained = resume && answer.status === 409 ? maxJobsGained(answer.text) : undefined;
+          if (gained !== undefined) {
+            if (setup === undefined) {
+              setup = { url, maxJobs: gained };
+            }
+            continue;
+          }
           return HttpServerResponse.text(answer.text, {
             status: answer.status,
             headers: answer.headers,
+          });
+        }
+        if (setup !== undefined) {
+          return yield* Errors.SetupNeeded.make({
+            message: `setup needed: ${setup.url} max-jobs is ${String(setup.maxJobs)}`,
+            agentId: agent,
           });
         }
         if (lastCapacity !== undefined) {

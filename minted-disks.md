@@ -23,8 +23,9 @@ lets every later session boot a throwaway copy of that disk in seconds.
   that file as `<iso>.OVMF_VARS.fd` and a resume copies it instead of the pristine one.
 - Every server is minted. `./ctrl mint` creates one ticket per live qemu server, pinned to it; the
   driver on each boots the ISO fresh (the server downloads it if it does not have it), installs to
-  the desktop, and saves. Nothing reports what is minted where: a resume is placed like any
-  session, and a server that lacks the disk refuses the start loudly. A second mint overwrites.
+  the desktop, and saves. A resume reserve lands on the least-busy server that holds the disk.
+  A live server with room and no disk is not a placement: the proxy answers 409 naming that
+  server and its `--max-jobs`. A start that still finds no disk is 500. A second mint overwrites.
 
 ## Vocabulary
 
@@ -50,8 +51,9 @@ lets every later session boot a throwaway copy of that disk in seconds.
   live, `~/.oligarchy` by default, so one machine runs several servers with a cache each.
 - The proxy routes `/save` to the session's server (#140); `./client save` (#141).
 - `./client start --resume` (#143): `StartBody.mode`, absent for fresh; the qemu server looks the
-  minted disk up before consuming the reservation, so 400 `no minted disk for <iso> on this machine`
-  leaves the reservation to relinquish or to start fresh with; a resume prepares an overlay of the
+  minted disk up before consuming the reservation, so a missing disk is 500 `internal error`
+  (Sentry is told `no minted disk for <iso> on this machine`) and the reservation stands, to
+  relinquish or to start fresh with; a resume prepares an overlay of the
   minted disk with its firmware, downloads nothing, attaches no cdrom, records `mode: resume`; a
   resumed session cannot save (400, it runs on), since its overlay names the minted disk by path
   and another save may replace that file under it. `--disk` with `--resume` is refused.
@@ -68,6 +70,13 @@ lets every later session boot a throwaway copy of that disk in seconds.
   `./client reserve --agent-id … [--server <url>]` is the driver's own reservation, pinned when
   `--server` is given. ctrl's database layer provides `ServerStore`. opencode's ceiling is 45
   minutes. `client.md` has `reserve`, `ctrl.md` has `mint`.
+- A resume reserve (`ReserveAgentBody.resume`, the iso url) is placed only where the disk is.
+  The proxy asks the least-busy live server first. A 200 lands there. A qemu 409 `setup needed:
+  max-jobs is N` takes no slot; the proxy keeps looking. When no server that holds the disk can
+  take it and one with a free slot does not, the proxy answers 409 `setup needed: <url> max-jobs
+  is N` (that machine's `--max-jobs`, the slots setting it up would add) and routes nothing.
+  Every live server full is still 503. A pin ignores the disk and passes that server's answer
+  through, a 409 included. `./client` does not send `resume` yet.
 
 ## What's left
 
@@ -104,15 +113,19 @@ desktop. The mint ticket confirms the desktop before it saves and records its ve
 `save` answered, the diagnoser closes it, and every test resumes — so the first test on a bad disk
 says the same thing, with a session to look at. The redo for a failed mint is item 4.
 
-Not planned, on purpose: a `minted` list in `/stats`, a resume filter in the proxy, a pin in the
-database, a verify pass, retries or Sentry reports for a failed mint. A failed mint is a failed ticket on the
-board, and the redo is item 4.
+Not planned, on purpose: a `minted` list in `/stats`, a pin in the database, a verify pass,
+retries or Sentry reports for a failed mint. A failed mint is a failed ticket on the board, and
+the redo is item 4. The resume filter is the reserve itself: the qemu server answers 200 or 409
+from the files, and the proxy ranks those answers.
 
 ## Decisions still to build against
 
-- A resume is placed like any session. Every server is minted by procedure, so there is nothing to
-  place around; a server that lacks the disk answers the start with 400 and the driver gives the
-  reservation back with `relinquish`. No `minted` list in `/stats`, no resume filter in the proxy.
+- A resume is placed only on a server that holds the disk, the least-busy of those with a free
+  slot. The reserve body carries `resume` (the iso url). When none of those can take it and a
+  live server has a free slot but no disk, the proxy answers 409 `setup needed: <url> max-jobs is
+  N`: N is that machine's `--max-jobs`. Every such server full, and no unset-up server free, is
+  the same 503. A pin is unchanged. There is still no `minted` list in `/stats`. A start
+  `--resume` that finds no disk is 500 `internal error`; the reservation stands.
 - The pin lives in the ticket, not the database. The dispatcher reserves for a mint ticket as for
   any other, by rank; the mint driver gives that reservation back and reserves pinned to the server
   its ticket names, then starts fresh. The automation server, the automation client and the
@@ -148,11 +161,15 @@ board, and the redo is item 4.
 
 | Where | Case | Answer |
 |---|---|---|
-| qemu server `/start` | `--resume`, not minted here | 400 `no minted disk for <iso> on this machine`, reservation stands |
+| qemu server `/start` | `--resume`, not minted here | 500 `internal error`; Sentry is told `no minted disk for <iso> on this machine`; reservation stands |
 | qemu server `/start` | `--resume` with `--disk` | 400 `a resume boots the minted disk; --disk cannot be given` |
 | qemu server `/save` | session was started with `--resume` | 400 `a resumed session cannot save; its disk is a view of the minted one`, session runs on |
 | qemu server `/save` | guest did not power off, copy or convert failed | 502 `SaveFailed`, row `failed`, debug log |
 | qemu server `/save` | racing the sweep | 404 `UnknownSession` |
+| proxy `/reserve` | `resume` set, a server holds the disk and has room | 200, least-busy of those |
+| proxy `/reserve` | `resume` set, none of those can, a live server has room and no disk | 409 `setup needed: <url> max-jobs is N`, nothing routed |
+| proxy `/reserve` | `resume` set, every live server is full | 503 passed through |
+| proxy `/reserve` | pinned, `resume` included | that server's answer, a 409 passed through, and no other server |
 | proxy `/reserve` | pinned url not registered | 404 `no server <url>` |
 | proxy `/reserve` | pinned server unreachable | 502 `ServerFailed` |
 | proxy `/reserve` | pinned server full | 503 passed through |

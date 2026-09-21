@@ -77,7 +77,7 @@ the database knows what a mint is.
   `<iso>.qcow2` and `<iso>.OVMF_VARS.fd`, then the same command. Without
   the flag every server is minted again (every save overwrites).
   Do not start the batch with an unminted server: every batch start there
-  is refused with `no minted disk for <iso> on this machine`.
+  is refused with `internal error`.
 - **Analyze every `ANALYZE` line from `tick.sh`**, plus any stalled run.
   Spawn a `Task` `generalPurpose` subagent. Hand it ticket, result id,
   session id, `/tmp/mintedrun/status.sh "$RID"`,
