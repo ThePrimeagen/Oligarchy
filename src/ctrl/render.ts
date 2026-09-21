@@ -22,7 +22,7 @@ export const STATUS_COLOR: Readonly<Record<Domain.SessionStatus, string>> = {
 export type AutomationJobRow = {
   readonly ticket: string | null;
   readonly test: string;
-  readonly action: "drive" | "diagnose";
+  readonly action: "drive" | "diagnose" | "mint";
   readonly status: "pending" | "running" | "succeeded" | "failed" | "aborted" | "timed_out";
   readonly createdAt: Date;
   readonly startedAt: Date | null;

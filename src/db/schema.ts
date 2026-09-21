@@ -54,7 +54,7 @@ export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]
 // boot guests; an automation-client is a host that announces itself the same way.
 export const serverType = pgEnum("server_type", ["qemu", "automation-client"]);
 
-export const automationAction = pgEnum("automation_action", ["drive", "diagnose"]);
+export const automationAction = pgEnum("automation_action", ["drive", "diagnose", "mint"]);
 export const automationJobStatus = pgEnum("automation_job_status", [
   "pending",
   "running",
@@ -391,7 +391,7 @@ export const testResults = pgTable(
 
 // One automation step for a test result: drive the guest, or diagnose after. Inserted
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
-// status. (result_id, action) is unique — one drive and one diagnose per result for now.
+// status. (result_id, action) is unique — one mint, one drive and one diagnose per result.
 // Queue order is created_at among pending rows; capacity limits stay out of this table.
 // server_id is the servers.id that claimed the job, so /abort can find that client after
 // a restart; null while the row is pending. Attribution, not a relation: forgetting a

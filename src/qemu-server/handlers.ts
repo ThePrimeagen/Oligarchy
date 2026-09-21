@@ -37,11 +37,7 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
         ({ payload }) =>
           Effect.gen(function* () {
             const sessions = yield* Sessions.Sessions;
-            if (payload.resume === undefined) {
-              yield* sessions.reserve(payload.agent);
-            } else {
-              yield* sessions.reserve(payload.agent, payload.resume);
-            }
+            yield* sessions.reserve(payload.agent, payload.resume);
             return ok;
           }),
         uninterruptible,

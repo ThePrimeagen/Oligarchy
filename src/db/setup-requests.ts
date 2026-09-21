@@ -43,7 +43,7 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
             DbSchema.automationJobs,
             and(
               eq(DbSchema.automationJobs.resultId, DbSchema.setupRequests.resultId),
-              eq(DbSchema.automationJobs.action, "drive"),
+              eq(DbSchema.automationJobs.action, "mint"),
             ),
           )
           .where(

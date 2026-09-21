@@ -76,9 +76,11 @@ const PENDING = { glyph: "◌", color: PALETTE.muted };
 // not use.
 export const DRIVE_COLOR = "#4ade80";
 export const DIAGNOSE_COLOR = "#60a5fa";
+export const MINT_COLOR = "#fbbf24";
 export const ACTION_COLOR: Readonly<Record<Automation.AutomationAction, string>> = {
   drive: DRIVE_COLOR,
   diagnose: DIAGNOSE_COLOR,
+  mint: MINT_COLOR,
 };
 
 // The braille spinner on a running row turns with the follow's spinner. A frame short of this

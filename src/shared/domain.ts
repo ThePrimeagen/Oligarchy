@@ -186,10 +186,11 @@ export const MaxJobs = Schema.Int.check(
 ).annotate({ identifier: "@oligarchy/shared/domain/MaxJobs" });
 export type MaxJobs = typeof MaxJobs.Type;
 
-// The two automation steps for a test result, the twin of the automation_action pgEnum in
-// src/db/schema.ts, maintained by hand together. A drive boots a guest and so reserves one; a
-// diagnose reads the session back and reserves a client only.
-export const AutomationAction = Schema.Literals(["drive", "diagnose"]).annotate({
+// The automation steps for a test result, the twin of the automation_action pgEnum in
+// src/db/schema.ts, maintained by hand together. A mint and a drive both boot a guest and so
+// reserve one; a mint does not resume, it installs. A diagnose reads the session back and
+// reserves a client only.
+export const AutomationAction = Schema.Literals(["drive", "diagnose", "mint"]).annotate({
   identifier: "@oligarchy/shared/domain/AutomationAction",
 });
 export type AutomationAction = typeof AutomationAction.Type;

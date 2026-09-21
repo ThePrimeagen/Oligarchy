@@ -240,6 +240,38 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       );
     });
 
+    // The definition a result was created against, by that row's id, not the name's newest.
+    const definitionName = Effect.fn("db.definitionName")(function* (id: number) {
+      const rows = yield* database.run("definitionName", (db) =>
+        db
+          .select({ name: DbSchema.testDefinitions.name })
+          .from(DbSchema.testDefinitions)
+          .where(eq(DbSchema.testDefinitions.id, id)),
+      );
+      return Option.map(Arr.head(rows), (row) => row.name);
+    });
+
+    // The iso a drive resumes, when this result is not the mint install. None when the result
+    // is missing or its definition is mint: a mint boots fresh and pins itself.
+    const resumeIso = Effect.fn("db.resumeIso")(function* (resultId: string) {
+      const rows = yield* database.run("resumeIso", (db) =>
+        db
+          .select({ iso: DbSchema.testRuns.iso, name: DbSchema.testDefinitions.name })
+          .from(DbSchema.testResults)
+          .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.testResults.runId))
+          .innerJoin(
+            DbSchema.testDefinitions,
+            eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+          )
+          .where(eq(DbSchema.testResults.id, resultId)),
+      );
+      const row = Arr.head(rows);
+      if (Option.isNone(row) || row.value.name === "mint") {
+        return Option.none<string>();
+      }
+      return Option.some(row.value.iso);
+    });
+
     return {
       listTestDefinitions,
       findTestDefinition,
@@ -254,6 +286,8 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       setLinearId,
       findResultByLinearId,
       resultForSession,
+      definitionName,
+      resumeIso,
     };
   }),
 }) {

@@ -13,6 +13,7 @@ const DISPATCH_INTERVAL = "5 seconds";
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 const isAtCapacity = Schema.is(Errors.AtCapacity);
+const isSetupNeeded = Schema.is(Errors.SetupNeeded);
 
 const detail = (error: unknown): string =>
   isDatabaseError(error)
@@ -57,12 +58,18 @@ const place = Effect.fn("place")(function* (
   }
   const ticket = result.value.linearId;
   const prompt =
-    job.action === "drive"
-      ? yield* Prompts.drive(ticket, model)
-      : yield* Prompts.diagnose(ticket, job.resultId, model);
+    job.action === "diagnose"
+      ? yield* Prompts.diagnose(ticket, job.resultId, model)
+      : yield* Prompts.drive(ticket, model);
+  // A drive resumes the run's iso. A mint boots fresh. A missing row reserves fresh rather
+  // than failing a drive the definition lookup cannot see.
+  const resume =
+    job.action === "drive" ? yield* tests.resumeIso(job.resultId) : Option.none<string>();
   let lastCapacity: string | undefined;
   for (const client of clients) {
-    const reserved = yield* Effect.result(AutomationClient.reserve(client.url, ticket, job.action));
+    const reserved = yield* Effect.result(
+      AutomationClient.reserve(client.url, ticket, job.action, Option.getOrUndefined(resume)),
+    );
     if (Result.isSuccess(reserved)) {
       if (client.id !== job.serverId) {
         yield* store.assign(job.id, client.id);
@@ -73,6 +80,12 @@ const place = Effect.fn("place")(function* (
       });
       const placement: Placement = { url: client.url, prompt, ticket };
       return placement;
+    }
+    if (reserved.failure.status === 409) {
+      return yield* Errors.SetupNeeded.make({
+        message: reserved.failure.message,
+        agentId: ticket,
+      });
     }
     if (reserved.failure.status === 503) {
       lastCapacity = reserved.failure.message;
@@ -164,8 +177,11 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
     }
     yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
+        // Mint jobs whose own reserve was 503. They stay pending and first, but this tick
+        // does not claim them again; the other jobs still get a turn.
+        const skipped: Array<string> = [];
         for (;;) {
-          const maybe = yield* store.claim(chosen.id);
+          const maybe = yield* store.claim(chosen.id, skipped);
           if (Option.isNone(maybe)) {
             return;
           }
@@ -175,12 +191,31 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               onSuccess: (placement) => ({ _tag: "placed" as const, placement }),
               onFailure: (cause) => {
                 const error = Cause.squash(cause);
-                return isAtCapacity(error)
-                  ? Object.assign(
-                      { _tag: "deferred" as const },
-                      error.agentId === undefined ? undefined : { agentId: error.agentId },
-                    )
-                  : { _tag: "closed" as const, outcome: outcomeFrom(cause) };
+                if (isAtCapacity(error)) {
+                  return Object.assign(
+                    {
+                      _tag: "deferred" as const,
+                      // A mint's own 503 does not end the tick. Every other 503 does.
+                      continueTick: job.action === "mint",
+                      line:
+                        job.action === "mint"
+                          ? "deferred; mint at capacity"
+                          : "deferred; at capacity",
+                    },
+                    error.agentId === undefined ? undefined : { agentId: error.agentId },
+                  );
+                }
+                if (isSetupNeeded(error)) {
+                  return Object.assign(
+                    {
+                      _tag: "deferred" as const,
+                      continueTick: false,
+                      line: "deferred; setup needed",
+                    },
+                    error.agentId === undefined ? undefined : { agentId: error.agentId },
+                  );
+                }
+                return { _tag: "closed" as const, outcome: outcomeFrom(cause) };
               },
             }),
           );
@@ -188,11 +223,15 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             const restored = yield* store.unclaim(job.id);
             if (restored) {
               yield* log.info(
-                "deferred; at capacity",
+                placed.line,
                 placed.agentId === undefined
                   ? { location: Log.Locations.automation }
                   : { location: Log.Locations.automation, agentId: placed.agentId },
               );
+            }
+            if (placed.continueTick) {
+              skipped.push(job.id);
+              continue;
             }
             return;
           }

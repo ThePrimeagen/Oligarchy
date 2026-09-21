@@ -37,6 +37,16 @@ describe("Qemu.reserve happy path", () => {
       expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
     }),
   );
+
+  it.effect("a resume posts the iso and omits it when the drive is fresh", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      const iso = "https://example.com/omarchy.iso";
+      yield* Qemu.reserve(proxy)(AGENT, iso);
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT, resume: iso });
+    }),
+  );
 });
 
 describe("Qemu.reserve unhappy path", () => {
@@ -50,6 +60,21 @@ describe("Qemu.reserve unhappy path", () => {
       expect(error).toMatchObject({
         _tag: "AtCapacity",
         message: "at capacity: max-jobs is 4",
+        agentId: AGENT,
+      });
+    }),
+  );
+
+  it.effect("a 409 is SetupNeeded and is not reported as an internal failure", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.respondWith(() =>
+        FakeHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
+      );
+      const proxy = yield* connect.pipe(Effect.provide(http));
+      const error = yield* Effect.flip(Qemu.reserve(proxy)(AGENT));
+      expect(error).toMatchObject({
+        _tag: "SetupNeeded",
+        message: "setup needed: http://10.0.0.6:42069 max-jobs is 4",
         agentId: AGENT,
       });
     }),

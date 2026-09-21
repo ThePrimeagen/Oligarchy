@@ -524,7 +524,10 @@ const make = (maxJobs: number) =>
       });
     };
 
-    const reserve = Effect.fn("Sessions.reserve")(function* (agent: string, resume?: string) {
+    const reserve = Effect.fn("Sessions.reserve")(function* (
+      agent: string,
+      resume?: string,
+    ) {
       // Held and full are answered before a disk lookup: a second reserve is still "already
       // reserved", and a full machine cannot gain a resume slot by being set up.
       const snapshot = yield* Ref.get(slots);

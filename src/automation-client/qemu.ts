@@ -13,16 +13,25 @@ const internal = (agent: string, error: ProxyClient.Failure): Errors.Internal =>
 const refused = (
   agent: string,
   error: ProxyClient.Failure,
-): Effect.Effect<never, Errors.AtCapacity | Errors.Internal> =>
-  error._tag === "ProxyRefusal" && error.status === 503
-    ? Errors.AtCapacity.make({ message: error.message, agentId: agent })
-    : internal(agent, error);
+): Effect.Effect<never, Errors.AtCapacity | Errors.SetupNeeded | Errors.Internal> => {
+  if (error._tag === "ProxyRefusal" && error.status === 503) {
+    return Errors.AtCapacity.make({ message: error.message, agentId: agent });
+  }
+  if (error._tag === "ProxyRefusal" && error.status === 409) {
+    return Errors.SetupNeeded.make({ message: error.message, agentId: agent });
+  }
+  return internal(agent, error);
+};
 
 export const reserve =
   (proxy: ProxyClient.ProxyClientService): Sessions.ReserveQemu =>
-  (agent) =>
+  (agent, resume) =>
     proxy
-      .reserve(Contract.ReserveAgentBody.make({ agent }))
+      .reserve(
+        Contract.ReserveAgentBody.make(
+          Object.assign({ agent }, resume === undefined ? undefined : { resume }),
+        ),
+      )
       .pipe(Effect.catch((error) => refused(agent, error)));
 
 // The guest host already let this reservation go (its own ten minutes ran out first, or it

@@ -18,9 +18,12 @@ const token = Layer.succeed(AutomationClient.OligarchyToken)(
 
 const reserve = (
   http: Layer.Layer<HttpClient.HttpClient>,
-  action: "drive" | "diagnose" = "drive",
+  action: "drive" | "diagnose" | "mint" = "drive",
+  resume?: string,
 ) =>
-  AutomationClient.reserve(URL, TICKET, action).pipe(Effect.provide(Layer.mergeAll(token, http)));
+  AutomationClient.reserve(URL, TICKET, action, resume).pipe(
+    Effect.provide(Layer.mergeAll(token, http)),
+  );
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.run(URL, PROMPT, TICKET, MODEL).pipe(
@@ -42,6 +45,25 @@ describe("automation client POST /reserve happy path", () => {
       expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
         ticket: TICKET,
         action: "drive",
+      });
+    }),
+  );
+
+  it.effect("a resume drive posts the iso and a mint does not", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const iso = "https://example.com/omarchy.iso";
+      yield* reserve(recorder.layer, "drive", iso);
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
+        ticket: TICKET,
+        action: "drive",
+        resume: iso,
+      });
+      const mint = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* reserve(mint.layer, "mint");
+      expect(JSON.parse(mint.requests[0]?.body ?? "")).toEqual({
+        ticket: TICKET,
+        action: "mint",
       });
     }),
   );

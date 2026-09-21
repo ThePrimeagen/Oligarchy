@@ -355,7 +355,7 @@ describe("AutomationClientApi", () => {
     expect(reserve.group).toBe("Runs");
     expect(reserve.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/reserve"]?.post?.security).toEqual([{ bearer: [] }]);
-    expect(reserve.errors).toEqual([400, 401, 500, 503]);
+    expect(reserve.errors).toEqual([400, 401, 409, 500, 503]);
     const run = byIdentifier(client, "run");
     expect(run.group).toBe("Runs");
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);

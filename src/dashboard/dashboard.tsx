@@ -909,7 +909,7 @@ app.post("/abort", async (context) => {
     if (
       typeof ticket === "string" &&
       ticket !== "" &&
-      (action === "drive" || action === "diagnose")
+      (action === "drive" || action === "diagnose" || action === "mint")
     ) {
       let closed = false;
       try {
