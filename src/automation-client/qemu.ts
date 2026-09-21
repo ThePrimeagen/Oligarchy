@@ -25,13 +25,14 @@ const refused = (
 
 export const reserve =
   (proxy: ProxyClient.ProxyClientService): Sessions.ReserveQemu =>
-  (agent, resume) => {
-    const body =
-      resume === undefined
-        ? Contract.ReserveAgentBody.make({ agent })
-        : Contract.ReserveAgentBody.make({ agent, resume });
-    return proxy.reserve(body).pipe(Effect.catch((error) => refused(agent, error)));
-  };
+  (agent, resume) =>
+    proxy
+      .reserve(
+        Contract.ReserveAgentBody.make(
+          Object.assign({ agent }, resume === undefined ? undefined : { resume }),
+        ),
+      )
+      .pipe(Effect.catch((error) => refused(agent, error)));
 
 // The guest host already let this reservation go (its own ten minutes ran out first, or it
 // restarted) and the proxy has forgotten the route: there is nothing to give back, which is what

@@ -86,11 +86,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           // A mint installs fresh and then pins itself; it takes a guest slot and does not
           // resume. Only a drive names the iso whose disk the slot must boot.
           if (action === "drive" || action === "mint") {
-            if (action === "drive" && resume !== undefined) {
-              yield* reserveQemu(ticket, resume);
-            } else {
-              yield* reserveQemu(ticket);
-            }
+            yield* reserveQemu(ticket, action === "drive" ? resume : undefined);
           }
           const since = yield* Clock.currentTimeMillis;
           const admitted = yield* Ref.modify(slots, (current) => {
