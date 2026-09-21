@@ -134,6 +134,15 @@ const cases: ReadonlyArray<WireCase> = [
     error: Errors.AtCapacity.make({ message: "at capacity: max-jobs is 2", agentId: AGENT_ID }),
     status: 503,
   },
+  {
+    name: "SetupNeeded",
+    wire: Errors.SetupNeededWire,
+    error: Errors.SetupNeeded.make({
+      message: "setup needed: max-jobs is 4",
+      agentId: AGENT_ID,
+    }),
+    status: 409,
+  },
 ];
 
 describe("API error wire codecs", () => {
@@ -276,5 +285,6 @@ describe("domain error messages", () => {
     expect(Errors.CliFailed.make({ command: "tool", message: "x" })._tag).toBe("CliFailed");
     expect(Errors.RunFailed.make({ message: "x" })._tag).toBe("RunFailed");
     expect(Errors.AtCapacity.make({ message: "x" })._tag).toBe("AtCapacity");
+    expect(Errors.SetupNeeded.make({ message: "x" })._tag).toBe("SetupNeeded");
   });
 });

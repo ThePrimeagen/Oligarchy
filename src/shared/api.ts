@@ -46,7 +46,8 @@ const png = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "im
 export const reserve = HttpApiEndpoint.post("reserve", "/reserve", {
   payload: Contract.ReserveAgentBody,
   success: Contract.Ok,
-  error: [Errors.AtCapacityWire],
+  // 409: a resume this machine has no minted disk for. 503: already at --max-jobs.
+  error: [Errors.SetupNeededWire, Errors.AtCapacityWire],
 });
 
 export const relinquish = HttpApiEndpoint.post("relinquish", "/relinquish", {

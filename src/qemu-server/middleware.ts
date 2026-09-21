@@ -45,6 +45,7 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.NoServer,
     Errors.RunFailed,
     Errors.AtCapacity,
+    Errors.SetupNeeded,
   ]),
 );
 
@@ -98,6 +99,7 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     // Refused before a session existed: the process bucket, under the agent that asked.
     case "NoServer":
     case "AtCapacity":
+    case "SetupNeeded":
     case "NotFound":
       return under(fallback.location, error.agentId, fallback);
     case "BadRequest":

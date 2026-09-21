@@ -165,8 +165,11 @@ describe("QemuServerApi", () => {
 
   it("declares the error statuses of §2.4 plus the middleware's 400, 401 and 500", () => {
     const sessions = [400, 401, 500];
-    // 502: the machine failed to boot; 503: only /reserve, when the server is at --max-jobs.
-    expect(byIdentifier(Api.QemuServerApi, "reserve").errors).toEqual([...sessions, 503]);
+    // 409: a resume this machine has no minted disk for. 502: the machine failed to boot.
+    // 503: only /reserve, when the server is at --max-jobs.
+    expect(byIdentifier(Api.QemuServerApi, "reserve").errors).toEqual(
+      ascending([...sessions, 409, 503]),
+    );
     expect(byIdentifier(Api.QemuServerApi, "relinquish").errors).toEqual(sessions);
     expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
     expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
@@ -274,7 +277,8 @@ describe("QemuReverseProxyApi", () => {
     // 404: a pinned reserve naming a server the fleet does not know; declared once, on the boundary,
     // so the endpoints that answer 404 themselves list it once.
     const boundary = [400, 401, 404, 500, 502, 503];
-    expect(byIdentifier(reverse, "reserve").errors).toEqual(boundary);
+    // 409 is declared on the shared reserve endpoint. This proxy does not answer it yet.
+    expect(byIdentifier(reverse, "reserve").errors).toEqual(ascending([...boundary, 409]));
     expect(byIdentifier(reverse, "relinquish").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403]));
