@@ -1001,6 +1001,12 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   entry by entry, or config objects (the exact `check:fast` string). Delete obsolete tests with
   their feature, and never export a member for a test to read: assert the behaviour. Test vendor
   behaviour with exact captured fixtures; label a synthetic fixture synthetic.
+- A UI test, including a Cloudflare dashboard page, asserts business logic only: which data is
+  shown, which rows a search finds, what a control submits, what a route answers, including a
+  sort rule such as newest first. Never add a presentational test. Never assert fonts, sizes,
+  colors, spacing, CSS, icons, or where a block sits on the page. Changing a font or swapping
+  layout must not break a unit test. Finding, including a fuzzy search, gets a couple of unit
+  tests, not a suite of markup snapshots.
 
 One `it.effect` over the real fakes with `Effect.flip`.
 
