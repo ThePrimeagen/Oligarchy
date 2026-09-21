@@ -1,14 +1,63 @@
 // Every name is already on the page — tests are rarely added — so finding and sorting
-// stay here. A blank box is every name, A to Z. Typed text is a case-insensitive fuzzy
-// match: words split on whitespace, and each word's characters must occur in order, not
-// necessarily together. The list is then reordered, tightest match first. The query is
-// written as text, so it cannot become markup. A page with no list is left alone.
+// stay here. Nothing is requested again. A blank box is every name, A to Z. Typed text is
+// a case-insensitive fuzzy match: words split on whitespace, and each word's characters
+// must occur in order, not necessarily together. The list is reordered by score, highest
+// first. The query is written as text, so it cannot become markup. A page with no list is
+// left alone.
 //
-// A matched character is worth 16. Sitting beside the previous one is worth 32 more, and
-// starting the name or a word (after -, _ or a space) is worth 16 more. The first
-// character also loses a point for each step past the start, up to 24, so the same run
-// early beats it later in a longer name. -1 is no match; an empty query is 0, so the
-// names fall through to alphabetical order.
+// Letters that all occur, and none of them touch, are worth one each: the amount typed.
+// A letter that touches the previous match is worth twice that previous letter, so a
+// contiguous "lock" is 1 + 2 + 4 + 8. A gap starts the doubling over at 1. The score kept
+// is the alignment that sums highest; words add. -1 is no match; an empty query is 0, so
+// the names fall through to alphabetical order.
+const scoreRun = (word, text) => {
+  let paths = [];
+  for (let at = 0; at < text.length; at++) {
+    if (text[at] === word[0]) {
+      paths.push({ at, total: 1, last: 1 });
+    }
+  }
+  if (paths.length === 0) {
+    return -1;
+  }
+  for (let index = 1; index < word.length; index++) {
+    const next = [];
+    for (let at = 0; at < text.length; at++) {
+      if (text[at] !== word[index]) {
+        continue;
+      }
+      // A path that has kept doubling can be tied with, or behind, one that reset.
+      // The next letter still prefers the doubled step, so both stay.
+      const bestByLast = new Map();
+      for (const path of paths) {
+        if (path.at >= at) {
+          continue;
+        }
+        const step = path.at + 1 === at ? path.last * 2 : 1;
+        const total = path.total + step;
+        const kept = bestByLast.get(step);
+        if (kept === undefined || total > kept) {
+          bestByLast.set(step, total);
+        }
+      }
+      for (const [last, total] of bestByLast) {
+        next.push({ at, total, last });
+      }
+    }
+    if (next.length === 0) {
+      return -1;
+    }
+    paths = next;
+  }
+  let best = -1;
+  for (const path of paths) {
+    if (path.total > best) {
+      best = path.total;
+    }
+  }
+  return best;
+};
+
 const scoreDefinition = (query, name) => {
   const words = query
     .trim()
@@ -21,26 +70,9 @@ const scoreDefinition = (query, name) => {
   }
   let score = 0;
   for (const word of words) {
-    let from = 0;
-    let previous = -2;
-    let wordScore = 0;
-    for (let index = 0; index < word.length; index++) {
-      const at = text.indexOf(word[index], from);
-      if (at < 0) {
-        return -1;
-      }
-      wordScore += 16;
-      if (at === previous + 1) {
-        wordScore += 32;
-      }
-      if (at === 0 || text[at - 1] === "-" || text[at - 1] === "_" || text[at - 1] === " ") {
-        wordScore += 16;
-      }
-      if (index === 0) {
-        wordScore += Math.max(0, 24 - at);
-      }
-      previous = at;
-      from = at + 1;
+    const wordScore = scoreRun(word, text);
+    if (wordScore < 0) {
+      return -1;
     }
     score += wordScore;
   }
