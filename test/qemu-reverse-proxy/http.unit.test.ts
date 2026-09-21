@@ -1071,6 +1071,75 @@ describe("placement", () => {
   );
 
   it.effect(
+    "a resume no minted server can take opens one mint for every unminted server (happy)",
+    () =>
+      Effect.gen(function* () {
+        const opened: Array<string> = [];
+        const fixed = fixture(
+          (request, url) =>
+            url.pathname === "/reserve"
+              ? setupNeeded(url.origin === SERVER_B ? 2 : 8)
+              : fleet(request, url),
+          {
+            setup: Layer.succeed(Setup.Setup)(
+              Setup.Setup.of({
+                open: (_iso, serverUrl) =>
+                  Effect.sync(() => {
+                    opened.push(serverUrl);
+                  }),
+                install: () => Effect.void,
+              }),
+            ),
+          },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 2`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(opened).toEqual([SERVER_B, SERVER_A]);
+      }),
+  );
+
+  it.effect("a resume that lands on a minted server does not open a mint (unhappy)", () =>
+    Effect.gen(function* () {
+      const opened: Array<string> = [];
+      const fixed = fixture(
+        (request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          return url.origin === SERVER_B ? FakeHttp.json({ ok: "true" }) : setupNeeded(4);
+        },
+        {
+          setup: Layer.succeed(Setup.Setup)(
+            Setup.Setup.of({
+              open: (_iso, serverUrl) =>
+                Effect.sync(() => {
+                  opened.push(serverUrl);
+                }),
+              install: () => Effect.void,
+            }),
+          ),
+        },
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(opened).toEqual([]);
+    }),
+  );
+
+  it.effect(
     "a resume no minted server can take is 409 naming the least-busy free unminted server and its max-jobs",
     () =>
       Effect.gen(function* () {

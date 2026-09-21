@@ -13,6 +13,7 @@ import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
+import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -84,6 +85,7 @@ const MainLive = Layer.mergeAll(
   Tests.TestStore.layer,
   Automation.AutomationStore.layer,
   Servers.ServerStore.layer,
+  SetupRequests.SetupRequestStore.layer,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),

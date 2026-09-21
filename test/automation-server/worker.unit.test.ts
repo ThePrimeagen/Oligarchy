@@ -1,10 +1,11 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, FileSystem, Layer, Redacted, Scope } from "effect";
+import { Deferred, Effect, Exit, FileSystem, Layer, Option, Redacted, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
 import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
+import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
@@ -118,6 +119,7 @@ type Harness = {
   readonly servers: Stores.FakeServerStore;
   readonly tests: Stores.FakeTestStore;
   readonly log: FakeLog.FakeLog;
+  readonly pins: Map<string, string>;
 };
 
 const harness = (): Harness => ({
@@ -125,7 +127,28 @@ const harness = (): Harness => ({
   servers: Stores.fakeServerStore(),
   tests: Stores.fakeTestStore(),
   log: FakeLog.fakeLog(),
+  pins: new Map(),
 });
+
+const unexpected = (method: string) =>
+  Effect.die(new Error(`unexpected SetupRequestStore.${method}`));
+
+const setupLayer = (pins: Map<string, string>) =>
+  Layer.succeed(SetupRequests.SetupRequestStore)(
+    SetupRequests.SetupRequestStore.of({
+      insert: () => unexpected("insert"),
+      setResult: () => unexpected("setResult"),
+      remove: () => unexpected("remove"),
+      removeServer: () => unexpected("removeServer"),
+      list: () => unexpected("list"),
+      inspect: () => unexpected("inspect"),
+      serverForResult: (resultId) =>
+        Effect.sync(() => {
+          const serverUrl = pins.get(resultId);
+          return serverUrl === undefined ? Option.none() : Option.some(serverUrl);
+        }),
+    }),
+  );
 
 const layers = (
   fixed: Harness,
@@ -137,6 +160,7 @@ const layers = (
     fixed.servers.layer,
     fixed.tests.layer,
     fixed.log.layer,
+    setupLayer(fixed.pins),
     token,
     fs,
   ).pipe(Layer.provideMerge(http));
@@ -847,6 +871,7 @@ describe("dispatch unhappy path", () => {
       seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
       seedJob(fixed.automation, "drive", RESULT_ID);
       seedJob(fixed.automation, "mint", RESULT_B);
+      fixed.pins.set(RESULT_B, "http://127.0.0.1:55332");
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() =>
         FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
@@ -867,6 +892,24 @@ describe("dispatch unhappy path", () => {
         "deferred; mint at capacity",
         "deferred; at capacity",
       ]);
+      expect(JSON.parse(http.requests[0]?.body ?? "")).toMatchObject({
+        action: "mint",
+        server: "http://127.0.0.1:55332",
+      });
+    }),
+  );
+
+  it.effect("a mint with no pinned server is not reserved (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "pending", RESULT_ID);
+      seedJob(fixed.automation, "mint", RESULT_ID);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "failed");
+      expect(http.requests).toEqual([]);
+      expect(fixed.automation.jobs[0]?.reason).toContain("has no pinned server");
     }),
   );
 });

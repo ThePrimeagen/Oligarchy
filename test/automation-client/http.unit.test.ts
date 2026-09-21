@@ -46,9 +46,9 @@ const fixture = (
 
 const qemuRecording =
   (fixed: Fixture): Sessions.ReserveQemu =>
-  (agent) =>
+  (agent, _resume, server) =>
     Effect.sync(() => {
-      fixed.qemu.push(agent);
+      fixed.qemu.push(server === undefined ? agent : `${agent} ${server}`);
     });
 
 const serve = (fixed: Fixture) =>
@@ -140,6 +140,49 @@ describe("POST /reserve happy path", () => {
         "diagnose the session",
       ]);
       expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+});
+
+describe("POST /reserve mint pin", () => {
+  const PIN = "http://127.0.0.1:55332";
+
+  it.effect("a mint with its server reserves that server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/reserve", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({ ticket: TICKET, action: "mint", server: PIN }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(200);
+        expect(fixed.qemu).toEqual([`${TICKET} ${PIN}`]);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a mint without a server is refused and reserves nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/reserve", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({ ticket: TICKET, action: "mint" }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        expect(decodeErrorBody(yield* response.json)).toEqual({
+          error: "a mint reserves its pinned server",
+        });
+        expect(fixed.qemu).toEqual([]);
+      }).pipe(Effect.provide(serve(fixed)));
     }),
   );
 });

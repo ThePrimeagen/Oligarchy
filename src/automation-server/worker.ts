@@ -1,6 +1,7 @@
 import { Cause, Effect, Option, Result, Schedule, Schema, Scope } from "effect";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
+import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
@@ -51,6 +52,7 @@ const place = Effect.fn("place")(function* (
 ) {
   const tests = yield* Tests.TestStore;
   const store = yield* Automation.AutomationStore;
+  const setups = yield* SetupRequests.SetupRequestStore;
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
   if (Option.isNone(result) || result.value.linearId === null) {
@@ -65,10 +67,25 @@ const place = Effect.fn("place")(function* (
   // than failing a drive the definition lookup cannot see.
   const resume =
     job.action === "drive" ? yield* tests.resumeIso(job.resultId) : Option.none<string>();
+  // A mint's guest has to be the server the setup lock named. No pin, no reserve.
+  const pinned =
+    job.action === "mint" ? yield* setups.serverForResult(job.resultId) : Option.none<string>();
+  if (job.action === "mint" && Option.isNone(pinned)) {
+    return yield* Errors.AutomationClientError.make({
+      message: `mint ${ticket} has no pinned server`,
+      agentId: ticket,
+    });
+  }
   let lastCapacity: string | undefined;
   for (const client of clients) {
     const reserved = yield* Effect.result(
-      AutomationClient.reserve(client.url, ticket, job.action, Option.getOrUndefined(resume)),
+      AutomationClient.reserve(
+        client.url,
+        ticket,
+        job.action,
+        Option.getOrUndefined(resume),
+        Option.getOrUndefined(pinned),
+      ),
     );
     if (Result.isSuccess(reserved)) {
       if (client.id !== job.serverId) {

@@ -201,16 +201,18 @@ export class ReserveBody extends Schema.Class<ReserveBody>(
 )({
   ticket: Schema.NonEmptyString,
   action: Domain.AutomationAction,
-  // Absent is a mint, a diagnose, or a fresh drive. The key is left off, never sent as null.
+  // Absent is a diagnose or a fresh drive. The key is left off, never sent as null.
+  // A mint requires it: the qemu server the setup lock named. The handler refuses a mint without one.
   resume: Schema.optionalKey(Schema.NonEmptyString),
+  server: Schema.optionalKey(Domain.ServerUrl),
 }) {}
 
 export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
   "@oligarchy/shared/contract/ReserveAgentBody",
 )({
   agent: Schema.NonEmptyString,
-  // The reverse proxy's: the one server this reserve may land on, by the url the fleet knows it
-  // under. A qemu server ignores it.
+  // The one server this reserve may land on, by the url the fleet knows it under. The proxy
+  // sends the reserve there and nowhere else. That server refuses it when the url is not its own.
   server: Schema.optionalKey(Domain.ServerUrl),
   // Present when this reserve is a resume: the iso url whose minted disk the slot must boot.
   // Absent is a fresh placement.

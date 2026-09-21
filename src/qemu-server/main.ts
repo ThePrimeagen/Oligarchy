@@ -85,7 +85,7 @@ const ServerLive = (
         disableListenLog: true,
       }),
     ),
-    Layer.provide(Sessions.Sessions.layer(maxJobs)),
+    Layer.provide(Sessions.Sessions.layer(maxJobs, Option.getOrUndefined(url))),
     Layer.provide(Layer.succeed(Sessions.Shutdown)(shutdown)),
     // Minted sits above the iso cache it writes beside; both read one Iso.
     Layer.provide(Minted.Minted.layer),

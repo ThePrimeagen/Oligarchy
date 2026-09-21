@@ -79,6 +79,19 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
     // Filled by install, which runs in the server scope. A request's scope must not own the loop.
     let scope: Scope.Scope | null = null;
     const gate = yield* Ref.make<Gate>({ on: false, again: false });
+    // A create still talking to Linear holds its lock. The check treats a missing result as a
+    // dead ticket, and that check was deleting the row out from under the create, which then
+    // queued the job anyway and let the next reserve mint the server again.
+    const creating = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const keyOf = (iso: string, serverUrl: string): string => `${iso}\n${serverUrl}`;
+    const hold = (iso: string, serverUrl: string) =>
+      Ref.update(creating, (current) => new Set(current).add(keyOf(iso, serverUrl)));
+    const dropHold = (iso: string, serverUrl: string) =>
+      Ref.update(creating, (current) => {
+        const next = new Set(current);
+        next.delete(keyOf(iso, serverUrl));
+        return next;
+      });
 
     const logged = (text: string) => log.error(text, { location: Log.Locations.server });
 
@@ -138,6 +151,14 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
           stateId: states.backlog,
         });
         yield* tests.setLinearId(resultId, issue.identifier);
+        // The job is queued when the issue reaches Automation Needed. The pin has to be on the
+        // lock before that, or the dispatcher reserves the mint with no server.
+        const stored = yield* store.setResult(iso, serverUrl, resultId);
+        if (!stored) {
+          return yield* Effect.fail({
+            message: "setup row gone before its result was stored",
+          });
+        }
         const description = yield* Prompts.renderMintIssue({
           LINEAR_TICKET: issue.identifier,
           RUN_ID: created.runId,
@@ -193,11 +214,22 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
           yield* drop(iso, serverUrl, "reserve carried no host");
           return;
         }
+        // 3. The Linear issue. Steps 4 and 5 are left as they are.
+        // Today a failed ticket calls drop, which deletes the row. If that delete fails, drop
+        // logs `setup release failed` through log.error. That line is reported to Sentry,
+        // because it does not set skipSentry, and the delete's own cause is not attached.
+        // Then we return. The row is still there, with no result id.
+        // What happens after that is the open question, and it is not changed here. The 30s
+        // check treats a missing result as release and tries the delete again. A later reserve
+        // sees the row and does not create another ticket. An issue createIssue already made,
+        // before a later step failed, is not reconciled. A delete that keeps failing leaves
+        // the server locked.
         const exit = yield* Effect.exit(ticket(iso, serverUrl, proxyUrl));
         if (Exit.isFailure(exit)) {
           yield* drop(iso, serverUrl, Render.errorDetail(Cause.squash(exit.cause)));
           return;
         }
+        // 6. The issue exists. Attach it to the lock and watch it.
         const stored = yield* Effect.exit(store.setResult(iso, serverUrl, exit.value.resultId));
         if (Exit.isFailure(stored)) {
           yield* drop(
@@ -226,6 +258,12 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
         yield* arm;
       });
 
+    const begin = (iso: string, serverUrl: string, proxyUrl: string) =>
+      hold(iso, serverUrl).pipe(
+        Effect.andThen(create(iso, serverUrl, proxyUrl)),
+        Effect.ensuring(dropHold(iso, serverUrl)),
+      );
+
     const tick = Effect.gen(function* () {
       const rows = yield* store.list();
       let keep = false;
@@ -242,6 +280,15 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
           yield* log.info(`setup gone; ${key.serverUrl}; ${key.iso}`, {
             location: Log.Locations.server,
           });
+          continue;
+        }
+        if (
+          action === "release" &&
+          Option.isSome(fresh) &&
+          fresh.value.resultId === null &&
+          (yield* Ref.get(creating)).has(keyOf(key.iso, key.serverUrl))
+        ) {
+          keep = true;
           continue;
         }
         if (action === "release" && Option.isSome(fresh)) {
@@ -316,8 +363,10 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
             ).pipe(Effect.as(false)),
           ),
         );
+      // 1. The row is the lock, one per iso and server. 2. Only a won insert continues.
+      // A lost insert, or an insert that failed, does not create a ticket.
       if (inserted) {
-        yield* create(iso, serverUrl, proxyUrl);
+        yield* begin(iso, serverUrl, proxyUrl);
         return;
       }
       const fresh = yield* store
@@ -345,7 +394,7 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
       if (action === "gone") {
         const again = yield* store.insert(iso, serverUrl).pipe(Effect.orElseSucceed(() => false));
         if (again) {
-          yield* create(iso, serverUrl, proxyUrl);
+          yield* begin(iso, serverUrl, proxyUrl);
         }
         return;
       }
@@ -361,7 +410,7 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
         );
       const again = yield* store.insert(iso, serverUrl).pipe(Effect.orElseSucceed(() => false));
       if (again) {
-        yield* create(iso, serverUrl, proxyUrl);
+        yield* begin(iso, serverUrl, proxyUrl);
       }
     });
 

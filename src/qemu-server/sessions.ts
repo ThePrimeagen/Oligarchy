@@ -97,6 +97,7 @@ export type SessionsService = {
   readonly reserve: (
     agent: string,
     resume?: string,
+    pinned?: string,
   ) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest | Errors.SetupNeeded>;
   // Gives back everything the agent holds: an unused reservation, and its running session,
   // which is stopped as aborted. Fails BadRequest when it holds nothing, a start in flight
@@ -254,7 +255,7 @@ const describeGesture = (gesture: Qemu.MouseGesture): string => {
   return gesture satisfies never;
 };
 
-const make = (maxJobs: number) =>
+const make = (maxJobs: number, selfUrl?: string) =>
   Effect.gen(function* () {
     const qemu = yield* Qemu.Qemu;
     const iso = yield* Iso.Iso;
@@ -527,7 +528,18 @@ const make = (maxJobs: number) =>
     const reserve = Effect.fn("Sessions.reserve")(function* (
       agent: string,
       resume?: string,
+      pinned?: string,
     ) {
+      // A pin names one server. This machine takes the slot only when that name is its own.
+      if (pinned !== undefined && pinned !== selfUrl) {
+        return yield* Errors.BadRequest.make({
+          message:
+            selfUrl === undefined
+              ? `reserve is for ${pinned}`
+              : `reserve is for ${pinned}, not ${selfUrl}`,
+          agentId: agent,
+        });
+      }
       // Held and full are answered before a disk lookup: a second reserve is still "already
       // reserved", and a full machine cannot gain a resume slot by being set up.
       const snapshot = yield* Ref.get(slots);
@@ -1319,7 +1331,9 @@ const make = (maxJobs: number) =>
       stop,
       save,
       follow,
-      stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+      // A reservation is a machine this server has promised. Counting only booted guests left a
+      // pinned mint at 0, so the board and the placer both treated that server as idle.
+      stats: Effect.flatMap(Ref.get(slots), (held) => stats.collect(held.count)),
       minted: (name) => Effect.map(minted.find(name), Option.isSome),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };
@@ -1331,6 +1345,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
 }) {
   static readonly layer = (
     maxJobs: number,
+    selfUrl?: string,
   ): Layer.Layer<
     Sessions,
     never,
@@ -1343,5 +1358,5 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     | DebugLogs.DebugLogStore
     | Log.Log
     | FileSystem.FileSystem
-  > => Layer.effect(this)(this.make(maxJobs));
+  > => Layer.effect(this)(this.make(maxJobs, selfUrl));
 }
