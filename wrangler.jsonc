@@ -9,6 +9,10 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  // POST /create-test-suite-run fills these into the Linear ticket, the same files ./ctrl reads.
+  "rules": [
+    { "type": "Text", "globs": ["**/*.md", "**/*.html"], "fallthrough": false }
+  ],
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",

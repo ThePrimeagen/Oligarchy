@@ -44,12 +44,19 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
       listJobs: () => counted({ running: [], pending: [], completed: [] }),
     });
     const actions = Stores.fakeActionStore();
+    const tests = Stores.fakeTestStore();
     const touched: Array<string> = [];
     const stdio = StdioSupport.capture();
     const command = VizCommand.makeVizCommand({
       database: () => {
         touched.push("database");
-        return Layer.mergeAll(servers.layer, process.layer, automation.layer, actions.layer);
+        return Layer.mergeAll(
+          servers.layer,
+          process.layer,
+          automation.layer,
+          actions.layer,
+          tests.layer,
+        );
       },
     });
     const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
@@ -88,15 +95,19 @@ describe("viz happy path", () => {
       expect(h.reads.count).toBe(0);
       expect(h.screen.setups).toEqual([]);
       const printed = (yield* TestConsole.logLines).join("\n");
-      expect(printed).toMatch(/automation queue/);
-      expect(printed).toMatch(/running and pending/);
-      expect(printed).toMatch(/jobs running on it/);
+      expect(printed).toMatch(/opens on automation/);
+      expect(printed).toMatch(/last five minutes/);
+      expect(printed).toMatch(/newest finished/);
       expect(printed).toMatch(/j\/k/);
       expect(printed).toMatch(/tab moves between the machines and the queue/);
-      expect(printed).toMatch(/h\/l switch servers and clients/);
+      expect(printed).toMatch(/h\/l switch tabs/);
       expect(printed).toMatch(/L opens the selected job's Linear ticket/);
       expect(printed).toMatch(/F follows the selected running job/);
-      expect(printed).toMatch(/A asks, then aborts the selected job at the automation server/);
+      expect(printed).toMatch(/j and k rest on a ticket/);
+      expect(printed).toMatch(/selected ticket's session/);
+      expect(printed).toMatch(/d opens the selected ticket's test definition/);
+      expect(printed).toMatch(/enter shows the ticket/);
+      expect(printed).toMatch(/a asks, then aborts the selected job at the automation server/);
       expect(printed).toMatch(/AUTOMATION_SERVER_URL/);
       expect(printed).toMatch(/q quits/);
     }),
@@ -114,8 +125,8 @@ describe("viz happy path", () => {
         expect(h.reads.count).toBe(3);
         const drawn = (yield* rows(setup)).join("\n");
         expect(drawn).toContain("servers 0/0");
-        expect(drawn).toContain("no qemu servers registered");
-        expect(drawn).toContain("automation · running 0 · pending 0");
+        expect(drawn).toContain("s  automation");
+        expect(drawn).toContain("no automation clients");
         expect(drawn).toContain("q quit");
         setup.mockInput.pressKey("q");
         const exit = yield* Fiber.join(fiber);

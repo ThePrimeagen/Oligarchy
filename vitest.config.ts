@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { transformAsync } from "@babel/core";
 import { defineConfig, type Plugin } from "vitest/config";
 
@@ -30,8 +31,22 @@ const opentuiSolid = (): Plugin => ({
   },
 });
 
+// POST /create-test-suite-run imports the ticket template and its guides as strings, the way
+// wrangler's Text rule loads them in the worker.
+const textModules = (): Plugin => ({
+  name: "oligarchy-text-modules",
+  enforce: "pre",
+  load(id) {
+    const path = id.split("?")[0] ?? "";
+    if (path.includes("node_modules") || (!path.endsWith(".md") && !path.endsWith(".html"))) {
+      return null;
+    }
+    return `export default ${JSON.stringify(readFileSync(path, "utf8"))}`;
+  },
+});
+
 export default defineConfig({
-  plugins: [opentuiSolid()],
+  plugins: [textModules(), opentuiSolid()],
   resolve: {
     // Under the `node` condition solid-js resolves to its server build, whose signals never
     // update; the tests run the client build the OpenTUI reconciler itself imports.

@@ -147,11 +147,11 @@ Postgres.describeWithDatabase("./viz against the seeded database", () => {
     const drawn = stripAnsi(result.output.slice(on, off));
     expect(drawn).toMatch(/─ read \d+ s ago ─╮/);
     expect(drawn).toMatch(/│ servers \d+\/\d+ │ driving \d+\/\d+ diagnosing \d+\/\d+ /);
-    expect(drawn).toMatch(/╭─ automation · running \d+ · pending \d+ ─+╮/);
-    expect(drawn).toMatch(/ticket\s+test\s+action\s+status\s+queued\s+started\s+│/);
-    expect(drawn).not.toContain("finished");
+    expect(drawn).toContain("▸ s  automation");
+    expect(drawn).toContain("qemu servers");
+    expect(drawn).toContain("t  tickets");
     expect(drawn).toContain(
-      "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   A abort   q quit",
+      "j/k select   s automation   h/l tabs   t tickets   d definition   enter info   L linear   a abort   F follow   q quit",
     );
     expect(drawn).not.toContain("error:");
     expect(drawn).not.toContain("viz needs");

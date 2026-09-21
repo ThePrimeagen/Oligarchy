@@ -148,7 +148,7 @@ Recorded so the next reviewer does not redo them.
 - The Sentry reporter's `error.name === Errors.LogLine.identifier`: `Schema.TaggedError` sets
   `name` to the identifier.
 - `Command.provide` applied before `Command.withSubcommands` wraps the parent's handler only, so
-  `ctrl test new` builds one pool.
+  `ctrl test run` builds one pool.
 - The `Sessions` slot accounting (`reserve`, `failStart`, `finishLiveSession`, `relinquish`, the
   sweep) balances on every path; `finishLiveSession` runs exactly once per admitted session.
 - `src/qemu-server/main.ts` binds the port before `Sessions` exists, as its comment says; the

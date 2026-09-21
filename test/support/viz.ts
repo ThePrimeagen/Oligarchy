@@ -107,6 +107,8 @@ export const running: Automation.AutomationJobListRow = {
   startedAt: ago(45),
   finishedAt: null,
   queriedAt: QUERIED_AT,
+  instruction: "",
+  intent: null,
 };
 
 // A diagnose runner took: no guest, so on runner's card alone.
@@ -131,6 +133,8 @@ export const pending: Automation.AutomationJobListRow = {
   startedAt: null,
   finishedAt: null,
   queriedAt: QUERIED_AT,
+  instruction: "",
+  intent: null,
 };
 
 // Over, and so never drawn: the store lists none when asked for zero, and one it did list would
@@ -148,6 +152,8 @@ export const failed: Automation.AutomationJobListRow = {
   startedAt: ago(3_800),
   finishedAt: ago(600),
   queriedAt: QUERIED_AT,
+  instruction: "",
+  intent: null,
 };
 
 export const QUEUE: Automation.AutomationQueue = {
@@ -164,8 +170,11 @@ export const SNAPSHOT: View.Snapshot = {
   readAt: READ_AT,
 };
 
+// The cards are what most of these tests draw, so a view starts on the qemu tab. The program
+// itself opens on automation (`View.initialView`); pass `tab` to draw that.
 export const shown = (snapshot: View.Snapshot, view: Partial<View.View> = {}): View.View => ({
   ...View.initialView,
+  tab: "servers",
   snapshot: Option.some(snapshot),
   ...view,
 });
@@ -251,7 +260,7 @@ export const jobCells = (
   cells(
     pad(ticket, 9),
     pad(test, 18),
-    pad(action, 9),
+    pad(action, 10),
     pad(status, 12),
     pad(queued, 11),
     pad(started, 11),
@@ -262,16 +271,16 @@ export const job = (marker: "▸" | " ", columns: Readonly<Parameters<typeof job
 export const RUNNING = [
   "OLI-61",
   "lock-screen",
-  "drive",
-  "● running",
+  "45 s ago",
+  `${View.spinnerAt(READ_AT)} running`,
   "3 min ago",
   "45 s ago",
 ] as const;
 export const DIAGNOSING = [
   "OLI-65",
   "wifi",
-  "diagnose",
-  "● running",
+  "45 s ago",
+  `${View.spinnerAt(READ_AT)} running`,
   "3 min ago",
   "45 s ago",
 ] as const;
@@ -279,7 +288,7 @@ export const PENDING = ["OLI-62", "install", "drive", "◌ pending", "7 s ago", 
 // The ticket of a job row: the nine columns after the border, its padding and the marker column.
 export const ticketOf = (row: string): string => row.slice(4, 13).trimEnd();
 export const HINTS =
-  "j/k select   tab machines/queue   h/l servers/clients   g/G first/last   L open ticket   F follow   A abort   q quit";
+  "j/k select   s automation   h/l tabs   t tickets   d definition   enter info   L linear   a abort   F follow   q quit";
 export const FOOTER = ` ${HINTS}${space(COLUMNS - HINTS.length - 11)}oligarchy `;
 export const OPENED = pad(" opened https://linear.app/issue/OLI-61", COLUMNS);
 

@@ -13,6 +13,7 @@ import {
   QUEUE,
   running,
   runner,
+  READ_AT,
   SESSION_ID,
   shown,
   SNAPSHOT,
@@ -58,12 +59,18 @@ describe("press happy path", () => {
     expect(View.press(onNext, key("j")).cursor.servers).toBe(2);
     expect(View.press(start, key("g", true)).cursor.servers).toBe(2);
     expect(View.press(onNext, key("g")).cursor.servers).toBe(0);
-    const clients = View.press(View.press(shown(snapshot, { tab: "clients" }), key("j")), key("j"));
+    const clients = View.press(
+      View.press(shown(snapshot, { tab: "automation" }), key("j")),
+      key("j"),
+    );
     expect(clients.cursor.clients).toBe(2);
     expect(View.press(clients, key("j")).cursor.clients).toBe(2);
-    // A job that finished under the cursor: the rows above take the selection.
-    const gone = shown(SNAPSHOT, { tab: "clients", cursor: { servers: 0, clients: 2, queue: 0 } });
-    expect(View.press(gone, key("k")).cursor.clients).toBe(0);
+    // A job that finished under the cursor: the marker stays on a ticket, not the header.
+    const gone = shown(SNAPSHOT, {
+      tab: "automation",
+      cursor: { servers: 0, clients: 2, queue: 0 },
+    });
+    expect(View.press(gone, key("k")).cursor.clients).toBe(1);
   });
 
   it("tab moves the focus between the machines and the queue; j, k, g and G then move the job selection, clamped to the jobs listed", () => {
@@ -93,22 +100,17 @@ describe("press happy path", () => {
     expect(View.press(one, key("tab", true)).focus).toBe("machines");
   });
 
-  it("h, l, left and right switch between servers and clients whichever list has the focus, each keeping its own cursor", () => {
-    const start = View.press(shown(many), key("j"));
-    const clients = View.press(start, key("l"));
-    expect(clients.tab).toBe("clients");
-    expect(clients.focus).toBe("machines");
-    expect(clients.cursor).toEqual({ servers: 1, clients: 0, queue: 0 });
-    // One client with one job: j reaches the job, and no further.
-    expect(View.press(clients, key("j")).cursor).toEqual({ servers: 1, clients: 1, queue: 0 });
-    expect(View.press(View.press(clients, key("j")), key("j")).cursor.clients).toBe(1);
-    expect(View.press(clients, key("h")).tab).toBe("servers");
-    expect(View.press(clients, key("left")).tab).toBe("servers");
-    expect(View.press(start, key("right")).tab).toBe("clients");
-    expect(View.press(View.press(clients, key("l")), key("l")).tab).toBe("clients");
-    const queue = View.press(start, key("tab"));
-    expect(View.press(queue, key("l")).tab).toBe("clients");
-    expect(View.press(queue, key("l")).focus).toBe("queue");
+  it("opens on automation; s stays there, t opens tickets, and h and l cycle the three", () => {
+    expect(View.initialView.tab).toBe("automation");
+    expect(View.press(View.initialView, key("s")).tab).toBe("automation");
+    expect(View.press(View.initialView, key("t")).tab).toBe("tickets");
+    expect(View.press(View.initialView, key("l")).tab).toBe("servers");
+    expect(View.press(View.initialView, key("h")).tab).toBe("tickets");
+    expect(View.press(View.press(View.initialView, key("l")), key("l")).tab).toBe("tickets");
+    const servers = shown(many);
+    expect(View.press(servers, key("s")).tab).toBe("automation");
+    expect(View.press(servers, key("l")).tab).toBe("tickets");
+    expect(View.press(servers, key("h")).tab).toBe("automation");
   });
 
   it("L moves nothing: opening the ticket is the runner's, and any key retires the last notice", () => {
@@ -121,10 +123,11 @@ describe("press happy path", () => {
     expect(View.press(noticed, key("tab")).notice).toEqual(Option.none());
   });
 
-  it("A moves nothing: the abort is the runner's; and no key takes the pop-up down, the clock does", () => {
+  it("a moves nothing: the abort is the runner's; and no key takes the pop-up down, the clock does", () => {
     const start = shown(many);
     const noticed = { ...start, notice: Option.some("aborted drive OLI-61") };
-    expect(View.press(noticed, key("a", true))).toEqual(start);
+    expect(View.press(noticed, key("a"))).toEqual(start);
+    expect(View.press(start, key("a"))).toEqual(start);
     expect(View.press(start, key("a", true))).toEqual(start);
     const popped = {
       ...start,
@@ -132,7 +135,7 @@ describe("press happy path", () => {
     };
     expect(View.press(popped, key("j")).popup).toEqual(popped.popup);
     expect(View.press(popped, key("escape")).popup).toEqual(popped.popup);
-    expect(View.press(popped, key("a", true)).popup).toEqual(popped.popup);
+    expect(View.press(popped, key("a")).popup).toEqual(popped.popup);
     expect(View.press(popped, key("tab")).popup).toEqual(popped.popup);
     expect(View.initialView.popup).toEqual(Option.none());
   });
@@ -163,6 +166,8 @@ describe("press happy path", () => {
     expect(View.press(open, key("g", true))).toEqual(retired);
     expect(View.press(open, key("l", true))).toEqual(retired);
     expect(View.press(open, key("a", true))).toEqual(retired);
+    expect(View.press(open, key("a"))).toEqual(retired);
+    expect(View.press(open, key("d"))).toEqual(retired);
     // A peek underneath stays up, and so does a pop-up.
     const peek = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
     const overPeek = { ...open, follow: Option.some<Follow.Follow>(peek) };
@@ -200,7 +205,7 @@ describe("press happy path", () => {
       Option.some("OLI-61"),
     );
     const clients = shown(snapshot, {
-      tab: "clients",
+      tab: "automation",
       cursor: { servers: 0, clients: 2, queue: 0 },
     });
     expect(Option.map(View.selectedJob(clients), (job) => job.ticket)).toEqual(
@@ -213,9 +218,12 @@ describe("press happy path", () => {
     expect(Option.map(View.selectedJob(past), (job) => job.ticket)).toEqual(Option.some("OLI-62"));
   });
 
-  it("q, Q and ctrl-c quit; L alone opens; f and F follow; A alone asks to abort; enter selects", () => {
-    expect(View.isAbort(key("a", true))).toBe(true);
-    expect(View.isAbort(key("a"))).toBe(false);
+  it("q, Q and ctrl-c quit; L alone opens; f and F follow; a alone asks to abort; d opens a definition; enter selects", () => {
+    expect(View.isAbort(key("a"))).toBe(true);
+    expect(View.isAbort(key("a", true))).toBe(false);
+    expect(View.isDefinition(key("d"))).toBe(true);
+    expect(View.isDefinition(key("d", true))).toBe(false);
+    expect(View.isDefinition({ name: "d", shift: false, ctrl: true, meta: false })).toBe(false);
     expect(View.isAbort({ name: "a", shift: false, ctrl: true, meta: false })).toBe(false);
     expect(View.isAbort(key("l", true))).toBe(false);
     expect(View.isSelect(key("return"))).toBe(true);
@@ -311,7 +319,7 @@ describe("press unhappy path", () => {
       clients: 0,
       queue: 0,
     });
-    expect(View.press(View.initialView, key("l")).tab).toBe("clients");
+    expect(View.press(View.initialView, key("l")).tab).toBe("servers");
     expect(View.press(View.initialView, key("tab")).focus).toBe("queue");
     expect(View.press(View.press(View.initialView, key("tab")), key("j")).cursor.queue).toBe(0);
     expect(View.selectedJob(View.initialView)).toEqual(Option.none());
@@ -324,5 +332,160 @@ describe("press unhappy path", () => {
     expect(View.tooSmall(100, 24)).toBe(
       "viz needs a terminal of at least 135×37 (columns×rows); this one is 100×24",
     );
+  });
+});
+
+describe("spinner", () => {
+  it("turns one frame every 80 milliseconds and wraps after the last", () => {
+    expect(View.spinnerAt(READ_AT)).toBe(Follow.SPINNER[0]);
+    expect(View.spinnerAt(READ_AT + View.SPIN_MS)).toBe(Follow.SPINNER[1]);
+    expect(View.spinnerAt(READ_AT + View.SPIN_MS * Follow.SPINNER.length)).toBe(Follow.SPINNER[0]);
+  });
+
+  it("holds the frame until a full 80 milliseconds have passed", () => {
+    expect(View.spinnerAt(0)).toBe(Follow.SPINNER[0]);
+    expect(View.spinnerAt(View.SPIN_MS - 1)).toBe(Follow.SPINNER[0]);
+    expect(View.spinnerAt(READ_AT + View.SPIN_MS - 1)).toBe(View.spinnerAt(READ_AT));
+  });
+});
+
+describe("sidebar tickets", () => {
+  const two: View.Snapshot = {
+    ...SNAPSHOT,
+    queue: { ...QUEUE, running: [running, diagnosing] },
+  };
+
+  it("place snaps a header or a cursor past the end onto a ticket, and leaves a ticket cursor", () => {
+    const header = shown(two, { tab: "automation" });
+    expect(View.land(header).cursor.clients).toBe(1);
+    const onSecond = shown(two, {
+      tab: "automation",
+      cursor: { servers: 0, clients: 2, queue: 0 },
+    });
+    expect(View.land(onSecond)).toEqual(onSecond);
+    const past = shown(two, {
+      tab: "automation",
+      cursor: { servers: 0, clients: 40, queue: 0 },
+    });
+    expect(View.land(past).cursor.clients).toBe(2);
+    expect(View.land(View.initialView)).toBe(View.initialView);
+  });
+
+  it("place leaves the cursor when there is no ticket to land on (unhappy)", () => {
+    const empty = shown({ ...SNAPSHOT, queue: EMPTY_QUEUE }, { tab: "automation" });
+    expect(View.land(empty).cursor.clients).toBe(0);
+    expect(View.press(empty, key("j")).cursor.clients).toBe(0);
+    expect(View.press(empty, key("k")).cursor.clients).toBe(0);
+    expect(View.press(empty, key("g", true)).cursor.clients).toBe(0);
+  });
+
+  it("j, k, g and G on the sidebar stop only on tickets", () => {
+    const start = shown(two, { tab: "automation" });
+    const first = View.press(start, key("j"));
+    expect(first.cursor.clients).toBe(1);
+    expect(View.press(first, key("j")).cursor.clients).toBe(2);
+    expect(View.press(first, key("k")).cursor.clients).toBe(1);
+    expect(View.press(start, key("g", true)).cursor.clients).toBe(2);
+    expect(View.press(View.press(first, key("j")), key("g")).cursor.clients).toBe(1);
+  });
+
+  it("d, enter and a move nothing: those commands are the runner's", () => {
+    const start = shown(two, { tab: "automation", notice: Option.some("opened") });
+    expect(View.press(start, key("d"))).toEqual({ ...start, notice: Option.none() });
+    expect(View.press(start, key("return")).cursor).toEqual(start.cursor);
+    expect(View.press(start, key("a")).cursor).toEqual(start.cursor);
+    expect(View.press(start, key("a", true)).tab).toBe("automation");
+  });
+});
+
+describe("sheets", () => {
+  const wording = {
+    name: "lock-screen",
+    description: "The screen locks.",
+    instruction: "Lock it.",
+    proof: "It is locked.",
+  };
+
+  it("definitionSheet and infoSheet name the ticket's wording and its row", () => {
+    const defined = View.definitionSheet(wording);
+    expect(defined.title).toBe("lock-screen");
+    expect(defined.offset).toBe(0);
+    expect(defined.lines).toEqual([
+      "description",
+      "The screen locks.",
+      "",
+      "instruction",
+      "Lock it.",
+      "",
+      "proof",
+      "It is locked.",
+      "",
+    ]);
+    const info = View.infoSheet(running, 0);
+    expect(info.title).toBe("ticket OLI-61");
+    expect(info.lines).toEqual([
+      "ticket    OLI-61",
+      "test      lock-screen",
+      "action    drive",
+      "status    running",
+      `reason    —`,
+      `session   ${SESSION_ID}`,
+      `client    ${running.clientUrl ?? ""}`,
+      `server    ${running.serverUrl ?? ""}`,
+      "queued    3 min ago",
+      "started   45 s ago",
+      "finished  —",
+    ]);
+  });
+
+  it("a blank definition part is a dash, and a missing reason is a dash (unhappy)", () => {
+    const blank = View.definitionSheet({
+      name: "x",
+      description: "  ",
+      instruction: "",
+      proof: "",
+    });
+    expect(blank.lines).toEqual(["description", "—", "", "instruction", "—", "", "proof", "—", ""]);
+    const info = View.infoSheet({ ...running, reason: null, ticket: null, sessionId: null }, 0);
+    expect(info.lines[0]).toBe("ticket    —");
+    expect(info.lines[4]).toBe("reason    —");
+    expect(info.lines[5]).toBe("session   —");
+  });
+
+  it("j and k scroll a sheet and escape closes it; other keys leave the board where it is", () => {
+    const long = View.definitionSheet({
+      ...wording,
+      proof: "p".repeat(View.SHEET_WIDTH * 20),
+    });
+    expect(long.lines.length).toBeGreaterThan(View.SHEET_ROWS);
+    const start = shown(SNAPSHOT, { tab: "automation" });
+    const open = { ...start, sheet: Option.some(long) };
+    const down = View.press(open, key("j"));
+    expect(Option.getOrThrow(down.sheet).offset).toBe(1);
+    expect(View.press(down, key("k")).sheet).toEqual(Option.some(long));
+    expect(Option.getOrThrow(View.press(open, key("k")).sheet).offset).toBe(0);
+    const last = long.lines.length - View.SHEET_ROWS;
+    const bottom = { ...open, sheet: Option.some({ ...long, offset: last }) };
+    expect(Option.getOrThrow(View.press(bottom, key("j")).sheet).offset).toBe(last);
+    expect(View.press(open, key("escape")).sheet).toEqual(Option.none());
+    expect(View.press(open, key("l")).tab).toBe("automation");
+    expect(View.press(open, key("l")).sheet).toEqual(Option.some(long));
+    const short = { ...start, sheet: Option.some(View.definitionSheet(wording)) };
+    expect(Option.getOrThrow(View.press(short, key("j")).sheet).offset).toBe(0);
+  });
+
+  it("a's question wins the keys when a sheet is also up (unhappy)", () => {
+    const sheet = View.definitionSheet(wording);
+    const asked: View.Confirm = { ticket: "OLI-61", action: "drive", choice: "no" };
+    const both = {
+      ...shown(SNAPSHOT, { tab: "automation" }),
+      sheet: Option.some(sheet),
+      confirm: Option.some(asked),
+    };
+    const pressed = View.press(both, key("j"));
+    expect(pressed.sheet).toEqual(Option.some(sheet));
+    expect(pressed.confirm).toEqual(Option.some(asked));
+    expect(View.press(both, key("escape")).confirm).toEqual(Option.none());
+    expect(View.press(both, key("escape")).sheet).toEqual(Option.some(sheet));
   });
 });

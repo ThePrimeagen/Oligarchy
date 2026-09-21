@@ -27,6 +27,8 @@ type FakeAutomationJob = AutomationJobRow & {
   readonly clientUrl?: string | null;
   readonly serverUrl?: string | null;
   readonly sessionId?: string | null;
+  readonly instruction?: string;
+  readonly intent?: string | null;
 };
 
 const sameId = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
@@ -647,6 +649,8 @@ export const fakeAutomationStore = (
           startedAt: job.startedAt,
           finishedAt: job.finishedAt,
           queriedAt,
+          instruction: job.instruction ?? "",
+          intent: job.intent ?? null,
         });
         const diagnoseFirst = (left: FakeAutomationJob, right: FakeAutomationJob) => {
           if (left.action !== right.action) {

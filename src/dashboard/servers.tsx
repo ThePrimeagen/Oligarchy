@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
-import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
+import { OperatorPage } from "./page.tsx";
 import type { AutomationJob, AutomationQueue, ProcessSeries, Server } from "./query.ts";
+import { followHref, linearHref } from "./ticket.ts";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
 // slow database; three overdue is a server that stopped.
@@ -220,14 +221,35 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   );
 
 // A stamp's age against the clock the read was made at, or a dash for a stamp not written yet.
-const since = (stamp: Date | null, queriedAt: Date): string =>
+// The definitions page uses the same wording for how long a test has been running.
+export const since = (stamp: Date | null, queriedAt: Date): string =>
   stamp === null ? "—" : `${age(queriedAt.getTime() - stamp.getTime())} ago`;
 
+// The test name is the one follow link in the tab order. The rest of the row opens the same page
+// but stays out of the way of the keyboard. An empty cell is still a link, so its padding is
+// clickable.
+const FollowCell: FC<{ ticket: string; primary: boolean; text: string }> = ({
+  ticket,
+  primary,
+  text,
+}) => (
+  <td class="follow">
+    {primary ? (
+      <a href={followHref(ticket)}>{text}</a>
+    ) : (
+      <a href={followHref(ticket)} tabindex={-1} aria-hidden="true">
+        {text}
+      </a>
+    )}
+  </td>
+);
+
 // One list of the queue as a table, or the one word that says it is empty. The columns are the
-// same in every list, so a pending job shows dashes where its start and finish will go. A running
-// or pending job with a ticket carries the abort, posting the ticket and its own action: a ticket
-// has one drive and one diagnose, and its drive may still be running while its diagnose waits.
-// A completed one is over, and a job with no ticket has nothing to name in the post.
+// same in every list, so a pending job shows dashes where its start and finish will go. The
+// ticket text goes to Linear; every other cell of a ticketed row opens the session feed. A
+// running or pending job with a ticket carries the abort, posting the ticket and its own action:
+// a ticket has one drive and one diagnose, and its drive may still be running while its diagnose
+// waits. A completed one is over, and a job with no ticket has nothing to name in the post.
 const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
   jobs.length === 0 ? (
     <p>none</p>
@@ -244,54 +266,91 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
         <th>reason</th>
         <th></th>
       </tr>
-      {jobs.map((job) => (
-        <tr>
-          <td>{job.ticket ?? "—"}</td>
-          <td>{job.test}</td>
-          <td>{job.action}</td>
-          <td>{job.status}</td>
-          <td>{since(job.createdAt, job.queriedAt)}</td>
-          <td>{since(job.startedAt, job.queriedAt)}</td>
-          <td>{since(job.finishedAt, job.queriedAt)}</td>
-          <td>{job.reason}</td>
-          <td>
-            {(job.status === "running" || job.status === "pending") && job.ticket !== null ? (
-              <form
-                method="post"
-                action="/abort"
-                hx-post="/abort"
-                hx-confirm="are you sure?"
-                hx-target="#queue"
-                hx-swap="innerHTML"
-              >
-                <input type="hidden" name="ticket" value={job.ticket} />
-                <input type="hidden" name="action" value={job.action} />
-                <button type="submit" class="abort" aria-label="abort">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 12 12"
-                    aria-hidden="true"
-                  >
-                    <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
-                  </svg>
-                </button>
-              </form>
-            ) : null}
-          </td>
-        </tr>
-      ))}
+      {jobs.map((job) => {
+        const ticket = job.ticket;
+        const cells = [
+          job.test,
+          job.action,
+          job.status,
+          since(job.createdAt, job.queriedAt),
+          since(job.startedAt, job.queriedAt),
+          since(job.finishedAt, job.queriedAt),
+          job.reason ?? "",
+        ];
+        return (
+          <tr>
+            <td>
+              {ticket === null ? (
+                "—"
+              ) : (
+                <a class="ticket" href={linearHref(ticket)}>
+                  {ticket}
+                </a>
+              )}
+            </td>
+            {ticket === null
+              ? cells.map((text) => <td>{text}</td>)
+              : cells.map((text, index) => (
+                  <FollowCell ticket={ticket} primary={index === 0} text={text} />
+                ))}
+            <td>
+              {(job.status === "running" || job.status === "pending") && ticket !== null ? (
+                <form
+                  method="post"
+                  action="/abort"
+                  hx-post="/abort"
+                  hx-confirm="are you sure?"
+                  hx-target="#queue"
+                  hx-swap="innerHTML"
+                >
+                  <input type="hidden" name="ticket" value={ticket} />
+                  <input type="hidden" name="action" value={job.action} />
+                  <button type="submit" class="abort" aria-label="abort">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      aria-hidden="true"
+                    >
+                      <path d="M2 2l8 8M10 2L2 10" stroke="red" stroke-width="2" fill="none" />
+                    </svg>
+                  </button>
+                </form>
+              ) : null}
+            </td>
+          </tr>
+        );
+      })}
     </table>
   );
 
+// A suite is open while any of its results is still pending or running. The rate is of the
+// results that have already passed or failed; none yet, and there is no rate to invent.
+const suiteLine = (suites: AutomationQueue["suites"]): string => {
+  const noun = suites.running === 1 ? "test suite" : "test suites";
+  const running = `${String(suites.running)} ${noun} running`;
+  if (suites.running === 0) {
+    return running;
+  }
+  const closed = suites.passed + suites.failed;
+  const verdicts = `${String(suites.passed)} passed · ${String(suites.failed)} failed`;
+  if (closed === 0) {
+    return `${running} · ${verdicts}`;
+  }
+  return `${running} · ${verdicts} · ${percent((suites.passed / closed) * 100)} pass`;
+};
+
 // The automation queue in the order the database sorted it: what runs, what waits, what finished.
-// What the automation half polls for.
+// What the automation half polls for, every thirty seconds. The line above is the test suites
+// still open. The numbers beside running and pending are the totals, not the length of the
+// fifty-row lists. Completed has no number: that total only grows.
 export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
   <>
-    <h3>running</h3>
+    <p>{suiteLine(queue.suites)}</p>
+    <h3>running {queue.runningCount}</h3>
     <Jobs jobs={queue.running} />
-    <h3>pending</h3>
+    <h3>pending {queue.pendingCount}</h3>
     <Jobs jobs={queue.pending} />
     <h3>completed</h3>
     <Jobs jobs={queue.completed} />
@@ -315,51 +374,39 @@ export const ServersPage: FC<{
   halves: Halves | undefined;
   error: string | undefined;
 }> = ({ halves, error }) => (
-  <html lang="en">
-    <head>
-      <meta charset="utf-8" />
-      <title>oligarchy servers</title>
-      <style>
-        {
-          ':root { color-scheme: dark; } body { margin: 24px 32px 40px; font: 16px/1.4 system-ui, sans-serif; color: #e8e6e3; background: #161616; } h1, h2, h3 { color: #fff; } h1 { margin: 0 0 20px; } h2 { margin: 1.25rem 0 12px; } table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; } th { color: #9a9691; font-weight: 600; } input, button { color: #e8e6e3; background: #1f1f1f; border: 1px solid #2c2c2c; border-radius: 6px; padding: 4px 8px; } button { cursor: pointer; } .halves { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; } .abort { background: none; border: none; padding: 0; cursor: pointer; line-height: 0; vertical-align: middle; } .process-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } .process-card { display: grid; gap: 10px; background: #1f1f1f; border: 1px solid #2c2c2c; border-radius: 12px; padding: 14px 16px 12px; } .process-card > header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; } .process-card > header h3, .process-card > header p, .process-card > p { margin: 0; } .process-card > header p { color: #9a9691; font-size: 13px; } .process-graph { display: grid; gap: 10px; } .process-graph__plot { position: relative; height: 10rem; background: #111; border-radius: 8px; overflow: hidden; } .process-graph__plot::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(to top, #2a2a2a 1px, transparent 1px); background-size: 100% 25%; opacity: 0.7; } .process-graph__bars { position: absolute; inset: 10px 10px 8px; display: flex; align-items: flex-end; gap: 2px; } .process-graph__bar { flex: 1 1 0; min-width: 0; min-height: 0; background: #3f3f46; border-radius: 3px 3px 0 0; } .process-graph__lines { position: absolute; inset: 10px 10px 8px; width: calc(100% - 20px); height: calc(100% - 18px); overflow: visible; } .process-graph__lines .process-graph__jobs, .process-graph__lines .process-graph__cpu { fill: none; stroke-width: 2.25; } .process-graph__lines .process-graph__jobs { stroke: #fbbf24; } .process-graph__lines .process-graph__cpu { stroke: #38bdf8; } .process-graph__legend { display: flex; gap: 16px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: #c4c0ba; } .process-graph__legend li::before { content: ""; display: inline-block; width: 12px; height: 8px; margin-right: 6px; vertical-align: middle; border-radius: 1px; } .process-graph__legend .process-graph__memory::before { background: #3f3f46; } .process-graph__legend .process-graph__jobs::before { background: #fbbf24; height: 3px; } .process-graph__legend .process-graph__cpu::before { background: #38bdf8; height: 3px; }'
-        }
-      </style>
-      <script src={HTMX_URL} integrity={HTMX_INTEGRITY} crossorigin="anonymous"></script>
-    </head>
-    <body>
-      <h1>oligarchy servers</h1>
-      {error === undefined ? null : <p>error: {error}</p>}
+  <OperatorPage title="oligarchy servers" page="servers">
+    <h1>oligarchy servers</h1>
+    {error === undefined ? null : <p>error: {error}</p>}
+    <section>
+      <h2>process</h2>
+      {halves === undefined ? null : (
+        <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
+          <Process series={halves.process} />
+        </div>
+      )}
+    </section>
+    <div class="halves">
       <section>
-        <h2>process</h2>
+        <h2>automation</h2>
         {halves === undefined ? null : (
-          <div id="process" hx-get="/servers/process" hx-trigger="every 30s">
-            <Process series={halves.process} />
+          <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
+            <Queue queue={halves.queue} />
           </div>
         )}
       </section>
-      <div class="halves">
-        <section>
-          <h2>automation</h2>
-          {halves === undefined ? null : (
-            <div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">
-              <Queue queue={halves.queue} />
-            </div>
-          )}
-        </section>
-        <section>
-          <h2>qemu servers</h2>
-          {halves === undefined ? null : (
-            <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
-              <Fleet servers={halves.servers} />
-            </div>
-          )}
-          <h2>add a server</h2>
-          <form method="post" action="/servers">
-            <input name="url" size={60} placeholder="https://qemu.example.com" />
-            <button>add</button>
-          </form>
-        </section>
-      </div>
-    </body>
-  </html>
+      <section>
+        <h2>qemu servers</h2>
+        {halves === undefined ? null : (
+          <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
+            <Fleet servers={halves.servers} />
+          </div>
+        )}
+        <h2>add a server</h2>
+        <form method="post" action="/servers">
+          <input name="url" size={60} placeholder="https://qemu.example.com" />
+          <button>add</button>
+        </form>
+      </section>
+    </div>
+  </OperatorPage>
 );

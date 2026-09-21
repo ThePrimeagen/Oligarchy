@@ -1,4 +1,16 @@
-import { and, desc, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  like,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import {
@@ -58,12 +70,32 @@ export type AutomationJob = {
   readonly queriedAt: Date;
 };
 
-// The queue as the page shows it: what runs, what waits, what finished, each list cut at fifty.
+// Test suites still open, and how their results have landed so far. A suite is open
+// while any of its results is pending or running; passed and failed are those
+// results, not the ones in a suite that has already closed.
+export type TestSuiteSummary = {
+  readonly running: number;
+  readonly passed: number;
+  readonly failed: number;
+};
+
+// The queue as the page shows it. running and pending are the fifty an operator
+// reads; the counts beside those headings are the whole lists. suites is every
+// run that still has a result open. Completed is the fifty that finished last,
+// and has no count: that total only grows.
 export type AutomationQueue = {
   readonly running: ReadonlyArray<AutomationJob>;
   readonly pending: ReadonlyArray<AutomationJob>;
   readonly completed: ReadonlyArray<AutomationJob>;
+  readonly runningCount: number;
+  readonly pendingCount: number;
+  readonly suites: TestSuiteSummary;
 };
+
+const countOf = (
+  rows: ReadonlyArray<{ readonly status: string; readonly total: number }>,
+  status: string,
+): number => rows.find((row) => row.status === status)?.total ?? 0;
 
 // One process's word on itself: current jobs, VmRSS of this process and every child that
 // still answers, cpu over the last thirty seconds, and the database's clock at the read so
@@ -173,6 +205,77 @@ async function withDatabase<T>(
   }
 }
 
+// Twenty-five is the strip beside a name. The counts are every pass and fail of that name, not
+// just the pills: 15 out of 17 is fifteen passes and two fails. A running result is a pill and
+// not a verdict, so it is on the strip and out of that number.
+const DEFINITION_RECENT = 25;
+
+export type DefinitionPill = {
+  readonly id: string;
+  readonly status: "passed" | "failed" | "running";
+  readonly at: number;
+  readonly reason: string | null;
+  readonly model: string | null;
+};
+
+export type DefinitionHistory = {
+  readonly name: string;
+  readonly passed: number;
+  readonly total: number;
+  readonly recent: ReadonlyArray<DefinitionPill>;
+};
+
+// Passes out of passes and fails, one row per name. Pending, aborted and timed out are not drawn.
+// recent is the newest twenty-five of the pills, oldest first, so the rightmost pill is the latest.
+// `at` is when the result finished, or when it was created if it is still running.
+export function definitionHistories(
+  rows: ReadonlyArray<{
+    readonly name: string;
+    readonly id: string;
+    readonly status: (typeof testResults.$inferSelect)["status"];
+    readonly at: number;
+    readonly reason: string | null;
+    readonly model: string | null;
+  }>,
+): DefinitionHistory[] {
+  const byName = new Map<string, DefinitionPill[]>();
+  for (const row of rows) {
+    if (row.status !== "passed" && row.status !== "failed" && row.status !== "running") {
+      continue;
+    }
+    const current = byName.get(row.name) ?? [];
+    current.push({
+      id: row.id,
+      status: row.status,
+      at: row.at,
+      reason: row.reason,
+      model: row.model,
+    });
+    byName.set(row.name, current);
+  }
+  return [...byName.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, group]) => {
+      group.sort((left, right) => left.at - right.at);
+      let passed = 0;
+      let total = 0;
+      for (const row of group) {
+        if (row.status === "passed") {
+          passed += 1;
+          total += 1;
+        } else if (row.status === "failed") {
+          total += 1;
+        }
+      }
+      return {
+        name,
+        passed,
+        total,
+        recent: group.slice(-DEFINITION_RECENT),
+      };
+    });
+}
+
 export function definitionStats(rows: ReadonlyArray<Session>): DefinitionStat[] {
   const byName = new Map<
     string,
@@ -225,14 +328,13 @@ export function groupDefinitions(rows: ReadonlyArray<TestDefinition>): Definitio
     }));
 }
 
-// The definition the wide layout opens on, every wording of it: the name ?name asks for, or the
-// first listed when the page is opened bare. A name nobody carries selects nothing, so the route
-// can answer 404 rather than quietly show another definition under a URL that names this one.
+// The definition a name's page opens, every wording of it. A name nobody carries selects nothing,
+// so the route can answer 404 rather than show another definition under a URL that names this one.
 export function selectDefinition(
   groups: ReadonlyArray<DefinitionVersions>,
-  name: string | undefined,
+  name: string,
 ): DefinitionVersions | undefined {
-  return name === undefined ? groups[0] : groups.find((group) => group.name === name);
+  return groups.find((group) => group.name === name);
 }
 
 // Passed and failed per wording of one name, oldest first; a wording with neither is left out.
@@ -280,16 +382,49 @@ export function modelStats(rows: ReadonlyArray<TestResultOutcome>): ModelStat[] 
     }));
 }
 
+// Session time when the run opened one, otherwise the result's own span. A negative span is
+// not a duration an operator can read, and neither is a result that has not finished.
+export const resultDurationMs = (
+  createdAt: Date,
+  finishedAt: Date | null,
+  sessionStartedAt: Date | null,
+  sessionEndedAt: Date | null,
+): number | null => {
+  if (sessionStartedAt !== null && sessionEndedAt !== null) {
+    const ms = sessionEndedAt.getTime() - sessionStartedAt.getTime();
+    return ms < 0 ? null : ms;
+  }
+  if (finishedAt === null) {
+    return null;
+  }
+  const ms = finishedAt.getTime() - createdAt.getTime();
+  return ms < 0 ? null : ms;
+};
+
 const durationOf = (row: TestResultOutcome): number | undefined => {
-  if (row.sessionStartedAt !== null && row.sessionEndedAt !== null) {
-    const ms = row.sessionEndedAt.getTime() - row.sessionStartedAt.getTime();
-    return ms < 0 ? undefined : ms;
+  const ms = resultDurationMs(
+    row.createdAt,
+    row.finishedAt,
+    row.sessionStartedAt,
+    row.sessionEndedAt,
+  );
+  return ms === null ? undefined : ms;
+};
+
+// The diagnosis the reviewer wrote, or the result's own reason when nobody diagnosed it.
+// An error type names the cause; the summary is what they said. A blank is not a diagnosis.
+export const failureDiagnosis = (
+  errorType: string | null,
+  summary: string | null,
+  reason: string | null,
+): string | null => {
+  if (summary !== null && summary !== "") {
+    return errorType === null || errorType === "" ? summary : `${errorType}: ${summary}`;
   }
-  if (row.finishedAt === null) {
-    return undefined;
+  if (reason === null || reason === "") {
+    return null;
   }
-  const ms = row.finishedAt.getTime() - row.createdAt.getTime();
-  return ms < 0 ? undefined : ms;
+  return reason;
 };
 
 const finishedAt = (row: TestResultOutcome): number =>
@@ -406,6 +541,168 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
   });
 }
 
+// Every pass, fail and running result still inside retention, grouped by the definition's name so
+// an older wording counts toward the same line. Ordered by when the result finished, or by when it
+// was created if it has not finished, so a tie stays in creation order. `names` limits the read to
+// the rows on screen. The clock keeps a minute's refresh out of Hyperdrive's query cache.
+export function listDefinitionHistories(
+  connectionString: string,
+  names?: ReadonlyArray<string>,
+): Promise<DefinitionHistory[]> {
+  if (names !== undefined && names.length === 0) {
+    return Promise.resolve([]);
+  }
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .select({
+        name: testDefinitions.name,
+        id: testResults.id,
+        status: testResults.status,
+        reason: testResults.reason,
+        model: testResults.model,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(
+        names === undefined
+          ? inArray(testResults.status, ["passed", "failed", "running"])
+          : and(
+              inArray(testResults.status, ["passed", "failed", "running"]),
+              inArray(testDefinitions.name, [...names]),
+            ),
+      )
+      .orderBy(
+        testDefinitions.name,
+        sql`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`,
+        testResults.createdAt,
+      );
+    return definitionHistories(
+      rows.map((row) => ({
+        name: row.name,
+        id: row.id,
+        status: row.status,
+        at: row.at.getTime(),
+        reason: row.reason,
+        model: row.model,
+      })),
+    );
+  });
+}
+
+// One result as the diagnostic page dumps it. version is that wording's place among the name's
+// rows by id, the same order the definitions page numbers. Screenshots and logs are empty together
+// when the result never opened a session. The clock keeps the page out of Hyperdrive's cache.
+export type TestLogLine = {
+  readonly level: (typeof logs.$inferSelect)["level"];
+  readonly text: string;
+  readonly at: Date;
+};
+
+export type TestDump = {
+  readonly id: string;
+  readonly name: string;
+  readonly version: number;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly reason: string | null;
+  readonly model: string | null;
+  readonly ticket: string | null;
+  readonly sessionId: string | null;
+  readonly at: Date;
+  readonly screenshots: ReadonlyArray<string>;
+  readonly logs: ReadonlyArray<TestLogLine>;
+};
+
+export function readTestDump(connectionString: string, id: string): Promise<TestDump | undefined> {
+  return withDatabase(connectionString, async (db) => {
+    const [row] = await db
+      .select({
+        id: testResults.id,
+        definitionId: testDefinitions.id,
+        name: testDefinitions.name,
+        description: testDefinitions.description,
+        instruction: testDefinitions.instruction,
+        proof: testDefinitions.proof,
+        status: testResults.status,
+        reason: testResults.reason,
+        model: testResults.model,
+        ticket: testResults.linearId,
+        sessionId: testResults.sessionId,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(eq(testResults.id, id));
+    if (row === undefined) {
+      return undefined;
+    }
+    const [versionRow] = await db
+      .select({ version: count().mapWith(Number) })
+      .from(testDefinitions)
+      .where(and(eq(testDefinitions.name, row.name), lte(testDefinitions.id, row.definitionId)));
+    const version = versionRow?.version ?? 1;
+    if (row.sessionId === null) {
+      return {
+        id: row.id,
+        name: row.name,
+        version,
+        description: row.description,
+        instruction: row.instruction,
+        proof: row.proof,
+        status: row.status,
+        reason: row.reason,
+        model: row.model,
+        ticket: row.ticket,
+        sessionId: null,
+        at: row.at,
+        screenshots: [],
+        logs: [],
+      };
+    }
+    const sessionId = row.sessionId;
+    const shots = await db
+      .select({ id: images.id })
+      .from(images)
+      .innerJoin(actions, eq(actions.id, images.actionId))
+      .where(eq(actions.sessionId, sessionId))
+      .orderBy(actions.id);
+    const logRows = await db
+      .select({
+        level: logs.level,
+        text: logs.text,
+        at: logs.createdAt,
+      })
+      .from(logs)
+      .where(eq(logs.location, sessionId))
+      .orderBy(logs.id);
+    return {
+      id: row.id,
+      name: row.name,
+      version,
+      description: row.description,
+      instruction: row.instruction,
+      proof: row.proof,
+      status: row.status,
+      reason: row.reason,
+      model: row.model,
+      ticket: row.ticket,
+      sessionId,
+      at: row.at,
+      screenshots: shots.map((shot) => shot.id),
+      logs: logRows,
+    };
+  });
+}
+
 // Every wording of every definition, by name then oldest first. The clock in the select keeps the
 // list out of Hyperdrive's query cache: the page after a save must show the wording just written.
 export function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
@@ -503,12 +800,21 @@ export function listServers(connectionString: string): Promise<Server[]> {
 // Fifty of each list: an operator reads the front of the queue and what finished last.
 const QUEUE_LIMIT = 50;
 
-// The queue in three lists, each ordered and cut by the database. Running and pending put the
-// diagnoses ahead of the drives and then follow queue order, created_at (a boolean sorts false
-// before true, so descending puts the diagnoses first). Completed is every terminal status,
-// newest finished first: finished_at is the stamp the close writes, the row's last change. The
-// clock in each select is the one the stamps' ages are read against, and it keeps a poll out of
-// Hyperdrive's query cache.
+// A run still in progress: one of its results has not closed. The run row's own status is not
+// that — it is opened pending, and a row that still says running can already be finished.
+const openRunIds = (db: NodePgDatabase) =>
+  db
+    .selectDistinct({ runId: testResults.runId })
+    .from(testResults)
+    .where(inArray(testResults.status, ["pending", "running"]));
+
+// The queue in three lists, each ordered and cut by the database, plus the totals the headings
+// show and the open suites. Running and pending put the diagnoses ahead of the drives and then
+// follow queue order, created_at (a boolean sorts false before true, so descending puts the
+// diagnoses first). Completed is every terminal status, newest finished first: finished_at is
+// the stamp the close writes, the row's last change. The clock in each select is the one the
+// stamps' ages are read against, and it keeps a poll out of Hyperdrive's query cache. The
+// counts are not the lists: a list stops at fifty.
 export function listAutomationQueue(connectionString: string): Promise<AutomationQueue> {
   return withDatabase(connectionString, async (db) => {
     const jobs = () =>
@@ -528,6 +834,8 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
         .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
         .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId));
     const diagnosesFirst = desc(sql`${automationJobs.action} = 'diagnose'`);
+    // One client, one query at a time: pg warns, and soon refuses, a second query
+    // started while the first is still running.
     const running = await jobs()
       .where(eq(automationJobs.status, "running"))
       .orderBy(diagnosesFirst, automationJobs.createdAt)
@@ -540,7 +848,393 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .where(inArray(automationJobs.status, ["succeeded", "failed", "aborted", "timed_out"]))
       .orderBy(desc(automationJobs.finishedAt))
       .limit(QUEUE_LIMIT);
-    return { running, pending, completed };
+    const jobCounts = await db
+      .select({
+        status: automationJobs.status,
+        total: count().mapWith(Number),
+      })
+      .from(automationJobs)
+      .where(inArray(automationJobs.status, ["running", "pending"]))
+      .groupBy(automationJobs.status);
+    const suiteCounts = await db
+      .select({ total: count().mapWith(Number) })
+      .from(openRunIds(db).as("open_runs"));
+    const verdicts = await db
+      .select({
+        status: testResults.status,
+        total: count().mapWith(Number),
+      })
+      .from(testResults)
+      .where(inArray(testResults.runId, openRunIds(db)))
+      .groupBy(testResults.status);
+    const [suiteCount] = suiteCounts;
+    return {
+      running,
+      pending,
+      completed,
+      runningCount: countOf(jobCounts, "running"),
+      pendingCount: countOf(jobCounts, "pending"),
+      suites: {
+        running: suiteCount?.total ?? 0,
+        passed: countOf(verdicts, "passed"),
+        failed: countOf(verdicts, "failed"),
+      },
+    };
+  });
+}
+
+// The index lists every job in flight. A definition's page, and the poll and abort that
+// rewrite its list, keep only that name's.
+export const runningForDefinition = (
+  jobs: ReadonlyArray<AutomationJob>,
+  name: string,
+): AutomationJob[] => jobs.filter((job) => job.test === name);
+
+// Ten is what a definition's own page shows. The index strip is the last twenty-five.
+const DEFINITION_PAGE_RUNS = 10;
+
+// One verdict on a definition's page. durationMs is a pass's length; a fail has none, it
+// has the diagnosis instead. Newest first.
+export type DefinitionRun = {
+  readonly id: string;
+  readonly status: "passed" | "failed";
+  readonly durationMs: number | null;
+  readonly diagnosis: string | null;
+};
+
+export type DefinitionRunSource = {
+  readonly id: string;
+  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly at: number;
+  readonly durationMs: number | null;
+  readonly errorType: string | null;
+  readonly summary: string | null;
+  readonly reason: string | null;
+};
+
+export function recentDefinitionRuns(rows: ReadonlyArray<DefinitionRunSource>): DefinitionRun[] {
+  return rows
+    .flatMap((row) =>
+      row.status === "passed" || row.status === "failed" ? [{ ...row, status: row.status }] : [],
+    )
+    .sort((left, right) => right.at - left.at || left.id.localeCompare(right.id))
+    .slice(0, DEFINITION_PAGE_RUNS)
+    .map((row) => ({
+      id: row.id,
+      status: row.status,
+      durationMs: row.status === "passed" ? row.durationMs : null,
+      diagnosis:
+        row.status === "failed" ? failureDiagnosis(row.errorType, row.summary, row.reason) : null,
+    }));
+}
+
+// Passed and failed results of one definition, newest ten after recentDefinitionRuns. Older
+// wordings of the name count: a result hangs off the wording it ran. The clock keeps the
+// page out of Hyperdrive's cache.
+export function listDefinitionRuns(
+  connectionString: string,
+  name: string,
+): Promise<DefinitionRun[]> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .select({
+        id: testResults.id,
+        status: testResults.status,
+        reason: testResults.reason,
+        createdAt: testResults.createdAt,
+        finishedAt: testResults.finishedAt,
+        sessionStartedAt: sessions.startedAt,
+        sessionEndedAt: sessions.endedAt,
+        errorType: postRunDiagnosis.errorType,
+        summary: postRunDiagnosis.summary,
+        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
+          testResults.createdAt,
+        ),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .leftJoin(sessions, eq(sessions.id, testResults.sessionId))
+      .leftJoin(postRunDiagnosis, eq(postRunDiagnosis.sessionId, testResults.sessionId))
+      .where(
+        and(eq(testDefinitions.name, name), inArray(testResults.status, ["passed", "failed"])),
+      );
+    return recentDefinitionRuns(
+      rows.map((row) => ({
+        id: row.id,
+        status: row.status,
+        at: row.at.getTime(),
+        durationMs: resultDurationMs(
+          row.createdAt,
+          row.finishedAt,
+          row.sessionStartedAt,
+          row.sessionEndedAt,
+        ),
+        errorType: row.errorType,
+        summary: row.summary,
+        reason: row.reason,
+      })),
+    );
+  });
+}
+
+// Every job that is running, in the queue's running order: diagnoses ahead of drives, then
+// created_at. The definitions page lists what is in flight so an operator can stop it; the
+// queue's fifty would hide one.
+export function listRunningAutomationJobs(connectionString: string): Promise<AutomationJob[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .select({
+        ticket: testResults.linearId,
+        test: testDefinitions.name,
+        action: automationJobs.action,
+        status: automationJobs.status,
+        reason: automationJobs.reason,
+        createdAt: automationJobs.createdAt,
+        startedAt: automationJobs.startedAt,
+        finishedAt: automationJobs.finishedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+      })
+      .from(automationJobs)
+      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .where(eq(automationJobs.status, "running"))
+      .orderBy(desc(sql`${automationJobs.action} = 'diagnose'`), automationJobs.createdAt),
+  );
+}
+
+// The newest two hundred lines the follow shows. An older intent still indents the actions that
+// stay in the window, so the cut happens after that indent is known.
+export const FOLLOW_LIMIT = 200;
+
+export type FollowLog = {
+  readonly text: string;
+  readonly at: Date;
+};
+
+export type FollowAction = {
+  readonly name: string;
+  readonly state: "running" | "completed" | "failed";
+  readonly at: Date;
+};
+
+// An intent the agent announced, or a QMP command sent while one was open (`under`).
+export type FollowEvent =
+  | {
+      readonly kind: "intent";
+      readonly text: string;
+      readonly state: "running" | "completed";
+      readonly at: Date;
+    }
+  | {
+      readonly kind: "action";
+      readonly name: string;
+      readonly state: "running" | "completed" | "failed";
+      readonly under: boolean;
+      readonly at: Date;
+    };
+
+// What the ticket page shows, read from Postgres. The dashboard never calls the qemu server:
+// intents, QMP commands and the newest screenshot are the operator-visible part of a terminal
+// follow. waiting is a ticket whose session has not started and whose job is still in flight.
+export type SessionFollow = {
+  readonly ticket: string;
+  readonly sessionId: string | null;
+  readonly status:
+    | "downloading"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "aborted"
+    | "timed_out"
+    | null;
+  readonly imageId: string | null;
+  readonly instruction: string;
+  readonly events: ReadonlyArray<FollowEvent>;
+  readonly waiting: boolean;
+  readonly queriedAt: Date;
+};
+
+// A stored action is the QMP request; `execute` is the command name the follow prints. Anything
+// else is not a command.
+export const actionName = (request: unknown): string => {
+  if (typeof request !== "object" || request === null) {
+    return "?";
+  }
+  const execute = (request as { readonly execute?: unknown }).execute;
+  return typeof execute === "string" && execute.length > 0 ? execute : "?";
+};
+
+const INTENT_START = "intent start; ";
+
+// Logs and commands into one time order. Same-millisecond ties keep input order, and the logs
+// are handed in before the commands, so a log written with a command precedes it. Indent is
+// decided before the window is cut, so an action stays under an intent the window no longer shows.
+export function followEvents(
+  lines: ReadonlyArray<FollowLog>,
+  commands: ReadonlyArray<FollowAction>,
+): FollowEvent[] {
+  const stamped = [
+    ...lines.map((line, index) => ({
+      kind: "log" as const,
+      text: line.text,
+      at: line.at,
+      index,
+    })),
+    ...commands.map((command, index) => ({
+      kind: "action" as const,
+      name: command.name,
+      state: command.state,
+      at: command.at,
+      index: lines.length + index,
+    })),
+  ].sort((left, right) => left.at.getTime() - right.at.getTime() || left.index - right.index);
+
+  const events: FollowEvent[] = [];
+  let open: number | undefined;
+  for (const item of stamped) {
+    if (item.kind === "log") {
+      if (item.text.startsWith(INTENT_START)) {
+        const text = item.text.slice(INTENT_START.length);
+        if (text.length === 0) {
+          continue;
+        }
+        if (open !== undefined) {
+          const previous = events[open];
+          if (previous !== undefined && previous.kind === "intent") {
+            events[open] = { ...previous, state: "completed" };
+          }
+        }
+        open = events.length;
+        events.push({ kind: "intent", text, state: "running", at: item.at });
+      } else if (item.text === "intent end" && open !== undefined) {
+        const previous = events[open];
+        if (previous !== undefined && previous.kind === "intent") {
+          events[open] = { ...previous, state: "completed" };
+        }
+        open = undefined;
+      }
+      continue;
+    }
+    events.push({
+      kind: "action",
+      name: item.name,
+      state: item.state,
+      under: open !== undefined,
+      at: item.at,
+    });
+  }
+  return events.length > FOLLOW_LIMIT ? events.slice(events.length - FOLLOW_LIMIT) : events;
+}
+
+// One ticket's follow, or undefined when no result carries that Linear id. Intent logs and
+// actions are the newest FOLLOW_LIMIT, reversed to chronological; the clock in every select is
+// the one ages are read against, and it keeps a poll out of Hyperdrive's query cache.
+export function readSessionFollow(
+  connectionString: string,
+  ticket: string,
+): Promise<SessionFollow | undefined> {
+  return withDatabase(connectionString, async (db) => {
+    const clock = sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt);
+    const [result] = await db
+      .select({
+        sessionId: testResults.sessionId,
+        instruction: testDefinitions.instruction,
+        status: sessions.status,
+        queriedAt: clock,
+      })
+      .from(testResults)
+      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .leftJoin(sessions, eq(sessions.id, testResults.sessionId))
+      .where(eq(testResults.linearId, ticket))
+      .limit(1);
+    if (result === undefined) {
+      return undefined;
+    }
+
+    let waiting = false;
+    if (result.sessionId === null) {
+      const [job] = await db
+        .select({
+          id: automationJobs.id,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+        })
+        .from(automationJobs)
+        .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+        .where(
+          and(
+            eq(testResults.linearId, ticket),
+            inArray(automationJobs.status, ["pending", "running"]),
+          ),
+        )
+        .limit(1);
+      waiting = job !== undefined;
+      return {
+        ticket,
+        sessionId: null,
+        status: null,
+        imageId: null,
+        instruction: result.instruction,
+        events: [],
+        waiting,
+        queriedAt: result.queriedAt,
+      };
+    }
+
+    const logRows = await db
+      .select({
+        text: logs.text,
+        at: logs.createdAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(logs.createdAt),
+      })
+      .from(logs)
+      .where(
+        and(
+          eq(logs.location, result.sessionId),
+          or(like(logs.text, "intent start; %"), eq(logs.text, "intent end")),
+        ),
+      )
+      .orderBy(desc(logs.id))
+      .limit(FOLLOW_LIMIT);
+    const actionRows = await db
+      .select({
+        request: actions.request,
+        state: actions.state,
+        at: actions.createdAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(actions.createdAt),
+      })
+      .from(actions)
+      .where(eq(actions.sessionId, result.sessionId))
+      .orderBy(desc(actions.id))
+      .limit(FOLLOW_LIMIT);
+    const [image] = await db
+      .select({
+        id: images.id,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(actions.createdAt),
+      })
+      .from(images)
+      .innerJoin(actions, eq(actions.id, images.actionId))
+      .where(eq(actions.sessionId, result.sessionId))
+      .orderBy(desc(actions.id))
+      .limit(1);
+
+    return {
+      ticket,
+      sessionId: result.sessionId,
+      status: result.status,
+      imageId: image?.id ?? null,
+      instruction: result.instruction,
+      events: followEvents(
+        logRows.toReversed().map((row) => ({ text: row.text, at: row.at })),
+        actionRows.toReversed().map((row) => ({
+          name: actionName(row.request),
+          state: row.state ?? "running",
+          at: row.at,
+        })),
+      ),
+      waiting,
+      queriedAt: result.queriedAt,
+    };
   });
 }
 

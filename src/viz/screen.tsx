@@ -165,6 +165,32 @@ const Popup = (props: { readonly text: string }) => (
   </Centered>
 );
 
+// d's definition or enter's ticket information, boxed in the middle so the board stays put
+// underneath. j and k have already scrolled the lines.
+const Sheet = (props: { readonly sheet: View.Sheet }) => (
+  <Centered>
+    <box
+      width={View.SHEET_WIDTH}
+      height={View.SHEET_ROWS + 4}
+      border
+      borderStyle="rounded"
+      borderColor={Text.PALETTE.foam}
+      backgroundColor={RGBA.defaultBackground()}
+      title={` ${props.sheet.title} `}
+      titleColor={Text.PALETTE.text}
+      bottomTitle={` ${View.SHEET_HINT} `}
+      bottomTitleAlignment="right"
+      paddingLeft={1}
+      paddingRight={1}
+      paddingTop={1}
+      paddingBottom={1}
+      flexDirection="column"
+    >
+      <Index each={View.sheetRows(props.sheet)}>{(row) => <Line row={row()} />}</Index>
+    </box>
+  </Centered>
+);
+
 // A's question: the job on the top border, the keys on the bottom one, the question and the
 // two answers between, as wide as the view says so the borders hold their words.
 const Confirm = (props: { readonly asked: View.Confirm }) => (
@@ -209,6 +235,8 @@ export const App = (props: Props) => {
     return follow?._tag === "full" ? follow : undefined;
   };
   const asked = (): View.Confirm | undefined => Option.getOrUndefined(props.view().confirm);
+  const sheet = (): View.Sheet | undefined => Option.getOrUndefined(props.view().sheet);
+  const image = () => Option.getOrUndefined(screen().image);
   const popup = (): string | undefined => Option.getOrUndefined(props.view().popup)?.text;
   return (
     <Show
@@ -235,9 +263,14 @@ export const App = (props: Props) => {
               paddingLeft={1}
               paddingRight={1}
               flexDirection="column"
-              flexShrink={0}
+              flexGrow={screen().tab === "servers" ? 0 : 1}
+              flexShrink={screen().tab === "servers" ? 0 : 1}
             >
               <Line row={screen().tabs} />
+              <Index each={screen().pages}>{(row) => <Line row={row()} />}</Index>
+              <Show when={screen().tab !== "servers"}>
+                <Index each={screen().body}>{(row) => <Line row={row()} />}</Index>
+              </Show>
               <Show when={Option.getOrUndefined(screen().machines.empty)}>
                 {(text: Accessor<string>) => (
                   <text fg={MUTED} wrapMode="none">
@@ -259,31 +292,33 @@ export const App = (props: Props) => {
                 )}
               </Index>
             </box>
-            <box
-              border
-              borderStyle="rounded"
-              borderColor={MUTED}
-              titleColor={MUTED}
-              title={` ${screen().queue.title} `}
-              bottomTitle={title(screen().queue.place)}
-              bottomTitleAlignment="right"
-              paddingLeft={1}
-              paddingRight={1}
-              flexDirection="column"
-              flexGrow={1}
-              flexShrink={1}
-              minHeight={0}
-            >
-              <Line row={screen().queue.header} />
-              <Show when={Option.getOrUndefined(screen().queue.empty)}>
-                {(text: Accessor<string>) => (
-                  <text fg={MUTED} wrapMode="none">
-                    {text()}
-                  </text>
-                )}
-              </Show>
-              <Index each={screen().queue.jobs}>{(job) => <Line row={job()} />}</Index>
-            </box>
+            <Show when={screen().tab === "servers"}>
+              <box
+                border
+                borderStyle="rounded"
+                borderColor={MUTED}
+                titleColor={MUTED}
+                title={` ${screen().queue.title} `}
+                bottomTitle={title(screen().queue.place)}
+                bottomTitleAlignment="right"
+                paddingLeft={1}
+                paddingRight={1}
+                flexDirection="column"
+                flexGrow={1}
+                flexShrink={1}
+                minHeight={0}
+              >
+                <Line row={screen().queue.header} />
+                <Show when={Option.getOrUndefined(screen().queue.empty)}>
+                  {(text: Accessor<string>) => (
+                    <text fg={MUTED} wrapMode="none">
+                      {text()}
+                    </text>
+                  )}
+                </Show>
+                <Index each={screen().queue.jobs}>{(job) => <Line row={job()} />}</Index>
+              </box>
+            </Show>
             <box
               flexDirection="row"
               justifyContent="space-between"
@@ -296,6 +331,31 @@ export const App = (props: Props) => {
                 {screen().footer.right}
               </text>
             </box>
+            <Show when={image()}>
+              {(
+                found: Accessor<{
+                  readonly png: Uint8Array;
+                  readonly top: number;
+                  readonly height: number;
+                }>,
+              ) => (
+                <box
+                  position="absolute"
+                  top={found().top}
+                  left={View.SESSION_IMAGE_LEFT}
+                  right={2}
+                  height={found().height}
+                >
+                  <image
+                    source={found().png}
+                    fit="fit"
+                    protocol={props.imageProtocol ?? "auto"}
+                    flexGrow={1}
+                    height={found().height}
+                  />
+                </box>
+              )}
+            </Show>
             <Show when={peek()}>
               {(found: Accessor<Follow.Peek>) => (
                 <Peek follow={found()} now={props.now()} imageProtocol={props.imageProtocol} />
@@ -313,6 +373,7 @@ export const App = (props: Props) => {
           />
         )}
       </Show>
+      <Show when={sheet()}>{(found: Accessor<View.Sheet>) => <Sheet sheet={found()} />}</Show>
       <Show when={asked()}>{(found: Accessor<View.Confirm>) => <Confirm asked={found()} />}</Show>
       <Show when={popup()}>{(text: Accessor<string>) => <Popup text={text()} />}</Show>
     </Show>

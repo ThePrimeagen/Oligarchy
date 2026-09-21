@@ -15,7 +15,10 @@ export type FinishStatus = "succeeded" | "failed" | "aborted";
 // is the automation client that took the job, null while it waits or once that client's row is
 // gone. serverUrl is the qemu server a drive's guest is on: the one its ticket is reserved on,
 // then the one its session was routed to; null while a drive is placed nowhere, and always for
-// a diagnose, which runs no guest.
+// a diagnose, which runs no guest. instruction is the wording the result was
+// created against, not a newer definition of the same name. intent is the open
+// `intent start; <message>` of that session, or null once it ends or when there
+// is no session.
 export type AutomationJobListRow = {
   readonly ticket: string | null;
   readonly test: string;
@@ -29,6 +32,8 @@ export type AutomationJobListRow = {
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
   readonly queriedAt: Date;
+  readonly instruction: string;
+  readonly intent: string | null;
 };
 
 export type AutomationQueue = {
@@ -237,6 +242,24 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
           startedAt: DbSchema.automationJobs.startedAt,
           finishedAt: DbSchema.automationJobs.finishedAt,
           queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
+          instruction: DbSchema.testDefinitions.instruction,
+          // Newest intent line for this session. A later log that is not an intent
+          // does not close it; `intent end`, or no session, leaves this null.
+          intent: sql<string | null>`(
+            select case
+              when ${DbSchema.logs.text} like ${"intent start; %"}
+                then substr(${DbSchema.logs.text}, length(${"intent start; "}) + 1)
+              else null
+            end
+            from ${DbSchema.logs}
+            where ${DbSchema.logs.location} = ${DbSchema.agentRuns.sessionId}::text
+              and (
+                ${DbSchema.logs.text} like ${"intent start; %"}
+                or ${DbSchema.logs.text} = ${"intent end"}
+              )
+            order by ${DbSchema.logs.id} desc
+            limit 1
+          )`,
         };
         const jobs = (db: Client.Db) =>
           db

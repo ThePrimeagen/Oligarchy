@@ -451,20 +451,29 @@ describe("test define", () => {
 });
 
 // ---------------------------------------------------------------------------
-// test new
+// test run --name
 // ---------------------------------------------------------------------------
 
-const NEW = ["test", "new", "--iso", "https://example.com/omarchy.iso", "--version", "1.2.3"];
+const NEW = [
+  "test",
+  "run",
+  "--name",
+  "Install Omarchy",
+  "--iso",
+  "https://example.com/omarchy.iso",
+  "--version",
+  "1.2.3",
+];
 const WITH_LINEAR = { ...WITH_DB, LINEAR_API_TOKEN: "linear-token" };
 
-describe("test new", () => {
+describe("test run", () => {
   it.effect(
     "creates the run and pending results, then one described Linear ticket per definition (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
         h.stores.tests.definitions.push(terminal, install);
-        const exit = yield* h.run([...NEW, `--server-url=${SERVER}`], WITH_LINEAR);
+        const exit = yield* h.run([...SUITE, `--server-url=${SERVER}`], WITH_LINEAR);
         expect(Exit.isSuccess(exit)).toBe(true);
 
         const [run] = h.stores.tests.runs;
@@ -567,10 +576,7 @@ describe("test new", () => {
     Effect.gen(function* () {
       const h = harness();
       h.stores.tests.definitions.push(install, terminal);
-      const exit = yield* h.run(
-        [...NEW, "--server-url", SERVER, "--name", "Install Omarchy"],
-        WITH_LINEAR,
-      );
+      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([1]);
       expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
@@ -584,7 +590,7 @@ describe("test new", () => {
     Effect.gen(function* () {
       const h = harness();
       h.stores.tests.definitions.push(install, installRevised, terminal);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([
         installRevised.id,
@@ -602,10 +608,7 @@ describe("test new", () => {
       const h = harness();
       // The older wording is listed last, so the newest wins by id, not by position.
       h.stores.tests.definitions.push(installRevised, terminal, install);
-      const exit = yield* h.run(
-        [...NEW, "--server-url", SERVER, "--name", "Install Omarchy"],
-        WITH_LINEAR,
-      );
+      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([installRevised.id]);
       const described = h.linear.calls.filter((call) => call.method === "describeIssue");
@@ -619,16 +622,18 @@ describe("test new", () => {
     }),
   );
 
-  it.effect("rejects an experiment with no test definitions before touching Linear (unhappy)", () =>
+  it.effect("test new is not a command (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "CommandError",
-        message: "test: no test definitions found",
-      });
+      h.stores.tests.definitions.push(install, terminal);
+      const exit = yield* h.run(
+        ["test", "new", "--name", "Install Omarchy", "--server-url", SERVER],
+        WITH_LINEAR,
+      );
+      expect(helpErrors(exit).join("\n")).toMatch(/Unknown subcommand "new"/);
       expect(h.stores.tests.runs).toEqual([]);
       expect(h.linear.calls).toEqual([]);
+      expect(h.touched).toEqual([]);
     }),
   );
 
@@ -637,7 +642,18 @@ describe("test new", () => {
       const h = harness();
       h.stores.tests.definitions.push(install);
       const exit = yield* h.run(
-        [...NEW, "--server-url", SERVER, "--name", "Change lighting"],
+        [
+          "test",
+          "run",
+          "--name",
+          "Change lighting",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+          "--server-url",
+          SERVER,
+        ],
         WITH_LINEAR,
       );
       expect(failure(exit)).toMatchObject({
@@ -695,7 +711,7 @@ describe("test new", () => {
         }),
       });
       h.stores.tests.definitions.push(install, terminal);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
       expect(failure(exit)).toMatchObject({
         _tag: "LinearError",
         message: "linear: request failed (401): unauthorized; created OLI-42, OLI-43",
@@ -850,7 +866,7 @@ describe("test new", () => {
         const fs = promptFs(/\/client\.md$/, "{{LINEAR_TICKET}} {{CLIENT_MD}}");
         const h = harness({ fs: fs.layer });
         h.stores.tests.definitions.push(install, terminal);
-        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
+        const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
         const error = failure(exit);
         expect(error).toMatchObject({
           _tag: "PromptError",
@@ -920,7 +936,9 @@ describe("test new", () => {
       const http = yield* h.run(
         [
           "test",
-          "new",
+          "run",
+          "--name",
+          "Install Omarchy",
           "--iso",
           "http://example.com/omarchy.iso",
           `--server-url=${SERVER}`,
@@ -931,7 +949,17 @@ describe("test new", () => {
       );
       expect(helpErrors(http).join("\n")).toMatch(/iso must be a valid https url/);
       const hostless = yield* h.run(
-        ["test", "new", "--iso", "https://?", `--server-url=${SERVER}`, "--version", "1.2.3"],
+        [
+          "test",
+          "run",
+          "--name",
+          "Install Omarchy",
+          "--iso",
+          "https://?",
+          `--server-url=${SERVER}`,
+          "--version",
+          "1.2.3",
+        ],
         WITH_LINEAR,
       );
       expect(helpErrors(hostless).join("\n")).toMatch(/iso must be a valid https url/);
@@ -943,19 +971,37 @@ describe("test new", () => {
     Effect.gen(function* () {
       const h = harness();
       const missingIso = yield* h.run(
-        ["test", "new", `--server-url=${SERVER}`, "--version", "1.2.3"],
+        [
+          "test",
+          "run",
+          "--name",
+          "Install Omarchy",
+          `--server-url=${SERVER}`,
+          "--version",
+          "1.2.3",
+        ],
         WITH_LINEAR,
       );
       expect(helpErrors(missingIso).join("\n")).toMatch(/Missing required flag: --iso/);
       const missingVersion = yield* h.run(
-        ["test", "new", "--iso", "https://example.com/omarchy.iso", `--server-url=${SERVER}`],
+        [
+          "test",
+          "run",
+          "--name",
+          "Install Omarchy",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          `--server-url=${SERVER}`,
+        ],
         WITH_LINEAR,
       );
       expect(helpErrors(missingVersion).join("\n")).toMatch(/Missing required flag: --version/);
       const underscore = yield* h.run(
         [
           "test",
-          "new",
+          "run",
+          "--name",
+          "Install Omarchy",
           "--iso",
           "https://example.com/omarchy.iso",
           `--server_url=${SERVER}`,
@@ -965,6 +1011,193 @@ describe("test new", () => {
         WITH_LINEAR,
       );
       expect(helpErrors(underscore).join("\n")).toMatch(/Unrecognized flag: --server_url/);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// test run testsuite
+// ---------------------------------------------------------------------------
+
+const SUITE = [
+  "test",
+  "run",
+  "testsuite",
+  "--iso",
+  "https://example.com/omarchy.iso",
+  "--version",
+  "1.2.3",
+];
+
+describe("test run testsuite", () => {
+  it.effect("opens one run for every newest wording, and one ticket each (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, terminal, installRevised);
+      const exit = yield* h.run([...SUITE, `--server-url=${SERVER}`], WITH_LINEAR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+
+      const [run] = h.stores.tests.runs;
+      expect(run).toMatchObject({
+        name: "Omarchy experiment",
+        iso: "https://example.com/omarchy.iso",
+        serverUrl: SERVER,
+        status: "pending",
+        reason: null,
+      });
+      const results = h.stores.tests.results;
+      expect(results.map((row) => [row.definitionId, row.status, row.linearId])).toEqual([
+        [installRevised.id, "pending", "OLI-42"],
+        [terminal.id, "pending", "OLI-43"],
+      ]);
+      const described = h.linear.calls.filter((call) => call.method === "describeIssue");
+      expect(described).toHaveLength(2);
+      const first = described[0]?.method === "describeIssue" ? described[0].description : "";
+      expect(first).toContain(installRevised.instruction);
+      expect(first).not.toContain(`<instruction>${install.instruction}</instruction>`);
+      expect(h.linear.calls.filter((call) => call.method === "createIssue")).toEqual([
+        expect.objectContaining({
+          input: expect.objectContaining({ title: "Omarchy: Install Omarchy" }),
+        }),
+        expect.objectContaining({
+          input: expect.objectContaining({ title: "Omarchy: Open a terminal" }),
+        }),
+      ]);
+      expect(yield* lastJson).toEqual({
+        id: run?.id,
+        tests: [
+          { id: results[0]?.id, linear: FakeLinear.ticketFor("OLI-42") },
+          { id: results[1]?.id, linear: FakeLinear.ticketFor("OLI-43") },
+        ],
+      });
+      expect(h.log.lines.map((line) => line.text)).toEqual([
+        `test ${run?.id} created; 2 tests; OLI-42, OLI-43`,
+      ]);
+    }),
+  );
+
+  it.effect("reads the qemu server from SERVER_URL when the flag is omitted (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(terminal);
+      const exit = yield* h.run(SUITE, { ...WITH_LINEAR, SERVER_URL: SERVER });
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.runs[0]?.serverUrl).toBe(SERVER);
+      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([terminal.id]);
+    }),
+  );
+
+  it.effect("rejects an empty table before touching Linear (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+      expect(failure(exit)).toMatchObject({
+        _tag: "CommandError",
+        message: "test: no test definitions found",
+      });
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("fails the run when Linear refuses, naming no ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const refused = Errors.LinearError.make({
+        operation: "teamId",
+        status: 401,
+        message: "linear: request failed (401): unauthorized",
+      });
+      const h = harness({
+        linear: FakeLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
+      });
+      h.stores.tests.definitions.push(install, terminal);
+      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+      expect(failure(exit)).toMatchObject({
+        _tag: "LinearError",
+        message: "linear: request failed (401): unauthorized",
+      });
+      expect(h.stores.tests.runs[0]).toMatchObject({
+        status: "failed",
+        reason: "linear: request failed (401): unauthorized",
+      });
+      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("refuses --name, a non-https ISO and a missing server (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install);
+      const named = yield* h.run(
+        [...SUITE, "--server-url", SERVER, "--name", "Install Omarchy"],
+        WITH_LINEAR,
+      );
+      expect(helpErrors(named).join("\n")).toMatch(/Unrecognized flag: --name/);
+      const http = yield* h.run(
+        [
+          "test",
+          "run",
+          "testsuite",
+          "--iso",
+          "http://example.com/omarchy.iso",
+          "--server-url",
+          SERVER,
+          "--version",
+          "1.2.3",
+        ],
+        WITH_LINEAR,
+      );
+      expect(helpErrors(http).join("\n")).toMatch(/iso must be a valid https url/);
+      const missing = yield* h.run(SUITE, { ...WITH_LINEAR, SERVER_URL: "" });
+      expect(helpErrors(missing).join("\n")).toMatch(/Missing required flag: --server-url/);
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("refuses a run that names no definition, before any ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, terminal);
+      const exit = yield* h.run(
+        [
+          "test",
+          "run",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+          "--server-url",
+          SERVER,
+        ],
+        WITH_LINEAR,
+      );
+      expect(helpErrors(exit).join("\n")).toMatch(/Missing required flag: --name/);
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("the hyphenated name is not a command (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, terminal);
+      const exit = yield* h.run(["test", "run", "test-suite"], {});
+      expect(helpErrors(exit).join("\n")).toMatch(/Unknown subcommand "test-suite"/);
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+      expect(h.touched).toEqual([]);
+    }),
+  );
+
+  it.effect("the old create parent is not a command (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const exit = yield* h.run(["create", "test-suite-run"], {});
+      expect(helpErrors(exit).join("\n")).toMatch(/Unknown subcommand "create"/);
       expect(h.touched).toEqual([]);
     }),
   );
@@ -1480,20 +1713,29 @@ describe("test list", () => {
 // gone Cursor agent kickoffs
 // ---------------------------------------------------------------------------
 
-describe("test run and diagnose run", () => {
-  it.effect("are unknown actions: they spawn no agent and touch nothing (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      for (const args of [
-        ["test", "run", "--ticket", "OLI-42"],
-        ["diagnose", "run", "--session-id", SESSION_ID],
-      ]) {
-        const exit = yield* h.run(args, {});
-        expect(helpErrors(exit).length, args.join(" ")).toBeGreaterThan(0);
-      }
-      expect(h.touched).toEqual([]);
-      expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
-    }),
+describe("gone Cursor agent kickoffs", () => {
+  it.effect(
+    "test run --ticket is not an agent: it is a stray flag and touches nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const exit = yield* h.run(["test", "run", "--ticket", "OLI-42"], {});
+        expect(helpErrors(exit).join("\n")).toMatch(/Unrecognized flag: --ticket/);
+        expect(h.touched).toEqual([]);
+        expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
+      }),
+  );
+
+  it.effect(
+    "diagnose run is an unknown action: it spawns no agent and touches nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        const exit = yield* h.run(["diagnose", "run", "--session-id", SESSION_ID], {});
+        expect(helpErrors(exit).length).toBeGreaterThan(0);
+        expect(h.touched).toEqual([]);
+        expect(yield* stdout).not.toContain(expect.stringContaining("Agent here"));
+      }),
   );
 });
 
@@ -3110,7 +3352,9 @@ describe("environment order", () => {
         const parseFirst = yield* h.run(
           [
             "test",
-            "new",
+            "run",
+            "--name",
+            "Install Omarchy",
             "--iso",
             "http://x.example/o.iso",
             "--version",
@@ -3167,9 +3411,9 @@ describe("environment order", () => {
   );
 });
 
-// The proxy url is data on test new alone: stored on the run and written into every ticket for the
-// drivers' ./client. Every other action reads the database and has no proxy to name; test start
-// and test-results still accept it unread, because tickets written before it went name it.
+// The proxy url is data on test run and test run testsuite: stored on the run and written into every ticket
+// for the drivers' ./client. Every other action reads the database and has no proxy to name; test
+// start and test-results still accept it unread, because tickets written before it went name it.
 describe("--server-url", () => {
   const TEST_START = [
     "test",
@@ -3205,7 +3449,7 @@ describe("--server-url", () => {
     ["automation", "--list"],
   ].map((args) => [...args, "--server-url", SERVER]);
 
-  it.effect("is required on test new (unhappy)", () =>
+  it.effect("is required on test run (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
       const exit = yield* h.run(NEW, { ...WITH_LINEAR, SERVER_URL: "" });
@@ -3215,7 +3459,7 @@ describe("--server-url", () => {
   );
 
   it.effect(
-    "is unrecognized on every action but test new, test start and test-results (unhappy)",
+    "is unrecognized on every action but test run, test run testsuite, test start and test-results (unhappy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -3258,37 +3502,39 @@ describe("--server-url", () => {
       }),
   );
 
-  it.effect("SERVER_URL in the environment is ignored by every action but test new (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.tests.definitions.push(install);
-      h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
-      h.stores.sessions.agentRuns.push({
-        agentId: "a",
-        sessionId: SESSION_ID,
-        startedAt: ago(500),
-        endedAt: ago(400),
-      });
-      h.stores.tests.results.push(result(RESULT_ID, "pending", null));
-      // A value test new's flag would refuse: nothing else reads it. The result is started
-      // before it is closed; NEW_TYPE mints the key DIAGNOSE then writes.
-      const env = { ...WITH_LINEAR, SERVER_URL: "ftp://env.example" };
-      for (const args of [
-        ["test", "--list"],
-        ["test", "list"],
-        TEST_START,
-        TEST_RESULTS,
-        ["session", "list"],
-        ["session", "--session-id", SESSION_ID, "--logs"],
-        SEARCH,
-        NEW_TYPE,
-        ["error-type", "list"],
-        DIAGNOSE,
-        ["automation", "--list"],
-      ]) {
-        expect(Exit.isSuccess(yield* h.run(args, env)), args.join(" ")).toBe(true);
-      }
-    }),
+  it.effect(
+    "SERVER_URL in the environment is ignored by every action but test run and test run testsuite (happy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness();
+        h.stores.tests.definitions.push(install);
+        h.stores.sessions.sessions.push(session(SESSION_ID, "failed", ago(500)));
+        h.stores.sessions.agentRuns.push({
+          agentId: "a",
+          sessionId: SESSION_ID,
+          startedAt: ago(500),
+          endedAt: ago(400),
+        });
+        h.stores.tests.results.push(result(RESULT_ID, "pending", null));
+        // A value test run's flag would refuse: nothing else reads it. The result is started
+        // before it is closed; NEW_TYPE mints the key DIAGNOSE then writes.
+        const env = { ...WITH_LINEAR, SERVER_URL: "ftp://env.example" };
+        for (const args of [
+          ["test", "--list"],
+          ["test", "list"],
+          TEST_START,
+          TEST_RESULTS,
+          ["session", "list"],
+          ["session", "--session-id", SESSION_ID, "--logs"],
+          SEARCH,
+          NEW_TYPE,
+          ["error-type", "list"],
+          DIAGNOSE,
+          ["automation", "--list"],
+        ]) {
+          expect(Exit.isSuccess(yield* h.run(args, env)), args.join(" ")).toBe(true);
+        }
+      }),
   );
 
   it.effect(
@@ -3454,7 +3700,8 @@ describe("--help", () => {
           ["--help"],
           ["test", "--help"],
           ["test", "define", "--help"],
-          ["test", "new", "--help"],
+          ["test", "run", "--help"],
+          ["test", "run", "testsuite", "--help"],
           ["test", "list", "--help"],
           ["test", "start", "--help"],
           ["test-results", "--help"],

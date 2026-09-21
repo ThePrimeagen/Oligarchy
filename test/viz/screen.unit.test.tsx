@@ -24,7 +24,6 @@ import {
   COLUMNS,
   CPU_BOTTOM,
   CPU_TOP,
-  DIAGNOSING,
   diagnosing,
   divider,
   EMPTY_QUEUE,
@@ -50,6 +49,7 @@ import {
   MUTED,
   OPENED,
   pad,
+  DIAGNOSING,
   PENDING,
   pending,
   PINE,
@@ -59,7 +59,6 @@ import {
   queueTop,
   READ_AT,
   ROWS,
-  RUNNER_RIGHT,
   RUNNING,
   runner,
   running,
@@ -150,22 +149,25 @@ describe("screen happy path", () => {
         const rows = yield* draw(shown(SNAPSHOT));
         expect(rows[0]).toBe(machinesTop("read 0 s ago"));
         expect(rows[1]).toBe(box(TABS));
-        expect(rows[2]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
-        expect(rows[3]).toBe(box(labels(CPU_TOP, MEM_TOP, JOBS_TOP)));
-        expect(rows[4]).toBe(
+        expect(rows[2]).toBe(box("  s  automation"));
+        expect(rows[3]).toBe(box("▸ qemu servers"));
+        expect(rows[4]).toBe(box("  t  tickets"));
+        expect(rows[5]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+        expect(rows[6]).toBe(box(labels(CPU_TOP, MEM_TOP, JOBS_TOP)));
+        expect(rows[7]).toBe(
           box(values("37.5%", CPU_BOTTOM, "512 MB", MEM_BOTTOM, "2", JOBS_BOTTOM)),
         );
-        expect(rows[5]).toBe(box(job(" ", RUNNING)));
-        expect(rows[6]).toBe(divider);
-        expect(rows[7]).toBe(box(header("  — · https://qemu-c.example.com", "never heard from")));
-        expect(rows[8]).toBe(box(labels(BLANK_GRAPH, BLANK_GRAPH, BLANK_GRAPH)));
-        expect(rows[9]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
-        expect(rows[10]).toBe(bottom());
-        expect(rows[11]).toBe(queueTop("automation · running 1 · pending 1"));
-        expect(rows[12]).toBe(box(JOB_HEADER));
-        expect(rows[13]).toBe(box(job("▸", RUNNING)));
-        expect(rows[14]).toBe(box(job(" ", PENDING)));
-        for (const row of rows.slice(15, ROWS - 2)) {
+        expect(rows[8]).toBe(box(job(" ", RUNNING)));
+        expect(rows[9]).toBe(divider);
+        expect(rows[10]).toBe(box(header("  — · https://qemu-c.example.com", "never heard from")));
+        expect(rows[11]).toBe(box(labels(BLANK_GRAPH, BLANK_GRAPH, BLANK_GRAPH)));
+        expect(rows[12]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
+        expect(rows[13]).toBe(bottom());
+        expect(rows[14]).toBe(queueTop("automation · running 1 · pending 1"));
+        expect(rows[15]).toBe(box(JOB_HEADER));
+        expect(rows[16]).toBe(box(job("▸", RUNNING)));
+        expect(rows[17]).toBe(box(job(" ", PENDING)));
+        for (const row of rows.slice(18, ROWS - 2)) {
           expect(row).toBe(blankBox);
         }
         expect(rows[ROWS - 2]).toBe(bottom());
@@ -174,34 +176,29 @@ describe("screen happy path", () => {
   );
 
   it.effect(
-    "shows the automation clients on the other tab, with the same card and the jobs the client runs",
+    "opens the automation tab as the clients and their jobs beside that client's memory and cpu",
     () =>
       Effect.gen(function* () {
-        const rows = yield* draw(shown(SNAPSHOT, { tab: "clients" }));
+        const rows = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
         expect(rows[0]).toBe(machinesTop("read 0 s ago"));
         expect(rows[1]).toBe(box(TABS));
-        expect(rows[2]).toBe(box(header("▸ runner · http://10.0.0.9:7000", RUNNER_RIGHT)));
-        // One reading: the left half of the one column is empty; 8% is one dot of the bottom row.
-        expect(rows[3]).toBe(
-          box(labels(BLANK_GRAPH, `${space(GRAPH - 1)}⢸`, `${space(GRAPH - 1)}⢸`)),
-        );
-        expect(rows[4]).toBe(
-          box(
-            values(
-              "8.0%",
-              `${space(GRAPH - 1)}⢀`,
-              "256 MB",
-              `${space(GRAPH - 1)}⢸`,
-              "1",
-              `${space(GRAPH - 1)}⢸`,
-            ),
-          ),
-        );
-        expect(rows[5]).toBe(box(job(" ", RUNNING)));
-        expect(rows[6]).toBe(bottom());
-        expect(rows[7]).toBe(queueTop("automation · running 1 · pending 1"));
-        expect(rows[9]).toBe(box(job("▸", RUNNING)));
+        expect(rows[2]).toBe(box("▸ s  automation"));
+        expect(rows[3]).toBe(box("  qemu servers"));
+        expect(rows[4]).toBe(box("  t  tickets"));
+        expect(rows[5]).toContain("▸ runner");
+        expect(rows[5]).toContain("256 MB");
+        expect(rows[5]).toContain("8.0%");
+        expect(rows[6]).toContain("OLI-61");
+        expect(rows[6]).toContain("100%");
+        // The graphs keep the top third. 0% is the last of those rows, not the foot of the body.
+        expect(rows[14]).toContain("0%");
+        expect(rows[15]).toContain("no session");
+        expect(rows[ROWS - 2]).toBe(bottom());
         expect(rows[ROWS - 1]).toBe(FOOTER);
+        expect(rows.join("\n")).not.toContain("╭─ automation");
+        const spans = yield* styled(shown(SNAPSHOT, { tab: "automation" }));
+        expect(styleOf(spans[5], "256 MB  ")).toEqual(["#9ccfd8", PLAIN]);
+        expect(styleOf(spans[5], "8.0%   ")).toEqual([GOLD, PLAIN]);
       }),
   );
 
@@ -221,20 +218,14 @@ describe("screen happy path", () => {
           queue: { ...QUEUE, running: [running, diagnosing, elsewhere] },
         };
         const servers = yield* draw(shown(snapshot));
-        expect(servers[5]).toBe(box(job(" ", RUNNING)));
-        expect(servers[6]).toBe(bottom());
-        expect(servers[7]).toBe(queueTop("automation · running 3 · pending 1"));
-        const clients = yield* draw(shown(snapshot, { tab: "clients" }));
-        expect(clients[5]).toBe(box(job(" ", RUNNING)));
-        expect(clients[6]).toBe(box(job(" ", DIAGNOSING)));
-        expect(clients[7]).toBe(bottom());
-        // The queue lists all three; the cards list only what is theirs.
-        expect(clients.slice(10, 14).map(ticketOf)).toEqual([
-          "OLI-61",
-          "OLI-65",
-          "OLI-66",
-          "OLI-62",
-        ]);
+        expect(servers[8]).toBe(box(job(" ", RUNNING)));
+        expect(servers[9]).toBe(bottom());
+        expect(servers[10]).toBe(queueTop("automation · running 3 · pending 1"));
+        const clients = yield* draw(shown(snapshot, { tab: "automation" }));
+        const listed = clients.flatMap((row) => row.match(/OLI-\d+/g) ?? []);
+        expect(listed).toEqual(["OLI-61", "OLI-65"]);
+        expect(clients.join("\n")).not.toContain("OLI-66");
+        expect(clients.join("\n")).not.toContain("OLI-62");
         expect(servers.filter((row) => row.includes("OLI-66"))).toHaveLength(1);
         expect(servers.filter((row) => row.includes("OLI-62"))).toHaveLength(1);
       }),
@@ -249,13 +240,14 @@ describe("screen happy path", () => {
         // The separator shares the inactive tab's muted, so the two are one run of cells.
         expect(styleOf(rows[1], "servers 1/2")).toEqual([TEXT, BOLD]);
         expect(styleOf(rows[1], " │ driving 1/1 diagnosing 0/1")).toEqual([MUTED, PLAIN]);
-        expect(styleOf(rows[2], "▸")).toEqual([GOLD, PLAIN]);
-        expect(styleOf(rows[2], "garage")).toEqual([TEXT, BOLD]);
-        expect(styleOf(rows[2], "http://127.0.0.1:55332")).toEqual([SUBTLE, PLAIN]);
-        expect(styleOf(rows[2], "qemus")).toEqual([SUBTLE, PLAIN]);
-        expect(styleOf(rows[2], "12 s ago")).toEqual([TEXT, PLAIN]);
+        expect(styleOf(rows[3], "▸ qemu servers")).toEqual([GOLD, BOLD]);
+        expect(styleOf(rows[5], "▸")).toEqual([GOLD, PLAIN]);
+        expect(styleOf(rows[5], "garage")).toEqual([TEXT, BOLD]);
+        expect(styleOf(rows[5], "http://127.0.0.1:55332")).toEqual([SUBTLE, PLAIN]);
+        expect(styleOf(rows[5], "qemus")).toEqual([SUBTLE, PLAIN]);
+        expect(styleOf(rows[5], "12 s ago")).toEqual([TEXT, PLAIN]);
         // Eight of sixteen blocks lit for 31.5 of 66.9 GB, each its own shade, the rest muted.
-        const blocks = (rows[2] ?? []).filter((span) => span[0].startsWith("■"));
+        const blocks = (rows[5] ?? []).filter((span) => span[0].startsWith("■"));
         expect(blocks.map((span) => span[0])).toEqual([
           ...Array.from({ length: 8 }, () => "■"),
           "■".repeat(8),
@@ -263,36 +255,42 @@ describe("screen happy path", () => {
         expect(blocks[7]?.[1]).toBe(GOLD);
         expect(blocks[8]?.[1]).toBe(MUTED);
         expect(new Set(blocks.slice(0, 8).map((span) => span[1])).size).toBe(8);
-        expect(styleOf(rows[3], "cpu     ")).toEqual([SUBTLE, PLAIN]);
-        expect(styleOf(rows[3], "⡇")).toEqual([LOVE, PLAIN]);
-        expect(styleOf(rows[3], "⢀⣿⣿")).toEqual([PINE, PLAIN]);
-        expect(styleOf(rows[3], "⣿⣿")).toEqual([IRIS, PLAIN]);
-        expect(styleOf(rows[4], "   37.5%")).toEqual([TEXT, BOLD]);
+        expect(styleOf(rows[6], "cpu     ")).toEqual([SUBTLE, PLAIN]);
+        expect(styleOf(rows[6], "⡇")).toEqual([LOVE, PLAIN]);
+        expect(styleOf(rows[6], "⢀⣿⣿")).toEqual([PINE, PLAIN]);
+        expect(styleOf(rows[6], "⣿⣿")).toEqual([IRIS, PLAIN]);
+        expect(styleOf(rows[7], "   37.5%")).toEqual([TEXT, BOLD]);
         // The card's job, in the queue's look, with no marker of its own while the card is selected.
-        expect(textOf(rows[5]).startsWith("│   OLI-61")).toBe(true);
-        expect(styleOf(rows[5], pad("● running", 12))).toEqual([GOLD, PLAIN]);
-        expect(rows[6]).toEqual([[divider, MUTED, PLAIN]]);
-        expect(colorsOf(rows[7])).not.toContain(GOLD);
-        expect(styleOf(rows[7], "never heard from")).toEqual([MUTED, PLAIN]);
-        expect(rows[11]).toEqual([[queueTop("automation · running 1 · pending 1"), MUTED, PLAIN]]);
-        expect(styleOf(rows[12], JOB_HEADER)).toEqual([SUBTLE, PLAIN]);
+        expect(textOf(rows[8]).startsWith("│   OLI-61")).toBe(true);
+        expect(styleOf(rows[8], pad(`${View.spinnerAt(READ_AT)} running`, 12))).toEqual([
+          View.DRIVE_COLOR,
+          PLAIN,
+        ]);
+        expect(rows[9]).toEqual([[divider, MUTED, PLAIN]]);
+        expect(colorsOf(rows[10])).not.toContain(GOLD);
+        expect(styleOf(rows[10], "never heard from")).toEqual([MUTED, PLAIN]);
+        expect(rows[14]).toEqual([[queueTop("automation · running 1 · pending 1"), MUTED, PLAIN]]);
+        expect(styleOf(rows[15], JOB_HEADER)).toEqual([SUBTLE, PLAIN]);
         // The machines have the focus: the queue's marker is muted, its ticket text.
-        expect(styleOf(rows[13], "▸")).toEqual([MUTED, PLAIN]);
-        expect(styleOf(rows[13], pad("OLI-61", 9))).toEqual([TEXT, PLAIN]);
-        expect(styleOf(rows[13], pad("● running", 12))).toEqual([GOLD, PLAIN]);
-        expect(styleOf(rows[14], pad("◌ pending", 12))).toEqual([MUTED, PLAIN]);
+        expect(styleOf(rows[16], "▸")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(rows[16], pad("OLI-61", 9))).toEqual([TEXT, PLAIN]);
+        expect(styleOf(rows[16], pad(`${View.spinnerAt(READ_AT)} running`, 12))).toEqual([
+          View.DRIVE_COLOR,
+          PLAIN,
+        ]);
+        expect(styleOf(rows[17], pad("◌ pending", 12))).toEqual([MUTED, PLAIN]);
         expect(styleOf(rows[ROWS - 1], "j/k")).toEqual([TEXT, PLAIN]);
         expect(styleOf(rows[ROWS - 1], " select   ")).toEqual([MUTED, PLAIN]);
         expect(styleOf(rows[ROWS - 1], "q")).toEqual([TEXT, PLAIN]);
         expect(styleOf(rows[ROWS - 1], "oligarchy")).toEqual([MUTED, PLAIN]);
         const queue = yield* styled(shown(SNAPSHOT, { focus: "queue" }));
-        expect(styleOf(queue[2], "▸")).toEqual([MUTED, PLAIN]);
-        expect(styleOf(queue[13], "▸")).toEqual([GOLD, PLAIN]);
+        expect(styleOf(queue[5], "▸")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(queue[16], "▸")).toEqual([GOLD, PLAIN]);
         // The card's job selected: its marker gold, the card's header without one.
         const onJob = yield* styled(at(SNAPSHOT, { servers: 1 }));
-        expect(textOf(onJob[2])).not.toContain("▸");
-        expect(styleOf(onJob[5], "▸")).toEqual([GOLD, PLAIN]);
-        const clients = yield* styled(shown(SNAPSHOT, { tab: "clients" }));
+        expect(textOf(onJob[5])).not.toContain("▸");
+        expect(styleOf(onJob[8], "▸")).toEqual([GOLD, PLAIN]);
+        const clients = yield* styled(shown(SNAPSHOT, { tab: "automation" }));
         expect(styleOf(clients[1], "servers 1/2 │ ")).toEqual([MUTED, PLAIN]);
         expect(styleOf(clients[1], "driving 1/1 diagnosing 0/1")).toEqual([TEXT, BOLD]);
       }),
@@ -320,7 +318,7 @@ describe("screen happy path", () => {
                 ],
               }),
             ),
-            (rows) => rows[4] ?? [],
+            (rows) => rows[7] ?? [],
           );
         // One percent is one dot, a shade off foam; fifty is gold itself; a hundred is love.
         expect(styleOf(yield* cpuRow([0, 1]), "⢀")).toEqual(["#9ecfd6", PLAIN]);
@@ -344,15 +342,15 @@ describe("screen happy path", () => {
           expect(row).toHaveLength(wide);
         }
         expect(rows[0]).toBe(machinesTop("read 0 s ago", wide));
-        expect(rows[3]).toBe(
+        expect(rows[6]).toBe(
           box(
             `${pad("cpu", 8)} ${space(graph - 2)}⢠⡇  ${pad("mem", 8)} ${space(graph - 3)}⢀⣿⣿  ${pad("jobs", 8)} ${space(graph - 2)}⣿⣿`,
             wide,
           ),
         );
-        expect(rows[5]).toBe(box(job(" ", RUNNING), wide));
-        expect(rows[12]).toBe(box(JOB_HEADER, wide));
-        expect(rows[13]).toBe(box(job("▸", RUNNING), wide));
+        expect(rows[8]).toBe(box(job(" ", RUNNING), wide));
+        expect(rows[15]).toBe(box(JOB_HEADER, wide));
+        expect(rows[16]).toBe(box(job("▸", RUNNING), wide));
         // Ninety readings in a graph of thirty-three columns: the oldest twenty-four fall off.
         const long = Array.from({ length: 90 }, (_, index) => ({
           jobs: 0,
@@ -363,8 +361,8 @@ describe("screen happy path", () => {
           shown({ ...SNAPSHOT, machines: [garage], series: [{ ...garageSeries, samples: long }] }),
         );
         const full = "⣿".repeat(GRAPH);
-        expect(cut[3]).toBe(box(labels(BLANK_GRAPH, full, BLANK_GRAPH)));
-        expect(cut[4]).toBe(box(values("0.0%", BLANK_GRAPH, "0 MB", full, "0", BLANK_GRAPH)));
+        expect(cut[6]).toBe(box(labels(BLANK_GRAPH, full, BLANK_GRAPH)));
+        expect(cut[7]).toBe(box(values("0.0%", BLANK_GRAPH, "0 MB", full, "0", BLANK_GRAPH)));
         // Memory and jobs scale to the highest reading in view, not to one that fell off.
         const spiked = [
           { jobs: 8, memoryBytes: 1, cpuPercent: 0 },
@@ -382,8 +380,8 @@ describe("screen happy path", () => {
             series: [{ ...garageSeries, samples: spiked }],
           }),
         );
-        expect(scaled[3]).toBe(box(labels(BLANK_GRAPH, full, `${space(GRAPH - 1)}⢸`)));
-        expect(scaled[4]).toBe(
+        expect(scaled[6]).toBe(box(labels(BLANK_GRAPH, full, `${space(GRAPH - 1)}⢸`)));
+        expect(scaled[7]).toBe(
           box(values("0.0%", BLANK_GRAPH, "0 MB", full, "1", `${space(GRAPH - 1)}⢸`)),
         );
       }),
@@ -402,11 +400,11 @@ describe("screen happy path", () => {
           },
         }),
       );
-      expect(rows.slice(13, 16).map(ticketOf)).toEqual(["OLI-61", "OLI-70", "OLI-62"]);
-      expect(rows[16]).toBe(blankBox);
-      expect(rows[11]).toBe(queueTop("automation · running 1 · pending 2"));
+      expect(rows.slice(16, 19).map(ticketOf)).toEqual(["OLI-61", "OLI-70", "OLI-62"]);
+      expect(rows[19]).toBe(blankBox);
+      expect(rows[14]).toBe(queueTop("automation · running 1 · pending 2"));
       // A completed job placed on garage is not on its card either.
-      expect(rows[6]).toBe(divider);
+      expect(rows[9]).toBe(divider);
       const frame = rows.join("\n");
       expect(frame).not.toContain("OLI-60");
       expect(frame).not.toContain("OLI-59");
@@ -446,19 +444,19 @@ describe("screen selection", () => {
       Effect.gen(function* () {
         const top = yield* draw(shown(many));
         expect(names(top)).toEqual(["▸ s0", "  s1", "  s2", "  s3"]);
-        expect(top[17]).toBe(bottom("1-4 of 6"));
-        expect(top[18]).toBe(queueTop("automation · running 1 · pending 1"));
+        expect(top[20]).toBe(bottom("1-4 of 6"));
+        expect(top[21]).toBe(queueTop("automation · running 1 · pending 1"));
         const third = yield* draw(at(many, { servers: 3 }));
         expect(names(third)).toEqual(["  s0", "  s1", "  s2", "▸ s3"]);
         const fifth = yield* draw(at(many, { servers: 4 }));
         expect(names(fifth)).toEqual(["  s1", "  s2", "  s3", "▸ s4"]);
-        expect(fifth[17]).toBe(bottom("2-5 of 6"));
+        expect(fifth[20]).toBe(bottom("2-5 of 6"));
         const last = yield* draw(at(many, { servers: 5 }));
         expect(names(last)).toEqual(["  s2", "  s3", "  s4", "▸ s5"]);
-        expect(last[17]).toBe(bottom("3-6 of 6"));
+        expect(last[20]).toBe(bottom("3-6 of 6"));
         // Four or fewer: no window to speak of.
         const few = yield* draw(shown(SNAPSHOT));
-        expect(few[10]).toBe(bottom());
+        expect(few[13]).toBe(bottom());
       }),
   );
 
@@ -466,35 +464,35 @@ describe("screen selection", () => {
     "shows only the cards that fit with their jobs, the queue keeping four rows, and cuts a card's jobs to the box",
     () =>
       Effect.gen(function* () {
-        // Cards of seven rows: three fit in the twenty-six rows the box may take at 37 rows.
+        // Cards of seven rows: three fit in the twenty-three rows the box may take at 37 rows.
         const four = yield* draw(shown(busy(4)));
         expect(names(four)).toEqual(["▸ s0", "  s1", "  s2"]);
-        expect(four[25]).toBe(bottom("1-3 of 6"));
-        expect(four[26]).toBe(queueTop("automation · running 24 · pending 0"));
-        expect(four[27]).toBe(box(JOB_HEADER));
-        // Three cards of four jobs, then the seven queue rows.
-        expect(four.filter((row) => /^│ [▸ ] OLI-/.test(row))).toHaveLength(12 + 7);
-        expect(four[35]).toBe(bottom("1-7 of 24"));
+        expect(four[28]).toBe(bottom("1-3 of 6"));
+        expect(four[29]).toBe(queueTop("automation · running 24 · pending 0"));
+        expect(four[30]).toBe(box(JOB_HEADER));
+        // Three cards of four jobs, then the four queue rows the shorter box leaves.
+        expect(four.filter((row) => /^│ [▸ ] OLI-/.test(row))).toHaveLength(12 + 4);
+        expect(four[35]).toBe(bottom("1-4 of 24"));
         expect(four[36]).toBe(FOOTER);
         // Cards of eleven rows: two fit.
         const eight = yield* draw(shown(busy(8)));
         expect(names(eight)).toEqual(["▸ s0", "  s1"]);
-        expect(eight[25]).toBe(bottom("1-2 of 6"));
+        expect(eight[28]).toBe(bottom("1-2 of 6"));
         // The window ends at the selected card and grows upward first: the last card's last
         // job selected shows the three cards above it that fit.
         const end = yield* draw(at(busy(4), { servers: 29 }));
         expect(names(end)).toEqual(["  s3", "  s4", "  s5"]);
         expect(
           end
-            .slice(0, 25)
+            .slice(0, 28)
             .filter((row) => row.startsWith("│ ▸ OLI-"))
             .map(ticketOf),
         ).toEqual(["OLI-53"]);
-        expect(end[25]).toBe(bottom("4-6 of 6"));
+        expect(end[28]).toBe(bottom("4-6 of 6"));
         // A taller terminal fits all four.
         const tall = yield* draw(shown(busy(4)), READ_AT, COLUMNS, 50);
         expect(names(tall)).toEqual(["▸ s0", "  s1", "  s2", "  s3"]);
-        expect(tall[33]).toBe(bottom("1-4 of 6"));
+        expect(tall[36]).toBe(bottom("1-4 of 6"));
         // A server running more guests than the box has rows shows what fits and the queue keeps
         // its four rows; the frame is still the terminal's height.
         const crowded = yield* draw(shown(busy(30)));
@@ -503,7 +501,7 @@ describe("screen selection", () => {
           expect(row).toHaveLength(COLUMNS);
         }
         expect(names(crowded)).toEqual(["▸ s0"]);
-        expect(crowded.slice(5, 28).every((row) => row.startsWith("│   OLI-0"))).toBe(true);
+        expect(crowded.slice(8, 28).every((row) => row.startsWith("│   OLI-0"))).toBe(true);
         expect(crowded[28]).toBe(bottom("1-1 of 6"));
         expect(crowded[29]).toBe(queueTop("automation · running 180 · pending 0"));
         expect(crowded[35]).toBe(bottom("1-4 of 180"));
@@ -511,16 +509,16 @@ describe("screen selection", () => {
         // The twenty-sixth job of that server selected (the card's header is the first entry):
         // the card's window ends on it, so the job L opens is on screen and marked.
         const deep = yield* draw(at(busy(30), { servers: 26 }));
-        expect(deep.slice(5, 28).map(ticketOf)).toEqual(
-          Array.from({ length: 23 }, (_, index) => `OLI-0${String(index + 3)}`),
+        expect(deep.slice(8, 28).map(ticketOf)).toEqual(
+          Array.from({ length: 20 }, (_, index) => `OLI-0${String(index + 6)}`),
         );
         expect(
           deep
-            .slice(5, 28)
+            .slice(8, 28)
             .filter((row) => row.startsWith("│ ▸ "))
             .map(ticketOf),
         ).toEqual(["OLI-025"]);
-        expect(deep[2]?.startsWith("│   s0")).toBe(true);
+        expect(deep[5]?.startsWith("│   s0")).toBe(true);
         expect(deep[28]).toBe(bottom("1-1 of 6"));
       }),
   );
@@ -547,35 +545,35 @@ describe("screen selection", () => {
           rows.filter((row) => row.startsWith("│ ▸ OLI-")).map(ticketOf);
         const listed = (rows: ReadonlyArray<string>): ReadonlyArray<string> =>
           rows.filter((row) => /^│ [▸ ] OLI-/.test(row)).map(ticketOf);
-        // 37 rows: ten are the cards' box, three the queue's frame, one the footer.
+        // 37 rows: the cards' box grew by the three tabs, so twenty jobs fit under them.
         const first = yield* draw(shown(snapshot));
-        expect(listed(first)).toHaveLength(23);
+        expect(listed(first)).toHaveLength(20);
         expect(listed(first)[0]).toBe("OLI-100");
         expect(marked(first)).toEqual(["OLI-100"]);
-        expect(first[35]).toBe(bottom("1-23 of 40"));
+        expect(first[35]).toBe(bottom("1-20 of 40"));
         const within = yield* draw(at(snapshot, { queue: 10 }));
         expect(listed(within)[0]).toBe("OLI-100");
         expect(marked(within)).toEqual(["OLI-110"]);
         const scrolled = yield* draw(at(snapshot, { queue: 30 }));
-        expect(listed(scrolled)[0]).toBe("OLI-108");
+        expect(listed(scrolled)[0]).toBe("OLI-111");
         expect(listed(scrolled).at(-1)).toBe("OLI-130");
         expect(marked(scrolled)).toEqual(["OLI-130"]);
-        expect(scrolled[35]).toBe(bottom("9-31 of 40"));
+        expect(scrolled[35]).toBe(bottom("12-31 of 40"));
         const end = yield* draw(at(snapshot, { queue: 39 }));
-        expect(listed(end)).toHaveLength(23);
+        expect(listed(end)).toHaveLength(20);
         expect(marked(end)).toEqual(["OLI-139"]);
-        expect(end[35]).toBe(bottom("18-40 of 40"));
+        expect(end[35]).toBe(bottom("21-40 of 40"));
         // A cursor past the end marks the last job; a taller terminal lists more.
         const past = yield* draw(at(snapshot, { queue: 90 }), READ_AT, COLUMNS, 50);
         expect(past).toHaveLength(50);
-        expect(listed(past)).toHaveLength(36);
+        expect(listed(past)).toHaveLength(33);
         expect(marked(past)).toEqual(["OLI-139"]);
-        expect(past[48]).toBe(bottom("5-40 of 40"));
+        expect(past[48]).toBe(bottom("8-40 of 40"));
         expect(past[49]).toBe(FOOTER);
         const exact = yield* draw(
           shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, pending: jobs.slice(0, 23) } }),
         );
-        expect(exact[35]).toBe(bottom());
+        expect(exact[35]).toBe(bottom("1-20 of 23"));
       }),
   );
 
@@ -586,23 +584,25 @@ describe("screen selection", () => {
         queue: { ...QUEUE, running: [running, diagnosing] },
       };
       const onJob = yield* draw(at(snapshot, { servers: 1 }));
-      expect(onJob[2]?.startsWith("│   garage")).toBe(true);
-      expect(onJob[5]).toBe(box(job("▸", RUNNING)));
-      expect(onJob[7]?.startsWith("│   — ·")).toBe(true);
+      expect(onJob[5]?.startsWith("│   garage")).toBe(true);
+      expect(onJob[8]).toBe(box(job("▸", RUNNING)));
+      expect(onJob[10]?.startsWith("│   — ·")).toBe(true);
       const next = yield* draw(at(snapshot, { servers: 2 }));
-      expect(next[5]).toBe(box(job(" ", RUNNING)));
-      expect(next[7]?.startsWith("│ ▸ — ·")).toBe(true);
+      expect(next[8]).toBe(box(job(" ", RUNNING)));
+      expect(next[10]?.startsWith("│ ▸ — ·")).toBe(true);
       const clients = yield* draw(
-        shown(snapshot, { tab: "clients", cursor: { servers: 0, clients: 2, queue: 0 } }),
+        shown(snapshot, { tab: "automation", cursor: { servers: 0, clients: 2, queue: 0 } }),
       );
-      expect(clients[2]?.startsWith("│   runner")).toBe(true);
-      expect(clients[5]).toBe(box(job(" ", RUNNING)));
-      expect(clients[6]).toBe(box(job("▸", DIAGNOSING)));
+      expect(clients[5]).toContain("runner");
+      expect(clients[5]).not.toContain("▸");
+      expect(clients[7]).toContain("▸");
+      expect(clients[7]).toContain("OLI-65");
       // A job that finished under the cursor: the rows above take the selection.
       const gone = yield* draw(
-        shown(SNAPSHOT, { tab: "clients", cursor: { servers: 0, clients: 2, queue: 0 } }),
+        shown(SNAPSHOT, { tab: "automation", cursor: { servers: 0, clients: 2, queue: 0 } }),
       );
-      expect(gone[5]).toBe(box(job("▸", RUNNING)));
+      expect(gone[6]).toContain("▸");
+      expect(gone[6]).toContain("OLI-61");
       // The queue focused with its second job selected, the machines keeping their place.
       const three = {
         ...SNAPSHOT,
@@ -611,9 +611,9 @@ describe("screen selection", () => {
       const queued = yield* draw(
         shown(three, { focus: "queue", cursor: { servers: 2, clients: 0, queue: 1 } }),
       );
-      expect(queued[2]?.startsWith("│   garage")).toBe(true);
-      expect(queued[7]?.startsWith("│ ▸ — ·")).toBe(true);
-      expect(queued.slice(13, 16).map((row) => row.slice(2, 3))).toEqual([" ", "▸", " "]);
+      expect(queued[5]?.startsWith("│   garage")).toBe(true);
+      expect(queued[10]?.startsWith("│ ▸ — ·")).toBe(true);
+      expect(queued.slice(16, 19).map((row) => row.slice(2, 3))).toEqual([" ", "▸", " "]);
     }),
   );
 });
@@ -641,8 +641,8 @@ describe("screen ages", () => {
         ).toEqual(["0 s ago", "59 s ago", "1 min ago", "59 min ago"]);
         // An hour and a day are silent, so the age follows the word.
         const old = yield* draw(shown({ ...SNAPSHOT, machines: [heard(3_600), heard(90_000)] }));
-        expect(old[2]).toContain("silent · seen 1 h ago");
-        expect(old[6]).toContain("silent · seen 1 d ago");
+        expect(old[5]).toContain("silent · seen 1 h ago");
+        expect(old[9]).toContain("silent · seen 1 d ago");
       }),
   );
 
@@ -650,9 +650,9 @@ describe("screen ages", () => {
     Effect.gen(function* () {
       const rows = yield* draw(shown(SNAPSHOT), READ_AT + 3_000);
       expect(rows[0]).toBe(machinesTop("read 3 s ago"));
-      expect(rows[2]).toContain("seen 15 s ago");
-      expect(rows[5]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
-      expect(rows[13]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
+      expect(rows[5]).toContain("seen 15 s ago");
+      expect(rows[8]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
+      expect(rows[16]).toContain(`${pad("3 min ago", 11)}  ${pad("48 s ago", 11)}`);
       const later = yield* draw(shown(SNAPSHOT), READ_AT + 125_000);
       expect(later[0]).toBe(machinesTop("read 2 min ago"));
     }),
@@ -662,7 +662,7 @@ describe("screen ages", () => {
     Effect.gen(function* () {
       const ahead: Servers.Machine = { ...garage, heartbeatAt: ago(-2) };
       const rows = yield* draw(shown({ ...SNAPSHOT, machines: [ahead] }));
-      expect(rows[2]).toContain("seen 0 s ago");
+      expect(rows[5]).toContain("seen 0 s ago");
     }),
   );
 });
@@ -674,13 +674,13 @@ describe("screen unhappy path", () => {
       Effect.gen(function* () {
         const view = shown({ ...SNAPSHOT, machines: [attic], series: [atticSeries] });
         const rows = yield* draw(view);
-        expect(rows[2]).toBe(
+        expect(rows[5]).toBe(
           box(header("▸ attic · https://qemu-b.example.com", "silent · seen 5 min ago")),
         );
-        expect(rows[3]).toBe(
+        expect(rows[6]).toBe(
           box(labels(BLANK_GRAPH, `${space(GRAPH - 1)}⢸`, `${space(GRAPH - 1)}⢸`)),
         );
-        expect(rows[4]).toBe(
+        expect(rows[7]).toBe(
           box(
             values(
               "50.0%",
@@ -696,13 +696,13 @@ describe("screen unhappy path", () => {
         expect(frame).not.toContain("50.0%  host");
         expect(frame).not.toContain("4.0 / 16.0 GB");
         const spans = yield* styled(view);
-        expect(styleOf(spans[2], "silent · seen 5 min ago")).toEqual([LOVE, PLAIN]);
-        const dots = [...(spans[3] ?? []), ...(spans[4] ?? [])].filter((span) => span[0] === "⢸");
+        expect(styleOf(spans[5], "silent · seen 5 min ago")).toEqual([LOVE, PLAIN]);
+        const dots = [...(spans[6] ?? []), ...(spans[7] ?? [])].filter((span) => span[0] === "⢸");
         expect(dots).toHaveLength(5);
         expect(dots.every((span) => span[1] === MUTED)).toBe(true);
-        expect(colorsOf(spans[3])).not.toContain(PINE);
-        expect(colorsOf(spans[4])).not.toContain(IRIS);
-        expect(styleOf(spans[4], "   50.0%")).toEqual([MUTED, PLAIN]);
+        expect(colorsOf(spans[6])).not.toContain(PINE);
+        expect(colorsOf(spans[7])).not.toContain(IRIS);
+        expect(styleOf(spans[7], "   50.0%")).toEqual([MUTED, PLAIN]);
       }),
   );
 
@@ -714,9 +714,9 @@ describe("screen unhappy path", () => {
           ...SNAPSHOT,
           machines: [{ ...garage, heartbeatAt: ago(secondsAgo) }],
         });
-        expect((yield* draw(shown(heard(90))))[2]).toContain("31.5 / 66.9 GB");
-        expect((yield* draw(shown(heard(91))))[2]).toContain("silent · seen 1 min ago");
-        expect((yield* draw(shown(heard(88)), READ_AT + 3_000))[2]).toContain(
+        expect((yield* draw(shown(heard(90))))[5]).toContain("31.5 / 66.9 GB");
+        expect((yield* draw(shown(heard(91))))[5]).toContain("silent · seen 1 min ago");
+        expect((yield* draw(shown(heard(88)), READ_AT + 3_000))[5]).toContain(
           "silent · seen 1 min ago",
         );
       }),
@@ -725,9 +725,9 @@ describe("screen unhappy path", () => {
   it.effect("draws a live machine without readings with dashes and empty graphs", () =>
     Effect.gen(function* () {
       const rows = yield* draw(shown({ ...SNAPSHOT, machines: [garage], series: [] }));
-      expect(rows[2]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
-      expect(rows[3]).toBe(box(labels(BLANK_GRAPH, BLANK_GRAPH, BLANK_GRAPH)));
-      expect(rows[4]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
+      expect(rows[5]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+      expect(rows[6]).toBe(box(labels(BLANK_GRAPH, BLANK_GRAPH, BLANK_GRAPH)));
+      expect(rows[7]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
       // A client's readings never dress a server of the same name.
       const crossed = yield* draw(
         shown({
@@ -736,7 +736,7 @@ describe("screen unhappy path", () => {
           series: [{ ...garageSeries, type: "automation-client" }],
         }),
       );
-      expect(crossed[4]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
+      expect(crossed[7]).toBe(box(values("—", BLANK_GRAPH, "—", BLANK_GRAPH, "—", BLANK_GRAPH)));
     }),
   );
 
@@ -767,14 +767,16 @@ describe("screen unhappy path", () => {
       const servers = yield* draw(shown({ ...SNAPSHOT, machines: [runner] }));
       expect(servers[0]).toBe(machinesTop("read 0 s ago"));
       expect(servers[1]).toBe(box("servers 0/0 │ driving 1/1 diagnosing 0/1"));
-      expect(servers[2]).toBe(box("no qemu servers registered"));
-      expect(servers[3]).toBe(bottom());
-      expect(servers[4]).toBe(queueTop("automation · running 1 · pending 1"));
-      expect(servers[6]).toBe(box(job("▸", RUNNING)));
-      const clients = yield* draw(shown({ ...SNAPSHOT, machines: [garage] }, { tab: "clients" }));
-      expect(clients[2]).toBe(box("no automation clients registered"));
+      expect(servers[5]).toBe(box("no qemu servers registered"));
+      expect(servers[6]).toBe(bottom());
+      expect(servers[7]).toBe(queueTop("automation · running 1 · pending 1"));
+      expect(servers[9]).toBe(box(job("▸", RUNNING)));
+      const clients = yield* draw(
+        shown({ ...SNAPSHOT, machines: [garage] }, { tab: "automation" }),
+      );
+      expect(clients[5]).toBe(box("no automation clients"));
       const spans = yield* styled(shown({ ...SNAPSHOT, machines: [] }));
-      expect(styleOf(spans[2], "no qemu servers registered")).toEqual([MUTED, PLAIN]);
+      expect(styleOf(spans[5], "no qemu servers registered")).toEqual([MUTED, PLAIN]);
     }),
   );
 
@@ -784,14 +786,14 @@ describe("screen unhappy path", () => {
       Effect.gen(function* () {
         const view = shown({ ...SNAPSHOT, queue: EMPTY_QUEUE }, { focus: "queue" });
         const rows = yield* draw(view);
-        expect(rows[10]).toBe(queueTop("automation · running 0 · pending 0"));
-        expect(rows[11]).toBe(box(JOB_HEADER));
-        expect(rows[12]).toBe(box("no jobs"));
-        expect(rows[13]).toBe(blankBox);
+        expect(rows[13]).toBe(queueTop("automation · running 0 · pending 0"));
+        expect(rows[14]).toBe(box(JOB_HEADER));
+        expect(rows[15]).toBe(box("no jobs"));
+        expect(rows[16]).toBe(blankBox);
         const spans = yield* styled(view);
         // The machines' own marker stays, muted; nothing in the focused queue is marked.
         expect(spans.flat().filter((span) => span[0] === "▸")).toEqual([["▸", MUTED, PLAIN]]);
-        expect(styleOf(spans[12], "no jobs")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(spans[15], "no jobs")).toEqual([MUTED, PLAIN]);
       }),
   );
 
@@ -800,7 +802,7 @@ describe("screen unhappy path", () => {
       const rows = yield* draw(
         shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, pending: [{ ...pending, ticket: null }] } }),
       );
-      expect(rows[12]?.startsWith(`│ ▸ ${cells(pad("—", 9), pad("install", 18))}`)).toBe(true);
+      expect(rows[15]?.startsWith(`│ ▸ ${cells(pad("—", 9), pad("install", 18))}`)).toBe(true);
     }),
   );
 
@@ -819,17 +821,17 @@ describe("screen unhappy path", () => {
         }),
       );
       const left = USABLE - GARAGE_RIGHT.length - 2;
-      expect(rows[2]).toBe(box(header(`▸ ${long.slice(0, left - 3)}…`, GARAGE_RIGHT)));
+      expect(rows[5]).toBe(box(header(`▸ ${long.slice(0, left - 3)}…`, GARAGE_RIGHT)));
       const truncated = [
         "OLI-61",
         `${"a".repeat(17)}…`,
-        "drive",
-        "● running",
+        "45 s ago",
+        `${View.spinnerAt(READ_AT)} running`,
         "3 min ago",
         "45 s ago",
       ] as const;
-      expect(rows[5]).toBe(box(job(" ", truncated)));
-      expect(rows[9]).toBe(box(job("▸", truncated)));
+      expect(rows[8]).toBe(box(job(" ", truncated)));
+      expect(rows[12]).toBe(box(job("▸", truncated)));
       for (const row of rows) {
         expect(row).toHaveLength(COLUMNS);
       }
@@ -860,13 +862,13 @@ describe("screen unhappy path", () => {
         const cleaned = [
           "OLI-61",
           "one two [31m t  c",
-          "drive",
-          "● running",
+          "45 s ago",
+          `${View.spinnerAt(READ_AT)} running`,
           "3 min ago",
           "45 s ago",
         ] as const;
-        expect(rows[5]).toBe(box(job(" ", cleaned)));
-        expect(rows[13]).toBe(box(job("▸", cleaned)));
+        expect(rows[8]).toBe(box(job(" ", cleaned)));
+        expect(rows[16]).toBe(box(job("▸", cleaned)));
         expect(rows[ROWS - 1]).toBe(pad(" error: Failed query: select 1 params: []", COLUMNS));
       }),
   );
@@ -876,16 +878,14 @@ describe("screen unhappy path", () => {
       const rows = yield* draw(View.initialView);
       expect(rows[0]).toBe(machinesTop("reading…"));
       expect(rows[1]).toBe(box("servers │ driving diagnosing"));
-      expect(rows[2]).toBe(bottom());
-      expect(rows[3]).toBe(queueTop("automation"));
-      expect(rows[4]).toBe(box(JOB_HEADER));
-      for (const row of rows.slice(5, ROWS - 2)) {
-        expect(row).toBe(blankBox);
-      }
+      expect(rows[2]).toBe(box("▸ s  automation"));
+      expect(rows[3]).toBe(box("  qemu servers"));
+      expect(rows[4]).toBe(box("  t  tickets"));
       expect(rows[ROWS - 2]).toBe(bottom());
       expect(rows[ROWS - 1]).toBe(FOOTER);
       const spans = yield* styled(View.initialView);
-      expect(styleOf(spans[1], "servers")).toEqual([TEXT, BOLD]);
+      expect(styleOf(spans[1], "driving diagnosing")).toEqual([TEXT, BOLD]);
+      expect(styleOf(spans[2], "▸ s  automation")).toEqual([GOLD, BOLD]);
     }),
   );
 
@@ -895,7 +895,7 @@ describe("screen unhappy path", () => {
       const view = { ...shown(SNAPSHOT), failure: Option.some(reason) };
       const rows = yield* draw(view, READ_AT + 7_000);
       expect(rows[0]).toBe(machinesTop("read 7 s ago"));
-      expect(rows[2]).toContain("http://127.0.0.1:55332");
+      expect(rows[5]).toContain("http://127.0.0.1:55332");
       expect(rows[ROWS - 1]).toBe(pad(` error: ${reason}`, COLUMNS));
       expect(rows.join("\n")).not.toContain("q quit");
       const spans = yield* styled(view, READ_AT + 7_000);
@@ -995,7 +995,7 @@ describe("screen follow", () => {
         expect(rows).toHaveLength(ROWS);
         // The board above is untouched.
         expect(rows[0]).toBe(machinesTop("read 0 s ago"));
-        expect(rows[2]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
+        expect(rows[5]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
         expect(rows[PEEK_TOP]).toBe(queueTop(PEEK_TITLE));
         expect(rows[PEEK_TOP + 1]?.startsWith(`│ ${command("send-key", "20 s ago")}`)).toBe(true);
         expect(rows[PEEK_TOP + 2]?.startsWith(`│ ${command("input-send-event", "8 s ago")}`)).toBe(
@@ -1286,5 +1286,345 @@ describe("screen confirm", () => {
         const without = yield* draw(shown(SNAPSHOT));
         expect(without.join("\n")).not.toContain("are you sure?");
       }),
+  );
+});
+
+describe("running job rows", () => {
+  const status = (now: number): string => pad(`${View.spinnerAt(now)} running`, 12);
+  const strip = (row: string | undefined): string => (row ?? "").slice(2, 28);
+  const withBoth = (snapshot: View.Snapshot = SNAPSHOT): View.Snapshot => ({
+    ...snapshot,
+    queue: { ...snapshot.queue, running: [running, diagnosing] },
+  });
+
+  it.effect(
+    "paints a running drive green, with the spinner and how long it has run in place of the action word",
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* styled(shown(SNAPSHOT));
+        const elapsed = pad("45 s ago", 10);
+        for (const index of [8, 16]) {
+          expect(styleOf(rows[index], status(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
+          expect(styleOf(rows[index], elapsed)).toEqual([View.DRIVE_COLOR, PLAIN]);
+          expect(styleOf(rows[index], pad("45 s ago", 11))).toEqual([SUBTLE, PLAIN]);
+          expect(textOf(rows[index])).not.toContain("drive");
+        }
+        const tickets = yield* draw(shown(SNAPSHOT, { tab: "tickets" }));
+        expect(tickets[5]).toBe(box(JOB_HEADER));
+        expect(tickets[6]).toBe(box(job("▸", RUNNING)));
+        const clients = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
+        expect(strip(clients[6])).toContain(View.spinnerAt(READ_AT));
+        expect(strip(clients[6])).toContain("45 s ago");
+        expect(strip(clients[6])).not.toContain("drive");
+        const painted = yield* styled(shown(SNAPSHOT, { tab: "automation" }));
+        expect(styleOf(painted[6], View.spinnerAt(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
+        expect(styleOf(painted[6], "45 s ago")).toEqual([View.DRIVE_COLOR, PLAIN]);
+      }),
+  );
+
+  it.effect(
+    "paints a running diagnose blue, and drops the action word on the queue, the client and the tickets",
+    () =>
+      Effect.gen(function* () {
+        const snapshot = withBoth();
+        const queue = yield* styled(shown(snapshot));
+        const diagnose = queue.find((row) => textOf(row).includes("OLI-65"));
+        expect(styleOf(diagnose, status(READ_AT))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(styleOf(diagnose, pad("45 s ago", 10))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(textOf(diagnose)).not.toContain("diagnose");
+        const clients = yield* styled(shown(snapshot, { tab: "automation" }));
+        const client = clients.find((row) => textOf(row).includes("OLI-65"));
+        expect(styleOf(client, View.spinnerAt(READ_AT))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(styleOf(client, "45 s ago")).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(textOf(client)).not.toContain("diagnose");
+        const tickets = yield* draw(shown(snapshot, { tab: "tickets" }));
+        expect(tickets[7]).toBe(box(job(" ", DIAGNOSING)));
+        expect(tickets[7]).not.toContain("diagnose");
+      }),
+  );
+
+  it.effect("a pending row keeps the action word and the hollow mark, and spins nothing", () =>
+    Effect.gen(function* () {
+      const rows = yield* styled(shown(SNAPSHOT));
+      expect(styleOf(rows[17], pad("drive", 10))).toEqual([SUBTLE, PLAIN]);
+      expect(styleOf(rows[17], pad("◌ pending", 12))).toEqual([MUTED, PLAIN]);
+      expect(textOf(rows[17])).toContain("drive");
+      expect(textOf(rows[17])).not.toContain(View.spinnerAt(READ_AT));
+      const drawn = yield* draw(shown(SNAPSHOT));
+      expect(drawn[17]).toBe(box(job(" ", PENDING)));
+    }),
+  );
+
+  it.effect("a finished ticket keeps the action word and is not spun", () =>
+    Effect.gen(function* () {
+      const rows = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { running: [], pending: [], completed: [failed] } },
+          { tab: "tickets" },
+        ),
+      );
+      const finished = rows[6] ?? "";
+      expect(finished).toContain("OLI-60");
+      expect(finished).toContain("drive");
+      expect(finished).toContain("◌ failed");
+      expect(finished).not.toContain(View.spinnerAt(READ_AT));
+    }),
+  );
+
+  it.effect("a running job that has not recorded a start shows a dash beside the spinner", () =>
+    Effect.gen(function* () {
+      const snapshot: View.Snapshot = {
+        ...SNAPSHOT,
+        queue: { ...EMPTY_QUEUE, running: [{ ...running, startedAt: null }] },
+      };
+      const rows = yield* styled(shown(snapshot));
+      expect(styleOf(rows[8], status(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[8], pad("—", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(textOf(rows[8])).not.toContain("drive");
+      const clients = yield* draw(shown(snapshot, { tab: "automation" }));
+      expect(strip(clients[6])).toContain("—");
+      expect(strip(clients[6])).toContain(View.spinnerAt(READ_AT));
+      expect(strip(clients[6])).not.toContain("drive");
+    }),
+  );
+
+  it.effect("the next 80 milliseconds show the next glyph and the same elapsed age", () =>
+    Effect.gen(function* () {
+      const later = READ_AT + View.SPIN_MS;
+      const rows = yield* styled(shown(SNAPSHOT), later);
+      expect(View.spinnerAt(later)).not.toBe(View.spinnerAt(READ_AT));
+      expect(styleOf(rows[16], status(later))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[16], pad("45 s ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+    }),
+  );
+
+  it.effect("fifty-nine minutes of running still fits the action column, uncut", () =>
+    Effect.gen(function* () {
+      const rows = yield* styled(
+        shown({
+          ...SNAPSHOT,
+          queue: { ...EMPTY_QUEUE, running: [{ ...running, startedAt: ago(59 * 60) }] },
+        }),
+      );
+      expect(styleOf(rows[16], pad("59 min ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(textOf(rows[16])).not.toContain("…");
+      expect(textOf(rows[16])).not.toContain("drive");
+    }),
+  );
+});
+
+describe("session pane", () => {
+  const sessionOf = (
+    follow: Follow.Follow,
+    note: Option.Option<string> = Option.none(),
+  ): View.View => ({
+    ...shown(SNAPSHOT, { tab: "automation" }),
+    session: Option.some(follow),
+    sessionNote: note,
+  });
+
+  it.effect(
+    "the bottom two thirds is the selected ticket's session: the calls, the intent and the image",
+    () =>
+      Effect.gen(function* () {
+        const full = Follow.apply(
+          Follow.apply(
+            Follow.expand(
+              Follow.peekFromActions(
+                "OLI-61",
+                SESSION_ID,
+                garage.url,
+                [{ request: sendKey, createdAt: ago(2) }],
+                Option.some(TINY_PNG),
+              ),
+              garage.url,
+            ),
+            { type: "intent", state: "started", message: "lock the screen" },
+          ),
+          { type: "action", id: 10, name: "send-keys", state: "running" },
+        );
+        const view = sessionOf(full);
+        const rows = yield* draw(view);
+        expect(rows[15]).toContain("following OLI-61");
+        expect(rows.join("\n")).toContain("lock the screen");
+        expect(rows.join("\n")).toContain("send-keys");
+        expect(rows.join("\n")).toContain("send-key");
+        expect(rows.some((row) => BLOCKS.test(row))).toBe(true);
+        const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
+        expect(drawn.image).toEqual(Option.some({ png: TINY_PNG, top: 15, height: 20 }));
+      }),
+  );
+
+  it.effect(
+    "on a ticket the pane shows the step, the exact line, and that intent's actions, not the history",
+    () =>
+      Effect.gen(function* () {
+        const instruction = `<ActionList>
+* Press Super+Escape. The System menu opens.
+* Click Lock. Use the mouse only. The screen locks.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+        const full = Follow.apply(
+          Follow.apply(
+            Follow.expand(
+              Follow.peekFromActions(
+                "OLI-61",
+                SESSION_ID,
+                garage.url,
+                [{ request: sendKey, createdAt: ago(2) }],
+                Option.some(TINY_PNG),
+              ),
+              garage.url,
+            ),
+            {
+              type: "intent",
+              state: "started",
+              message: "Click Lock. Use the mouse only. The screen locks.",
+            },
+          ),
+          { type: "action", id: 10, name: "send-keys", state: "running" },
+        );
+        const view = sessionOf(full, Option.none());
+        const onTicket = {
+          ...view,
+          snapshot: Option.some({
+            ...SNAPSHOT,
+            queue: {
+              ...SNAPSHOT.queue,
+              running: [{ ...running, instruction, intent: null }],
+            },
+          }),
+          cursor: { ...view.cursor, clients: 1 },
+        };
+        const rows = yield* draw(onTicket);
+        const body = rows.join("\n");
+        expect(body).toContain("following OLI-61");
+        expect(body).toContain("2/2");
+        expect(body).toContain("Click Lock. Use the mouse only. The");
+        expect(body).toContain("screen locks.");
+        expect(body).toContain("send-keys");
+        expect(body).not.toMatch(/send-key(?!s)/);
+      }),
+  );
+
+  it.effect("a running client shows its step in place of how long it has run", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
+* Press Super+Escape. The System menu opens.
+* Click Lock. Use the mouse only. The screen locks.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+      const stepped = {
+        ...running,
+        instruction,
+        intent: "Press Super+Escape. The System menu opens.",
+      };
+      const drawn = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } },
+          { tab: "automation" },
+        ),
+      );
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
+      expect(side(drawn[6])).toContain("1/2");
+      expect(side(drawn[6])).not.toContain("45 s ago");
+      const tickets = yield* draw(
+        shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } }, { tab: "tickets" }),
+      );
+      expect(tickets.join("\n")).toContain("1/2");
+    }),
+  );
+
+  it.effect("a paraphrase or a closed stream keeps the elapsed time (unhappy)", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
+* Press Super+Escape. The System menu opens.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+      const paraphrased = { ...running, instruction, intent: "lock the screen" };
+      const clients = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [paraphrased] } },
+          { tab: "automation" },
+        ),
+      );
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
+      expect(side(clients[6])).toContain("45 s ago");
+      expect(side(clients[6])).not.toContain("1/1");
+      const done = Follow.apply(
+        Follow.apply(
+          Follow.expand(
+            Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+            garage.url,
+          ),
+          { type: "session", status: "running" },
+        ),
+        { type: "intent", state: "completed" },
+      );
+      const selected = yield* draw(
+        shown(
+          {
+            ...SNAPSHOT,
+            queue: {
+              ...EMPTY_QUEUE,
+              running: [{ ...paraphrased, intent: "Press Super+Escape. The System menu opens." }],
+            },
+          },
+          {
+            tab: "automation",
+            session: Option.some(done),
+            cursor: { servers: 0, clients: 1, queue: 0 },
+          },
+        ),
+      );
+      expect(side(selected[6])).toContain("45 s ago");
+    }),
+  );
+
+  it.effect("with no session the pane says so and draws no image (unhappy)", () =>
+    Effect.gen(function* () {
+      const waiting = {
+        ...shown(SNAPSHOT, { tab: "automation" }),
+        sessionNote: Option.some("waiting for OLI-61's session"),
+      };
+      const rows = yield* draw(waiting);
+      expect(rows[15]).toContain("waiting for OLI-61's session");
+      expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
+      expect(View.screen(waiting, READ_AT, COLUMNS, ROWS).image).toEqual(Option.none());
+      const bare = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
+      expect(bare[15]).toContain("no session");
+      expect(bare.some((row) => BLOCKS.test(row))).toBe(false);
+    }),
+  );
+
+  it.effect("d's definition and enter's ticket information are drawn over the board", () =>
+    Effect.gen(function* () {
+      const defined = yield* draw({
+        ...shown(SNAPSHOT, { tab: "automation" }),
+        sheet: Option.some(
+          View.definitionSheet({
+            name: "lock-screen",
+            description: "The screen locks.",
+            instruction: "Lock it.",
+            proof: "It is locked.",
+          }),
+        ),
+      });
+      expect(defined.join("\n")).toContain("lock-screen");
+      expect(defined.join("\n")).toContain("The screen locks.");
+      expect(defined.join("\n")).toContain(View.SHEET_HINT);
+      expect(defined.join("\n")).toContain("OLI-61");
+
+      const informed = yield* draw({
+        ...shown(SNAPSHOT, { tab: "automation" }),
+        sheet: Option.some(View.infoSheet(running, 0)),
+      });
+      expect(informed.join("\n")).toContain("ticket    OLI-61");
+      expect(informed.join("\n")).toContain("reason    —");
+      expect(informed.join("\n")).toContain(View.SHEET_HINT);
+    }),
   );
 });

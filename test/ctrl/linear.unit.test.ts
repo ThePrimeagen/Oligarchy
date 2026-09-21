@@ -127,7 +127,7 @@ const describedAs = (ticket: string) =>
     TEST_PROOF: firstTest.proof,
   }).pipe(Effect.provide(NodeFileSystem.layer), Effect.orDie);
 
-// The whole ticket flow as `test new` runs it for one definition: the ticket is born in Backlog
+// The whole ticket flow as `test run` runs it for one definition: the ticket is born in Backlog
 // and moves to Automation Needed with its body, in the one update.
 const createTicket = Effect.gen(function* () {
   const client = yield* Linear.Linear;
