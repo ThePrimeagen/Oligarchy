@@ -95,9 +95,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 801,
     "open_issues": 43,
@@ -110,9 +108,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 808708701,
@@ -210,9 +206,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 9,
     "open_issues": 5,
@@ -225,9 +219,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 994093166,
@@ -331,9 +323,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 4778,
     "open_issues": 4678,
@@ -346,9 +336,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 994103017,
@@ -446,9 +434,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 298,
     "open_issues": 247,
@@ -461,9 +447,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1012745147,
@@ -561,9 +545,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 2,
     "open_issues": 2,
@@ -576,9 +558,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1018744268,
@@ -676,9 +656,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -691,9 +669,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1020571674,
@@ -791,9 +767,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 8,
     "open_issues": 4,
@@ -806,9 +780,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1026921573,
@@ -912,14 +884,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-      "applesilicon",
-      "archlinux",
-      "asahi-alarm",
-      "asahilinux",
-      "omarchy",
-      "omarchy-mac"
-    ],
+    "topics": ["applesilicon", "archlinux", "asahi-alarm", "asahilinux", "omarchy", "omarchy-mac"],
     "visibility": "public",
     "forks": 86,
     "open_issues": 146,
@@ -932,9 +897,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1027172663,
@@ -1038,9 +1001,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 149,
     "open_issues": 63,
@@ -1053,9 +1014,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1028617756,
@@ -1153,9 +1112,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 29,
     "open_issues": 6,
@@ -1168,9 +1125,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1035676420,
@@ -1274,9 +1229,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 2,
     "open_issues": 6,
@@ -1289,9 +1242,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1043833332,
@@ -1395,9 +1346,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 188,
     "open_issues": 192,
@@ -1410,9 +1359,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1045851305,
@@ -1510,9 +1457,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 3,
     "open_issues": 2,
@@ -1525,9 +1470,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1047515946,
@@ -1625,9 +1568,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -1640,9 +1581,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1047520481,
@@ -1740,9 +1679,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -1755,9 +1692,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1057717084,
@@ -1855,9 +1790,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -1870,9 +1803,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1069669233,
@@ -1970,10 +1901,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-      "omarchy",
-      "omarchy-theme"
-    ],
+    "topics": ["omarchy", "omarchy-theme"],
     "visibility": "public",
     "forks": 38,
     "open_issues": 4,
@@ -1986,9 +1914,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1071718662,
@@ -2092,9 +2018,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 4,
     "open_issues": 1,
@@ -2107,9 +2031,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1089100003,
@@ -2213,9 +2135,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 4,
     "open_issues": 3,
@@ -2228,9 +2148,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1089101365,
@@ -2334,9 +2252,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 8,
     "open_issues": 5,
@@ -2349,9 +2265,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1152125234,
@@ -2449,9 +2363,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -2464,9 +2376,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1152691324,
@@ -2564,9 +2474,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 23,
     "open_issues": 4,
@@ -2579,9 +2487,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1152799445,
@@ -2679,9 +2585,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 1,
     "open_issues": 0,
@@ -2694,9 +2598,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1155494262,
@@ -2794,9 +2696,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 13,
     "open_issues": 2,
@@ -2809,9 +2709,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1155553378,
@@ -2909,9 +2807,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -2924,9 +2820,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1156231572,
@@ -3024,9 +2918,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -3039,9 +2931,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1156631462,
@@ -3139,9 +3029,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 8,
     "open_issues": 2,
@@ -3154,9 +3042,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1186565200,
@@ -3254,9 +3140,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 2,
     "open_issues": 1,
@@ -3269,9 +3153,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1275211496,
@@ -3375,9 +3257,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 25,
     "open_issues": 13,
@@ -3390,9 +3270,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1276059409,
@@ -3496,9 +3374,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 95,
     "open_issues": 67,
@@ -3511,9 +3387,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1311132483,
@@ -3617,9 +3491,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -3632,9 +3504,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1311540769,
@@ -3738,9 +3608,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -3753,9 +3621,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1312184829,
@@ -3859,9 +3725,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 3,
     "open_issues": 0,
@@ -3874,9 +3738,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1314624489,
@@ -3980,12 +3842,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-      "omarchy",
-      "omarchy-plugins",
-      "omarchy-quattro",
-      "omarchy-shell"
-    ],
+    "topics": ["omarchy", "omarchy-plugins", "omarchy-quattro", "omarchy-shell"],
     "visibility": "public",
     "forks": 46,
     "open_issues": 1140,
@@ -3998,9 +3855,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1319751974,
@@ -4104,9 +3959,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 11,
     "open_issues": 14,
@@ -4119,9 +3972,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1327637791,
@@ -4225,9 +4076,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 2,
     "open_issues": 2,
@@ -4240,9 +4089,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1329255615,
@@ -4346,13 +4193,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-      "animation",
-      "ascii-art",
-      "cli",
-      "rust",
-      "terminal"
-    ],
+    "topics": ["animation", "ascii-art", "cli", "rust", "terminal"],
     "visibility": "public",
     "forks": 20,
     "open_issues": 14,
@@ -4365,9 +4206,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1330130055,
@@ -4471,9 +4310,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 51,
     "open_issues": 31,
@@ -4486,9 +4323,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1337313547,
@@ -4592,9 +4427,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 1,
     "open_issues": 1,
@@ -4607,9 +4440,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1340504998,
@@ -4707,9 +4538,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -4722,9 +4551,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1341222832,
@@ -4822,9 +4649,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 2,
     "open_issues": 14,
@@ -4837,9 +4662,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1344252356,
@@ -4968,9 +4791,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1344513731,
@@ -5068,9 +4889,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -5083,9 +4902,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1349052770,
@@ -5216,9 +5033,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1351135262,
@@ -5322,9 +5137,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 1,
     "open_issues": 1,
@@ -5337,9 +5150,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1351199537,
@@ -5437,9 +5248,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 8,
     "open_issues": 7,
@@ -5452,9 +5261,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1351236157,
@@ -5558,9 +5365,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 3,
     "open_issues": 2,
@@ -5573,9 +5378,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1352439715,
@@ -5673,9 +5476,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 2,
     "open_issues": 2,
@@ -5688,9 +5489,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1353478959,
@@ -5788,9 +5587,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 47,
     "open_issues": 55,
@@ -5803,9 +5600,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1357965457,
@@ -5909,9 +5704,7 @@
     "web_commit_signoff_required": true,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 4,
     "open_issues": 5,
@@ -5924,9 +5717,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1358451624,
@@ -6030,13 +5821,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-      "hyprland",
-      "omarchy",
-      "qt6",
-      "screen-recorder",
-      "wayland"
-    ],
+    "topics": ["hyprland", "omarchy", "qt6", "screen-recorder", "wayland"],
     "visibility": "public",
     "forks": 2,
     "open_issues": 2,
@@ -6049,9 +5834,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1358731286,
@@ -6149,9 +5932,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -6164,9 +5945,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1359527619,
@@ -6270,9 +6049,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -6285,9 +6062,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1360506833,
@@ -6391,9 +6166,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 1,
     "open_issues": 0,
@@ -6406,9 +6179,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1360510049,
@@ -6512,9 +6283,7 @@
     "web_commit_signoff_required": true,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 1,
     "open_issues": 0,
@@ -6527,9 +6296,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1360751189,
@@ -6633,9 +6400,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 8,
@@ -6648,9 +6413,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1362707056,
@@ -6754,9 +6517,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -6769,9 +6530,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1367770210,
@@ -6869,9 +6628,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -6884,9 +6641,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1373550483,
@@ -6984,9 +6739,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 1,
     "open_issues": 0,
@@ -6999,9 +6752,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1374604996,
@@ -7105,9 +6856,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -7120,9 +6869,7 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   },
   {
     "id": 1376265675,
@@ -7226,9 +6973,7 @@
     "web_commit_signoff_required": false,
     "has_pull_requests": true,
     "pull_request_creation_policy": "all",
-    "topics": [
-
-    ],
+    "topics": [],
     "visibility": "public",
     "forks": 0,
     "open_issues": 0,
@@ -7241,8 +6986,6 @@
       "triage": false,
       "pull": true
     },
-    "custom_properties": {
-
-    }
+    "custom_properties": {}
   }
 ]
