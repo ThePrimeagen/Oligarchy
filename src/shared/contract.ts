@@ -201,6 +201,7 @@ export class ReserveBody extends Schema.Class<ReserveBody>(
 )({
   ticket: Schema.NonEmptyString,
   action: Domain.AutomationAction,
+  // Absent is a mint, a diagnose, or a fresh drive. The key is left off, never sent as null.
   resume: Schema.optionalKey(Schema.NonEmptyString),
 }) {}
 

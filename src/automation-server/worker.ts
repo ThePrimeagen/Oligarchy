@@ -68,10 +68,7 @@ const place = Effect.fn("place")(function* (
   let lastCapacity: string | undefined;
   for (const client of clients) {
     const reserved = yield* Effect.result(
-      Option.match(resume, {
-        onNone: () => AutomationClient.reserve(client.url, ticket, job.action),
-        onSome: (iso) => AutomationClient.reserve(client.url, ticket, job.action, iso),
-      }),
+      AutomationClient.reserve(client.url, ticket, job.action, Option.getOrUndefined(resume)),
     );
     if (Result.isSuccess(reserved)) {
       if (client.id !== job.serverId) {

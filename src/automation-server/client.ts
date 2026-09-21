@@ -66,12 +66,11 @@ export const reserve = Effect.fn("reserve")(function* (
   resume?: string,
 ) {
   const client = yield* makeClient(url);
-  const payload =
-    resume === undefined
-      ? Contract.ReserveBody.make({ ticket, action })
-      : Contract.ReserveBody.make({ ticket, action, resume });
+  // undefined is not a value: the key is absent, which is what optionalKey accepts.
   return yield* client.Runs.reserve({
-    payload,
+    payload: Contract.ReserveBody.make(
+      Object.assign({ ticket, action }, resume === undefined ? undefined : { resume }),
+    ),
   }).pipe(
     Effect.catch((error) => {
       if (error._tag === "HttpClientError") {
