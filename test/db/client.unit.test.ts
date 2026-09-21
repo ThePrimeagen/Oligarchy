@@ -42,12 +42,12 @@ describe("normalizeDatabaseUrl", () => {
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
         const pretty = Cause.pretty(exit.cause);
-        expect(pretty).toContain("db: DATABASE_URL is not a valid url");
+        expect(pretty).toContain("db: database url is not a valid url");
         expect(pretty).not.toContain(PASSWORD);
         expect(Cause.squash(exit.cause)).toMatchObject({
           _tag: "DatabaseError",
           operation: "connect",
-          message: "db: DATABASE_URL is not a valid url",
+          message: "db: database url is not a valid url",
         });
       }
     }),
@@ -56,7 +56,7 @@ describe("normalizeDatabaseUrl", () => {
   it.effect("treats an empty url as invalid", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Client.normalizeDatabaseUrl(Redacted.make("")));
-      expect(error.message).toBe("db: DATABASE_URL is not a valid url");
+      expect(error.message).toBe("db: database url is not a valid url");
     }),
   );
 });
@@ -131,7 +131,7 @@ describe("Database.make", () => {
   it.effect("fails at acquire for an invalid url", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Client.Database.make(Redacted.make("nope")));
-      expect(error.message).toBe("db: DATABASE_URL is not a valid url");
+      expect(error.message).toBe("db: database url is not a valid url");
     }),
   );
 });

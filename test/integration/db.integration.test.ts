@@ -37,14 +37,24 @@ Postgres.describeWithDatabase("database", () => {
         yield* Migrate.program;
         const lines = yield* TestConsole.logLines;
         expect(lines).toEqual(["database migrations applied", "database migrations applied"]);
-      }).pipe(Effect.provide(Support.withEnv({ DATABASE_URL: Postgres.getDbUrl() }))),
+      }).pipe(
+        Effect.provide(
+          Support.withEnv({
+            // A dead app url: the program must migrate the container, not this.
+            DATABASE_URL: "postgres://user:pw@127.0.0.1:1/oligarchy",
+            DATABASE_MIGRATION_URL: Postgres.getDbUrl(),
+          }),
+        ),
+      ),
     );
 
-    scoped.effect("the migration program fails DATABASE_URL is not set without a url", () =>
-      Effect.gen(function* () {
-        const error = yield* Effect.flip(Migrate.program);
-        expect(error.message).toBe("DATABASE_URL is not set");
-      }).pipe(Effect.provide(Support.withEnv({}))),
+    scoped.effect(
+      "the migration program fails DATABASE_MIGRATION_URL is not set without a url",
+      () =>
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(Migrate.program);
+          expect(error.message).toBe("DATABASE_MIGRATION_URL is not set");
+        }).pipe(Effect.provide(Support.withEnv({ DATABASE_URL: Postgres.getDbUrl() }))),
     );
 
     scoped.effect("SessionStore writes the documented columns and stamps one now()", () =>

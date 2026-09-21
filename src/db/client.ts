@@ -24,7 +24,7 @@ export const normalizeDatabaseUrl = (
     if (!URL.canParse(raw)) {
       return yield* Errors.DatabaseError.make({
         operation: "connect",
-        message: "db: DATABASE_URL is not a valid url",
+        message: "db: database url is not a valid url",
       });
     }
     const parsed = new URL(raw);
