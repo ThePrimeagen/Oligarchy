@@ -273,7 +273,9 @@ export const sessionServers = pgTable("session_servers", {
 // the lock: a second insert fails, so one ticket per pair. result_id is null until that
 // ticket's result exists, then whoever watches the row reads the result by it. Not a foreign
 // key, and server_url is not one either: a success stays when the result is swept and when the
-// server is forgotten. Many null result ids are allowed; one result is one setup.
+// server is forgotten. Many null result ids are allowed; one result is one setup. server_url
+// is indexed on its own — the primary key leads with iso — because a server that comes online
+// deletes every row of its url. Not unique: one server, many isos.
 export const setupRequests = pgTable(
   "setup_requests",
   {
@@ -284,6 +286,7 @@ export const setupRequests = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.iso, table.serverUrl] }),
+    index("setup_requests_server_url_idx").on(table.serverUrl),
     uniqueIndex("setup_requests_result_id_idx").on(table.resultId),
   ],
 );

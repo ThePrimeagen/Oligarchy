@@ -1,5 +1,5 @@
 {
-  "id": "8e995bd5-4703-4e7d-b2e4-4fff57d24df6",
+  "id": "2fca2a1d-7696-47df-8f1a-d9712fa4b95c",
   "prevId": "01b1e941-151e-4dcb-9d7e-126679b2f3aa",
   "version": "7",
   "dialect": "postgresql",
@@ -977,6 +977,21 @@
         }
       },
       "indexes": {
+        "setup_requests_server_url_idx": {
+          "name": "setup_requests_server_url_idx",
+          "columns": [
+            {
+              "expression": "server_url",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "setup_requests_result_id_idx": {
           "name": "setup_requests_result_id_idx",
           "columns": [

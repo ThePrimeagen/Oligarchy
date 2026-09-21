@@ -2311,6 +2311,12 @@ Postgres.describeWithDatabase("database", () => {
             .returning({ resultId: DbSchema.setupRequests.resultId }),
         );
         expect(claimed?.resultId).toBe(resultId);
+        const indexes = yield* database.run("select", (db) =>
+          db.execute(
+            sql`select indexname from pg_indexes where tablename = 'setup_requests' and indexname = 'setup_requests_server_url_idx'`,
+          ),
+        );
+        expect(indexes.rowCount).toBe(1);
       }),
     );
 
