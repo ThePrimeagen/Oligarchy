@@ -72,16 +72,52 @@ describe("FollowFrame happy path", () => {
     expect(page).toContain(`src="/images/${IMAGE}"`);
   });
 
-  it("lists the newest action first and the oldest intent last", async () => {
+  it("puts the intention above its actions and the newest action first", async () => {
     const page = await render(FollowFrame({ follow }));
+    const intent = page.indexOf("open a terminal");
     const newest = page.indexOf("input-send-event");
     const middle = page.indexOf("send-key");
     const older = page.indexOf("screendump");
-    const intent = page.indexOf("open a terminal");
-    expect(newest).toBeGreaterThan(-1);
+    expect(intent).toBeGreaterThan(-1);
+    expect(intent).toBeLessThan(newest);
     expect(newest).toBeLessThan(middle);
     expect(middle).toBeLessThan(older);
-    expect(older).toBeLessThan(intent);
+  });
+
+  it("puts the newest intention above the older one, each with its newest action first", async () => {
+    const page = await render(
+      FollowFrame({
+        follow: {
+          ...follow,
+          events: [
+            { kind: "intent", text: "open a terminal", state: "completed", at: ago(40) },
+            { kind: "action", name: "mouse-click", state: "completed", under: true, at: ago(30) },
+            { kind: "action", name: "send-key", state: "completed", under: true, at: ago(20) },
+            { kind: "intent", text: "type hello", state: "running", at: ago(10) },
+            { kind: "action", name: "screendump", state: "completed", under: true, at: ago(6) },
+            {
+              kind: "action",
+              name: "input-send-event",
+              state: "running",
+              under: true,
+              at: ago(1),
+            },
+          ],
+        },
+      }),
+    );
+    const latestIntent = page.indexOf("type hello");
+    const latest = page.indexOf("input-send-event");
+    const second = page.indexOf("screendump");
+    const olderIntent = page.indexOf("open a terminal");
+    const olderLatest = page.indexOf("send-key");
+    const older = page.indexOf("mouse-click");
+    expect(latestIntent).toBeGreaterThan(-1);
+    expect(latestIntent).toBeLessThan(latest);
+    expect(latest).toBeLessThan(second);
+    expect(second).toBeLessThan(olderIntent);
+    expect(olderIntent).toBeLessThan(olderLatest);
+    expect(olderLatest).toBeLessThan(older);
   });
 
   it("shows the step as unknown when the open intent is not one of the definition's steps", async () => {
@@ -146,6 +182,40 @@ describe("FollowFrame unhappy path", () => {
     const page = await render(FollowFrame({ follow: { ...follow, instruction: "do the thing" } }));
     expect(page).not.toContain("follow__step");
     expect(page).toContain("open a terminal");
+  });
+
+  it("does not list a command under an intention it was not taken for", async () => {
+    const page = await render(
+      FollowFrame({
+        follow: {
+          ...follow,
+          instruction: "do the thing",
+          events: [
+            { kind: "action", name: "screendump", state: "completed", under: false, at: ago(30) },
+            { kind: "intent", text: "open a terminal", state: "completed", at: ago(20) },
+            { kind: "action", name: "send-key", state: "completed", under: true, at: ago(10) },
+            {
+              kind: "action",
+              name: "input-send-event",
+              state: "completed",
+              under: true,
+              at: ago(2),
+            },
+            { kind: "action", name: "mouse-click", state: "failed", under: false, at: ago(1) },
+          ],
+        },
+      }),
+    );
+    const loose = page.indexOf("mouse-click");
+    const intent = page.indexOf("open a terminal");
+    const newestUnder = page.indexOf("input-send-event");
+    const olderUnder = page.indexOf("send-key");
+    const earlier = page.indexOf("screendump");
+    expect(loose).toBeGreaterThan(-1);
+    expect(loose).toBeLessThan(intent);
+    expect(intent).toBeLessThan(newestUnder);
+    expect(newestUnder).toBeLessThan(olderUnder);
+    expect(olderUnder).toBeLessThan(earlier);
   });
 
   it("escapes an intent and a command", async () => {

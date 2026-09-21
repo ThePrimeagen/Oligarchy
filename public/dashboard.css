@@ -534,7 +534,7 @@ main {
   }
 }
 
-/* The session feed: the newest frame, then every intent and command, newest first. */
+/* The session feed: the newest frame, then each intention and the commands taken for it, newest first. */
 .follow {
   display: grid;
   gap: 1rem;

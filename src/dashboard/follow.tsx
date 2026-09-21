@@ -55,26 +55,62 @@ const Step: FC<{ follow: SessionFollow }> = ({ follow }) => {
   );
 };
 
-// Newest first, under the frame. Landing on the page shows the action just taken, not the
-// start of the session.
+type IntentEvent = Extract<FollowEvent, { kind: "intent" }>;
+type ActionEvent = Extract<FollowEvent, { kind: "action" }>;
+
+type IntentionGroup = {
+  readonly intent: IntentEvent | null;
+  readonly actions: ReadonlyArray<ActionEvent>;
+};
+
+// Commands belong to the intention that was open when they were sent. One that was not is its
+// own group, so a later intention does not claim it.
+const intentionGroups = (events: ReadonlyArray<FollowEvent>): ReadonlyArray<IntentionGroup> => {
+  const groups: Array<{ intent: IntentEvent | null; actions: ActionEvent[] }> = [];
+  let current: (typeof groups)[number] | undefined;
+  for (const event of events) {
+    if (event.kind === "intent") {
+      current = { intent: event, actions: [] };
+      groups.push(current);
+      continue;
+    }
+    if (current === undefined || (current.intent !== null && !event.under)) {
+      current = { intent: null, actions: [] };
+      groups.push(current);
+    }
+    current.actions.push(event);
+  }
+  return groups;
+};
+
+const IntentRow: FC<{ event: IntentEvent }> = ({ event }) => (
+  <li
+    class={event.state === "running" ? "follow__intent follow__intent--running" : "follow__intent"}
+  >
+    <Mark state={event.state} /> {event.text}
+  </li>
+);
+
+const ActionRow: FC<{ event: ActionEvent; at: Date }> = ({ event, at }) => (
+  <li class={event.under ? "follow__action follow__action--under" : "follow__action"}>
+    <Mark state={event.state} /> {event.name} <span class="follow__age">{since(event.at, at)}</span>
+  </li>
+);
+
+// Newest intention first, and under it the commands taken for it, newest first. Landing shows
+// the intention in progress and the action just taken, not the start of the session.
 const EventList: FC<{ follow: SessionFollow }> = ({ follow }) => (
   <ol class="follow__log">
-    {follow.events.toReversed().map((event) =>
-      event.kind === "intent" ? (
-        <li
-          class={
-            event.state === "running" ? "follow__intent follow__intent--running" : "follow__intent"
-          }
-        >
-          <Mark state={event.state} /> {event.text}
-        </li>
-      ) : (
-        <li class={event.under ? "follow__action follow__action--under" : "follow__action"}>
-          <Mark state={event.state} /> {event.name}{" "}
-          <span class="follow__age">{since(event.at, follow.queriedAt)}</span>
-        </li>
-      ),
-    )}
+    {intentionGroups(follow.events)
+      .toReversed()
+      .map((group) => (
+        <>
+          {group.intent === null ? null : <IntentRow event={group.intent} />}
+          {group.actions.toReversed().map((event) => (
+            <ActionRow event={event} at={follow.queriedAt} />
+          ))}
+        </>
+      ))}
   </ol>
 );
 
