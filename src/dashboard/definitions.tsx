@@ -106,9 +106,9 @@ export const RunningList: FC<{
     </table>
   );
 
-// Above every definition, so an operator sees what is in flight before any wording. The poll is
-// the queue's thirty seconds: a job that starts after the page opened shows up without a reload,
-// and the swap replaces the list while the poll stays on this frame.
+// Above the search and the names, so an operator sees what is in flight before filtering. The
+// poll is the queue's thirty seconds: a job that starts after the page opened shows up without a
+// reload, and the swap replaces the list while the poll stays on this frame.
 const RunningTests: FC<{
   jobs: ReadonlyArray<AutomationJob>;
   definition: string | undefined;
@@ -305,11 +305,12 @@ const DefinitionList: FC<{
   );
 };
 
-// The index is a search and one link per name. A name's own page is its newest wording as a
-// form, then the current wording and the one before it. Running jobs sit above that body.
-// `groups` is the index's list, absent on a name's page and when the database could not be
-// read. `running` is absent on that same failure, so it does not claim that nothing is running.
-// `error` is that failure; a name nobody carries is said on its own page.
+// The index is one link per name, with the search on that list. A name's own page is its newest
+// wording as a form, then the current wording and the one before it. Running jobs sit above the
+// search: the box filters names already on the page, not the jobs in flight. `groups` is the
+// index's list, absent on a name's page and when the database could not be read. `running` is
+// absent on that same failure, so it does not claim that nothing is running. `error` is that
+// failure; a name nobody carries is said on its own page.
 export const DefinitionsPage: FC<{
   groups: ReadonlyArray<DefinitionVersions> | null;
   name: string | undefined;
@@ -324,8 +325,8 @@ export const DefinitionsPage: FC<{
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
-      {index ? <DefinitionSearch /> : null}
       {running === null ? null : <RunningTests jobs={running} definition={name} />}
+      {index ? <DefinitionSearch /> : null}
       {index ? <DefinitionList groups={groups} histories={histories} /> : null}
       {error === undefined && name !== undefined && selected === undefined ? (
         <p>
