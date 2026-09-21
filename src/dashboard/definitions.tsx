@@ -108,10 +108,10 @@ export const RunningList: FC<{
     </table>
   );
 
-// On the index, above every definition, so an operator sees what is in flight before any wording.
-// A definition's own page uses the same list only for that name, and only when one of its jobs
-// is running. The poll is the queue's thirty seconds: a job that starts after the page opened
-// shows up without a reload, and the swap replaces the list while the poll stays on this frame.
+// Above the search, so an operator sees what is in flight before filtering names. A definition's
+// own page uses the same list only for that name, and only when one of its jobs is running. The
+// poll is the queue's thirty seconds: a job that starts after the page opened shows up without a
+// reload, and the swap replaces the list while the poll stays on this frame.
 const RunningTests: FC<{
   jobs: ReadonlyArray<AutomationJob>;
   definition: string | undefined;
@@ -354,13 +354,13 @@ const DefinitionList: FC<{
   );
 };
 
-// The index is a search and one link per name. A name's own page is its newest wording as a
-// form, then the current wording and the one before it, and the last ten verdicts under the
-// name. Running jobs sit above that body on the index. On a name's page they are that name's
-// jobs, and the block is absent when none of them are running. `groups` is the index's list,
-// absent on a name's page and when the database could not be read. `running` is absent on
-// that same failure, so it does not claim that nothing is running. `error` is that failure;
-// a name nobody carries is said on its own page.
+// The index is one link per name, with the search on that list. A name's own page is its newest
+// wording as a form, then the current wording and the one before it, and the last ten verdicts
+// under the name. Running jobs sit above the search: the box filters names already on the page,
+// not the jobs in flight. On a name's page they are that name's jobs, and the block is absent
+// when none of them are running. `groups` is the index's list, absent on a name's page and when
+// the database could not be read. `running` is absent on that same failure, so it does not claim
+// that nothing is running. `error` is that failure; a name nobody carries is said on its own page.
 export const DefinitionsPage: FC<{
   groups: ReadonlyArray<DefinitionVersions> | null;
   name: string | undefined;
@@ -382,10 +382,10 @@ export const DefinitionsPage: FC<{
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
-      {index ? <DefinitionSearch /> : null}
       {shownRunning === null || (name !== undefined && shownRunning.length === 0) ? null : (
         <RunningTests jobs={shownRunning} definition={name} />
       )}
+      {index ? <DefinitionSearch /> : null}
       {index ? <DefinitionList groups={groups} histories={histories} /> : null}
       {error === undefined && name !== undefined && selected === undefined ? (
         <p>

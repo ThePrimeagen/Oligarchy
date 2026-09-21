@@ -203,24 +203,48 @@ describe("dashboard.js definition search happy path", () => {
     expect(miss.hidden).toBe(true);
   });
 
-  it("sorts a tighter, earlier match ahead of a scattered one, and ties by name", () => {
-    const { input, list, miss } = index(["lock-screen", "scroll", "screen", "install"]);
-    input.value = "scr";
+  // "lock" touching is 1+2+4+8. The same letters with none touching are worth 4, the
+  // number typed. A run that breaks and starts again doubles from 1, not from the earlier run.
+  it("ranks a contiguous word above a broken one, and a broken one above letters that never touch", () => {
+    const { input, list, miss } = index(["l-o-c-k", "lo-ck", "loc-k", "lock", "install"]);
+    input.value = "lock";
     document.dispatch("input", input);
     expect(names(list)).toEqual([
-      { name: "screen", hidden: false },
-      { name: "scroll", hidden: false },
-      { name: "lock-screen", hidden: false },
+      { name: "lock", hidden: false },
+      { name: "loc-k", hidden: false },
+      { name: "lo-ck", hidden: false },
+      { name: "l-o-c-k", hidden: false },
       { name: "install", hidden: true },
     ]);
     expect(miss.hidden).toBe(true);
+  });
 
-    const ranked = index(["clock", "lock-screen"]);
-    ranked.input.value = "lock";
-    document.dispatch("input", ranked.input);
-    expect(names(ranked.list)).toEqual([
-      { name: "lock-screen", hidden: false },
+  // A three-letter tail after a gap is 1+1+2+4. Two pairs is 1+2+1+2. The tail is worth more,
+  // and the name that sorts first alphabetically is the lower score, so order is the score.
+  it("doubles each contiguous letter from the previous one, then sorts by that score", () => {
+    const { input, list } = index(["ab-cd", "xa-bcd", "abcd", "a-b-c-d", "nope"]);
+    input.value = "abcd";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
+      { name: "abcd", hidden: false },
+      { name: "xa-bcd", hidden: false },
+      { name: "ab-cd", hidden: false },
+      { name: "a-b-c-d", hidden: false },
+      { name: "nope", hidden: true },
+    ]);
+  });
+
+  // "lock" inside "llock" is the later run, 1+2+4+8, the same as "lock". Equal scores fall
+  // through to the name. Taking the first letter and leaving the word would rank "lock" first.
+  it("uses the alignment that scores highest, and ties by name", () => {
+    const { input, list } = index(["lock", "llock", "clock", "lock-screen"]);
+    input.value = "lock";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
       { name: "clock", hidden: false },
+      { name: "llock", hidden: false },
+      { name: "lock", hidden: false },
+      { name: "lock-screen", hidden: false },
     ]);
 
     const tied = index(["alpine", "Alpha"]);
@@ -297,6 +321,21 @@ describe("dashboard.js definition search unhappy path", () => {
     expect(names(list)).toEqual([{ name: "lock-screen", hidden: true }]);
     expect(miss.hidden).toBe(false);
     expect(miss.querySelector("code")?.textContent).toBe("kcol");
+  });
+
+  // The early "abc" totals 7 and the later "bcde" needs an 'a' that is not beside it. Keeping
+  // only the higher total at the shared 'c' drops the run that doubles through "de", and then
+  // "ab-cde" (10) would sort first.
+  it("keeps a lower total when its last letter still doubles into a higher score", () => {
+    const { input, list, miss } = index(["ab-cde", "abc-bcde", "nope"]);
+    input.value = "abcde";
+    document.dispatch("input", input);
+    expect(names(list)).toEqual([
+      { name: "abc-bcde", hidden: false },
+      { name: "ab-cde", hidden: false },
+      { name: "nope", hidden: true },
+    ]);
+    expect(miss.hidden).toBe(true);
   });
 
   it("says nothing matches, and the query is text rather than markup", () => {
