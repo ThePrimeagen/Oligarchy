@@ -1,7 +1,8 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as Heartbeat from "../../src/qemu-server/heartbeat.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as ProcessUsage from "../../src/shared/process-usage.ts";
@@ -38,20 +39,42 @@ const refused = Errors.DatabaseError.make({
 });
 
 // The loop in a scope of its own, so a test can close it and prove the ticking stops.
+const fakeSetups = () => {
+  const cleared: Array<string> = [];
+  const layer = Layer.succeed(SetupRequests.SetupRequestStore)(
+    SetupRequests.SetupRequestStore.of({
+      insert: () => Effect.succeed(true),
+      setResult: () => Effect.succeed(true),
+      remove: () => Effect.void,
+      removeServer: (url) =>
+        Effect.sync(() => {
+          cleared.push(url);
+          return 0;
+        }),
+      list: () => Effect.succeed([]),
+      inspect: () => Effect.succeed(Option.none()),
+    }),
+  );
+  return { cleared, layer };
+};
+
 const start = (
   store: Stores.FakeServerStore,
   sessions = FakeSessions.fakeSessions(),
   log = FakeLog.fakeLog(),
   process = Stores.fakeProcessStatsStore(),
   usage = fakeUsage(),
+  setups = fakeSetups(),
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
     yield* Heartbeat.announce(URL, NAME).pipe(
-      Effect.provide(Layer.mergeAll(sessions.layer, store.layer, process.layer, usage, log.layer)),
+      Effect.provide(
+        Layer.mergeAll(sessions.layer, store.layer, process.layer, usage, log.layer, setups.layer),
+      ),
       Scope.provide(scope),
     );
-    return { scope, log, process };
+    return { scope, log, process, setups };
   });
 
 describe("heartbeat happy path", () => {
@@ -301,6 +324,79 @@ describe("heartbeat unhappy path", () => {
       yield* Scope.close(scope, Exit.void);
       expect(removals).toEqual([URL]);
       expect(log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("clears this server's setup rows once, when it comes online, not on later ticks", () =>
+    Effect.gen(function* () {
+      const store = Stores.fakeServerStore();
+      const { setups } = yield* start(store);
+      expect(setups.cleared).toEqual([URL]);
+      yield* TestClock.adjust("60 seconds");
+      expect(setups.cleared).toEqual([URL]);
+      expect(store.heartbeats.length).toBeGreaterThan(1);
+    }),
+  );
+
+  it.effect("a refused setup clear is one error line and the heartbeat still writes", () =>
+    Effect.gen(function* () {
+      const boom = Errors.DatabaseError.make({
+        operation: "removeServerSetups",
+        message: "Failed query: delete from setup_requests",
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+      });
+      const setups = fakeSetups();
+      const refusing = Layer.succeed(SetupRequests.SetupRequestStore)(
+        SetupRequests.SetupRequestStore.of({
+          insert: () => Effect.succeed(true),
+          setResult: () => Effect.succeed(true),
+          remove: () => Effect.void,
+          removeServer: () => Effect.fail(boom),
+          list: () => Effect.succeed([]),
+          inspect: () => Effect.succeed(Option.none()),
+        }),
+      );
+      const store = Stores.fakeServerStore();
+      const log = FakeLog.fakeLog();
+      const { scope } = yield* Effect.gen(function* () {
+        const made = yield* Scope.make();
+        yield* Heartbeat.announce(URL, NAME).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              FakeSessions.fakeSessions().layer,
+              store.layer,
+              Stores.fakeProcessStatsStore().layer,
+              fakeUsage(),
+              log.layer,
+              refusing,
+            ),
+          ),
+          Scope.provide(made),
+        );
+        return { scope: made };
+      });
+      expect(store.heartbeats).toEqual([ANNOUNCED]);
+      yield* TestClock.adjust("30 seconds");
+      expect(log.lines).toEqual([
+        {
+          level: "error",
+          text: "setup clear failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "server",
+          agentId: undefined,
+          skipSentry: false,
+          cause: boom,
+        },
+        {
+          level: "error",
+          text: "setup clear failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "server",
+          agentId: undefined,
+          skipSentry: false,
+          cause: boom,
+        },
+      ]);
+      yield* Scope.close(scope, Exit.void);
+      void setups;
     }),
   );
 });

@@ -8,11 +8,14 @@ import * as Command from "effect/unstable/cli/Command";
 import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Linear from "../ctrl/linear.ts";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
 import * as SessionStore from "../db/sessions.ts";
+import * as SetupRequests from "../db/setup-requests.ts";
+import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
@@ -21,6 +24,7 @@ import * as StaleServers from "../shared/stale-servers.ts";
 import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
+import * as Setup from "./setup.ts";
 
 const HOST = "127.0.0.1";
 
@@ -46,6 +50,19 @@ const ServerLive = (port: number) =>
       yield* log.info(`qemu reverse proxy listening on ${HOST}:${String(port)}`, {
         location: Log.Locations.server,
       });
+      const setups = yield* Setup.Setup;
+      // A database that cannot be listed is the same class of startup failure as a failed ping:
+      // watching nothing while rows sit there would leave those setups unwatched.
+      yield* setups.install().pipe(
+        Effect.catch((error) =>
+          log
+            .fatal(`qemu reverse proxy: ${Render.errorDetail(error)}`, {
+              location: Log.Locations.server,
+              cause: error,
+            })
+            .pipe(Effect.andThen(Effect.die(error))),
+        ),
+      );
       yield* StaleServers.forget("qemu");
     }),
   ).pipe(
@@ -55,6 +72,7 @@ const ServerLive = (port: number) =>
       ),
     ),
     Layer.provide(Router.Router.layer),
+    Layer.provide(Setup.Setup.layer),
     // As on the qemu server: no http.server span reaches Sentry.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
@@ -63,10 +81,19 @@ const DatabaseLive = Layer.unwrap(
   Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
 );
 
+// A ticket is a Linear issue. The proxy does not start without the token, the same way it
+// does not start without the database.
+const LinearLive = Layer.unwrap(
+  Effect.map(Config.linearApiToken, (token) => Linear.Linear.layer(token)),
+);
+
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.
 const MainLive = Layer.mergeAll(
   Servers.ServerStore.layer,
   SessionStore.SessionStore.layer,
+  SetupRequests.SetupRequestStore.layer,
+  Tests.TestStore.layer,
+  LinearLive,
   Log.Log.layer,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),

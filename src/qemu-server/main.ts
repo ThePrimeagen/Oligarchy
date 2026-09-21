@@ -15,6 +15,7 @@ import * as DebugLogs from "../db/debug-logs.ts";
 import * as Logs from "../db/logs.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
+import * as SetupRequests from "../db/setup-requests.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -113,6 +114,7 @@ const MainLive = Layer.mergeAll(
   SessionStore.SessionStore.layer,
   DebugLogs.DebugLogStore.layer,
   Servers.ServerStore.layer,
+  SetupRequests.SetupRequestStore.layer,
   ProcessStats.ProcessStatsStore.layer,
   Log.Log.layer,
 ).pipe(

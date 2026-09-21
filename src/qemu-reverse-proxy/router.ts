@@ -11,6 +11,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Servers from "../db/servers.ts";
+import * as Setup from "./setup.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -151,6 +152,7 @@ const forwardedHeaders = (headers: Headers.Headers): Headers.Input => ({
 const make = Effect.gen(function* () {
   const store = yield* Servers.ServerStore;
   const sessionStore = yield* SessionStore.SessionStore;
+  const setups = yield* Setup.Setup;
   const log = yield* Log.Log;
   const http = yield* HttpClient.HttpClient;
   const { token } = yield* Config.ProxyConfig;
@@ -466,7 +468,8 @@ const make = Effect.gen(function* () {
             headers: answer.headers,
           });
         }
-        if (setup !== undefined) {
+        if (setup !== undefined && body.resume !== undefined) {
+          yield* setups.open(body.resume, setup.url, Setup.proxyOrigin(request.headers));
           return yield* Errors.SetupNeeded.make({
             message: `setup needed: ${setup.url} max-jobs is ${String(setup.maxJobs)}`,
             agentId: agent,
@@ -575,5 +578,6 @@ export class Router extends Context.Service<Router>()("@oligarchy/qemu-reverse-p
     | Log.Log
     | HttpClient.HttpClient
     | Config.ProxyConfig
+    | Setup.Setup
   > = Layer.effect(this)(this.make);
 }
