@@ -210,6 +210,9 @@ export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
   // The reverse proxy's: the one server this reserve may land on, by the url the fleet knows it
   // under. A qemu server ignores it.
   server: Schema.optionalKey(Domain.ServerUrl),
+  // Present when this reserve is a resume: the iso url whose minted disk the slot must boot.
+  // Absent is a fresh placement.
+  resume: Schema.optionalKey(Schema.NonEmptyString),
 }) {}
 
 // The automation client's abort: what it runs for the ticket, one job at a time.

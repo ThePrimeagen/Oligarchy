@@ -192,6 +192,20 @@ export class AtCapacity extends Schema.TaggedError<AtCapacity>(
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// A resume reserve on a machine that has room and does not hold this iso's minted disk.
+// 409, not 503: the machine is not full, and a 503 is placed elsewhere. The message names
+// the slots setting it up would add. Not Conflict: that one belongs to /follow and requires
+// a session id.
+export class SetupNeeded extends Schema.TaggedError<SetupNeeded>(
+  "@oligarchy/shared/errors/SetupNeeded",
+)(
+  "SetupNeeded",
+  { message: Schema.String, agentId: Schema.optionalKey(Schema.String) },
+  { httpApiStatus: 409 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 export type ApiError =
   | BadRequest
   | Unauthorized
@@ -206,7 +220,8 @@ export type ApiError =
   | ServerFailed
   | NoServer
   | RunFailed
-  | AtCapacity;
+  | AtCapacity
+  | SetupNeeded;
 
 const resolveHttpApiStatus = SchemaAST.resolveAt("httpApiStatus");
 
@@ -232,6 +247,7 @@ const apiErrorClasses = {
   NoServer,
   RunFailed,
   AtCapacity,
+  SetupNeeded,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
 
 export const apiStatus = (error: ApiError): number => httpStatus(apiErrorClasses[error._tag]);
@@ -310,6 +326,10 @@ export const RunFailedWire = wireError(
 export const AtCapacityWire = wireError(
   AtCapacity,
   (message) => ({ _tag: "AtCapacity", message }) as const,
+);
+export const SetupNeededWire = wireError(
+  SetupNeeded,
+  (message) => ({ _tag: "SetupNeeded", message }) as const,
 );
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import {
   Effect,
   Exit,
   Fiber,
+  FileSystem,
   Layer,
   PlatformError,
   Redacted,
@@ -24,13 +25,17 @@ import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Handlers from "../../src/qemu-server/handlers.ts";
+import * as RealSessions from "../../src/qemu-server/sessions.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
+import * as FakeMinted from "../support/fake-minted.ts";
+import * as FakeQemu from "../support/fake-qemu.ts";
 import * as FakeSessions from "../support/fake-sessions.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
+import * as Stores from "../support/stores.ts";
 
 const TOKEN = "test-token";
 const { SESSION_ID, AGENT_ID, OTHER_AGENT_ID, STARTED_ID, IMAGE_ID } = FakeSessions;
@@ -1607,6 +1612,98 @@ describe("defects", () => {
           location: SESSION_ID,
           agent_id: AGENT_ID,
         });
+      }),
+  );
+});
+
+describe("resume", () => {
+  const ISO = "https://example.com/omarchy.iso";
+
+  const live = (reporter: Reporter.Collector, minted: FakeMinted.FakeMinted) => {
+    const log = Log.Log.layerStdout.pipe(Layer.provide(reporter.layer));
+    const sessions = RealSessions.Sessions.layer(4).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          FakeQemu.fakeQemu().layer,
+          FakeQemu.fakeIso().layer,
+          minted.layer,
+          FakeQemu.fakeStats,
+          Stores.fakeSessionStore().layer,
+          Stores.fakeActionStore().layer,
+          Stores.fakeDebugLogStore().layer,
+          log,
+          FileSystem.layerNoop({}),
+        ),
+      ),
+    );
+    return HttpRouter.serve(Handlers.routes("none", false), {
+      disableLogger: true,
+      disableListenLog: true,
+    }).pipe(
+      Layer.provide(Layer.mergeAll(sessions, log, ProxyConfigLive)),
+      Layer.provideMerge(NodeHttpServer.layerTest),
+      Layer.provideMerge(reporter.layer),
+      Layer.provideMerge(bearer(TOKEN)),
+    );
+  };
+
+  it.effect("POST /reserve with a resume and no minted disk is 409 and is not reported", () =>
+    Effect.gen(function* () {
+      const reporter = Reporter.collect();
+      const minted = FakeMinted.fakeMinted();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ agent: AGENT_ID, resume: ISO }),
+        });
+        expect(raw.status).toBe(409);
+        expect(yield* raw.json).toEqual({ error: "setup needed: max-jobs is 4" });
+        const again = yield* http.post("/reserve", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
+        });
+        expect(again.status).toBe(200);
+      }).pipe(Effect.provide(live(reporter, minted)));
+      expect(minted.finds).toEqual([ISO]);
+      expect(reporter.reported.map((report) => report.error.message).join("\n")).not.toContain(
+        "setup needed",
+      );
+    }),
+  );
+
+  it.effect(
+    "a resume start with no minted disk is 500 and Sentry is told the disk is missing",
+    () =>
+      Effect.gen(function* () {
+        const reporter = Reporter.collect();
+        const minted = FakeMinted.fakeMinted();
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const reserved = yield* http.post("/reserve", {
+            headers: { authorization: `Bearer ${TOKEN}` },
+            body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
+          });
+          expect(reserved.status).toBe(200);
+          const raw = yield* http.post("/start", {
+            headers: { authorization: `Bearer ${TOKEN}` },
+            body: HttpBody.jsonUnsafe({ iso: ISO, agent: AGENT_ID, mode: "resume" }),
+          });
+          expect(raw.status).toBe(500);
+          expect(yield* raw.json).toEqual({ error: "internal error" });
+        }).pipe(Effect.provide(live(reporter, minted)));
+        expect(minted.finds).toEqual([ISO]);
+        const report = reporter.reported.find((entry) =>
+          entry.error.message.includes("no minted disk"),
+        );
+        expect(report?.error.message).toBe(
+          `POST /start failed: no minted disk for ${ISO} on this machine`,
+        );
+        expect(Render.errorDetail(report?.error.cause)).toBe(
+          `no minted disk for ${ISO} on this machine`,
+        );
+        expect(report?.severity).toBe("Error");
+        expect(report?.annotations).toMatchObject({ location: "server", agent_id: AGENT_ID });
       }),
   );
 });

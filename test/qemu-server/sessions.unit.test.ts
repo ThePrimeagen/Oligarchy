@@ -545,7 +545,7 @@ describe("start resume", () => {
   );
 
   it.effect(
-    "without a minted disk on this machine it is refused before anything is minted, and the reservation stands",
+    "without a minted disk on this machine it is an internal error before anything is minted, and the reservation stands",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -555,10 +555,14 @@ describe("start resume", () => {
             yield* sessions.reserve(AGENT);
             const error = yield* Effect.flip(sessions.start(resume(), "none", false));
             expect(error).toMatchObject({
-              _tag: "BadRequest",
-              message: `no minted disk for ${URL_ISO} on this machine`,
+              _tag: "Internal",
+              message: "internal error",
               agentId: AGENT,
+              cause: expect.objectContaining({
+                message: `no minted disk for ${URL_ISO} on this machine`,
+              }),
             });
+            expect(error._tag === "Internal" ? error.sessionId : "set").toBeUndefined();
             expect(h.sessions.sessions).toEqual([]);
             expect(h.qemu.calls).toEqual([]);
             expect(h.iso.calls).toEqual([]);
@@ -595,6 +599,87 @@ describe("start resume", () => {
           });
           expect(h.minted.finds).toEqual([]);
           expect(h.sessions.sessions).toEqual([]);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "a resume of an iso this machine holds is a reservation, and a fresh one never asks",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ minted: { find: () => Option.some(MINTED) } });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT, URL_ISO);
+            expect(yield* sessions.jobs).toBe(1);
+            expect(h.minted.finds).toEqual([URL_ISO]);
+            yield* sessions.reserve(OTHER_AGENT);
+            expect(yield* sessions.jobs).toBe(2);
+            expect(h.minted.finds).toEqual([URL_ISO]);
+          }),
+        );
+      }),
+  );
+
+  it.effect("a resume of an iso this machine does not hold is 409 and takes no slot", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const error = yield* Effect.flip(sessions.reserve(AGENT, URL_ISO));
+          expect(error).toMatchObject({
+            _tag: "SetupNeeded",
+            message: "setup needed: max-jobs is 4",
+            agentId: AGENT,
+          });
+          expect(h.minted.finds).toEqual([URL_ISO]);
+          expect(yield* sessions.jobs).toBe(0);
+          // The slot was never taken: a fresh reserve can still have it.
+          yield* sessions.reserve(AGENT);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a resume of an unminted iso on a full machine is at capacity, not setup needed", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const error = yield* Effect.flip(sessions.reserve(OTHER_AGENT, URL_ISO));
+          expect(error).toMatchObject({
+            _tag: "AtCapacity",
+            message: "at capacity: max-jobs is 1",
+            agentId: OTHER_AGENT,
+          });
+          expect(h.minted.finds).toEqual([]);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a second resume for an agent that already holds one is already reserved", () =>
+    Effect.gen(function* () {
+      const h = harness({ minted: { find: () => Option.some(MINTED) } });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT, URL_ISO);
+          const error = yield* Effect.flip(sessions.reserve(AGENT, URL_ISO));
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "already reserved",
+            agentId: AGENT,
+          });
+          expect(h.minted.finds).toEqual([URL_ISO]);
           expect(yield* sessions.jobs).toBe(1);
         }),
       );

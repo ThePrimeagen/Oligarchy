@@ -91,8 +91,13 @@ type OpenSession = Omit<LiveSession, "qemu">;
 export type SessionsService = {
   // Takes a --max-jobs slot for this agent, before anything is minted or written. A second
   // reserve for the same agent is BadRequest: one id, one unused reservation. Start consumes
-  // it and does not increment again.
-  readonly reserve: (agent: string) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest>;
+  // it and does not increment again. A resume names the iso whose minted disk the slot must
+  // boot; when this machine has the room but not that disk the answer is SetupNeeded and the
+  // slot is not taken.
+  readonly reserve: (
+    agent: string,
+    resume?: string,
+  ) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest | Errors.SetupNeeded>;
   // Gives back everything the agent holds: an unused reservation, and its running session,
   // which is stopped as aborted. Fails BadRequest when it holds nothing, a start in flight
   // included.
@@ -519,7 +524,22 @@ const make = (maxJobs: number) =>
       });
     };
 
-    const reserve = Effect.fn("Sessions.reserve")(function* (agent: string) {
+    const reserve = Effect.fn("Sessions.reserve")(function* (agent: string, resume?: string) {
+      // Held and full are answered before a disk lookup: a second reserve is still "already
+      // reserved", and a full machine cannot gain a resume slot by being set up.
+      const snapshot = yield* Ref.get(slots);
+      if (snapshot.reserved.has(agent)) {
+        return yield* admit("held", agent);
+      }
+      if (snapshot.count >= maxJobs) {
+        return yield* admit("full", agent);
+      }
+      if (resume !== undefined && Option.isNone(yield* minted.find(resume))) {
+        return yield* Errors.SetupNeeded.make({
+          message: `setup needed: max-jobs is ${String(maxJobs)}`,
+          agentId: agent,
+        });
+      }
       const now = yield* Clock.currentTimeMillis;
       return yield* Effect.flatMap(
         Ref.modify(slots, (held) => {
@@ -579,9 +599,11 @@ const make = (maxJobs: number) =>
           });
         }
         const found = yield* minted.find(body.iso);
+        // A resume is only reserved where this disk already is, so a start that finds none is
+        // this process breaking its own contract. 500, reported: the reservation stands.
         if (Option.isNone(found)) {
-          return yield* Errors.BadRequest.make({
-            message: `no minted disk for ${body.iso} on this machine`,
+          return yield* Errors.Internal.make({
+            cause: new Error(`no minted disk for ${body.iso} on this machine`),
             agentId: agent,
           });
         }
