@@ -995,6 +995,226 @@ describe("placement", () => {
     }),
   );
 
+  const ISO = "https://example.com/omarchy.iso";
+  const resumeBody = Contract.ReserveAgentBody.make({ agent: AGENT_ID, resume: ISO });
+  const setupNeeded = (maxJobs: number) =>
+    FakeHttp.json({ error: `setup needed: max-jobs is ${String(maxJobs)}` }, 409);
+  const reserveUrls = (fixed: Fixture) =>
+    fixed.upstream.requests
+      .filter((request) => request.url.endsWith("/reserve"))
+      .map((request) => request.url);
+
+  it.effect(
+    "a resume skips an unminted server with room and lands on the least-busy minted one",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          // B is less busy and has no disk; A holds the disk and has room.
+          return url.origin === SERVER_B ? setupNeeded(4) : FakeHttp.json({ ok: "true" });
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(
+            Contract.Ok.make({}),
+          );
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+        const reserves = fixed.upstream.requests.filter((request) =>
+          request.url.endsWith("/reserve"),
+        );
+        expect(reserves.map((request) => request.url)).toEqual([
+          `${SERVER_B}/reserve`,
+          `${SERVER_A}/reserve`,
+        ]);
+        expect(reserves[0]?.body).toBe(JSON.stringify(resumeBody));
+        expect(fixed.log.lines.map((line) => [line.level, line.text])).toEqual([
+          ["info", `reserved; ${SERVER_A}`],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a resume lands on the least-busy minted server and does not ask a busier unminted one",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          return url.origin === SERVER_B ? FakeHttp.json({ ok: "true" }) : setupNeeded(4);
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(
+            Contract.Ok.make({}),
+          );
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+      }),
+  );
+
+  it.effect(
+    "a resume no minted server can take is 409 naming the least-busy free unminted server and its max-jobs",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/reserve"
+            ? setupNeeded(url.origin === SERVER_B ? 2 : 8)
+            : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const error = yield* Effect.flip(api.Sessions.reserve({ payload: resumeBody }));
+          expect(error).toMatchObject({
+            _tag: "SetupNeeded",
+            message: `setup needed: ${SERVER_B} max-jobs is 2`,
+          });
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 2`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([
+          `${SERVER_B}/reserve`,
+          `${SERVER_A}/reserve`,
+          `${SERVER_B}/reserve`,
+          `${SERVER_A}/reserve`,
+        ]);
+        expect(fixed.log.lines.map((line) => [line.text, line.agentId, line.skipSentry])).toEqual([
+          [`POST /reserve failed: setup needed: ${SERVER_B} max-jobs is 2`, AGENT_ID, true],
+          [`POST /reserve failed: setup needed: ${SERVER_B} max-jobs is 2`, AGENT_ID, true],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a full least-busy server is not the setup candidate; the free unminted one's max-jobs is",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname === "/stats") {
+            return FakeHttp.json(stats(url.origin === SERVER_A ? 0 : 5));
+          }
+          if (url.pathname === "/reserve") {
+            return url.origin === SERVER_A
+              ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+              : setupNeeded(8);
+          }
+          return fleet(request, url);
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 8`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_A}/reserve`, `${SERVER_B}/reserve`]);
+      }),
+  );
+
+  it.effect("a resume every server refuses with 503 is at capacity, not setup needed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve"
+          ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(resumeBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect(
+    "a resume whose probe fails is skipped, and the remaining free unminted server is the candidate",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.origin === SERVER_A && url.pathname === "/stats") {
+            return refused(request, url);
+          }
+          return url.pathname === "/reserve" ? setupNeeded(4) : fleet(request, url);
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 4`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+        expect(fixed.log.lines.map((line) => [line.level, line.text, line.skipSentry])).toEqual([
+          [
+            "warning",
+            `server skipped; server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+            false,
+          ],
+          ["error", `POST /reserve failed: setup needed: ${SERVER_B} max-jobs is 4`, true],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a resume answered 409 without max-jobs is that answer, and the rest are not asked",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          return url.origin === SERVER_B
+            ? FakeHttp.json({ error: "nope" }, 409)
+            : FakeHttp.json({ ok: "true" });
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({ error: "nope" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+      }),
+  );
+
   // A reserve pinned to a server url goes there and nowhere else: what ./ctrl mint relies on to
   // put one install on every server.
   it.effect("a pinned reserve is probed, asked and routed on that server alone", () =>
@@ -1038,6 +1258,34 @@ describe("placement", () => {
         expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
       }).pipe(Effect.provide(serve(fixed)));
       // No falling back to B: a pin is a pin.
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect("a pinned resume passes that server's 409 through and does not try another", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname !== "/reserve") {
+          return fleet(request, url);
+        }
+        return url.origin === SERVER_A ? setupNeeded(4) : FakeHttp.json({ ok: "true" });
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({
+        agent: AGENT_ID,
+        server: SERVER_A,
+        resume: ISO,
+      });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(409);
+        expect(yield* raw.json).toEqual({ error: "setup needed: max-jobs is 4" });
+      }).pipe(Effect.provide(serve(fixed)));
       expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
       expect(fixed.store.agents.size).toBe(0);
     }),

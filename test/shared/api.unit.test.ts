@@ -277,7 +277,7 @@ describe("QemuReverseProxyApi", () => {
     // 404: a pinned reserve naming a server the fleet does not know; declared once, on the boundary,
     // so the endpoints that answer 404 themselves list it once.
     const boundary = [400, 401, 404, 500, 502, 503];
-    // 409 is declared on the shared reserve endpoint. This proxy does not answer it yet.
+    // 409: a resume no server that holds the disk can take, naming one that has a free slot.
     expect(byIdentifier(reverse, "reserve").errors).toEqual(ascending([...boundary, 409]));
     expect(byIdentifier(reverse, "relinquish").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);

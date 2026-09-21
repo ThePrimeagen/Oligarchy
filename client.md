@@ -98,7 +98,7 @@ given back, and a start after that is refused the same way.
 
 - `--iso <path|url>` — the ISO. A local path must exist unless `--resume` is given; an http(s) URL is downloaded and cached by the server. Default `omarchy.iso` in the current directory.
 - `--disk <path>` — an existing qcow2 disk. Omit it and the server creates a fresh one.
-- `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 400 `no minted disk for <iso> on this machine` and your reservation stands: `start` again without `--resume`, or give it back with [relinquish](#relinquish). Cannot be combined with `--disk`.
+- `--resume` — boot the machine's minted disk of this ISO, the one a `save` kept, instead of the ISO: the installed system comes up in seconds and you log in. Nothing is downloaded and no ISO is attached, so a local `--iso` need not exist. Without a minted disk on that machine the host answers 500 `internal error`. Sentry is told `no minted disk for <iso> on this machine`. Your reservation stands: `start` again without `--resume`, or give it back with [relinquish](#relinquish). Cannot be combined with `--disk`.
 
 ```bash
 ./client start --agent-id OLI-42 --server-url https://qemu.example.com --iso https://example.com/omarchy.iso

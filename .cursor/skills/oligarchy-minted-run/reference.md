@@ -42,8 +42,8 @@ The saved session's row ends `succeeded` with reason `saved; minted <iso>`; a sa
 
 - A ticket with no drive job: stop. Do not touch the ticket's state. Diagnose (automation-server
   log), fix, cancel the ticket, `./ctrl mint … --unminted`.
-- `no minted disk for <iso> on this machine` on a batch start: that server was not minted (or its
-  data dir was wiped). INFRA; mint it before refilling.
+- `internal error` on a batch start, logged `no minted disk for <iso> on this machine`: that
+  server was not minted (or its data dir was wiped). INFRA; mint it before refilling.
 - Two servers sharing a data dir: two mints overwrite one disk. Check the four `data` values in the
   `listening on` lines before minting.
 - A mint result passed but no `.qcow2` beside the ISO, or the reverse: harness defect, analyze
