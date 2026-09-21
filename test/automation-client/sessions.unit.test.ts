@@ -483,17 +483,20 @@ describe("capacity", () => {
 describe("QEMU-first reserve", () => {
   it.effect("a drive passes the iso to QEMU and a mint does not", () => {
     const seen: Array<string | undefined> = [];
-    const reserveQemu: Sessions.ReserveQemu = (_agent, resume) =>
+    const pins: Array<string | undefined> = [];
+    const reserveQemu: Sessions.ReserveQemu = (_agent, resume, server) =>
       Effect.sync(() => {
         seen.push(resume);
+        pins.push(server);
       });
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       const iso = "https://example.com/omarchy.iso";
       yield* sessions.reserve(TICKET, "drive", iso);
-      yield* sessions.reserve(OTHER, "mint");
+      yield* sessions.reserve(OTHER, "mint", undefined, "http://127.0.0.1:55332");
       expect(seen).toEqual([iso, undefined]);
+      expect(pins).toEqual([undefined, "http://127.0.0.1:55332"]);
     }).pipe(Effect.provide(layer(spawner, 2, reserveQemu)));
   });
 

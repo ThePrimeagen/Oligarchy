@@ -94,6 +94,7 @@ type Options = {
   readonly log?: Layer.Layer<Log.Log>;
   readonly shutdown?: Sessions.Shutdown;
   readonly maxJobs?: number;
+  readonly selfUrl?: string;
 };
 
 const harness = (options: Options = {}) => {
@@ -123,7 +124,7 @@ const harness = (options: Options = {}) => {
     options.shutdown === undefined
       ? Layer.empty
       : Layer.succeed(Sessions.Shutdown)(options.shutdown);
-  const layer = Sessions.Sessions.layer(options.maxJobs ?? MAX_JOBS).pipe(
+  const layer = Sessions.Sessions.layer(options.maxJobs ?? MAX_JOBS, options.selfUrl).pipe(
     Layer.provide(
       Layer.mergeAll(
         qemu.layer,
@@ -599,6 +600,43 @@ describe("start resume", () => {
           });
           expect(h.minted.finds).toEqual([]);
           expect(h.sessions.sessions).toEqual([]);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a reserve pinned to this server takes the slot", () =>
+    Effect.gen(function* () {
+      const self = "http://127.0.0.1:55332";
+      const h = harness({ selfUrl: self });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT, undefined, self);
+          expect(yield* sessions.jobs).toBe(1);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a reserve pinned to another server takes no slot (unhappy)", () =>
+    Effect.gen(function* () {
+      const self = "http://127.0.0.1:55332";
+      const h = harness({ selfUrl: self });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const error = yield* Effect.flip(
+            sessions.reserve(AGENT, undefined, "http://127.0.0.1:55333"),
+          );
+          expect(error).toMatchObject({
+            _tag: "BadRequest",
+            message: "reserve is for http://127.0.0.1:55333, not http://127.0.0.1:55332",
+            agentId: AGENT,
+          });
+          expect(yield* sessions.jobs).toBe(0);
+          yield* sessions.reserve(OTHER_AGENT);
           expect(yield* sessions.jobs).toBe(1);
         }),
       );

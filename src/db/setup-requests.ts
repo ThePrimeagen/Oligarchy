@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { Array as Arr, Context, Effect, Layer } from "effect";
+import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 
@@ -109,6 +109,18 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
         return rows.length;
       });
 
+      // The qemu server a mint result is locked to. None when the ticket was never attached.
+      const serverForResult = Effect.fn("db.serverForSetupResult")(function* (resultId: string) {
+        const rows = yield* database.run("serverForSetupResult", (db) =>
+          db
+            .select({ serverUrl: DbSchema.setupRequests.serverUrl })
+            .from(DbSchema.setupRequests)
+            .where(eq(DbSchema.setupRequests.resultId, resultId))
+            .limit(1),
+        );
+        return Option.map(Arr.head(rows), (row) => row.serverUrl);
+      });
+
       const list = Effect.fn("db.listSetupRequests")(function* () {
         return yield* database.run("listSetupRequests", (db) =>
           db
@@ -131,7 +143,7 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
         return Arr.head(rows);
       });
 
-      return { insert, setResult, remove, removeServer, list, inspect };
+      return { insert, setResult, remove, removeServer, serverForResult, list, inspect };
     }),
   },
 ) {

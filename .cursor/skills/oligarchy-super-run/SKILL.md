@@ -1,12 +1,14 @@
 ---
 name: oligarchy-super-run
 description: >-
-  Operate an Oligarchy lock-screen super-run: start two QEMU servers and two
-  automation clients plus proxy and automation-server, run 100 counted Muse
-  Spark 1.3 contributor jobs, tick the board, analyze failures, and fix a
-  confirmed harness defect. Use when the user asks to run 100 Muse Spark
-  jobs, start qemu/automation servers, drain a batch, or operate the
-  automation pipeline.
+  Operate an Oligarchy lock-screen super-run: always delete the previous
+  minted disks first, start two QEMU servers (one data dir each) and two
+  automation clients plus proxy and automation-server, let resume traffic
+  create each server's mint job (mint runs before any lock-screen), then run
+  100 counted Muse Spark 1.3 contributor jobs, tick the board, analyze
+  failures, and fix a confirmed harness defect. Use when the user asks to
+  run 100 Muse Spark jobs, start qemu/automation servers, drain a batch, or
+  operate the automation pipeline.
 ---
 
 <OligarchySuperRun>
@@ -17,6 +19,25 @@ report stability, whether the paid model landed on every result/diagnosis,
 and whether `--max-jobs` was actually exercised (dispatch claims every
 pending job a live client will reserve; qemu 4/3 and client 5/3 are the caps).
 </Goal>
+<Disks>
+This is always the super-run. **Delete the old minted disks before every
+batch**, including the first one on a machine that already has them. A
+super-run never boots a disk left by an earlier batch, and it never calls
+`./ctrl mint`.
+
+Each qemu server has its own `--data-dir`. A minted disk is `<iso>.qcow2`
+and `<iso>.OVMF_VARS.fd` beside that server's ISO. Erase those two files in
+every server data dir, and erase session directories under
+`OLIGARCHY_SESSIONS_DIR`. Keep the ISO files (they are the installer, not
+the disk).
+
+Lock-screen tickets start `--resume`. The proxy, finding a live server with
+room and no disk, creates that server's mint ticket itself (proxy log:
+`setup ticket`). The mint job is claimed ahead of every pending drive, so
+the install runs first and lock-screens stay `deferred; setup needed` until
+that server holds the disk. The other server is minted the same way once
+every server that already holds the disk is at its `--max-jobs`.
+</Disks>
 <WriteableFiles>
 | File | What goes here |
 |------|----------------|
@@ -35,17 +56,20 @@ pending job a live client will reserve; qemu 4/3 and client 5/3 are the caps).
 <test>lock-screen</test>
 <fleet>
 <qemu-reverse-proxy port="55555"/>
-<qemu-server-4 port="55332" max-jobs="4"/>
-<qemu-server-3 port="55333" max-jobs="3"/>
+<qemu-server-4 port="55332" max-jobs="4" data-dir="$OLIGARCHY_DATA_ROOT/qemu-server-4"/>
+<qemu-server-3 port="55333" max-jobs="3" data-dir="$OLIGARCHY_DATA_ROOT/qemu-server-3"/>
 <automation-client-5 port="52222" max-jobs="5"/>
 <automation-client-3 port="52223" max-jobs="3"/>
 <automation-server port="54321"/>
 </fleet>
 </Runs>
 <YourRole>
-- **Operator:** start/restart the six processes, create tickets (`new.sh`),
-  run `/tmp/superrun/tick.sh` every minute, retire, abort INFRA, refill
-  until 100 COUNTED, drain, write the pad.
+- **Operator:** delete the old minted disks, start/restart the six processes
+  (one data dir per qemu server), create tickets (`new.sh`), run
+  `/tmp/superrun/tick.sh` every minute, retire, abort INFRA, refill until
+  100 COUNTED, drain, write the pad. Do not run `./ctrl mint`. The proxy
+  creates each server's mint ticket, and that mint job runs before the
+  lock-screens waiting on it.
 - **Analyze every `ANALYZE` line from `tick.sh`**, plus any stalled run.
   Spawn a `Task` `generalPurpose` subagent. Hand it ticket, result id,
   session id, `/tmp/superrun/status.sh "$RID"`,
@@ -88,14 +112,27 @@ behind. Stop any old fleet (the six ports must be free), then:
 # /tmp/superrun/reset.sh --force  # skip both guards (you have confirmed nothing is in flight)
 ```
 
-It never touches the database, Linear, or session dirs. Do not append a
-new batch onto an old `index.tsv`; `tick.sh` counts `COUNTED` rows in it.
+It never touches the database, Linear, session dirs, or minted disks. Do not
+append a new batch onto an old `index.tsv`; `tick.sh` counts `COUNTED` rows in it.
 
-Start **six** processes. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (it fills from client reserve) and defaults to **free** Muse — always pass the paid model.
+**Always delete the old disks before starting the fleet.** This is every
+super-run, not a one-time reset. `reset.sh` does not do it. Keep the ISO.
+
+```bash
+DATA="${OLIGARCHY_DATA_ROOT:-$HOME/personal/oligarchy-data}"
+SESS="${OLIGARCHY_SESSIONS_DIR:-$HOME/personal/oligarchy-tmp}"
+mkdir -p "$DATA/qemu-server-4/isos" "$DATA/qemu-server-3/isos" "$SESS"
+find "$SESS" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+find "$DATA"/qemu-server-4/isos "$DATA"/qemu-server-3/isos \
+  -type f \( -name '*.qcow2' -o -name '*.OVMF_VARS.fd' \) -delete
+```
+
+Start **six** processes, each in its own session (`setsid`) so they outlive the operator shell. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Each qemu server gets its own `--data-dir`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (it fills from client reserve) and defaults to **free** Muse — always pass the paid model. Do not mint by hand.
 
 ```bash
 P=automation-super-run-logs/processes
 SESS=/home/theprimeagen/personal/oligarchy-tmp
+DATA="${OLIGARCHY_DATA_ROOT:-$HOME/personal/oligarchy-data}"
 export OLIGARCHY_SESSIONS_DIR="$SESS"
 
 start_fleet() {
@@ -107,26 +144,28 @@ start_fleet() {
   # live row, different url: stop that process. stale row: delete only that name's dead row, keep these four names.
   : > "$P/pids"
 
-  ./qemu-reverse-proxy --port 55555 \
+  setsid ./qemu-reverse-proxy --port 55555 \
     >"$P/qemu-reverse-proxy.log" 2>&1 & echo "qemu-reverse-proxy $!" | tee -a "$P/pids"
 
-  TMPDIR="$SESS" ./qemu-server \
+  setsid env TMPDIR="$SESS" ./qemu-server \
     --name qemu-server-4 --max-jobs 4 --port 55332 --url http://127.0.0.1:55332 \
+    --data-dir "$DATA/qemu-server-4" \
     >"$P/qemu-server-4.log" 2>&1 & echo "qemu-server-4 $!" | tee -a "$P/pids"
 
-  TMPDIR="$SESS" ./qemu-server \
+  setsid env TMPDIR="$SESS" ./qemu-server \
     --name qemu-server-3 --max-jobs 3 --port 55333 --url http://127.0.0.1:55333 \
+    --data-dir "$DATA/qemu-server-3" \
     >"$P/qemu-server-3.log" 2>&1 & echo "qemu-server-3 $!" | tee -a "$P/pids"
 
-  SERVER_URL=http://127.0.0.1:55555 ./automation-client \
+  setsid env SERVER_URL=http://127.0.0.1:55555 ./automation-client \
     --name automation-client-5 --max-jobs 5 --port 52222 --url http://127.0.0.1:52222 \
     >"$P/automation-client-5.log" 2>&1 & echo "automation-client-5 $!" | tee -a "$P/pids"
 
-  SERVER_URL=http://127.0.0.1:55555 ./automation-client \
+  setsid env SERVER_URL=http://127.0.0.1:55555 ./automation-client \
     --name automation-client-3 --max-jobs 3 --port 52223 --url http://127.0.0.1:52223 \
     >"$P/automation-client-3.log" 2>&1 & echo "automation-client-3 $!" | tee -a "$P/pids"
 
-  ./automation-server --port 54321 \
+  setsid ./automation-server --port 54321 \
     --model openrouter/meta/muse-spark-1.3-contributor \
     >"$P/automation-server.log" 2>&1 & echo "automation-server $!" | tee -a "$P/pids"
 }
@@ -143,9 +182,9 @@ grep -E 'listening on|heartbeat failed' "$P"/qemu-server-*.log "$P"/automation-c
 psql "$DBURL" -X -c "select name, type, url, heartbeat_at from servers where heartbeat_at > now() - interval '45 seconds' order by type, name;"
 ```
 
-Expect `qemu-server-4` / `qemu-server-3` (`qemu`) and `automation-client-5` / `automation-client-3` (`automation-client`).
+Expect `qemu-server-4` / `qemu-server-3` (`qemu`) and `automation-client-5` / `automation-client-3` (`automation-client`). Each `listening on` line names a different `data` dir, and neither dir has a `.qcow2` yet.
 
-`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch fills every slot a live client will reserve; keep enough pending drives that `--max-jobs` is exercised.
+`N` is monotonic (`/tmp/superrun/next`). Never take N from `active`. Target: `counted + active == 100` after replacing every INFRA. Dispatch fills every slot a live client will reserve; keep enough pending drives that `--max-jobs` is exercised. The first lock-screen resumes an empty fleet: the proxy opens one mint ticket for the server that answered `setup needed`, and that mint is claimed before any drive. Leave the lock-screens pending until the proxy log shows `setup ticket` and that mint job is `running`. A lock-screen that starts a guest before its server's mint job is a defect. The second server gets its own mint the same way, once the first server holds the disk and is at `--max-jobs`.
 
 Start a run by creating its Linear ticket:
 

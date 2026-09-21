@@ -5,7 +5,7 @@ export const BIN = "opencode";
 // only exits on idle (anomalyco/opencode#40747). Drives have taken up to fifteen minutes,
 // diagnoses under four, and a mint installs Omarchy to the desktop before it saves; past the
 // ceiling the run is killed and the job says so.
-export const CEILING = "45 minutes";
+export const CEILING = "1.5 hours";
 
 // A headless run has nobody to answer a permission prompt. --auto approves the root session's
 // asks, but a subagent the driver spawns asks into the void and the run deadlocks

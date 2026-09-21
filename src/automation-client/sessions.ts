@@ -28,6 +28,7 @@ const mapWithout = <V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<st
 export type ReserveQemu = (
   agent: string,
   resume?: string,
+  server?: string,
 ) => Effect.Effect<void, Errors.AtCapacity | Errors.SetupNeeded | Errors.Internal>;
 
 export type RelinquishQemu = (agent: string) => Effect.Effect<void, Errors.Internal>;
@@ -68,6 +69,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       ticket: string,
       action: Domain.AutomationAction,
       resume?: string,
+      server?: string,
     ) {
       return yield* reserveGate.withPermits(1)(
         Effect.gen(function* () {
@@ -83,10 +85,10 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           // than leak it. A diagnose reads the session back and boots nothing: a guest slot it
           // took would never be consumed by a start, nor given back, and would be gone for as
           // long as that qemu server lived.
-          // A mint installs fresh and then pins itself; it takes a guest slot and does not
-          // resume. Only a drive names the iso whose disk the slot must boot.
+          // A mint installs fresh on the server its lock named, and does not resume. Only a
+          // drive names the iso whose disk the slot must boot. The pin is that server.
           if (action === "drive" || action === "mint") {
-            yield* reserveQemu(ticket, action === "drive" ? resume : undefined);
+            yield* reserveQemu(ticket, action === "drive" ? resume : undefined, server);
           }
           const since = yield* Clock.currentTimeMillis;
           const admitted = yield* Ref.modify(slots, (current) => {

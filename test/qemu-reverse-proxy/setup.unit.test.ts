@@ -1,9 +1,10 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
+import * as Errors from "../../src/shared/errors.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -32,12 +33,17 @@ type Row = {
 const memory = () => {
   const rows: Array<Row> = [];
   let removed = 0;
+  let failInsert = false;
+  let failRemove = false;
   const key = (iso: string, serverUrl: string) =>
     rows.find((row) => row.iso === iso && row.serverUrl === serverUrl);
   const layer = Layer.succeed(SetupRequests.SetupRequestStore)(
     SetupRequests.SetupRequestStore.of({
       insert: (iso, serverUrl) =>
         Effect.sync(() => {
+          if (failInsert) {
+            return false;
+          }
           if (key(iso, serverUrl) !== undefined) {
             return false;
           }
@@ -61,13 +67,15 @@ const memory = () => {
           return true;
         }),
       remove: (iso, serverUrl) =>
-        Effect.sync(() => {
-          const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
-          if (index >= 0) {
-            rows.splice(index, 1);
-            removed += 1;
-          }
-        }),
+        failRemove
+          ? Effect.die(new Error("unlock failed"))
+          : Effect.sync(() => {
+              const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
+              if (index >= 0) {
+                rows.splice(index, 1);
+                removed += 1;
+              }
+            }),
       removeServer: (serverUrl) =>
         Effect.sync(() => {
           const before = rows.length;
@@ -77,6 +85,11 @@ const memory = () => {
             }
           }
           return before - rows.length;
+        }),
+      serverForResult: (resultId) =>
+        Effect.sync(() => {
+          const row = rows.find((candidate) => candidate.resultId === resultId);
+          return row === undefined ? Option.none() : Option.some(row.serverUrl);
         }),
       list: () =>
         Effect.sync(() => rows.map((row) => ({ iso: row.iso, serverUrl: row.serverUrl }))),
@@ -91,6 +104,12 @@ const memory = () => {
     rows,
     get removed() {
       return removed;
+    },
+    set failInsert(value: boolean) {
+      failInsert = value;
+    },
+    set failRemove(value: boolean) {
+      failRemove = value;
     },
     layer,
   };
@@ -149,10 +168,12 @@ describe("decide", () => {
   });
 });
 
-const harness = (definitions: ReadonlyArray<typeof MINT> = [MINT]) => {
+const harness = (
+  definitions: ReadonlyArray<typeof MINT> = [MINT],
+  linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear(),
+) => {
   const store = memory();
   const tests = Stores.fakeTestStore({ definitions });
-  const linear = FakeLinear.fakeLinear();
   const log = FakeLog.fakeLog();
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -244,6 +265,43 @@ describe("opening a setup", () => {
     );
   });
 
+  it.effect("a create still attaching its ticket is not released by the check (happy)", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const go = yield* Deferred.make<void>();
+      let created = 0;
+      const linear = FakeLinear.fakeLinear({
+        overrides: {
+          createIssue: () =>
+            Effect.gen(function* () {
+              created += 1;
+              if (created === 1) {
+                return FakeLinear.ticketFor("OLI-42");
+              }
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(go);
+              return FakeLinear.ticketFor("OLI-43");
+            }),
+        },
+      });
+      const other = "http://10.0.0.5:42069";
+      const h = harness([MINT], linear);
+      yield* h.run(
+        Effect.gen(function* () {
+          const setup = yield* Setup.Setup;
+          yield* setup.install();
+          yield* setup.open(ISO, SERVER, PROXY);
+          const fiber = yield* Effect.forkChild(setup.open(ISO, other, PROXY));
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("30 seconds");
+          expect(h.store.rows.map((row) => row.serverUrl).sort()).toEqual([SERVER, other].sort());
+          yield* Deferred.succeed(go, undefined);
+          yield* Fiber.join(fiber);
+        }),
+      );
+    }),
+  );
+
   it.effect("a row whose ticket has not been stored yet is left for the timer (unhappy)", () => {
     const h = harness();
     h.store.rows.push({
@@ -268,6 +326,85 @@ describe("opening a setup", () => {
       }),
     );
   });
+
+  it.effect("an insert that fails never creates a ticket (unhappy)", () => {
+    const h = harness();
+    h.store.failInsert = true;
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.linear.calls).toEqual([]);
+        expect(h.store.rows).toHaveLength(0);
+      }),
+    );
+  });
+
+  it.effect("a failed Linear ticket unlocks, and the issue is not watched (unhappy)", () => {
+    const linear = FakeLinear.fakeLinear({
+      overrides: {
+        createIssue: () =>
+          Effect.fail(
+            Errors.LinearError.make({
+              operation: "createIssue",
+              message: "linear: request failed",
+            }),
+          ),
+      },
+    });
+    const h = harness([MINT], linear);
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.store.rows).toHaveLength(0);
+        expect(h.log.lines.some((line) => line.text.startsWith("setup ticket OLI"))).toBe(false);
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.removed).toBe(1);
+      }),
+    );
+  });
+
+  it.effect(
+    "a failed unlock after a failed Linear ticket leaves the row and does not mint again (unhappy)",
+    () => {
+      let created = 0;
+      const linear = FakeLinear.fakeLinear({
+        overrides: {
+          createIssue: () =>
+            Effect.gen(function* () {
+              created += 1;
+              return yield* Effect.fail(
+                Errors.LinearError.make({
+                  operation: "createIssue",
+                  message: "linear: request failed",
+                }),
+              );
+            }),
+        },
+      });
+      const h = harness([MINT], linear);
+      h.store.failRemove = true;
+      return h.run(
+        Effect.gen(function* () {
+          const setup = yield* Setup.Setup;
+          yield* setup.install();
+          yield* setup.open(ISO, SERVER, PROXY);
+          expect(h.store.rows).toHaveLength(1);
+          expect(h.store.rows[0]?.resultId).toBeNull();
+          expect(
+            h.log.lines
+              .map((line) => line.text)
+              .some((text) => text.includes("setup release failed")),
+          ).toBe(true);
+          yield* setup.open(ISO, SERVER, PROXY);
+          expect(created).toBe(1);
+        }),
+      );
+    },
+  );
 
   it.effect("a reserve with no host drops the lock and creates no ticket (unhappy)", () => {
     const h = harness();

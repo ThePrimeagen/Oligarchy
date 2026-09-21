@@ -64,12 +64,17 @@ export const reserve = Effect.fn("reserve")(function* (
   ticket: string,
   action: Domain.AutomationAction,
   resume?: string,
+  server?: string,
 ) {
   const client = yield* makeClient(url);
   // undefined is not a value: the key is absent, which is what optionalKey accepts.
   return yield* client.Runs.reserve({
     payload: Contract.ReserveBody.make(
-      Object.assign({ ticket, action }, resume === undefined ? undefined : { resume }),
+      Object.assign(
+        { ticket, action },
+        resume === undefined ? undefined : { resume },
+        server === undefined ? undefined : { server },
+      ),
     ),
   }).pipe(
     Effect.catch((error) => {

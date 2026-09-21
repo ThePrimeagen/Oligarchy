@@ -25,11 +25,15 @@ const refused = (
 
 export const reserve =
   (proxy: ProxyClient.ProxyClientService): Sessions.ReserveQemu =>
-  (agent, resume) =>
+  (agent, resume, server) =>
     proxy
       .reserve(
         Contract.ReserveAgentBody.make(
-          Object.assign({ agent }, resume === undefined ? undefined : { resume }),
+          Object.assign(
+            { agent },
+            resume === undefined ? undefined : { resume },
+            server === undefined ? undefined : { server },
+          ),
         ),
       )
       .pipe(Effect.catch((error) => refused(agent, error)));

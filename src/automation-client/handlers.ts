@@ -4,6 +4,7 @@ import * as QemuServerHandlers from "../qemu-server/handlers.ts";
 import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
+import * as Errors from "../shared/errors.ts";
 import * as Sessions from "./sessions.ts";
 
 const ok = Contract.Ok.make({});
@@ -19,7 +20,13 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
       ({ payload }) =>
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          yield* sessions.reserve(payload.ticket, payload.action, payload.resume);
+          if (payload.action === "mint" && payload.server === undefined) {
+            return yield* Errors.BadRequest.make({
+              message: "a mint reserves its pinned server",
+              agentId: payload.ticket,
+            });
+          }
+          yield* sessions.reserve(payload.ticket, payload.action, payload.resume, payload.server);
           return ok;
         }),
       uninterruptible,

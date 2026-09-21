@@ -38,6 +38,16 @@ describe("Qemu.reserve happy path", () => {
     }),
   );
 
+  it.effect("posts the pinned server when the mint names one", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      const pin = "http://127.0.0.1:55332";
+      yield* Qemu.reserve(proxy)(AGENT, undefined, pin);
+      expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT, server: pin });
+    }),
+  );
+
   it.effect("a resume posts the iso and omits it when the drive is fresh", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));

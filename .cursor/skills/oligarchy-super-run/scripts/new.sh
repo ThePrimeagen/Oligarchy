@@ -9,13 +9,13 @@ DIR="${1:-muse}"
 [ -f "$DEST/next" ] || echo 1 > "$DEST/next"
 N=$(cat "$DEST/next")
 cd "$ROOT"
-OUT=$(./ctrl test new \
+OUT=$(./ctrl test run \
   --server-url "${SUPER_RUN_SERVER_URL:-https://oligarchy-server.trm.sh}" \
   --iso "${SUPER_RUN_ISO:-https://iso.omarchy.org/omarchy-4.0.2.iso}" \
   --version "${SUPER_RUN_VERSION:-4.0.2}" \
   --name "${SUPER_RUN_TEST:-lock-screen}" 2>&1) || {
   echo "$OUT" >&2
-  echo "new.sh: ctrl test new failed" >&2
+  echo "new.sh: ctrl test run failed" >&2
   exit 1
 }
 JSON=$(printf '%s\n' "$OUT" | grep '^{' | tail -1)

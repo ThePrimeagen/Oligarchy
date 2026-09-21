@@ -444,9 +444,10 @@ const make = Effect.gen(function* () {
         }
         ranked.sort((left, right) => left.qemus - right.qemus);
         const resume = body.resume !== undefined;
-        // The least-busy server that has room and no disk. A later server that holds the disk
-        // still wins; this one is the answer only when none does.
-        let setup: { readonly url: string; readonly maxJobs: number } | undefined;
+        // Every server that has room and no disk, least-busy first. A later server that holds
+        // the disk still wins; these are the answer only when none does. One mint each: a second
+        // reserve while that mint is in flight does not open another.
+        const unminted: Array<{ readonly url: string; readonly maxJobs: number }> = [];
         let lastCapacity:
           | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
           | undefined;
@@ -458,9 +459,7 @@ const make = Effect.gen(function* () {
           }
           const gained = resume && answer.status === 409 ? maxJobsGained(answer.text) : undefined;
           if (gained !== undefined) {
-            if (setup === undefined) {
-              setup = { url, maxJobs: gained };
-            }
+            unminted.push({ url, maxJobs: gained });
             continue;
           }
           return HttpServerResponse.text(answer.text, {
@@ -468,8 +467,12 @@ const make = Effect.gen(function* () {
             headers: answer.headers,
           });
         }
+        const setup = unminted[0];
         if (setup !== undefined && body.resume !== undefined) {
-          yield* setups.open(body.resume, setup.url, Setup.proxyOrigin(request.headers));
+          const origin = Setup.proxyOrigin(request.headers);
+          for (const each of unminted) {
+            yield* setups.open(body.resume, each.url, origin);
+          }
           return yield* Errors.SetupNeeded.make({
             message: `setup needed: ${setup.url} max-jobs is ${String(setup.maxJobs)}`,
             agentId: agent,

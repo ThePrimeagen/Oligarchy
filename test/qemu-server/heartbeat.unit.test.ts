@@ -51,6 +51,7 @@ const fakeSetups = () => {
           cleared.push(url);
           return 0;
         }),
+      serverForResult: () => Effect.succeed(Option.none()),
       list: () => Effect.succeed([]),
       inspect: () => Effect.succeed(Option.none()),
     }),
@@ -352,6 +353,7 @@ describe("heartbeat unhappy path", () => {
           setResult: () => Effect.succeed(true),
           remove: () => Effect.void,
           removeServer: () => Effect.fail(boom),
+          serverForResult: () => Effect.succeed(Option.none()),
           list: () => Effect.succeed([]),
           inspect: () => Effect.succeed(Option.none()),
         }),

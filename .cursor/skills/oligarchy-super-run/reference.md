@@ -82,6 +82,24 @@ OpenRouter's usage page is billed truth.
 - **localhost vs 127.0.0.1:** servers bind `127.0.0.1`. Announce
   `http://127.0.0.1:<port>`. `localhost` can resolve to `::1`.
 
+## Disks, every batch
+
+Always, before `start_fleet`, including when a previous batch already minted:
+
+- Delete `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` under
+  `$OLIGARCHY_DATA_ROOT/qemu-server-4/isos` and `qemu-server-3/isos`
+  (`OLIGARCHY_DATA_ROOT` defaults to `$HOME/personal/oligarchy-data`).
+- Delete session directories under `OLIGARCHY_SESSIONS_DIR`.
+- Keep the ISO. `reset.sh` does not touch disks or session dirs.
+
+Do not run `./ctrl mint`. A `--resume` against a server with room and no disk
+makes the proxy insert a `setup_requests` row and a mint ticket. Claim order
+is mint, then diagnose, then drive, so the mint job runs first and drives
+stay pending (`deferred; setup needed`) until that server's disk exists.
+One mint at a time: the least-busy unminted server with room. The other
+server is ticketed only after every server that holds the disk is at
+`--max-jobs`.
+
 ## Env the six processes need
 
 From `.env` in the repo root (already-set vars win):
