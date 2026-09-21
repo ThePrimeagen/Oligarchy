@@ -9,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -267,6 +268,25 @@ export const sessionServers = pgTable("session_servers", {
   serverUrl: text("server_url").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// One setup in flight, or finished and left in place, per iso and server. The primary key is
+// the lock: a second insert fails, so one ticket per pair. result_id is null until that
+// ticket's result exists, then whoever watches the row reads the result by it. Not a foreign
+// key, and server_url is not one either: a success stays when the result is swept and when the
+// server is forgotten. Many null result ids are allowed; one result is one setup.
+export const setupRequests = pgTable(
+  "setup_requests",
+  {
+    iso: text("iso").notNull(),
+    serverUrl: text("server_url").notNull(),
+    resultId: uuid("result_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.iso, table.serverUrl] }),
+    uniqueIndex("setup_requests_result_id_idx").on(table.resultId),
+  ],
+);
 
 // Which server reserved a slot for an agent, so start finds that machine before a session id
 // exists. agent_id is the ticket. A racing second insert is one row.

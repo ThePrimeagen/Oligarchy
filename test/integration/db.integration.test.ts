@@ -2289,6 +2289,68 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect("a setup request records the iso and server, and a result once one exists", () =>
+      Effect.gen(function* () {
+        const database = yield* Client.Database;
+        const iso = `https://example.com/${uuid()}.iso`;
+        const serverUrl = "http://10.0.0.5:42069";
+        const [row] = yield* database.run("insert", (db) =>
+          db.insert(DbSchema.setupRequests).values({ iso, serverUrl }).returning(),
+        );
+        expect(row).toMatchObject({ iso, serverUrl, resultId: null });
+        expect(row?.createdAt).toBeInstanceOf(Date);
+        // The same iso on another server, and another iso on the same server, are other setups.
+        yield* database.run("insert", (db) =>
+          db.insert(DbSchema.setupRequests).values({ iso, serverUrl: "http://10.0.0.6:42069" }),
+        );
+        const resultId = uuid();
+        const [claimed] = yield* database.run("insert", (db) =>
+          db
+            .insert(DbSchema.setupRequests)
+            .values({ iso: `https://example.com/${uuid()}.iso`, serverUrl, resultId })
+            .returning({ resultId: DbSchema.setupRequests.resultId }),
+        );
+        expect(claimed?.resultId).toBe(resultId);
+      }),
+    );
+
+    scoped.effect(
+      "a second setup for the same iso and server is refused, and so is a second claim on one result (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const database = yield* Client.Database;
+          const iso = `https://example.com/${uuid()}.iso`;
+          const serverUrl = "http://10.0.0.5:42069";
+          yield* database.run("insert", (db) =>
+            db.insert(DbSchema.setupRequests).values({ iso, serverUrl }),
+          );
+          const duplicate = yield* Effect.flip(
+            database.run("insert", (db) =>
+              db.insert(DbSchema.setupRequests).values({ iso, serverUrl }),
+            ),
+          );
+          expect(duplicate).toMatchObject({ _tag: "DatabaseError", operation: "insert" });
+          expect(String(duplicate.cause)).toContain("setup_requests_iso_server_url_pk");
+
+          const resultId = uuid();
+          const otherIso = `https://example.com/${uuid()}.iso`;
+          yield* database.run("insert", (db) =>
+            db.insert(DbSchema.setupRequests).values({ iso: otherIso, serverUrl, resultId }),
+          );
+          const sameResult = yield* Effect.flip(
+            database.run("insert", (db) =>
+              db.insert(DbSchema.setupRequests).values({
+                iso: `https://example.com/${uuid()}.iso`,
+                serverUrl: "http://10.0.0.6:42069",
+                resultId,
+              }),
+            ),
+          );
+          expect(sameResult).toMatchObject({ _tag: "DatabaseError", operation: "insert" });
+          expect(String(sameResult.cause)).toContain("setup_requests_result_id_idx");
+        }),
+    );
+
     scoped.effect("ping succeeds against the container", () =>
       Effect.gen(function* () {
         const database = yield* Client.Database;
