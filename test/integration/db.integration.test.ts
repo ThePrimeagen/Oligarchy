@@ -14,6 +14,7 @@ import * as ProcessStats from "../../src/db/process-stats.ts";
 import * as Servers from "../../src/db/servers.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Automation from "../../src/db/automation.ts";
+import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -2354,6 +2355,42 @@ Postgres.describeWithDatabase("database", () => {
           );
           expect(sameResult).toMatchObject({ _tag: "DatabaseError", operation: "insert" });
           expect(String(sameResult.cause)).toContain("setup_requests_result_id_idx");
+        }),
+    );
+
+    scoped.effect(
+      "a setup request is one row per iso and server, and a server coming online clears only its own",
+      () =>
+        Effect.gen(function* () {
+          const setups = yield* SetupRequests.SetupRequestStore;
+          const tests = yield* Tests.TestStore;
+          const jobs = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42070",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          const iso = `https://example.com/${uuid()}.iso`;
+          const serverUrl = "http://10.0.0.5:42069";
+          const other = "http://10.0.0.6:42069";
+          expect(yield* setups.insert(iso, serverUrl)).toBe(true);
+          expect(yield* setups.insert(iso, serverUrl)).toBe(false);
+          expect(yield* setups.insert(iso, other)).toBe(true);
+          expect(yield* setups.setResult(iso, serverUrl, resultId)).toBe(true);
+          yield* jobs.enqueue({ resultId, action: "drive" });
+          const seen = Option.getOrThrow(yield* setups.inspect(iso, serverUrl));
+          expect(seen).toMatchObject({
+            iso,
+            serverUrl,
+            resultId,
+            resultStatus: "pending",
+            driveStatus: "pending",
+          });
+          expect(yield* setups.removeServer(serverUrl)).toBe(1);
+          expect(Option.isNone(yield* setups.inspect(iso, serverUrl))).toBe(true);
+          expect(Option.isSome(yield* setups.inspect(iso, other))).toBe(true);
         }),
     );
 

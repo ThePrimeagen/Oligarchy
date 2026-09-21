@@ -1,6 +1,7 @@
-import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
+import { Cause, Effect, Ref, Schedule, type Scope, Schema } from "effect";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
+import * as SetupRequests from "../db/setup-requests.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -40,6 +41,7 @@ export const announce = (
   | ProcessUsage.ProcessUsage
   | Servers.ServerStore
   | ProcessStats.ProcessStatsStore
+  | SetupRequests.SetupRequestStore
   | Log.Log
 > =>
   Effect.gen(function* () {
@@ -47,6 +49,7 @@ export const announce = (
     const usage = yield* ProcessUsage.ProcessUsage;
     const store = yield* Servers.ServerStore;
     const processStore = yield* ProcessStats.ProcessStatsStore;
+    const setups = yield* SetupRequests.SetupRequestStore;
     const log = yield* Log.Log;
     const failed = (text: string) => (cause: Cause.Cause<unknown>) => {
       const error = Cause.squash(cause);
@@ -78,7 +81,24 @@ export const announce = (
         }),
       );
     }).pipe(Effect.catchCause(failed("process stats failed")));
-    const tick = writeHeartbeat.pipe(Effect.andThen(writeProcess));
+    // Once the delete lands: a host that comes back must not keep a setup lock from the
+    // process that died. A failed delete is retried on the next tick; after it lands, later
+    // ticks leave an in-flight setup on this live server alone.
+    const setupCleared = yield* Ref.make(false);
+    const clearSetups = Effect.gen(function* () {
+      if (yield* Ref.get(setupCleared)) {
+        return;
+      }
+      const removed = yield* setups.removeServer(url);
+      yield* Ref.set(setupCleared, true);
+      if (removed === 0) {
+        return;
+      }
+      yield* log.info(`setup cleared; ${url}; ${String(removed)}`, {
+        location: Log.Locations.server,
+      });
+    }).pipe(Effect.catchCause(failed("setup clear failed")));
+    const tick = clearSetups.pipe(Effect.andThen(writeHeartbeat), Effect.andThen(writeProcess));
     // Before the loop: close interrupts the fiber first, then this runs.
     yield* Effect.addFinalizer(() =>
       store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed")), Effect.asVoid),

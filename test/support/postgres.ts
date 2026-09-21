@@ -7,6 +7,7 @@ import * as Diagnosis from "../../src/db/diagnosis.ts";
 import * as Logs from "../../src/db/logs.ts";
 import * as ProcessStats from "../../src/db/process-stats.ts";
 import * as Servers from "../../src/db/servers.ts";
+import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as Sessions from "../../src/db/sessions.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as Tests from "../../src/db/tests.ts";
@@ -32,6 +33,7 @@ export const migratedLayer: Layer.Layer<
   | Automation.AutomationStore
   | Servers.ServerStore
   | ProcessStats.ProcessStatsStore
+  | SetupRequests.SetupRequestStore
 > = Layer.mergeAll(
   Sessions.SessionStore.layer,
   DebugLogs.DebugLogStore.layer,
@@ -39,6 +41,7 @@ export const migratedLayer: Layer.Layer<
   Tests.TestStore.layer,
   Automation.AutomationStore.layer,
   Servers.ServerStore.layer,
+  SetupRequests.SetupRequestStore.layer,
   ProcessStats.ProcessStatsStore.layer,
 ).pipe(
   Layer.provideMerge(Actions.ActionStore.layer),

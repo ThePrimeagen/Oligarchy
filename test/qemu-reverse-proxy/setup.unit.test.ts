@@ -1,0 +1,380 @@
+import { describe, expect } from "vitest";
+import { it } from "@effect/vitest";
+import { Effect, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as SetupRequests from "../../src/db/setup-requests.ts";
+import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
+import * as FakeLog from "../support/log.ts";
+import * as FakeLinear from "../support/fake-linear.ts";
+import * as Stores from "../support/stores.ts";
+
+const ISO = "https://example.com/omarchy.iso";
+const SERVER = "http://10.0.0.6:42069";
+const PROXY = "http://127.0.0.1:42070";
+const MINT = {
+  id: 1,
+  name: "mint",
+  description: "install it",
+  instruction: "boot the iso",
+  proof: "the desktop",
+  createdAt: new Date(0),
+};
+
+type Row = {
+  iso: string;
+  serverUrl: string;
+  resultId: string | null;
+  resultStatus: SetupRequests.ResultStatus | null;
+  driveStatus: SetupRequests.DriveStatus | null;
+};
+
+const memory = () => {
+  const rows: Array<Row> = [];
+  let removed = 0;
+  const key = (iso: string, serverUrl: string) =>
+    rows.find((row) => row.iso === iso && row.serverUrl === serverUrl);
+  const layer = Layer.succeed(SetupRequests.SetupRequestStore)(
+    SetupRequests.SetupRequestStore.of({
+      insert: (iso, serverUrl) =>
+        Effect.sync(() => {
+          if (key(iso, serverUrl) !== undefined) {
+            return false;
+          }
+          rows.push({
+            iso,
+            serverUrl,
+            resultId: null,
+            resultStatus: null,
+            driveStatus: null,
+          });
+          return true;
+        }),
+      setResult: (iso, serverUrl, resultId) =>
+        Effect.sync(() => {
+          const row = key(iso, serverUrl);
+          if (row === undefined) {
+            return false;
+          }
+          row.resultId = resultId;
+          row.resultStatus = "pending";
+          return true;
+        }),
+      remove: (iso, serverUrl) =>
+        Effect.sync(() => {
+          const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
+          if (index >= 0) {
+            rows.splice(index, 1);
+            removed += 1;
+          }
+        }),
+      removeServer: (serverUrl) =>
+        Effect.sync(() => {
+          const before = rows.length;
+          for (let index = rows.length - 1; index >= 0; index -= 1) {
+            if (rows[index]?.serverUrl === serverUrl) {
+              rows.splice(index, 1);
+            }
+          }
+          return before - rows.length;
+        }),
+      list: () =>
+        Effect.sync(() => rows.map((row) => ({ iso: row.iso, serverUrl: row.serverUrl }))),
+      inspect: (iso, serverUrl) =>
+        Effect.sync(() => {
+          const row = key(iso, serverUrl);
+          return row === undefined ? Option.none() : Option.some({ ...row });
+        }),
+    }),
+  );
+  return {
+    rows,
+    get removed() {
+      return removed;
+    },
+    layer,
+  };
+};
+
+const provide = (
+  store: ReturnType<typeof memory>,
+  tests = Stores.fakeTestStore({ definitions: [MINT] }),
+  linear = FakeLinear.fakeLinear(),
+  log = FakeLog.fakeLog(),
+) => Layer.mergeAll(store.layer, tests.layer, linear.layer, log.layer, NodeFileSystem.layer);
+
+describe("decide", () => {
+  const row = (patch: Partial<SetupRequests.Situation>): Option.Option<SetupRequests.Situation> =>
+    Option.some({
+      iso: ISO,
+      serverUrl: SERVER,
+      resultId: "result",
+      resultStatus: "pending",
+      driveStatus: null,
+      ...patch,
+    });
+
+  it("a missing row is gone, before any status is read", () => {
+    expect(Setup.decide(Option.none())).toBe("gone");
+  });
+
+  it("a passed result is done and the row stays out of the loop", () => {
+    expect(Setup.decide(row({ resultStatus: "passed" }))).toBe("done");
+  });
+
+  it("a failed, aborted, or timed out result releases the lock (unhappy)", () => {
+    expect(Setup.decide(row({ resultStatus: "failed" }))).toBe("release");
+    expect(Setup.decide(row({ resultStatus: "aborted" }))).toBe("release");
+    expect(Setup.decide(row({ resultStatus: "timed_out" }))).toBe("release");
+  });
+
+  it("an open result whose drive already ended releases the lock (unhappy)", () => {
+    expect(Setup.decide(row({ resultStatus: "running", driveStatus: "succeeded" }))).toBe(
+      "release",
+    );
+    expect(Setup.decide(row({ resultStatus: "pending", driveStatus: "failed" }))).toBe("release");
+  });
+
+  it("a pending result with no finished drive is still in flight", () => {
+    expect(Setup.decide(row({ resultStatus: "pending", driveStatus: null }))).toBe("keep");
+    expect(Setup.decide(row({ resultStatus: "running", driveStatus: "running" }))).toBe("keep");
+  });
+
+  it("a row with no result yet is released (unhappy)", () => {
+    expect(Setup.decide(row({ resultId: null, resultStatus: null }))).toBe("release");
+  });
+
+  it("a stored result that retention swept is done, so the lock is not minted again", () => {
+    expect(Setup.decide(row({ resultId: "result", resultStatus: null }))).toBe("done");
+  });
+});
+
+const harness = (definitions: ReadonlyArray<typeof MINT> = [MINT]) => {
+  const store = memory();
+  const tests = Stores.fakeTestStore({ definitions });
+  const linear = FakeLinear.fakeLinear();
+  const log = FakeLog.fakeLog();
+  const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provide(Setup.Setup.layer.pipe(Layer.provide(provide(store, tests, linear, log)))),
+    );
+  return { store, tests, linear, log, run };
+};
+
+describe("opening a setup", () => {
+  it.effect("creates one mint ticket, and a second open while it is in flight does not", () => {
+    const h = harness();
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.linear.calls.filter((call) => call.method === "createIssue")).toEqual([
+          {
+            method: "createIssue",
+            input: {
+              teamId: FakeLinear.TEAM_ID,
+              title: `Omarchy mint: ${SERVER}`,
+              labelIds: [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")],
+              assigneeId: FakeLinear.USER_ID,
+              stateId: FakeLinear.STATES.backlog,
+            },
+          },
+        ]);
+        expect(h.store.rows).toHaveLength(1);
+        expect(h.store.rows[0]?.resultStatus).toBe("pending");
+        expect(h.tests.results[0]?.linearId).toBe("OLI-42");
+        expect(h.log.lines.map((line) => line.text)).toEqual([
+          `setup ticket OLI-42; ${SERVER}; ${ISO}`,
+        ]);
+      }),
+    );
+  });
+
+  it.effect("a passed setup is left in place and is not ticketed again", () => {
+    const h = harness();
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        const row = h.store.rows[0];
+        if (row !== undefined) {
+          row.resultStatus = "passed";
+        }
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
+        expect(h.store.rows).toHaveLength(1);
+        expect(h.store.removed).toBe(0);
+      }),
+    );
+  });
+
+  it.effect("a failed setup is released and a new ticket is created (unhappy)", () => {
+    const h = harness();
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        const row = h.store.rows[0];
+        if (row !== undefined) {
+          row.resultStatus = "failed";
+        }
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(2);
+        expect(h.store.rows).toHaveLength(1);
+        expect(h.store.rows[0]?.resultStatus).toBe("pending");
+      }),
+    );
+  });
+
+  it.effect("no mint definition drops the lock and creates no ticket (unhappy)", () => {
+    const h = harness([]);
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.linear.calls).toEqual([]);
+        expect(h.store.rows).toHaveLength(0);
+        expect(h.log.lines.map((line) => line.text)[0]).toContain("no test definition named mint");
+      }),
+    );
+  });
+
+  it.effect("a row whose ticket has not been stored yet is left for the timer (unhappy)", () => {
+    const h = harness();
+    h.store.rows.push({
+      iso: ISO,
+      serverUrl: SERVER,
+      resultId: null,
+      resultStatus: null,
+      driveStatus: null,
+    });
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        expect(h.linear.calls).toEqual([]);
+        expect(h.store.rows).toHaveLength(1);
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.rows).toHaveLength(0);
+        expect(h.log.lines.map((line) => line.text)).toContain(
+          `setup released; ${SERVER}; ${ISO}; no result`,
+        );
+      }),
+    );
+  });
+
+  it.effect("a reserve with no host drops the lock and creates no ticket (unhappy)", () => {
+    const h = harness();
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, "");
+        expect(h.linear.calls).toEqual([]);
+        expect(h.store.rows).toHaveLength(0);
+        expect(h.log.lines.map((line) => line.text)).toEqual([
+          `setup ticket failed: reserve carried no host; ${SERVER}; ${ISO}`,
+        ]);
+      }),
+    );
+  });
+});
+
+describe("the setup timer", () => {
+  it.effect("checks every 30 seconds and stops once nothing is still in flight", () => {
+    const h = harness();
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.rows).toHaveLength(1);
+        const row = h.store.rows[0];
+        if (row !== undefined) {
+          row.resultStatus = "passed";
+        }
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.removed).toBe(0);
+        expect(h.store.rows).toHaveLength(1);
+        // The timer is down: another interval does not look again.
+        if (row !== undefined) {
+          row.resultStatus = "failed";
+        }
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.rows).toHaveLength(1);
+        expect(h.store.rows[0]?.resultStatus).toBe("failed");
+      }),
+    );
+  });
+
+  it.effect("a row deleted before the tick is gone, and its status is not acted on", () => {
+    const h = harness();
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        yield* setup.open(ISO, SERVER, PROXY);
+        h.store.rows.splice(0, h.store.rows.length);
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.removed).toBe(0);
+        expect(h.log.lines.some((line) => line.text.startsWith("setup released"))).toBe(false);
+        // Nothing left to watch, so the next interval does not invent a release.
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.removed).toBe(0);
+      }),
+    );
+  });
+
+  it.effect(
+    "a drive that already ended while the result is open releases the lock (unhappy)",
+    () => {
+      const h = harness();
+      return h.run(
+        Effect.gen(function* () {
+          const setup = yield* Setup.Setup;
+          yield* setup.install();
+          yield* setup.open(ISO, SERVER, PROXY);
+          const row = h.store.rows[0];
+          if (row !== undefined) {
+            row.driveStatus = "succeeded";
+          }
+          yield* TestClock.adjust("30 seconds");
+          expect(h.store.rows).toHaveLength(0);
+          expect(h.log.lines.map((line) => line.text)).toContain(
+            `setup released; ${SERVER}; ${ISO}; pending`,
+          );
+        }),
+      );
+    },
+  );
+
+  it.effect("install starts the timer for a setup already in flight", () => {
+    const h = harness();
+    h.store.rows.push({
+      iso: ISO,
+      serverUrl: SERVER,
+      resultId: "result",
+      resultStatus: "running",
+      driveStatus: "running",
+    });
+    return h.run(
+      Effect.gen(function* () {
+        const setup = yield* Setup.Setup;
+        yield* setup.install();
+        const row = h.store.rows[0];
+        if (row !== undefined) {
+          row.resultStatus = "failed";
+        }
+        yield* TestClock.adjust("30 seconds");
+        expect(h.store.rows).toHaveLength(0);
+      }),
+    );
+  });
+});

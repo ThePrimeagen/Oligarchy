@@ -14,6 +14,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as Config from "../../src/config.ts";
 import * as Handlers from "../../src/qemu-reverse-proxy/handlers.ts";
 import * as Router from "../../src/qemu-reverse-proxy/router.ts";
+import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
 import * as Api from "../../src/shared/api.ts";
 import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -93,6 +94,7 @@ type Fixture = {
   readonly upstream: FakeHttp.Recorder;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
+  readonly setup: Layer.Layer<Setup.Setup>;
 };
 
 const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> = {}): Fixture => ({
@@ -101,11 +103,19 @@ const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> 
   upstream: FakeHttp.recordRequests(respond),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
+  setup: noopSetup,
   ...overrides,
 });
 
 // The reverse proxy's routes on a loopback server; the upstream servers are the recorder's
 // HttpClient, given to the Router alone, so the HttpClient in scope still points at the server.
+const noopSetup = Layer.succeed(Setup.Setup)(
+  Setup.Setup.of({
+    open: () => Effect.void,
+    install: () => Effect.void,
+  }),
+);
+
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provide(
@@ -117,6 +127,7 @@ const serve = (fixed: Fixture) =>
             fixed.log.layer,
             fixed.upstream.layer,
             ProxyConfigLive,
+            fixed.setup,
           ),
         ),
       ),
