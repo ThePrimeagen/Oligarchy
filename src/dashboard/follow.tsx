@@ -26,12 +26,11 @@ const Mark: FC<{ state: FollowEvent["state"] }> = ({ state }) => {
 
 const Heading: FC<{ follow: SessionFollow }> = ({ follow }) => (
   <h1 id="follow-heading">
-    {"following "}
     <a href={linearHref(follow.ticket)}>{follow.ticket}</a>
     {follow.sessionId === null ? null : (
       <>
         {" · "}
-        <code>{follow.sessionId.slice(0, 8)}</code>
+        <code>{follow.sessionId}</code>
         {follow.status === null ? null : ` ${follow.status}`}
       </>
     )}
@@ -56,9 +55,11 @@ const Step: FC<{ follow: SessionFollow }> = ({ follow }) => {
   );
 };
 
+// Newest first, under the frame. Landing on the page shows the action just taken, not the
+// start of the session.
 const EventList: FC<{ follow: SessionFollow }> = ({ follow }) => (
   <ol class="follow__log">
-    {follow.events.map((event) =>
+    {follow.events.toReversed().map((event) =>
       event.kind === "intent" ? (
         <li
           class={
@@ -101,15 +102,15 @@ export const FollowBody: FC<{ follow: SessionFollow }> = ({ follow }) => {
   } else if (follow.events.length === 0) {
     body = (
       <>
-        <p>no commands yet</p>
         <Frame follow={follow} />
+        <p>no commands yet</p>
       </>
     );
   } else {
     body = (
       <>
-        <EventList follow={follow} />
         <Frame follow={follow} />
+        <EventList follow={follow} />
       </>
     );
   }

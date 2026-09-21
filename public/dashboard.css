@@ -161,7 +161,7 @@ main {
 }
 
 .hero {
-  margin-bottom: 4rem;
+  margin-bottom: 0.75rem;
 }
 
 .brand {
@@ -170,11 +170,10 @@ main {
   background: linear-gradient(90deg, var(--terminal-blue), var(--terminal-cyan), var(--turquoise), var(--terminal-blue));
   background-size: 240% 100%;
   background-clip: text;
-  font-size: clamp(3rem, 13vw, 9rem);
+  font-size: 1.15rem;
   font-weight: 700;
-  letter-spacing: -0.09em;
-  line-height: 0.9;
-  text-indent: -0.08em;
+  letter-spacing: -0.06em;
+  line-height: 1;
   -webkit-text-fill-color: transparent;
   animation: brand-shift 8s linear infinite;
 }
@@ -535,7 +534,7 @@ main {
   }
 }
 
-/* The session feed: the log on the left, the newest frame on the right. */
+/* The session feed: the newest frame, then every intent and command, newest first. */
 .follow {
   display: grid;
   gap: 1rem;
@@ -545,6 +544,7 @@ main {
   margin: 0;
   color: var(--terminal-white);
   font-size: 1.25rem;
+  overflow-wrap: anywhere;
 }
 
 .follow h1 a {

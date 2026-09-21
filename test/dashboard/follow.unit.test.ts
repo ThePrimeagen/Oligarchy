@@ -57,10 +57,10 @@ describe("FollowFrame happy path", () => {
     expect(page).toContain(
       '<div id="follow" hx-get="/tickets/OLI-61/feed" hx-trigger="every 5s" hx-swap="innerHTML">',
     );
-    expect(page).toContain('href="https://linear.app/issue/OLI-61"');
-    expect(page).toContain("OLI-61");
-    expect(page).toContain("6f1c8e2a");
-    expect(page).toContain("running");
+    expect(page).toContain(
+      `<h1 id="follow-heading"><a href="https://linear.app/issue/OLI-61">OLI-61</a> · <code>${SESSION}</code> running</h1>`,
+    );
+    expect(page).not.toContain("following");
     expect(page).toContain("1/2");
     expect(page).toContain("open a terminal");
     expect(page).toContain("screendump");
@@ -70,6 +70,18 @@ describe("FollowFrame happy path", () => {
     expect(page).toContain("input-send-event");
     expect(page).toContain("1 s ago");
     expect(page).toContain(`src="/images/${IMAGE}"`);
+  });
+
+  it("lists the newest action first and the oldest intent last", async () => {
+    const page = await render(FollowFrame({ follow }));
+    const newest = page.indexOf("input-send-event");
+    const middle = page.indexOf("send-key");
+    const older = page.indexOf("screendump");
+    const intent = page.indexOf("open a terminal");
+    expect(newest).toBeGreaterThan(-1);
+    expect(newest).toBeLessThan(middle);
+    expect(middle).toBeLessThan(older);
+    expect(older).toBeLessThan(intent);
   });
 
   it("shows the step as unknown when the open intent is not one of the definition's steps", async () => {
