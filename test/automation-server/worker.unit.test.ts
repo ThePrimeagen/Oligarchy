@@ -74,7 +74,7 @@ const seedResult = (
 
 const seedJob = (
   automation: Stores.FakeAutomationStore,
-  action: "drive" | "diagnose" = "drive",
+  action: "drive" | "diagnose" | "mint" = "drive",
   resultId = RESULT_ID,
 ) => {
   automation.jobs.push({
@@ -790,6 +790,82 @@ describe("dispatch unhappy path", () => {
         `POST ${URL}/reserve`,
         `POST ${OTHER_URL}/reserve`,
         `POST ${OTHER_URL}/run`,
+      ]);
+    }),
+  );
+
+  it.effect("a resume drive posts the run's iso and a 409 leaves the job pending", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      const iso = "https://example.com/omarchy.iso";
+      fixed.tests.definitions.push({
+        id: 1,
+        name: "lock-screen",
+        description: "d",
+        instruction: "i",
+        proof: "p",
+        createdAt: new Date(0),
+      });
+      fixed.tests.runs.push({
+        id: RUN_ID,
+        name: "n",
+        iso,
+        serverUrl: "http://127.0.0.1:42070",
+        status: "pending",
+        reason: null,
+        startedAt: new Date(0),
+        endedAt: null,
+      });
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
+      );
+      yield* start(fixed, http.layer);
+      for (let i = 0; i < 200; i++) {
+        if (FakeLog.texts(fixed.log).includes("deferred; setup needed")) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
+        ticket: TICKET,
+        action: "drive",
+        resume: iso,
+      });
+      expect(fixed.automation.jobs[0]?.status).toBe("pending");
+      expect(http.requests).toHaveLength(1);
+      expect(FakeLog.texts(fixed.log)).toEqual(["deferred; setup needed"]);
+    }),
+  );
+
+  it.effect("a mint's 503 does not end the tick, and the next drive's 503 does", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
+      seedJob(fixed.automation, "drive", RESULT_ID);
+      seedJob(fixed.automation, "mint", RESULT_B);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
+      );
+      yield* start(fixed, http.layer);
+      for (let i = 0; i < 200; i++) {
+        if (FakeLog.texts(fixed.log).includes("deferred; at capacity")) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(http.requests.map((request) => JSON.parse(request.body ?? "").action)).toEqual([
+        "mint",
+        "drive",
+      ]);
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["pending", "pending"]);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        "deferred; mint at capacity",
+        "deferred; at capacity",
       ]);
     }),
   );

@@ -74,24 +74,33 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         });
         return ok;
       }
-      const outcome = yield* automation
-        .enqueue({ resultId: result.value.id, action: job.value })
+      // Automation Needed is a drive, unless this result is the mint install: that job is a
+      // mint, not a drive, so it is claimed ahead of the resumes waiting on it.
+      const definition = yield* tests
+        .definitionName(result.value.definitionId)
         .pipe(
-          Effect.as("queued" as const),
-          Effect.catchTag("DatabaseError", (error) =>
-            isDuplicateJob(error)
-              ? Effect.succeed("duplicate" as const)
-              : Effect.fail(Errors.Internal.make({ cause: error, agentId: event.ticket })),
-          ),
+          Effect.mapError((error) => Errors.Internal.make({ cause: error, agentId: event.ticket })),
         );
+      const action =
+        job.value === "drive" && Option.isSome(definition) && definition.value === "mint"
+          ? "mint"
+          : job.value;
+      const outcome = yield* automation.enqueue({ resultId: result.value.id, action }).pipe(
+        Effect.as("queued" as const),
+        Effect.catchTag("DatabaseError", (error) =>
+          isDuplicateJob(error)
+            ? Effect.succeed("duplicate" as const)
+            : Effect.fail(Errors.Internal.make({ cause: error, agentId: event.ticket })),
+        ),
+      );
       if (outcome === "duplicate") {
-        yield* log.info(`linear webhook ignored; ${job.value} already queued`, {
+        yield* log.info(`linear webhook ignored; ${action} already queued`, {
           location: Log.Locations.automation,
           agentId: event.ticket,
         });
         return ok;
       }
-      yield* log.info(`linear webhook queued ${job.value}; ${event.state}`, {
+      yield* log.info(`linear webhook queued ${action}; ${event.state}`, {
         location: Log.Locations.automation,
         agentId: event.ticket,
       });

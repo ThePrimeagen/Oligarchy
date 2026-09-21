@@ -481,6 +481,41 @@ describe("capacity", () => {
 });
 
 describe("QEMU-first reserve", () => {
+  it.effect("a drive passes the iso to QEMU and a mint does not", () => {
+    const seen: Array<string | undefined> = [];
+    const reserveQemu: Sessions.ReserveQemu = (_agent, resume) =>
+      Effect.sync(() => {
+        seen.push(resume);
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const iso = "https://example.com/omarchy.iso";
+      yield* sessions.reserve(TICKET, "drive", iso);
+      yield* sessions.reserve(OTHER, "mint");
+      expect(seen).toEqual([iso, undefined]);
+    }).pipe(Effect.provide(layer(spawner, 2, reserveQemu)));
+  });
+
+  it.effect("a QEMU 409 takes no local slot and is SetupNeeded (unhappy)", () => {
+    const reserveQemu: Sessions.ReserveQemu = () =>
+      Effect.fail(
+        Errors.SetupNeeded.make({
+          message: "setup needed: http://host max-jobs is 4",
+          agentId: TICKET,
+        }),
+      );
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const error = yield* Effect.flip(
+        sessions.reserve(TICKET, "drive", "https://example.com/omarchy.iso"),
+      );
+      expect(error).toMatchObject({ _tag: "SetupNeeded" });
+      expect(yield* sessions.jobs).toBe(0);
+    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
+  });
+
   it.effect("asks QEMU before taking a local slot", () => {
     const order: Array<string> = [];
     const reserveQemu: Sessions.ReserveQemu = (agent) =>

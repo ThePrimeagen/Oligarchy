@@ -1,0 +1,1 @@
+ALTER TYPE "public"."automation_action" ADD VALUE 'mint';

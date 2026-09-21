@@ -269,7 +269,8 @@ export class Linear extends HttpApiGroup.make("Linear").add(linear).middleware(A
 export const reserveRun = HttpApiEndpoint.post("reserve", "/reserve", {
   payload: Contract.ReserveBody,
   success: Contract.Ok,
-  error: [Errors.AtCapacityWire],
+  // 409: a resume the fleet cannot boot until a server is minted. 503: this client is at --max-jobs.
+  error: [Errors.SetupNeededWire, Errors.AtCapacityWire],
 });
 
 export const run = HttpApiEndpoint.post("run", "/run", {

@@ -809,9 +809,8 @@ const openRunIds = (db: NodePgDatabase) =>
     .where(inArray(testResults.status, ["pending", "running"]));
 
 // The queue in three lists, each ordered and cut by the database, plus the totals the headings
-// show and the open suites. Running and pending put the diagnoses ahead of the drives and then
-// follow queue order, created_at (a boolean sorts false before true, so descending puts the
-// diagnoses first). Completed is every terminal status, newest finished first: finished_at is
+// show and the open suites. Running and pending follow claim order: mint, then diagnose, then
+// drive, each oldest first. Completed is every terminal status, newest finished first: finished_at is
 // the stamp the close writes, the row's last change. The clock in each select is the one the
 // stamps' ages are read against, and it keeps a poll out of Hyperdrive's query cache. The
 // counts are not the lists: a list stops at fifty.
@@ -833,16 +832,16 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
         .from(automationJobs)
         .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
         .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId));
-    const diagnosesFirst = desc(sql`${automationJobs.action} = 'diagnose'`);
+    const queueRank = sql`case ${automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
     // One client, one query at a time: pg warns, and soon refuses, a second query
     // started while the first is still running.
     const running = await jobs()
       .where(eq(automationJobs.status, "running"))
-      .orderBy(diagnosesFirst, automationJobs.createdAt)
+      .orderBy(queueRank, automationJobs.createdAt)
       .limit(QUEUE_LIMIT);
     const pending = await jobs()
       .where(eq(automationJobs.status, "pending"))
-      .orderBy(diagnosesFirst, automationJobs.createdAt)
+      .orderBy(queueRank, automationJobs.createdAt)
       .limit(QUEUE_LIMIT);
     const completed = await jobs()
       .where(inArray(automationJobs.status, ["succeeded", "failed", "aborted", "timed_out"]))
@@ -978,8 +977,8 @@ export function listDefinitionRuns(
   });
 }
 
-// Every job that is running, in the queue's running order: diagnoses ahead of drives, then
-// created_at. The definitions page lists what is in flight so an operator can stop it; the
+// Every job that is running, in the queue's running order: mint, then diagnose, then drive,
+// then created_at. The definitions page lists what is in flight so an operator can stop it; the
 // queue's fifty would hide one.
 export function listRunningAutomationJobs(connectionString: string): Promise<AutomationJob[]> {
   return withDatabase(connectionString, (db) =>
@@ -999,7 +998,10 @@ export function listRunningAutomationJobs(connectionString: string): Promise<Aut
       .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
       .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
       .where(eq(automationJobs.status, "running"))
-      .orderBy(desc(sql`${automationJobs.action} = 'diagnose'`), automationJobs.createdAt),
+      .orderBy(
+        sql`case ${automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`,
+        automationJobs.createdAt,
+      ),
   );
 }
 

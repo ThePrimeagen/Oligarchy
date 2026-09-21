@@ -196,6 +196,30 @@ describe("POST /linear", () => {
     }),
   );
 
+  it.effect("queues mint, not drive, when Automation Needed is for the mint definition", () =>
+    Effect.gen(function* () {
+      const body = issueBody("Automation Needed");
+      const fixed = fixture();
+      fixed.stores.tests.definitions.push({
+        id: 1,
+        name: "mint",
+        description: "install",
+        instruction: "boot",
+        proof: "desktop",
+        createdAt: new Date(0),
+      });
+      const resultId = seedResult(fixed, "OLI-1063");
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId, action: "mint", status: "pending" }),
+      ]);
+      expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook queued mint; Automation Needed"]);
+    }),
+  );
+
   it.effect("queues diagnose when Needs Review arrives for a known ticket", () =>
     Effect.gen(function* () {
       const body = issueBody("Needs Review");

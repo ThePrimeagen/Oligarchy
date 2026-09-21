@@ -99,6 +99,13 @@
       "when": 1790005504259,
       "tag": "0014_setup_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1790008738640,
+      "tag": "0015_mint_action",
+      "breakpoints": true
     }
   ]
 }

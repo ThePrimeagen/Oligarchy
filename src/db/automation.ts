@@ -66,16 +66,20 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return row;
       });
 
-      // Queue order: every pending diagnose oldest first, then every pending drive oldest
-      // first; id breaks a tie. A diagnose closes a result whose drive is done, so it never
-      // waits behind the drives queued before it. The dashboard lists the queue the same way.
-      const diagnosesFirst = desc(sql`${DbSchema.automationJobs.action} = ${"diagnose"}`);
+      // Queue order: every pending mint oldest first, then every pending diagnose, then every
+      // pending drive, each oldest first; id breaks a tie. A mint is the install a resume is
+      // waiting on, so it never waits behind that resume. A diagnose closes a result whose
+      // drive is done, so it never waits behind the drives queued before it.
+      const queueRank = sql`case ${DbSchema.automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
 
       // First in queue order whose result is not already running, locked for the
       // transaction so a second claimer waits. One running job per result: drive
       // and diagnose share a ticket, and the client will not reserve it twice.
       // serverId is the client that took it: /abort looks that server up for its url.
-      const claim = Effect.fn("db.claimAutomationJob")(function* (serverId: string) {
+      const claim = Effect.fn("db.claimAutomationJob")(function* (
+        serverId: string,
+        except: ReadonlyArray<string> = [],
+      ) {
         return yield* database.transaction("claimAutomationJob", (tx) =>
           Effect.gen(function* () {
             const running = yield* Client.attempt("claimAutomationJob", () =>
@@ -85,23 +89,22 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
                 .where(eq(DbSchema.automationJobs.status, "running")),
             );
             const busy = running.map((row) => row.resultId);
+            const waiting = eq(DbSchema.automationJobs.status, "pending");
+            const notBusy =
+              busy.length === 0
+                ? waiting
+                : and(waiting, notInArray(DbSchema.automationJobs.resultId, busy));
+            const skipped = [...except];
+            const where =
+              skipped.length === 0
+                ? notBusy
+                : and(notBusy, notInArray(DbSchema.automationJobs.id, skipped));
             const pending = yield* Client.attempt("claimAutomationJob", () =>
               tx
                 .select()
                 .from(DbSchema.automationJobs)
-                .where(
-                  busy.length === 0
-                    ? eq(DbSchema.automationJobs.status, "pending")
-                    : and(
-                        eq(DbSchema.automationJobs.status, "pending"),
-                        notInArray(DbSchema.automationJobs.resultId, busy),
-                      ),
-                )
-                .orderBy(
-                  diagnosesFirst,
-                  DbSchema.automationJobs.createdAt,
-                  DbSchema.automationJobs.id,
-                )
+                .where(where)
+                .orderBy(queueRank, DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id)
                 .limit(1)
                 .for("update"),
             );
@@ -220,8 +223,8 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return rows.length > 0;
       });
 
-      // Running and pending are the whole live queue in queue order (diagnoses first, then
-      // created_at). Completed is every terminal status, newest finished first, cut at count.
+      // Running and pending are the whole live queue in queue order (mint, then diagnose, then
+      // drive, then created_at). Completed is every terminal status, newest finished first, cut at count.
       // The ticket is the driver's agent id, so agent_servers holds the server reserved for it
       // until start, and agent_runs the session start opened, routed by session_servers; the
       // reservation wins while both exist, being the newer placement.
@@ -236,7 +239,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
           clientUrl: client.url,
           serverUrl: sql<
             string | null
-          >`case when ${DbSchema.automationJobs.action} = ${"drive"} then coalesce(${DbSchema.agentServers.serverUrl}, ${DbSchema.sessionServers.serverUrl}) end`,
+          >`case when ${DbSchema.automationJobs.action} in (${"drive"}, ${"mint"}) then coalesce(${DbSchema.agentServers.serverUrl}, ${DbSchema.sessionServers.serverUrl}) end`,
           sessionId: DbSchema.agentRuns.sessionId,
           createdAt: DbSchema.automationJobs.createdAt,
           startedAt: DbSchema.automationJobs.startedAt,
@@ -291,14 +294,14 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
           (db) =>
             jobs(db)
               .where(eq(DbSchema.automationJobs.status, "running"))
-              .orderBy(diagnosesFirst, DbSchema.automationJobs.createdAt),
+              .orderBy(queueRank, DbSchema.automationJobs.createdAt),
         );
         const pending: ReadonlyArray<AutomationJobListRow> = yield* database.run(
           "listAutomationJobs",
           (db) =>
             jobs(db)
               .where(eq(DbSchema.automationJobs.status, "pending"))
-              .orderBy(diagnosesFirst, DbSchema.automationJobs.createdAt),
+              .orderBy(queueRank, DbSchema.automationJobs.createdAt),
         );
         const completed: ReadonlyArray<AutomationJobListRow> = yield* database.run(
           "listAutomationJobs",

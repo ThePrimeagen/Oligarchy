@@ -19,7 +19,11 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
       ({ payload }) =>
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          yield* sessions.reserve(payload.ticket, payload.action);
+          if (payload.resume === undefined) {
+            yield* sessions.reserve(payload.ticket, payload.action);
+          } else {
+            yield* sessions.reserve(payload.ticket, payload.action, payload.resume);
+          }
           return ok;
         }),
       uninterruptible,

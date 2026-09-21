@@ -1159,7 +1159,8 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    // Queue order is every pending diagnose oldest first, then every pending drive oldest first:
+    // Queue order is mint, then diagnose, then drive, each oldest first. A diagnose still
+    // comes before a drive queued earlier; a mint comes before both.
     // a diagnose closes a result whose drive is done, so it never waits behind the drives queued
     // before it, however many.
     scoped.effect(
@@ -1221,6 +1222,62 @@ Postgres.describeWithDatabase("database", () => {
           expect(order).toEqual([olderDiagnose.id, newerDiagnose.id, oldDrive.id, newDrive.id]);
           expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
         }),
+    );
+
+    scoped.effect("AutomationStore claims a mint before an older diagnose and an older drive", () =>
+      Effect.gen(function* () {
+        yield* emptyQueue;
+        const tests = yield* Tests.TestStore;
+        const automation = yield* Automation.AutomationStore;
+        const database = yield* Client.Database;
+        const lock = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const mint = yield* tests.defineTestDefinition({
+          name: "mint",
+          description: "install",
+          instruction: "boot",
+          proof: "desktop",
+        });
+        const run = (definitionId: number) =>
+          tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definitionId }],
+          });
+        const driveRun = yield* run(lock.id);
+        const diagnoseRun = yield* run(lock.id);
+        const mintRun = yield* run(mint.id);
+        const drive = yield* automation.enqueue({
+          resultId: driveRun.results[0].id,
+          action: "drive",
+        });
+        const diagnose = yield* automation.enqueue({
+          resultId: diagnoseRun.results[0].id,
+          action: "diagnose",
+        });
+        const minted = yield* automation.enqueue({
+          resultId: mintRun.results[0].id,
+          action: "mint",
+        });
+        // Oldest first within a kind. The mint row is the newest and is still claimed first.
+        yield* database.run("stamp", (db) =>
+          db.execute(
+            sql`update automation_jobs set created_at = now() - interval '3 minutes' where id = ${drive.id}`,
+          ),
+        );
+        yield* database.run("stamp", (db) =>
+          db.execute(
+            sql`update automation_jobs set created_at = now() - interval '2 minutes' where id = ${diagnose.id}`,
+          ),
+        );
+        const first = Option.getOrThrow(yield* automation.claim(crypto.randomUUID()));
+        expect(first.id).toBe(minted.id);
+        // A mint whose own reserve was 503 stays pending and is skipped for the rest of this tick.
+        yield* automation.unclaim(minted.id);
+        const second = Option.getOrThrow(yield* automation.claim(crypto.randomUUID(), [minted.id]));
+        expect(second.id).toBe(diagnose.id);
+        const third = Option.getOrThrow(yield* automation.claim(crypto.randomUUID(), [minted.id]));
+        expect(third.id).toBe(drive.id);
+      }),
     );
 
     // The driver moves its ticket to Needs Review before its drive job closes, so a diagnose is
@@ -2379,7 +2436,7 @@ Postgres.describeWithDatabase("database", () => {
           expect(yield* setups.insert(iso, serverUrl)).toBe(false);
           expect(yield* setups.insert(iso, other)).toBe(true);
           expect(yield* setups.setResult(iso, serverUrl, resultId)).toBe(true);
-          yield* jobs.enqueue({ resultId, action: "drive" });
+          yield* jobs.enqueue({ resultId, action: "mint" });
           const seen = Option.getOrThrow(yield* setups.inspect(iso, serverUrl));
           expect(seen).toMatchObject({
             iso,

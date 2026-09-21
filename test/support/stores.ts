@@ -497,6 +497,21 @@ export const fakeTestStore = (
     findResult: (resultId) =>
       Effect.sync(() => Option.fromUndefinedOr(results.find((row) => sameId(row.id, resultId)))),
     // Inner joins, as the real query: a result whose definition or run is missing is no row.
+    definitionName: (id) =>
+      Effect.sync(() => Option.fromUndefinedOr(definitions.find((row) => row.id === id)?.name)),
+    resumeIso: (resultId) =>
+      Effect.sync(() => {
+        const result = results.find((row) => sameId(row.id, resultId));
+        if (result === undefined) {
+          return Option.none<string>();
+        }
+        const definition = definitions.find((row) => row.id === result.definitionId);
+        const run = runs.find((row) => sameId(row.id, result.runId));
+        if (definition === undefined || run === undefined || definition.name === "mint") {
+          return Option.none<string>();
+        }
+        return Option.some(run.iso);
+      }),
     resultForSession: (sessionId) =>
       Effect.sync(() =>
         results.flatMap((result) => {
@@ -558,15 +573,28 @@ export const fakeAutomationStore = (
         jobs.push(row);
         return row;
       }),
-    claim: (serverId) =>
+    claim: (serverId, except = []) =>
       Effect.sync(() => {
         const busy = new Set(
           jobs.filter((job) => job.status === "running").map((job) => job.resultId),
         );
-        // Queue order as the real store claims: diagnoses first, then created_at, then id.
-        const rank = (job: FakeAutomationJob): number => (job.action === "diagnose" ? 0 : 1);
+        // Queue order as the real store claims: mint, then diagnose, then drive; then created_at, id.
+        const rank = (job: FakeAutomationJob): number => {
+          if (job.action === "mint") {
+            return 0;
+          }
+          if (job.action === "diagnose") {
+            return 1;
+          }
+          return 2;
+        };
         const pending = jobs
-          .filter((job) => job.status === "pending" && !busy.has(job.resultId))
+          .filter(
+            (job) =>
+              job.status === "pending" &&
+              !busy.has(job.resultId) &&
+              !except.some((id) => sameId(id, job.id)),
+          )
           .sort(
             (left, right) =>
               rank(left) - rank(right) ||

@@ -63,10 +63,15 @@ export const reserve = Effect.fn("reserve")(function* (
   url: string,
   ticket: string,
   action: Domain.AutomationAction,
+  resume?: string,
 ) {
   const client = yield* makeClient(url);
+  const payload =
+    resume === undefined
+      ? Contract.ReserveBody.make({ ticket, action })
+      : Contract.ReserveBody.make({ ticket, action, resume });
   return yield* client.Runs.reserve({
-    payload: Contract.ReserveBody.make({ ticket, action }),
+    payload,
   }).pipe(
     Effect.catch((error) => {
       if (error._tag === "HttpClientError") {
