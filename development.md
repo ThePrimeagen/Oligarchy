@@ -57,7 +57,7 @@ exist.
   tools (oxlint, oxfmt, tsc, drizzle-kit, wrangler) do the same work on either. There is no bare
   `check`, `test` or `lint` script; `test/repo/scripts.unit.test.ts` keeps it that way, and pins
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
-  `bun run db:migrate`, never the production `DATABASE_URL`.
+  `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
   wins, and an empty value counts as unset.
 
@@ -449,6 +449,9 @@ export const requiredRedacted = (
 
 export const oligarchyToken = requiredRedacted("OLIGARCHY_TOKEN");
 export const databaseUrl = requiredRedacted("DATABASE_URL");
+// `bun run db:migrate` only. Kept off DATABASE_URL so the app can use a pooler while
+// migrations stay on a direct connection.
+export const databaseMigrationUrl = requiredRedacted("DATABASE_MIGRATION_URL");
 
 export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/config/ProxyConfig", {
   // Sequential on purpose: OLIGARCHY_TOKEN is reported before DATABASE_URL.
@@ -1102,10 +1105,12 @@ Schema and module rules above already cover most of them; the rest:
   match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
   `schema-in-sync`). A third job, `checks`, runs `bun run check:fast`.
 - Applying migrations is deployment-owned: `bun run db:migrate` runs `src/db/migrate.ts`, whose
-  `program` reads `Config.databaseUrl`, builds `Database.make(url)` in a scope, and runs
+  `program` reads `Config.databaseMigrationUrl` (`DATABASE_MIGRATION_URL`, not `DATABASE_URL`, so
+  a pooler url cannot be migrated by accident), builds `Database.make(url)` in a scope, and runs
   `migrateDatabase` (`database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle"
-  }))`); it prints `database migrations applied` and fails with `DATABASE_URL is not set` (a `.env`
-  fills missing variables only). Tests only ever migrate an ephemeral container.
+  }))`); it prints `database migrations applied` and fails with `DATABASE_MIGRATION_URL is not set`
+  (a `.env` fills missing variables only; an empty value counts as unset). Tests only ever migrate
+  an ephemeral container.
 
 ## Review
 

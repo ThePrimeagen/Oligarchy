@@ -40,6 +40,9 @@ export const requiredRedacted = (
 
 export const oligarchyToken = requiredRedacted("OLIGARCHY_TOKEN");
 export const databaseUrl = requiredRedacted("DATABASE_URL");
+// `bun run db:migrate` only. Kept off DATABASE_URL so the app can use a pooler while
+// migrations stay on a direct connection.
+export const databaseMigrationUrl = requiredRedacted("DATABASE_MIGRATION_URL");
 // The automation server viz sends its aborts to; read when a is pressed, so viz opens without it.
 export const automationServerUrl = required("AUTOMATION_SERVER_URL");
 export const linearApiToken = requiredRedacted("LINEAR_API_TOKEN");

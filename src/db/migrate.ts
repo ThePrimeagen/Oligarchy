@@ -13,7 +13,7 @@ export const migrateDatabase = Effect.gen(function* () {
 });
 
 export const program = Effect.gen(function* () {
-  const url = yield* Config.databaseUrl;
+  const url = yield* Config.databaseMigrationUrl;
   const database = yield* Client.Database.make(url);
   yield* migrateDatabase.pipe(Effect.provideService(Client.Database, database));
 }).pipe(Effect.scoped);
