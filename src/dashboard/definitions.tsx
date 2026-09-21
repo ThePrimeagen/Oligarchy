@@ -1,10 +1,12 @@
 import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
-import type {
-  AutomationJob,
-  DefinitionHistory,
-  DefinitionPill,
-  DefinitionVersions,
+import {
+  runningForDefinition,
+  type AutomationJob,
+  type DefinitionHistory,
+  type DefinitionPill,
+  type DefinitionRun,
+  type DefinitionVersions,
 } from "./query.ts";
 import { since } from "./servers.tsx";
 import { followHref, linearHref } from "./ticket.ts";
@@ -106,7 +108,8 @@ export const RunningList: FC<{
     </table>
   );
 
-// Above the search and the names, so an operator sees what is in flight before filtering. The
+// Above the search, so an operator sees what is in flight before filtering names. A definition's
+// own page uses the same list only for that name, and only when one of its jobs is running. The
 // poll is the queue's thirty seconds: a job that starts after the page opened shows up without a
 // reload, and the swap replaces the list while the poll stays on this frame.
 const RunningTests: FC<{
@@ -134,10 +137,55 @@ const EDIT_NOTICES: Record<EditNotice, string> = {
   empty: "Every field needs text.",
 };
 
+// Same units a running job's age uses, without the "ago": how long a pass took.
+const took = (ms: number): string => {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) {
+    return `${String(seconds)} s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${String(minutes)} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${String(hours)} h`;
+  }
+  return `${String(Math.floor(hours / 24))} d`;
+};
+
+const shortResultId = (id: string): string => id.slice(0, 6);
+
+// The dump of one result. The index pills still open /tests; a definition's page uses this.
+export const testResultHref = (id: string): string => `/test-results/${encodeURIComponent(id)}`;
+
+// The last ten verdicts, newest first. The short id is the link. A pass says how long it took.
+// A fail says failed and the diagnosis it was given. Nothing here when the name has no verdict.
+const DefinitionRuns: FC<{ runs: ReadonlyArray<DefinitionRun> }> = ({ runs }) =>
+  runs.length === 0 ? null : (
+    <ul class="definition-runs" aria-label="Last ten runs">
+      {runs.map((run) => (
+        <li>
+          <a class={`definition-pill definition-pill--${run.status}`} href={testResultHref(run.id)}>
+            {shortResultId(run.id)}
+          </a>
+          {run.status === "passed" && run.durationMs !== null ? (
+            <span class="definition-pill__time">{took(run.durationMs)}</span>
+          ) : null}
+          {run.status === "failed" ? <span class="definition-pill__error">failed</span> : null}
+          {run.status === "failed" && run.diagnosis !== null ? (
+            <span class="definition-pill__diagnosis">{run.diagnosis}</span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+
 const Definition: FC<{
   group: DefinitionVersions;
   notice: EditNotice | undefined;
-}> = ({ group, notice }) => {
+  runs: ReadonlyArray<DefinitionRun>;
+}> = ({ group, notice, runs }) => {
   const newest = group.versions[group.versions.length - 1];
   const next = group.versions.length + 1;
   // Two: the current wording and the one before it. Older wordings stay in the database.
@@ -145,6 +193,7 @@ const Definition: FC<{
   return (
     <section>
       <h2>{group.name}</h2>
+      <DefinitionRuns runs={runs} />
       {/* The class is what public/dashboard.js looks for: the button starts disabled and is
           enabled once a field differs from the wording it was rendered with. */}
       <form method="post" action="/definitions" class="definition__form">
@@ -306,11 +355,12 @@ const DefinitionList: FC<{
 };
 
 // The index is one link per name, with the search on that list. A name's own page is its newest
-// wording as a form, then the current wording and the one before it. Running jobs sit above the
-// search: the box filters names already on the page, not the jobs in flight. `groups` is the
-// index's list, absent on a name's page and when the database could not be read. `running` is
-// absent on that same failure, so it does not claim that nothing is running. `error` is that
-// failure; a name nobody carries is said on its own page.
+// wording as a form, then the current wording and the one before it, and the last ten verdicts
+// under the name. Running jobs sit above the search: the box filters names already on the page,
+// not the jobs in flight. On a name's page they are that name's jobs, and the block is absent
+// when none of them are running. `groups` is the index's list, absent on a name's page and when
+// the database could not be read. `running` is absent on that same failure, so it does not claim
+// that nothing is running. `error` is that failure; a name nobody carries is said on its own page.
 export const DefinitionsPage: FC<{
   groups: ReadonlyArray<DefinitionVersions> | null;
   name: string | undefined;
@@ -319,13 +369,22 @@ export const DefinitionsPage: FC<{
   error: string | undefined;
   running: ReadonlyArray<AutomationJob> | null;
   histories: ReadonlyArray<DefinitionHistory>;
-}> = ({ groups, name, selected, notice, error, running, histories }) => {
+  runs: ReadonlyArray<DefinitionRun>;
+}> = ({ groups, name, selected, notice, error, running, histories, runs }) => {
   const index = error === undefined && name === undefined && groups !== null;
+  // A name's page shows only that name's jobs. The index shows every one. A failed read
+  // stays absent so the page does not claim that nothing is running.
+  let shownRunning: ReadonlyArray<AutomationJob> | null;
+  if (running === null) shownRunning = null;
+  else if (name === undefined) shownRunning = running;
+  else shownRunning = runningForDefinition(running, name);
   return (
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
-      {running === null ? null : <RunningTests jobs={running} definition={name} />}
+      {shownRunning === null || (name !== undefined && shownRunning.length === 0) ? null : (
+        <RunningTests jobs={shownRunning} definition={name} />
+      )}
       {index ? <DefinitionSearch /> : null}
       {index ? <DefinitionList groups={groups} histories={histories} /> : null}
       {error === undefined && name !== undefined && selected === undefined ? (
@@ -333,7 +392,7 @@ export const DefinitionsPage: FC<{
           No test definition named <code>{name}</code>.
         </p>
       ) : null}
-      {selected === undefined ? null : <Definition group={selected} notice={notice} />}
+      {selected === undefined ? null : <Definition group={selected} notice={notice} runs={runs} />}
     </OperatorPage>
   );
 };

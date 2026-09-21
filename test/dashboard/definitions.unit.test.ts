@@ -5,6 +5,7 @@ import type {
   AutomationJob,
   DefinitionHistory,
   DefinitionPill,
+  DefinitionRun,
   TestDefinition,
 } from "../../src/dashboard/query.ts";
 
@@ -46,6 +47,7 @@ const page = (
       error: undefined,
       running: [],
       histories: [],
+      runs: [],
       ...extra,
     }),
   );
@@ -233,6 +235,7 @@ describe("DefinitionsPage unhappy path", () => {
     const body = ownPage.slice(ownPage.indexOf("<body>"));
     expect(body).not.toContain("out of");
     expect(body).not.toContain('href="/tests/');
+    expect(body).not.toContain("definition-runs");
 
     const listed = await page([...both], { histories });
     const installRow = listItem(listed, "install");
@@ -345,12 +348,16 @@ describe("DefinitionsPage unhappy path", () => {
     expect(missing).not.toContain("<nope>");
   });
 
-  it("lists the running jobs it is given, and offers no abort without a ticket", async () => {
+  it("lists the running jobs of that definition, and offers no abort without a ticket", async () => {
     const queriedAt = new Date("2026-09-09T16:00:00Z");
     const startedAt = new Date("2026-09-09T15:59:50Z");
-    const running = (ticket: string | null, action: AutomationJob["action"]): AutomationJob => ({
+    const running = (
+      ticket: string | null,
+      action: AutomationJob["action"],
+      test = "lock-screen",
+    ): AutomationJob => ({
       ticket,
-      test: "lock-screen",
+      test,
       action,
       status: "running",
       reason: null,
@@ -362,7 +369,12 @@ describe("DefinitionsPage unhappy path", () => {
     const htmlText = await page([{ name: "lock-screen", versions: lock }], {
       name: "lock-screen",
       selected: { name: "lock-screen", versions: lock },
-      running: [running("RUN-2", "diagnose"), running("RUN-1", "drive"), running(null, "drive")],
+      running: [
+        running("RUN-2", "diagnose"),
+        running("RUN-1", "drive"),
+        running(null, "drive"),
+        running("OTHER", "drive", "install"),
+      ],
     });
     const runningAt = htmlText.indexOf('<section class="running-tests"');
     const strip = htmlText.slice(runningAt, htmlText.indexOf("</section>", runningAt));
@@ -380,6 +392,142 @@ describe("DefinitionsPage unhappy path", () => {
       '<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="RUN-2"/><input type="hidden" name="action" value="diagnose"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="lock-screen"/><button type="submit" class="abort" aria-label="abort">',
     );
     expect(strip).not.toContain("running-tests__open");
+    expect(strip).not.toContain("OTHER");
+    expect(strip).not.toContain(">install<");
     expect(strip.match(/action="\/abort"/g)).toHaveLength(2);
+  });
+
+  it("hides the running list when this definition has nothing running", async () => {
+    const queriedAt = new Date("2026-09-09T16:00:00Z");
+    const startedAt = new Date("2026-09-09T15:59:50Z");
+    const foreign: AutomationJob = {
+      ticket: "OTHER",
+      test: "install",
+      action: "drive",
+      status: "running",
+      reason: null,
+      createdAt: startedAt,
+      startedAt,
+      finishedAt: null,
+      queriedAt,
+    };
+    const htmlText = await page(null, {
+      name: "lock-screen",
+      selected: { name: "lock-screen", versions: lock },
+      running: [foreign],
+    });
+    const body = htmlText.slice(htmlText.indexOf("<body>"));
+    expect(body).not.toContain("running-tests");
+    expect(body).not.toContain("No tests are running.");
+    expect(body).not.toContain("OTHER");
+    expect(body).not.toContain("<h2>Running</h2>");
+
+    const none = await page(null, {
+      name: "lock-screen",
+      selected: { name: "lock-screen", versions: lock },
+      running: [],
+    });
+    const empty = none.slice(none.indexOf("<body>"));
+    expect(empty).not.toContain("running-tests");
+    expect(empty).not.toContain("definition-runs");
+  });
+
+  it("still lists every running test on the definitions index", async () => {
+    const queriedAt = new Date("2026-09-09T16:00:00Z");
+    const startedAt = new Date("2026-09-09T15:59:50Z");
+    const job = (ticket: string, test: string): AutomationJob => ({
+      ticket,
+      test,
+      action: "drive",
+      status: "running",
+      reason: null,
+      createdAt: startedAt,
+      startedAt,
+      finishedAt: null,
+      queriedAt,
+    });
+    const htmlText = await page([{ name: "lock-screen", versions: lock }], {
+      running: [job("RUN-1", "lock-screen"), job("OTHER", "install")],
+    });
+    expect(htmlText).toContain(">RUN-1<");
+    expect(htmlText).toContain(">OTHER<");
+    expect(htmlText).toContain('hx-get="/definitions/running"');
+    expect(htmlText).not.toContain("?name=");
+  });
+});
+
+const resultId = (n: number): string =>
+  `${String(n).padStart(6, "0")}00-1111-4111-8111-111111111111`;
+
+const run = (
+  n: number,
+  status: DefinitionRun["status"],
+  extra: { readonly durationMs?: number | null; readonly diagnosis?: string | null } = {},
+): DefinitionRun => ({
+  id: resultId(n),
+  status,
+  durationMs: extra.durationMs ?? null,
+  diagnosis: extra.diagnosis ?? null,
+});
+
+describe("DefinitionsPage last ten runs", () => {
+  it("links each verdict's first six letters to its result, with the pass's time and the fail's diagnosis", async () => {
+    const selected = { name: "lock-screen", versions: lock };
+    const runs: ReadonlyArray<DefinitionRun> = [
+      run(1, "passed", { durationMs: 4 * 60_000 }),
+      run(2, "passed", { durationMs: 45_000 }),
+      run(3, "passed", { durationMs: 90_000 }),
+      run(4, "passed", { durationMs: 2 * 60 * 60_000 }),
+      run(5, "passed", { durationMs: 25 * 60 * 60_000 }),
+      run(6, "failed", { diagnosis: "unlocked: the screen stayed unlocked" }),
+    ];
+    const htmlText = await page(null, { name: "lock-screen", selected, runs });
+    const passed = resultId(1);
+    const failed = resultId(6);
+    expect(htmlText).toContain('aria-label="Last ten runs"');
+    expect(htmlText).toContain(
+      `<a class="definition-pill definition-pill--passed" href="/test-results/${passed}">000001</a><span class="definition-pill__time">4 min</span>`,
+    );
+    expect(htmlText).toContain(
+      `<a class="definition-pill definition-pill--passed" href="/test-results/${resultId(2)}">000002</a><span class="definition-pill__time">45 s</span>`,
+    );
+    expect(htmlText).toContain('>000003</a><span class="definition-pill__time">1 min</span>');
+    expect(htmlText).toContain('>000004</a><span class="definition-pill__time">2 h</span>');
+    expect(htmlText).toContain('>000005</a><span class="definition-pill__time">1 d</span>');
+    expect(htmlText).toContain(
+      `<a class="definition-pill definition-pill--failed" href="/test-results/${failed}">000006</a><span class="definition-pill__error">failed</span><span class="definition-pill__diagnosis">unlocked: the screen stayed unlocked</span>`,
+    );
+    expect(htmlText.indexOf(">000001<")).toBeLessThan(htmlText.indexOf(">000006<"));
+    const failAt = htmlText.indexOf(`href="/test-results/${failed}"`);
+    const failItem = htmlText.slice(failAt, htmlText.indexOf("</li>", failAt));
+    expect(failItem).not.toContain("definition-pill__time");
+    const passAt = htmlText.indexOf(`href="/test-results/${passed}"`);
+    const passItem = htmlText.slice(passAt, htmlText.indexOf("</li>", passAt));
+    expect(passItem).not.toContain("definition-pill__error");
+    expect(passItem).not.toContain("unlocked");
+    expect(htmlText).not.toContain('href="/tests/');
+  });
+
+  it("still links a pass with no recorded time, and a fail that was given no diagnosis", async () => {
+    const selected = { name: "lock-screen", versions: lock };
+    const htmlText = await page(null, {
+      name: "lock-screen",
+      selected,
+      runs: [run(7, "passed"), run(8, "failed", { diagnosis: "driver <gave> up" })],
+    });
+    expect(htmlText).toContain(
+      `<a class="definition-pill definition-pill--passed" href="/test-results/${resultId(7)}">000007</a>`,
+    );
+    const body = htmlText.slice(htmlText.indexOf("<body>"));
+    expect(body).not.toContain("definition-pill__time");
+    expect(htmlText).toContain('definition-pill__diagnosis">driver &lt;gave&gt; up</span>');
+    expect(htmlText).not.toContain("driver <gave> up");
+    const bare = await page(null, {
+      name: "lock-screen",
+      selected,
+      runs: [run(9, "failed")],
+    });
+    expect(bare).toContain('<span class="definition-pill__error">failed</span>');
+    expect(bare.slice(bare.indexOf("<body>"))).not.toContain("definition-pill__diagnosis");
   });
 });

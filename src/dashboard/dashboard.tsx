@@ -12,7 +12,9 @@ import {
   groupDefinitions,
   listAutomationQueue,
   listDefinitionHistories,
+  listDefinitionRuns,
   listRunningAutomationJobs,
+  runningForDefinition,
   readTestDump,
   readSessionFollow,
   listProcessSeries,
@@ -411,6 +413,7 @@ app.get("/definitions", async (context) => {
       error: undefined,
       running,
       histories,
+      runs: [],
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -423,18 +426,21 @@ app.get("/definitions", async (context) => {
       error: "Test definitions are unavailable.",
       running: null,
       histories: [],
+      runs: [],
     });
   }
 });
 
 // What the running strip polls for: the jobs in flight, not the rest of the page. `name` is the
-// definition an abort without htmx returns to, echoed into the forms the swap inserts. Registered
-// before /definitions/:name so this path is the fragment, not a definition named running.
+// definition an abort without htmx returns to, echoed into the forms the swap inserts, and the
+// name whose jobs this fragment keeps. Registered before /definitions/:name so this path is the
+// fragment, not a definition named running.
 app.get("/definitions/running", async (context) => {
   const definition = context.req.query("name");
   try {
     const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
-    return context.html(<RunningList jobs={running} definition={definition} />);
+    const jobs = definition === undefined ? running : runningForDefinition(running, definition);
+    return context.html(<RunningList jobs={jobs} definition={definition} />);
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: listing running tests:", errorMessage(error));
@@ -464,9 +470,10 @@ app.get("/definitions/:name", async (context) => {
   const name = context.req.param("name");
   const notice = editNotice(context.req.query("edit"));
   try {
-    const [definitions, running] = await Promise.all([
+    const [definitions, running, runs] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
+      listDefinitionRuns(context.env.HYPERDRIVE.connectionString, name),
     ]);
     const selected = selectDefinition(groupDefinitions(definitions), name);
     return definitionsPage(context, selected === undefined ? 404 : 200, {
@@ -475,8 +482,9 @@ app.get("/definitions/:name", async (context) => {
       selected,
       notice,
       error: undefined,
-      running,
+      running: runningForDefinition(running, name),
       histories: [],
+      runs,
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -489,6 +497,7 @@ app.get("/definitions/:name", async (context) => {
       error: "Test definitions are unavailable.",
       running: null,
       histories: [],
+      runs: [],
     });
   }
 });
@@ -539,6 +548,7 @@ app.post("/definitions", async (context) => {
       error: "Test definitions are unavailable.",
       running: null,
       histories: [],
+      runs: [],
     });
   }
 });
@@ -658,8 +668,8 @@ app.get("/tickets/:ticket", async (context) => {
 const RESULT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // One result, dumped. An id that is not a uuid is not looked up: the column would refuse it.
-app.get("/tests/:id", async (context) => {
-  const id = context.req.param("id");
+// /tests is the address the index pills already use. A definition's page links /test-results.
+const testResultPage = async (context: Context<{ Bindings: Bindings }>, id: string) => {
   if (!RESULT_ID.test(id)) {
     return context.html(html`<!doctype html>${<TestMissingPage />}`, 404);
   }
@@ -674,7 +684,10 @@ app.get("/tests/:id", async (context) => {
     console.error("dashboard: loading a test:", errorMessage(error));
     return context.html(html`<!doctype html>${<TestUnavailablePage />}`, 500);
   }
-});
+};
+
+app.get("/tests/:id", (context) => testResultPage(context, context.req.param("id")));
+app.get("/test-results/:id", (context) => testResultPage(context, context.req.param("id")));
 
 app.get("/images/:id", async (context) => {
   const id = context.req.param("id");
@@ -857,7 +870,8 @@ app.post("/abort", async (context) => {
       try {
         if (definitionsView) {
           const running = await listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString);
-          return context.html(<RunningList jobs={running} definition={back} />);
+          const jobs = back === undefined ? running : runningForDefinition(running, back);
+          return context.html(<RunningList jobs={jobs} definition={back} />);
         }
         const queue = await listAutomationQueue(context.env.HYPERDRIVE.connectionString);
         return context.html(<Queue queue={queue} />);

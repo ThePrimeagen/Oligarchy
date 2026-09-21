@@ -754,6 +754,12 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(card).not.toContain("Last 50 runs by duration");
     expect(card).not.toContain("duration-chart");
     expect(card).not.toContain("succeeded in");
+    // Newest first. A pass says how long it took. The four-minute failure does not: it says failed.
+    expect(card).toContain('aria-label="Last ten runs"');
+    expect(card.match(/href="\/test-results\//g)).toHaveLength(3);
+    expect(card.indexOf("2 min")).toBeLessThan(card.indexOf("1 min"));
+    expect(card).not.toContain("4 min");
+    expect(card).toContain('<span class="definition-pill__error">failed</span>');
   });
 
   it("shows the newest wording in a form, the name fixed, its update button handed over disabled", async () => {
@@ -859,6 +865,176 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(running).toContain(definitionsAbortForm("RUN-1", "drive", "running-on-definitions"));
     expect(running.match(/action="\/abort"/g)).toHaveLength(2);
   });
+
+  it("keeps only this definition's running jobs, and its last ten verdicts", async () => {
+    const keptSession = randomUUID();
+    const failedSession = randomUUID();
+    const errorKey = `pill-unlocked-${randomUUID().slice(0, 8)}`;
+    let diagnosed = "";
+    let timed = "";
+    let dropped = "";
+    let keptOld = "";
+    await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({ name: "pill-lock", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [other] = await db
+        .insert(testDefinitions)
+        .values({ name: "pill-other", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      await db.insert(postRunErrorTypes).values({
+        key: errorKey,
+        description: "the lock did not take",
+      });
+      await db.insert(sessions).values([
+        {
+          id: keptSession,
+          config: { iso: "x" },
+          status: "succeeded",
+          startedAt: new Date("2026-09-02T00:00:00Z"),
+          endedAt: new Date("2026-09-02T00:02:00Z"),
+        },
+        {
+          id: failedSession,
+          config: { iso: "x" },
+          status: "failed",
+          startedAt: new Date("2026-09-03T00:00:00Z"),
+          endedAt: new Date("2026-09-03T00:04:00Z"),
+        },
+      ]);
+      const runs = await db
+        .insert(testRuns)
+        .values(
+          Array.from({ length: 13 }, (_, index) => ({
+            name: `pill ${String(index)}`,
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+          })),
+        )
+        .returning({ id: testRuns.id });
+      const runId = (index: number): string => runs[index]?.id ?? "";
+      const inserted = await db
+        .insert(testResults)
+        .values([
+          {
+            runId: runId(0),
+            definitionId: definition.id,
+            sessionId: failedSession,
+            status: "failed" as const,
+            model: "grok-4.6",
+            reason: "driver gave up",
+            createdAt: new Date("2026-09-03T00:00:00Z"),
+            finishedAt: new Date("2026-09-03T00:04:00Z"),
+          },
+          {
+            runId: runId(1),
+            definitionId: definition.id,
+            sessionId: keptSession,
+            status: "passed" as const,
+            model: "grok-4.6",
+            createdAt: new Date("2026-09-02T00:00:00Z"),
+            finishedAt: new Date("2026-09-02T00:10:00Z"),
+          },
+          ...Array.from({ length: 9 }, (_, index) => ({
+            runId: runId(index + 2),
+            definitionId: definition.id,
+            status: "passed" as const,
+            model: "grok-4.6",
+            createdAt: new Date(Date.UTC(2026, 8, 1, index + 1)),
+            finishedAt: new Date(Date.UTC(2026, 8, 1, index + 1, 1)),
+          })),
+          {
+            runId: runId(11),
+            definitionId: definition.id,
+            status: "pending" as const,
+            model: "grok-4.6",
+            linearId: "PILL-KEEP",
+          },
+          {
+            runId: runId(12),
+            definitionId: other.id,
+            status: "pending" as const,
+            model: "grok-4.6",
+            linearId: "PILL-OTHER",
+          },
+        ])
+        .returning({ id: testResults.id });
+      diagnosed = inserted[0]?.id ?? "";
+      timed = inserted[1]?.id ?? "";
+      dropped = inserted[2]?.id ?? "";
+      keptOld = inserted[10]?.id ?? "";
+      await db.insert(postRunDiagnosis).values([
+        {
+          sessionId: keptSession,
+          verdict: "passed",
+          summary: "a pass is not an error",
+          model: "grok-4.6",
+        },
+        {
+          sessionId: failedSession,
+          verdict: "failed",
+          errorType: errorKey,
+          summary: "the screen stayed unlocked",
+          model: "grok-4.6",
+        },
+      ]);
+      await db.insert(automationJobs).values([
+        {
+          resultId: inserted[11]?.id ?? "",
+          action: "drive",
+          status: "running",
+          startedAt: secondsAgo(45),
+          createdAt: secondsAgo(120),
+        },
+        {
+          resultId: inserted[12]?.id ?? "",
+          action: "diagnose",
+          status: "running",
+          startedAt: secondsAgo(10),
+          createdAt: secondsAgo(30),
+        },
+      ]);
+    });
+
+    const { status, html } = await getPage("/definitions/pill-lock", dbUrl);
+    expect(status).toBe(200);
+    const running = runningSection(html);
+    expect(running).toContain("PILL-KEEP");
+    expect(running).not.toContain("PILL-OTHER");
+    expect(running).toContain(definitionsAbortForm("PILL-KEEP", "drive", "pill-lock"));
+    expect(running.match(/action="\/abort"/g)).toHaveLength(1);
+    const card = section(html, "pill-lock");
+    expect(card).toContain(`href="/test-results/${diagnosed}"`);
+    expect(card).toContain(`>${diagnosed.slice(0, 6)}</a>`);
+    expect(card).toContain(`${errorKey}: the screen stayed unlocked`);
+    expect(card).toContain('<span class="definition-pill__error">failed</span>');
+    expect(card).not.toContain("4 min");
+    expect(card).not.toContain("driver gave up");
+    expect(card).toContain(`href="/test-results/${timed}"`);
+    expect(card).toContain(`>${timed.slice(0, 6)}</a>`);
+    expect(card).toContain("2 min");
+    expect(card).not.toContain("10 min");
+    expect(card).not.toContain("a pass is not an error");
+    expect(card).toContain(`href="/test-results/${keptOld}"`);
+    expect(card).not.toContain(`href="/test-results/${dropped}"`);
+    expect(card.match(/href="\/test-results\//g)).toHaveLength(10);
+    expect(card.indexOf(diagnosed)).toBeLessThan(card.indexOf(timed));
+    expect(card.indexOf(timed)).toBeLessThan(card.indexOf(keptOld));
+
+    const fragment = await getPage("/definitions/running?name=pill-lock", dbUrl);
+    expect(fragment.status).toBe(200);
+    expect(fragment.html).toContain("PILL-KEEP");
+    expect(fragment.html).not.toContain("PILL-OTHER");
+    const otherPage = await getPage("/definitions/pill-other", dbUrl);
+    const otherBody = otherPage.html.slice(otherPage.html.indexOf("<body>"));
+    expect(otherBody).toContain("PILL-OTHER");
+    expect(otherBody).not.toContain("PILL-KEEP");
+    expect(otherBody).not.toContain("definition-runs");
+    const index = await getPage("/definitions", dbUrl);
+    expect(runningSection(index.html)).toContain("PILL-KEEP");
+    expect(runningSection(index.html)).toContain("PILL-OTHER");
+  });
 });
 
 describe.skipIf(dbUrl === "")("dashboard test diagnostic happy path", () => {
@@ -934,6 +1110,9 @@ describe.skipIf(dbUrl === "")("dashboard test diagnostic happy path", () => {
     const listed = await getPage("/definitions", dbUrl);
     expect(definitionItem(listed.html, "dump-lock")).toContain(`href="/tests/${resultId}"`);
     const { status, html } = await getPage(`/tests/${resultId}`, dbUrl);
+    const linked = await getPage(`/test-results/${resultId}`, dbUrl);
+    expect(linked.status).toBe(200);
+    expect(linked.html).toContain('<p class="test-reason">the screen stayed unlocked</p>');
     expect(status).toBe(200);
     expect(html).toContain("<h1>dump-lock</h1>");
     expect(html).toContain("v1");
@@ -1049,11 +1228,12 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
     );
     const { status, html } = await getPage("/definitions/lock-screen", dbUrl);
     expect(status).toBe(200);
-    const running = runningSection(html);
-    expect(running).toContain("No tests are running.");
-    expect(running).not.toContain("RUN-NONE");
-    expect(running).not.toContain("RUN-FINISHED");
-    expect(running).not.toContain('action="/abort"');
+    const body = html.slice(html.indexOf("<body>"));
+    expect(body).not.toContain("running-tests");
+    expect(body).not.toContain("No tests are running.");
+    expect(body).not.toContain("RUN-NONE");
+    expect(body).not.toContain("RUN-FINISHED");
+    expect(body).not.toContain('action="/abort"');
   });
 
   it("answers 404 for a name no definition carries, and does not open another one", async () => {
