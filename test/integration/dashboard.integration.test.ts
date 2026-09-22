@@ -1890,7 +1890,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     const { status, html } = await getPage("/servers", dbUrl);
     expect(status).toBe(200);
     expect(html).toMatch(
-      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>(?:<ul class="definition-runs" aria-label="Test suites">[\s\S]*?<\/ul>)?<h3>running 2<\/h3><table>/,
+      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>(?:<ul[^>]*aria-label="Test suites"[^>]*>[\s\S]*?<\/ul>)?<h3>running 2<\/h3><table>/,
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
@@ -2164,9 +2164,7 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       const page = await postAbortSuite(dbUrl, inserted.runId);
       expect(page.status).toBe(200);
       expect(page.html).not.toContain(`value="${inserted.runId}"`);
-      expect(page.html).toContain(
-        `class="definition-pill definition-pill--aborted">${inserted.runId.slice(0, 6)}`,
-      );
+      expect(page.html).toContain(`>${inserted.runId.slice(0, 6)}</span><span>aborted</span>`);
       expect(page.html).not.toContain("postgres://");
       const stored = await seed(dbUrl, async (db) => {
         const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
@@ -2978,8 +2976,9 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       expect(response.status).toBe(200);
       const html = await response.text();
       expect(html).toMatch(
-        /^<p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/,
+        /^<p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>/,
       );
+      expect(html).toMatch(/<h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/);
       expect(html).toMatch(
         /<h3>pending 1<\/h3><table>.*?<a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-2">ABT-HX-2<\/a>.*?<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-1">ABT-HX-1<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1">abort-htmx-pending<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><\/td><\/tr>/s,
       );
