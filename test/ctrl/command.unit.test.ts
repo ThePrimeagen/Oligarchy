@@ -1672,8 +1672,20 @@ describe("test list", () => {
   it.effect("prints the backlog as a JSON array (happy)", () =>
     Effect.gen(function* () {
       const backlog = [
-        { id: "i1", identifier: "OLI-1", title: "one", url: "https://linear.app/issue/OLI-1" },
-        { id: "i2", identifier: "OLI-2", title: "two", url: "https://linear.app/issue/OLI-2" },
+        {
+          id: "i1",
+          identifier: "OLI-1",
+          title: "one",
+          url: "https://linear.app/issue/OLI-1",
+          updatedAt: "2026-09-22T13:00:00.000Z",
+        },
+        {
+          id: "i2",
+          identifier: "OLI-2",
+          title: "two",
+          url: "https://linear.app/issue/OLI-2",
+          updatedAt: "2026-09-22T13:02:00.000Z",
+        },
       ];
       const h = harness({ linear: FakeLinear.fakeLinear({ backlog }) });
       const exit = yield* h.run(["test", "list"], WITH_LINEAR);

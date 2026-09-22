@@ -13,6 +13,12 @@ export type LinearCall =
       readonly description: string;
       readonly stateId: string;
     }
+  | {
+      readonly method: "moveIssue";
+      readonly issueId: string;
+      readonly identifier: string;
+      readonly stateId: string;
+    }
   | { readonly method: "listBacklog" };
 
 export type FakeLinear = {
@@ -74,6 +80,8 @@ export const fakeLinear = (
       ),
     describeIssue: (ticket, description, state) =>
       record({ method: "describeIssue", ticket, description, stateId: state }, Effect.void),
+    moveIssue: (issueId, identifier, state) =>
+      record({ method: "moveIssue", issueId, identifier, stateId: state }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
   };
   const overrides = options.overrides ?? {};
@@ -84,6 +92,7 @@ export const fakeLinear = (
     stateIds: overrides.stateIds ?? defaults.stateIds,
     createIssue: overrides.createIssue ?? defaults.createIssue,
     describeIssue: overrides.describeIssue ?? defaults.describeIssue,
+    moveIssue: overrides.moveIssue ?? defaults.moveIssue,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
   };
   return { calls, layer: Layer.succeed(Linear.Linear)(service) };

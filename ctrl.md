@@ -151,7 +151,7 @@ Refused before anything is created when there is no definition named `mint` — 
 ./ctrl test list
 ```
 
-Prints every Linear issue on the Oligarchy team whose status type is backlog, as JSON: `id`, `identifier`, `title`, `url`. An empty backlog prints `[]`. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Prints every Linear issue on the Oligarchy team whose status type is backlog, as JSON: `id`, `identifier`, `title`, `url`, `updatedAt`. An empty backlog prints `[]`. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
 
 ```bash
 ./ctrl test list

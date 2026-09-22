@@ -9,6 +9,7 @@ import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Config from "../config.ts";
+import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
@@ -20,6 +21,7 @@ import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Api from "../shared/api.ts";
 import * as StaleServers from "../shared/stale-servers.ts";
+import * as Backlog from "./backlog.ts";
 import * as AutomationClient from "./client.ts";
 import * as AutomationServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
@@ -59,6 +61,7 @@ const ServerLive = (port: number, model: string) =>
       );
       yield* Worker.dispatch(model);
       yield* StaleServers.forget("automation-client");
+      yield* Backlog.watch();
     }),
   ).pipe(
     Layer.provide(
@@ -73,11 +76,15 @@ const ServerLive = (port: number, model: string) =>
 
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
-// LINEAR_WEBHOOK_SECRET signs POST /linear; OLIGARCHY_TOKEN authenticates POST /run to a
-// client and POST /abort from Cloudflare; DATABASE_URL holds the queue, the live-server
-// list and the logs rows. Sentry sits
+// LINEAR_WEBHOOK_SECRET signs POST /linear; LINEAR_API_TOKEN reads the backlog the webhook
+// missed; OLIGARCHY_TOKEN authenticates POST /run to a client and POST /abort from
+// Cloudflare; DATABASE_URL holds the queue, the live-server list and the logs rows. Sentry sits
 // beneath Log so Log captures the reporter. Lines land in logs with location/agentId
 // "automation"; durable jobs remain automation_jobs.
+const LinearLive = Layer.unwrap(
+  Effect.map(Config.linearApiToken, (token) => Linear.Linear.layer(token)),
+);
+
 const MainLive = Layer.mergeAll(
   Log.Log.layer,
   Handlers.LinearWebhookSecret.layer,
@@ -86,6 +93,7 @@ const MainLive = Layer.mergeAll(
   Automation.AutomationStore.layer,
   Servers.ServerStore.layer,
   SetupRequests.SetupRequestStore.layer,
+  LinearLive,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),
@@ -101,9 +109,9 @@ const command = AutomationServerCommand.makeAutomationServerCommand({
   serverFailed,
 });
 
-// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET, OLIGARCHY_TOKEN
-// or DATABASE_URL is the one failure no Log exists to record, so it is printed here. Every
-// later failure logs its own fatal line; a defect has nothing else to say for it.
+// The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET, LINEAR_API_TOKEN,
+// OLIGARCHY_TOKEN or DATABASE_URL is the one failure no Log exists to record, so it is printed
+// here. Every later failure logs its own fatal line; a defect has nothing else to say for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(command, { version: Api.VERSION }).pipe(

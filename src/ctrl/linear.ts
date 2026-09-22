@@ -26,6 +26,8 @@ export const LinearBacklogTicket = Schema.Struct({
   identifier: Schema.String,
   title: Schema.String,
   url: Schema.String,
+  // Compared as text: an edit is a different string, and that is the whole signal.
+  updatedAt: Schema.String,
 });
 export type LinearBacklogTicket = typeof LinearBacklogTicket.Type;
 
@@ -91,6 +93,7 @@ const BACKLOG_QUERY = `query ExperimentBacklog($filter: IssueFilter!, $after: St
       identifier
       title
       url
+      updatedAt
     }
     pageInfo {
       hasNextPage
@@ -156,6 +159,11 @@ export type LinearService = {
   readonly describeIssue: (
     ticket: LinearTicket,
     description: string,
+    stateId: string,
+  ) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveIssue: (
+    issueId: string,
+    identifier: string,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
@@ -306,6 +314,30 @@ const makeLinear = (
       return created.issueCreate.issue;
     });
 
+    // State only. The backlog watch uses this when a ticket has sat unchanged: the body, if it
+    // was going to be written, would already have changed updatedAt and reset that wait.
+    const moveIssue = Effect.fn("Linear.moveIssue")(function* (
+      issueId: string,
+      identifier: string,
+      stateId: string,
+    ) {
+      yield* request(
+        "moveIssue",
+        ISSUE_DESCRIBE_MUTATION,
+        { id: issueId, input: { stateId } },
+        IssueUpdate,
+      ).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveIssue",
+              message: `linear: moving ${identifier} failed`,
+            }),
+        ),
+      );
+    });
+
     // Linear assigns the identifier on create, and the description names it as the driver's agent
     // id, so the body can only land in a second call. The move to `stateId` rides in that same
     // update: the ticket is never in Automation Needed without its body.
@@ -359,6 +391,7 @@ const makeLinear = (
       stateIds,
       createIssue,
       describeIssue,
+      moveIssue,
       listBacklog,
     } satisfies LinearService;
   });
