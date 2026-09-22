@@ -13,6 +13,7 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 // written, so the webhook that queues the drive can never arrive before that write.
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
+export const NEEDS_REVIEW_STATE = "Needs Review";
 
 export const LinearTicket = Schema.Struct({
   id: Schema.String,
@@ -86,7 +87,7 @@ const ISSUE_UPDATE_MUTATION = `mutation ExperimentIssueUpdate($id: String!, $inp
   }
 }`;
 
-const BACKLOG_QUERY = `query ExperimentBacklog($filter: IssueFilter!, $after: String) {
+const ISSUES_QUERY = `query ExperimentIssues($filter: IssueFilter!, $after: String) {
   issues(first: 100, after: $after, filter: $filter) {
     nodes {
       id
@@ -105,6 +106,13 @@ const BACKLOG_QUERY = `query ExperimentBacklog($filter: IssueFilter!, $after: St
 const BACKLOG_FILTER = {
   team: { name: { eq: LINEAR_TEAM } },
   state: { type: { eq: "backlog" } },
+};
+
+type IssueFilter = {
+  readonly team: { readonly name: { readonly eq: string } };
+  readonly state:
+    | { readonly type: { readonly eq: string } }
+    | { readonly name: { readonly eq: string } };
 };
 
 const Nodes = Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) });
@@ -166,6 +174,11 @@ export type LinearService = {
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
+  readonly listAutomationNeeded: Effect.Effect<
+    ReadonlyArray<LinearBacklogTicket>,
+    Errors.LinearError
+  >;
+  readonly listNeedsReview: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
 };
 
 const makeLinear = (
@@ -360,26 +373,38 @@ const makeLinear = (
       );
     });
 
-    const listBacklog: Effect.Effect<
-      ReadonlyArray<LinearBacklogTicket>,
-      Errors.LinearError
-    > = Effect.gen(function* () {
-      const tickets: Array<LinearBacklogTicket> = [];
-      let after: string | undefined;
-      while (true) {
-        const variables =
-          after === undefined ? { filter: BACKLOG_FILTER } : { filter: BACKLOG_FILTER, after };
-        const page = yield* request("listBacklog", BACKLOG_QUERY, variables, Backlog);
-        tickets.push(...page.issues.nodes);
-        if (!page.issues.pageInfo.hasNextPage) {
-          return tickets;
+    const listIssues = (
+      operation: "listBacklog" | "listAutomationNeeded" | "listNeedsReview",
+      filter: IssueFilter,
+    ): Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError> =>
+      Effect.gen(function* () {
+        const tickets: Array<LinearBacklogTicket> = [];
+        let after: string | undefined;
+        while (true) {
+          const variables = after === undefined ? { filter } : { filter, after };
+          const page = yield* request(operation, ISSUES_QUERY, variables, Backlog);
+          tickets.push(...page.issues.nodes);
+          if (!page.issues.pageInfo.hasNextPage) {
+            return tickets;
+          }
+          if (page.issues.pageInfo.endCursor === null) {
+            return yield* invalidResponse(operation);
+          }
+          after = page.issues.pageInfo.endCursor;
         }
-        if (page.issues.pageInfo.endCursor === null) {
-          return yield* invalidResponse("listBacklog");
-        }
-        after = page.issues.pageInfo.endCursor;
-      }
+      });
+
+    const stateFilter = (name: string) => ({
+      team: { name: { eq: LINEAR_TEAM } },
+      state: { name: { eq: name } },
     });
+
+    const listBacklog = listIssues("listBacklog", BACKLOG_FILTER);
+    const listAutomationNeeded = listIssues(
+      "listAutomationNeeded",
+      stateFilter(AUTOMATION_NEEDED_STATE),
+    );
+    const listNeedsReview = listIssues("listNeedsReview", stateFilter(NEEDS_REVIEW_STATE));
 
     return {
       teamId,
@@ -390,6 +415,8 @@ const makeLinear = (
       describeIssue,
       moveIssue,
       listBacklog,
+      listAutomationNeeded,
+      listNeedsReview,
     } satisfies LinearService;
   });
 

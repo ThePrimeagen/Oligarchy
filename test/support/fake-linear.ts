@@ -18,7 +18,9 @@ export type LinearCall =
       readonly ticket: Linear.LinearTicket;
       readonly stateId: string;
     }
-  | { readonly method: "listBacklog" };
+  | { readonly method: "listBacklog" }
+  | { readonly method: "listAutomationNeeded" }
+  | { readonly method: "listNeedsReview" };
 
 export type FakeLinear = {
   readonly calls: Array<LinearCall>;
@@ -82,6 +84,8 @@ export const fakeLinear = (
     moveIssue: (issue, state) =>
       record({ method: "moveIssue", ticket: issue, stateId: state }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
+    listAutomationNeeded: record({ method: "listAutomationNeeded" }, Effect.succeed([])),
+    listNeedsReview: record({ method: "listNeedsReview" }, Effect.succeed([])),
   };
   const overrides = options.overrides ?? {};
   const service: Linear.LinearService = {
@@ -93,6 +97,8 @@ export const fakeLinear = (
     describeIssue: overrides.describeIssue ?? defaults.describeIssue,
     moveIssue: overrides.moveIssue ?? defaults.moveIssue,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
+    listAutomationNeeded: overrides.listAutomationNeeded ?? defaults.listAutomationNeeded,
+    listNeedsReview: overrides.listNeedsReview ?? defaults.listNeedsReview,
   };
   return { calls, layer: Layer.succeed(Linear.Linear)(service) };
 };
