@@ -153,6 +153,7 @@ const qemu = (url: string) => ({
   url,
   name: null,
   type: "qemu" as const,
+  maxJobs: null,
 });
 
 const upstreamCalls = (fixed: Fixture) =>

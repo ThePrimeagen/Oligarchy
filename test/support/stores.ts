@@ -731,12 +731,14 @@ type RegisteredServer = {
   readonly url: string;
   readonly name: string | null;
   readonly type: Servers.ServerType;
+  maxJobs: number | null;
 };
 type Heartbeat = {
   readonly url: string;
   readonly type: Servers.ServerType;
   readonly name: string;
   readonly stats: DbSchema.ServerStats;
+  readonly maxJobs: number;
 };
 
 export type FakeServerStore = {
@@ -766,21 +768,46 @@ export const fakeServerStore = (
     addServer: (url, type) =>
       Effect.sync(() => {
         if (indexOf(url) === -1) {
-          servers.push({ id: crypto.randomUUID(), url, name: null, type });
+          servers.push({ id: crypto.randomUUID(), url, name: null, type, maxJobs: null });
         }
       }),
-    heartbeat: (url, type, name, stats) =>
+    heartbeat: (url, type, name, stats, maxJobs) =>
       Effect.sync(() => {
         const index = indexOf(url);
         if (index === -1) {
-          servers.push({ id: crypto.randomUUID(), url, name, type });
+          servers.push({ id: crypto.randomUUID(), url, name, type, maxJobs });
         } else {
           const existing = servers[index];
           if (existing !== undefined) {
-            servers[index] = { id: existing.id, url, name, type };
+            servers[index] = {
+              id: existing.id,
+              url,
+              name,
+              type,
+              maxJobs: existing.maxJobs ?? maxJobs,
+            };
           }
         }
-        heartbeats.push({ url, type, name, stats });
+        heartbeats.push({ url, type, name, stats, maxJobs });
+      }),
+    setMaxJobs: (url, maxJobs) =>
+      Effect.sync(() => {
+        const index = indexOf(url);
+        if (index === -1) {
+          return false;
+        }
+        const existing = servers[index];
+        if (existing !== undefined) {
+          servers[index] = { ...existing, maxJobs };
+        }
+        return true;
+      }),
+    maxJobsFor: (url) =>
+      Effect.sync(() => {
+        const existing = servers[indexOf(url)];
+        return existing === undefined || existing.maxJobs === null
+          ? Option.none()
+          : Option.some(existing.maxJobs);
       }),
     removeServer: (url) =>
       Effect.sync(() => {
@@ -811,6 +838,7 @@ export const fakeServerStore = (
               name: server.name,
               type: server.type,
               stats: last === undefined ? null : last.stats,
+              maxJobs: server.maxJobs,
               generation: beats.length,
               heartbeatAt: last === undefined ? null : queriedAt,
               queriedAt,

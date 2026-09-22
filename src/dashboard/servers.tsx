@@ -30,7 +30,26 @@ const age = (ms: number): string => {
 
 // One row: what the server said of itself, or the one word that says it stopped saying it. stats
 // and heartbeat_at are written together, so either being null is a row no server has claimed.
+// max-jobs is the capacity the process admits; the form posts a new value and the process
+// re-reads it within a minute.
 const Row: FC<{ server: Server }> = ({ server }) => {
+  const maxJobsCell = (
+    <td>
+      <form method="post" action="/servers/max-jobs">
+        <input type="hidden" name="url" value={server.url} />
+        <input
+          name="maxJobs"
+          type="number"
+          min={1}
+          step={1}
+          value={server.maxJobs === null ? "" : String(server.maxJobs)}
+          placeholder="—"
+          aria-label={`max-jobs for ${server.name ?? server.url}`}
+        />
+        <button>set</button>
+      </form>
+    </td>
+  );
   const remove = (
     <td>
       <form method="post" action="/servers/delete">
@@ -43,8 +62,10 @@ const Row: FC<{ server: Server }> = ({ server }) => {
     return (
       <tr>
         <td>{server.name ?? "—"}</td>
+        <td>{server.type}</td>
         <td>{server.url}</td>
         <td colspan={3}>never heard from</td>
+        {maxJobsCell}
         <td>{server.generation}</td>
         <td>never</td>
         {remove}
@@ -55,6 +76,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
   return (
     <tr>
       <td>{server.name ?? "—"}</td>
+      <td>{server.type}</td>
       <td>{server.url}</td>
       {sinceHeartbeat > SILENT_AFTER_MS ? (
         <td colspan={3}>
@@ -73,6 +95,7 @@ const Row: FC<{ server: Server }> = ({ server }) => {
           </td>
         </>
       )}
+      {maxJobsCell}
       <td>{server.generation}</td>
       <td>{age(sinceHeartbeat)} ago</td>
       {remove}
@@ -198,7 +221,9 @@ export const Process: FC<{ series: ReadonlyArray<ProcessSeries> }> = ({ series }
     </div>
   );
 
-// The fleet as a table, or the sentence that there is none: what the page polls for.
+// The fleet as a table, or the sentence that there is none: what the page polls for. qemu
+// servers and automation clients share the table; max-jobs is the capacity each process admits,
+// editable here so a change lands without a restart.
 export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
   servers.length === 0 ? (
     <p>no servers registered</p>
@@ -206,10 +231,12 @@ export const Fleet: FC<{ servers: ReadonlyArray<Server> }> = ({ servers }) =>
     <table>
       <tr>
         <th>name</th>
+        <th>type</th>
         <th>url</th>
         <th>qemus</th>
         <th>memory</th>
         <th>cpu 1m / 2m / 3m</th>
+        <th>max-jobs</th>
         <th>generation</th>
         <th>heartbeat</th>
         <th></th>
@@ -395,7 +422,7 @@ export const ServersPage: FC<{
         )}
       </section>
       <section>
-        <h2>qemu servers</h2>
+        <h2>fleet</h2>
         {halves === undefined ? null : (
           <div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">
             <Fleet servers={halves.servers} />

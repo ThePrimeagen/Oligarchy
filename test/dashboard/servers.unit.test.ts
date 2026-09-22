@@ -15,11 +15,13 @@ const ago = (seconds: number): Date => new Date(QUERIED_AT.getTime() - seconds *
 const alive: Server = {
   url: "http://127.0.0.1:55332",
   name: "garage",
+  type: "qemu",
   stats: {
     qemus: 2,
     memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
     cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
   },
+  maxJobs: 4,
   generation: 42,
   heartbeatAt: ago(12),
   queriedAt: QUERIED_AT,
@@ -28,11 +30,13 @@ const alive: Server = {
 const silent: Server = {
   url: "https://qemu-b.example.com",
   name: "attic",
+  type: "qemu",
   stats: {
     qemus: 3,
     memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
     cpu: { mean1m: 50, mean2m: 40, mean3m: 30 },
   },
+  maxJobs: 2,
   generation: 7,
   heartbeatAt: ago(5 * 60 + 12),
   queriedAt: QUERIED_AT,
@@ -41,7 +45,9 @@ const silent: Server = {
 const neverHeardFrom: Server = {
   url: "https://qemu-c.example.com",
   name: null,
+  type: "qemu",
   stats: null,
+  maxJobs: null,
   generation: 0,
   heartbeatAt: null,
   queriedAt: QUERIED_AT,
@@ -177,10 +183,10 @@ describe("Fleet happy path", () => {
   it("lists a server heard from just now with its machines, memory, the three cpu means, its generation and the age of its heartbeat", async () => {
     const page = await render(Fleet({ servers: [alive] }));
     expect(page).toContain(
-      "<tr><th>name</th><th>url</th><th>qemus</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>generation</th><th>heartbeat</th><th></th></tr>",
+      "<tr><th>name</th><th>type</th><th>url</th><th>qemus</th><th>memory</th><th>cpu 1m / 2m / 3m</th><th>max-jobs</th><th>generation</th><th>heartbeat</th><th></th></tr>",
     );
     expect(page).toContain(
-      "<tr><td>garage</td><td>http://127.0.0.1:55332</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
+      '<tr><td>garage</td><td>qemu</td><td>http://127.0.0.1:55332</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td><form method="post" action="/servers/max-jobs"><input type="hidden" name="url" value="http://127.0.0.1:55332"/><input name="maxJobs" type="number" min="1" step="1" value="4"',
     );
     expect(page).toContain(
       '<form method="post" action="/servers/delete"><input type="hidden" name="url" value="http://127.0.0.1:55332"/><button>delete</button></form>',
@@ -210,7 +216,7 @@ describe("Fleet unhappy path", () => {
   it("marks a server silent, its stats withheld, once three heartbeats are overdue", async () => {
     const page = await render(Fleet({ servers: [silent] }));
     expect(page).toContain(
-      '<tr><td>attic</td><td>https://qemu-b.example.com</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
+      '<tr><td>attic</td><td>qemu</td><td>https://qemu-b.example.com</td><td colspan="3"><strong>silent</strong></td><td><form method="post" action="/servers/max-jobs"><input type="hidden" name="url" value="https://qemu-b.example.com"/><input name="maxJobs" type="number" min="1" step="1" value="2"',
     );
     expect(page).not.toContain("50.0%");
   });
@@ -221,14 +227,14 @@ describe("Fleet unhappy path", () => {
     expect(onTime).not.toContain("silent");
     const overdue = await render(Fleet({ servers: [{ ...alive, heartbeatAt: ago(91) }] }));
     expect(overdue).toContain(
-      '<td colspan="3"><strong>silent</strong></td><td>42</td><td>1 min ago</td>',
+      '<td colspan="3"><strong>silent</strong></td><td><form method="post" action="/servers/max-jobs"><input type="hidden" name="url" value="http://127.0.0.1:55332"/><input name="maxJobs" type="number" min="1" step="1" value="4"',
     );
   });
 
   it("says never heard from for a server an operator added that has not announced itself", async () => {
     const page = await render(Fleet({ servers: [neverHeardFrom] }));
     expect(page).toContain(
-      '<tr><td>—</td><td>https://qemu-c.example.com</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+      '<tr><td>—</td><td>qemu</td><td>https://qemu-c.example.com</td><td colspan="3">never heard from</td><td><form method="post" action="/servers/max-jobs"><input type="hidden" name="url" value="https://qemu-c.example.com"/><input name="maxJobs" type="number" min="1" step="1" value="" placeholder="—"',
     );
   });
 
@@ -240,7 +246,7 @@ describe("Fleet unhappy path", () => {
     };
     const page = await render(Fleet({ servers: [hostile] }));
     expect(page).toContain(
-      "<td>rack&lt;&quot;1&gt;</td><td>http://a&quot;b.example.com/&lt;x&gt;</td>",
+      "<td>rack&lt;&quot;1&gt;</td><td>qemu</td><td>http://a&quot;b.example.com/&lt;x&gt;</td>",
     );
     expect(page).toContain('value="http://a&quot;b.example.com/&lt;x&gt;"');
     expect(page).not.toContain('a"b');
@@ -559,7 +565,7 @@ describe("ServersPage happy path", () => {
     expect(page).toContain("<h3>running 1</h3>");
     expect(page).toContain(linearLink("OLI-61"));
     expect(page).toContain(
-      '<h2>qemu servers</h2><div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">',
+      '<h2>fleet</h2><div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">',
     );
     expect(page).toContain("<td>http://127.0.0.1:55332</td>");
     expect(page).toContain("<td>https://qemu-c.example.com</td>");
@@ -595,7 +601,7 @@ describe("ServersPage unhappy path", () => {
     expect(page).not.toContain('id="process"');
     expect(page).not.toContain("no process stats");
     expect(page).toContain("<h2>automation</h2>");
-    expect(page).toContain("<h2>qemu servers</h2>");
+    expect(page).toContain("<h2>fleet</h2>");
     expect(page).toContain("<h2>add a server</h2>");
     expect(page).toContain("<h2>process</h2>");
   });

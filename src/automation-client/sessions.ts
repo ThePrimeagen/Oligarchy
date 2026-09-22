@@ -40,7 +40,7 @@ type Reservation = {
   readonly since: number;
 };
 
-const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: RelinquishQemu) =>
+const make = (initialMaxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: RelinquishQemu) =>
   Effect.gen(function* () {
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
@@ -52,12 +52,15 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       readonly count: number;
       readonly reserved: ReadonlyMap<string, Reservation>;
     }>({ count: 0, reserved: new Map() });
+    // How many runs this process admits at once. Seeded from --max-jobs; the website can
+    // rewrite servers.max_jobs and the follow loop sets this Ref within a minute.
+    const maxJobs = yield* Ref.make(initialMaxJobs);
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const log = yield* Log.Log;
 
-    const atCapacity = (ticket: string): Errors.AtCapacity =>
+    const atCapacity = (ticket: string, limit: number): Errors.AtCapacity =>
       Errors.AtCapacity.make({
-        message: `at capacity: max-jobs is ${String(maxJobs)}`,
+        message: `at capacity: max-jobs is ${String(limit)}`,
         agentId: ticket,
       });
 
@@ -91,8 +94,9 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             yield* reserveQemu(ticket, action === "drive" ? resume : undefined, server);
           }
           const since = yield* Clock.currentTimeMillis;
+          const limit = yield* Ref.get(maxJobs);
           const admitted = yield* Ref.modify(slots, (current) => {
-            if (current.count >= maxJobs) {
+            if (current.count >= limit) {
               return [false, current] as const;
             }
             return [
@@ -107,7 +111,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             if (action === "drive" || action === "mint") {
               yield* relinquishQemu(ticket);
             }
-            return yield* atCapacity(ticket);
+            return yield* atCapacity(ticket, limit);
           }
           return yield* Effect.void;
         }),
@@ -244,6 +248,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       abort,
       // How many runs this process currently holds against --max-jobs: reserved plus running.
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
+      maxJobs: Ref.get(maxJobs),
+      setMaxJobs: (next: number) => Ref.set(maxJobs, next),
     };
   });
 

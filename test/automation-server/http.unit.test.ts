@@ -105,7 +105,13 @@ const seedResult = (
 
 const seedServer = (fixed: Fixture, url: string) => {
   const id = crypto.randomUUID();
-  fixed.stores.servers.servers.push({ id, url, name: null, type: "automation-client" });
+  fixed.stores.servers.servers.push({
+    id,
+    url,
+    name: null,
+    type: "automation-client",
+    maxJobs: null,
+  });
   return id;
 };
 

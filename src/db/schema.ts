@@ -217,7 +217,10 @@ export type ServerStats = {
 // a job still running on a client silent for ten minutes keeps that id and can no longer be
 // aborted this way — the client is gone, or as good as. url remains the key a heartbeat upserts
 // on. name is what the operator called the machine (--name); null on a row nobody has claimed
-// yet.
+// yet. max_jobs is how many runs that process admits at once: seeded from --max-jobs on the
+// first announce, then owned by the operator (the dashboard) so a change lands without a
+// restart. Null until a process or an operator has named it. A heartbeat never overwrites a
+// non-null value; the process re-reads every minute and adjusts.
 export const servers = pgTable(
   "servers",
   {
@@ -226,6 +229,7 @@ export const servers = pgTable(
     name: text("name"),
     type: serverType("type").notNull().default("qemu"),
     stats: jsonb("stats").$type<ServerStats>(),
+    maxJobs: integer("max_jobs"),
     generation: bigint("generation", { mode: "number" }).notNull().default(0),
     heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

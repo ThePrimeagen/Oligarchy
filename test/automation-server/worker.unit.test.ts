@@ -93,8 +93,14 @@ const seedJob = (
 
 const seedLiveClient = (servers: Stores.FakeServerStore, url = URL) => {
   const id = crypto.randomUUID();
-  servers.servers.push({ id, url, name: null, type: "automation-client" });
-  servers.heartbeats.push({ url, type: "automation-client", name: "garage", stats: STATS });
+  servers.servers.push({ id, url, name: null, type: "automation-client", maxJobs: null });
+  servers.heartbeats.push({
+    url,
+    type: "automation-client",
+    name: "garage",
+    stats: STATS,
+    maxJobs: 4,
+  });
   return id;
 };
 
@@ -573,8 +579,20 @@ describe("dispatch unhappy path", () => {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation);
-      fixed.servers.servers.push({ id: crypto.randomUUID(), url: URL, name: null, type: "qemu" });
-      fixed.servers.heartbeats.push({ url: URL, type: "qemu", name: "garage", stats: STATS });
+      fixed.servers.servers.push({
+        id: crypto.randomUUID(),
+        url: URL,
+        name: null,
+        type: "qemu",
+        maxJobs: null,
+      });
+      fixed.servers.heartbeats.push({
+        url: URL,
+        type: "qemu",
+        name: "garage",
+        stats: STATS,
+        maxJobs: 4,
+      });
       yield* start(fixed, FakeHttp.die);
       yield* Effect.yieldNow;
       expect(fixed.automation.jobs[0]?.status).toBe("pending");

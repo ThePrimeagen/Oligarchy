@@ -23,6 +23,7 @@ import {
   listTestBasePrompts,
   listTestDefinitions,
   removeServer,
+  setMaxJobs,
   RETENTION_DAYS,
   reviseTestDefinition,
   selectDefinition,
@@ -736,6 +737,7 @@ const serversPage = (
 ) => context.html(html`<!doctype html>${<ServersPage halves={halves} error={error} />}`, status);
 
 const SERVER_URL_RULE = "url must be an http or https url";
+const MAX_JOBS_RULE = "max-jobs must be at least 1";
 
 // Domain.ServerUrl's rule, without Effect in the Worker: http or https with a host, kept as given.
 const isServerUrl = (url: string): boolean => {
@@ -744,6 +746,16 @@ const isServerUrl = (url: string): boolean => {
   }
   const parsed = new URL(url);
   return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname !== "";
+};
+
+const parseMaxJobs = (value: unknown): number | undefined => {
+  if (typeof value === "string" && value !== "") {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed >= 1) {
+      return parsed;
+    }
+  }
+  return undefined;
 };
 
 const serveServers = async (context: Context<{ Bindings: Bindings }>) => {
@@ -836,6 +848,37 @@ app.post("/servers/delete", async (context) => {
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: removing a server:", errorMessage(error));
+    return serversPage(context, 500, undefined, "internal error");
+  }
+});
+
+// The max-jobs form on a fleet row. The process that announces under the url re-reads within a
+// minute and adjusts; lowering below work already held does not kill it, it only refuses new
+// reservations until the count falls.
+app.post("/servers/max-jobs", async (context) => {
+  const body = await context.req.parseBody();
+  const url = body.url;
+  const maxJobs = parseMaxJobs(body.maxJobs);
+  const connectionString = context.env.HYPERDRIVE.connectionString;
+  try {
+    if (typeof url !== "string" || !isServerUrl(url)) {
+      return await serversPage(context, 400, await readHalves(connectionString), SERVER_URL_RULE);
+    }
+    if (maxJobs === undefined) {
+      return await serversPage(context, 400, await readHalves(connectionString), MAX_JOBS_RULE);
+    }
+    if (!(await setMaxJobs(connectionString, url, maxJobs))) {
+      return await serversPage(
+        context,
+        404,
+        await readHalves(connectionString),
+        `${url} is not registered`,
+      );
+    }
+    return context.redirect("/servers", 303);
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: setting max-jobs:", errorMessage(error));
     return serversPage(context, 500, undefined, "internal error");
   }
 });

@@ -6,6 +6,7 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Errors from "../shared/errors.ts";
+import * as MaxJobs from "../shared/max-jobs.ts";
 import * as ProcessUsage from "../shared/process-usage.ts";
 import * as Sessions from "./sessions.ts";
 
@@ -24,16 +25,19 @@ const detail = (error: unknown): string =>
 // Announces this process under `url`: its `servers` row is written now and every thirty seconds
 // as an automation-client, with the host's stats and qemus 0 — this process boots no guests —
 // and the row's generation counts the writes, so a number that stops moving is a client that
-// stopped without a chance to leave. The same tick inserts a `process_stats` row: current jobs,
-// VmRSS of this process and every child that still answers, and the cpu busy over the last
-// thirty seconds. A write that fails is one error line; the other write and the next tick still
-// run. A shutdown deletes the servers row only: the readings stay so they can be graphed later.
-// Registered before the loop so the fiber is interrupted first; a write in flight finishes
-// (the write is uninterruptible). A delete that fails is one `unannounce failed` line; the
-// process still exits.
+// stopped without a chance to leave. maxJobs is the --max-jobs seed: written on the first
+// announce, kept when the column is already set so an operator's change on the website sticks.
+// The same tick inserts a `process_stats` row: current jobs, VmRSS of this process and every
+// child that still answers, and the cpu busy over the last thirty seconds. A write that fails
+// is one error line; the other write and the next tick still run. A separate loop re-reads
+// servers.max_jobs every minute and adjusts Sessions. A shutdown deletes the servers row only:
+// the readings stay so they can be graphed later. Registered before the loop so the fiber is
+// interrupted first; a write in flight finishes (the write is uninterruptible). A delete that
+// fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
   name: string,
+  maxJobs: number,
 ): Effect.Effect<
   void,
   never,
@@ -62,18 +66,24 @@ export const announce = (
     const writeHeartbeat = stats.collect(0).pipe(
       Effect.flatMap((collected) =>
         Effect.uninterruptible(
-          store.heartbeat(url, "automation-client", name, {
-            qemus: collected.qemus,
-            memory: {
-              totalBytes: collected.memory.totalBytes,
-              usedBytes: collected.memory.usedBytes,
+          store.heartbeat(
+            url,
+            "automation-client",
+            name,
+            {
+              qemus: collected.qemus,
+              memory: {
+                totalBytes: collected.memory.totalBytes,
+                usedBytes: collected.memory.usedBytes,
+              },
+              cpu: {
+                mean1m: collected.cpu.mean1m,
+                mean2m: collected.cpu.mean2m,
+                mean3m: collected.cpu.mean3m,
+              },
             },
-            cpu: {
-              mean1m: collected.cpu.mean1m,
-              mean2m: collected.cpu.mean2m,
-              mean3m: collected.cpu.mean3m,
-            },
-          }),
+            maxJobs,
+          ),
         ),
       ),
       Effect.catchCause(failed("heartbeat failed")),
@@ -94,6 +104,7 @@ export const announce = (
     yield* Effect.addFinalizer(() =>
       store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed")), Effect.asVoid),
     );
+    yield* MaxJobs.follow(url, sessions, Log.AutomationClientProcessAttribution);
     yield* tick.pipe(
       Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),
       Effect.forkScoped({ startImmediately: true }),

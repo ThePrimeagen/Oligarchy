@@ -1705,8 +1705,29 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     ]);
     const { html } = await getPage("/servers", dbUrl);
     expect(html).toContain(
-      '<tr><td>—</td><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
+      '<tr><td>—</td><td>qemu</td><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td><form method="post" action="/servers/max-jobs"',
     );
+  });
+
+  it("sets max-jobs on a registered url and sends the browser back to the page", async () => {
+    const result = await postForm(
+      { url: "http://10.1.0.1:42069", maxJobs: "6" },
+      dbUrl,
+      "/servers/max-jobs",
+    );
+    expect(result.status).toBe(303);
+    expect(result.location).toBe("/servers");
+    const client = new Client({ connectionString: dbUrl });
+    await client.connect();
+    try {
+      const rows = await drizzle(client)
+        .select({ maxJobs: servers.maxJobs })
+        .from(servers)
+        .where(eq(servers.url, "http://10.1.0.1:42069"));
+      expect(rows[0]?.maxJobs).toBe(6);
+    } finally {
+      await client.end();
+    }
   });
 
   it("deletes a server and sends the browser back to the page", async () => {
@@ -1737,6 +1758,41 @@ describe.skipIf(dbUrl === "")("dashboard/servers page unhappy path", () => {
     expect(result.status).toBe(404);
     expect(result.text).toContain("<p>error: http://10.1.0.77:42069 is not registered</p>");
     expect(result.text).toContain("<td>http://10.1.0.1:42069</td>");
+  });
+
+  it("refuses max-jobs below 1: 400, the reason on top, nothing changed", async () => {
+    const client = new Client({ connectionString: dbUrl });
+    await client.connect();
+    try {
+      const before = await drizzle(client)
+        .select({ maxJobs: servers.maxJobs })
+        .from(servers)
+        .where(eq(servers.url, "http://10.1.0.1:42069"));
+      const result = await postForm(
+        { url: "http://10.1.0.1:42069", maxJobs: "0" },
+        dbUrl,
+        "/servers/max-jobs",
+      );
+      expect(result.status).toBe(400);
+      expect(result.text).toContain("<p>error: max-jobs must be at least 1</p>");
+      const after = await drizzle(client)
+        .select({ maxJobs: servers.maxJobs })
+        .from(servers)
+        .where(eq(servers.url, "http://10.1.0.1:42069"));
+      expect(after).toEqual(before);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it("answers 404 for max-jobs on a url that was never registered", async () => {
+    const result = await postForm(
+      { url: "http://10.1.0.88:42069", maxJobs: "2" },
+      dbUrl,
+      "/servers/max-jobs",
+    );
+    expect(result.status).toBe(404);
+    expect(result.text).toContain("<p>error: http://10.1.0.88:42069 is not registered</p>");
   });
 });
 
@@ -1902,7 +1958,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     expect(html).toMatch(
       /<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-107">QUE-107<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">failed<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">session timed out<\/a><\/td><td><\/td><\/tr>.*?>QUE-108<\/a>.*?>QUE-106<\/a>.*?>QUE-109<\/a>/s,
     );
-    expect(html).toContain("<h2>qemu servers</h2>");
+    expect(html).toContain("<h2>fleet</h2>");
     expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
     expect(html).toContain("<h2>add a server</h2>");
   });
@@ -1918,7 +1974,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     expect(html).toContain('href="https://linear.app/issue/QUE-109"');
     expect(html).toContain('href="/tickets/QUE-109"');
     expect(html).not.toContain("<html");
-    expect(html).not.toContain("qemu servers");
+    expect(html).not.toContain("<h2>qemu servers</h2>");
     expect(html).not.toContain("add a server");
   });
 

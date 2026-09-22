@@ -168,6 +168,10 @@ export type SessionsService = {
   readonly minted: (iso: string) => Effect.Effect<boolean>;
   // How many jobs this process currently holds against --max-jobs: reserved plus running.
   readonly jobs: Effect.Effect<number>;
+  // The limit in force, and a write that takes effect on the next reserve. Lowering below the
+  // current count does not kill work already held.
+  readonly maxJobs: Effect.Effect<number>;
+  readonly setMaxJobs: (maxJobs: number) => Effect.Effect<void>;
 };
 
 // What the drain finalizer reads and reports: the reason every surviving session's row is closed
@@ -255,7 +259,7 @@ const describeGesture = (gesture: Qemu.MouseGesture): string => {
   return gesture satisfies never;
 };
 
-const make = (maxJobs: number, selfUrl?: string) =>
+const make = (initialMaxJobs: number, selfUrl?: string) =>
   Effect.gen(function* () {
     const qemu = yield* Qemu.Qemu;
     const iso = yield* Iso.Iso;
@@ -280,6 +284,9 @@ const make = (maxJobs: number, selfUrl?: string) =>
       readonly count: number;
       readonly reserved: ReadonlyMap<string, number>;
     }>({ count: 0, reserved: new Map() });
+    // How many runs this process admits at once. Seeded from --max-jobs; the website can
+    // rewrite servers.max_jobs and the follow loop sets this Ref within a minute.
+    const maxJobs = yield* Ref.make(initialMaxJobs);
 
     const elapsed = (started: number) =>
       Effect.map(Clock.currentTimeMillis, (now) => String(now - started));
@@ -509,6 +516,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     const admit = (
       outcome: "ok" | "held" | "full",
       agent: string,
+      limit: number,
     ): Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest> => {
       if (outcome === "ok") {
         return Effect.void;
@@ -520,7 +528,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         });
       }
       return Errors.AtCapacity.make({
-        message: `at capacity: max-jobs is ${String(maxJobs)}`,
+        message: `at capacity: max-jobs is ${String(limit)}`,
         agentId: agent,
       });
     };
@@ -542,16 +550,17 @@ const make = (maxJobs: number, selfUrl?: string) =>
       }
       // Held and full are answered before a disk lookup: a second reserve is still "already
       // reserved", and a full machine cannot gain a resume slot by being set up.
+      const limit = yield* Ref.get(maxJobs);
       const snapshot = yield* Ref.get(slots);
       if (snapshot.reserved.has(agent)) {
-        return yield* admit("held", agent);
+        return yield* admit("held", agent, limit);
       }
-      if (snapshot.count >= maxJobs) {
-        return yield* admit("full", agent);
+      if (snapshot.count >= limit) {
+        return yield* admit("full", agent, limit);
       }
       if (resume !== undefined && Option.isNone(yield* minted.find(resume))) {
         return yield* Errors.SetupNeeded.make({
-          message: `setup needed: max-jobs is ${String(maxJobs)}`,
+          message: `setup needed: max-jobs is ${String(limit)}`,
           agentId: agent,
         });
       }
@@ -561,7 +570,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
           if (held.reserved.has(agent)) {
             return ["held", held] as const;
           }
-          if (held.count >= maxJobs) {
+          if (held.count >= limit) {
             return ["full", held] as const;
           }
           return [
@@ -569,7 +578,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
             { count: held.count + 1, reserved: mapWith(held.reserved, agent, now) },
           ] as const;
         }),
-        (outcome) => admit(outcome, agent),
+        (outcome) => admit(outcome, agent, limit),
       );
     });
 
@@ -1334,6 +1343,8 @@ const make = (maxJobs: number, selfUrl?: string) =>
       stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
       minted: (name) => Effect.map(minted.find(name), Option.isSome),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
+      maxJobs: Ref.get(maxJobs),
+      setMaxJobs: (next: number) => Ref.set(maxJobs, next),
     };
     return service;
   });
