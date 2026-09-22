@@ -49,7 +49,10 @@ const MainLive = Layer.mergeAll(
   CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
   NodeHttpClient.layerNodeHttp,
   Config.providerLayer,
-  Run.Renderer.layer(imageProtocol),
+  // The placement is written here: screen and run are not boundaries, and stdout is.
+  Run.Renderer.layer(imageProtocol, (text) => {
+    process.stdout.write(text);
+  }),
   tickets,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
