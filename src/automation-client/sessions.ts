@@ -1,4 +1,4 @@
-import { Cause, Clock, Context, Effect, Layer, Ref, Schedule, Semaphore } from "effect";
+import { Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Semaphore } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Cli from "../cli.ts";
 import * as Log from "../observability/log.ts";
@@ -8,11 +8,10 @@ import * as Errors from "../shared/errors.ts";
 import * as OpenCode from "./opencode.ts";
 
 // A reservation is a promise that a run follows at once; the dispatcher POSTs /run right after
-// /reserve answers. One nobody runs (the dispatcher died in between) holds this client's one
-// reservation, its slot, and a drive's guest slot, so nothing new lands until it is given back.
-// Ten minutes unused and it is given back, as a guest with no command is. In memory only:
-// nothing durable records a reservation, so a restart starts clean and a restarted dispatcher
-// can place the job anew.
+// /reserve answers. One nobody runs (the dispatcher died in between) would hold a slot, and a
+// drive's guest slot with it, until this process restarted. Ten minutes unused and it is given
+// back, as a guest with no command is. In memory only: nothing durable records a reservation,
+// so a restart starts clean and a restarted dispatcher can place the job anew.
 const RESERVATION_TIMEOUT = "10 minutes";
 const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
 const RESERVATION_SWEEP = "10 seconds";
@@ -62,8 +61,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         agentId: ticket,
       });
 
-    // One reserve at a time: two tickets must not both reserve QEMU when only one local
-    // slot remains, and only a reserve adds a reservation, so a snapshot read here cannot grow.
+    // Held for the whole /reserve, including the QEMU call. A second /reserve on this
+    // server while that one has not answered is refused, not queued behind it.
     const reserveGate = yield* Semaphore.make(1);
 
     const reserve = Effect.fn("Sessions.reserve")(function* (
@@ -72,20 +71,12 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       resume?: string,
       server?: string,
     ) {
-      return yield* reserveGate.withPermits(1)(
+      const ran = yield* reserveGate.withPermitsIfAvailable(1)(
         Effect.gen(function* () {
           const held = yield* Ref.get(slots);
           if (held.reserved.has(ticket)) {
             return yield* Errors.BadRequest.make({
               message: "already reserved",
-              agentId: ticket,
-            });
-          }
-          // One outstanding reservation. A run consumes it before OpenCode spawns, so another
-          // ticket may reserve while that run holds its slot. Refused before QEMU is asked.
-          if (held.reserved.size > 0) {
-            return yield* Errors.AtCapacity.make({
-              message: "a reservation is already outstanding",
               agentId: ticket,
             });
           }
@@ -121,6 +112,13 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           return yield* Effect.void;
         }),
       );
+      if (Option.isNone(ran)) {
+        return yield* Errors.AtCapacity.make({
+          message: "a reserve is already in flight",
+          agentId: ticket,
+        });
+      }
+      return yield* Effect.void;
     });
 
     const consume = (ticket: string): Effect.Effect<void, Errors.BadRequest> =>

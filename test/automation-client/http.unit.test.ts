@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
@@ -28,6 +28,8 @@ type Fixture = {
   readonly maxJobs: number;
   // Every ticket the client asked QEMU a slot for, in order.
   readonly qemu: Array<string>;
+  // When set, each QEMU reserve waits on it, so a test can hold one /reserve in flight.
+  readonly holdQemu?: Deferred.Deferred<void>;
 };
 
 // Room for the two runs some tests hold at once; the capacity test passes 1.
@@ -47,8 +49,11 @@ const fixture = (
 const qemuRecording =
   (fixed: Fixture): Sessions.ReserveQemu =>
   (agent, _resume, server) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       fixed.qemu.push(server === undefined ? agent : `${agent} ${server}`);
+      if (fixed.holdQemu !== undefined) {
+        yield* Deferred.await(fixed.holdQemu);
+      }
     });
 
 const serve = (fixed: Fixture) =>
@@ -444,23 +449,32 @@ describe("POST /run unhappy path", () => {
   );
 
   it.effect(
-    "a second reserve while one reservation is outstanding is 503 and does not ask QEMU",
+    "a second reserve while one is in flight on this server is 503 and does not ask QEMU",
     () =>
       Effect.gen(function* () {
-        const fixed = fixture(() => ({}), 2);
+        const holdQemu = yield* Deferred.make<void>();
+        const fixed = { ...fixture(() => ({}), 2), holdQemu };
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
-          expect((yield* reserve(http)).status).toBe(200);
+          const pending = yield* Effect.forkChild(reserve(http));
+          for (let i = 0; i < 100 && fixed.qemu.length < 1; i++) {
+            yield* Effect.yieldNow;
+          }
+          expect(fixed.qemu).toEqual([TICKET]);
           const refused = yield* reserve(http, "OLI-99");
           expect(refused.status).toBe(503);
-          expect(yield* refused.json).toEqual({ error: "a reservation is already outstanding" });
+          expect(yield* refused.json).toEqual({ error: "a reserve is already in flight" });
+          expect(fixed.qemu).toEqual([TICKET]);
+          yield* Deferred.succeed(holdQemu, undefined);
+          expect((yield* Fiber.join(pending)).status).toBe(200);
+          expect((yield* reserve(http, "OLI-99")).status).toBe(200);
+          expect(fixed.qemu).toEqual([TICKET, "OLI-99"]);
         }).pipe(Effect.provide(serve(fixed)));
-        expect(fixed.qemu).toEqual([TICKET]);
         expect(fixed.spawner.spawned).toEqual([]);
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
-            text: "POST /reserve failed: a reservation is already outstanding",
+            text: "POST /reserve failed: a reserve is already in flight",
             location: "automation-client",
             agentId: "OLI-99",
             skipSentry: false,
@@ -471,34 +485,28 @@ describe("POST /run unhappy path", () => {
       }),
   );
 
-  it.effect(
-    "once /run has consumed the reservation, another ticket may reserve while that run is in flight",
-    () =>
-      Effect.gen(function* () {
-        const fixed = fixture(() => ({}), 2);
-        yield* Effect.gen(function* () {
-          const http = yield* HttpClient.HttpClient;
-          expect((yield* reserve(http)).status).toBe(200);
-          const refused = yield* reserve(http, "OLI-99");
-          expect(refused.status).toBe(503);
-          expect(yield* refused.json).toEqual({ error: "a reservation is already outstanding" });
-          expect(fixed.qemu).toEqual([TICKET]);
-          const pending = yield* Effect.forkChild(run(http, "first"));
-          const first = yield* fixed.spawner.nextSpawn;
-          expect((yield* reserve(http, "OLI-99")).status).toBe(200);
-          expect(fixed.qemu).toEqual([TICKET, "OLI-99"]);
-          const accepted = yield* Effect.forkChild(run(http, "second", headers, "OLI-99"));
-          const second = yield* fixed.spawner.nextSpawn;
-          expect(fixed.spawner.spawned.map((spawned) => spawned.args[5])).toEqual([
-            "first",
-            "second",
-          ]);
-          yield* first.exit(0);
-          yield* second.exit(0);
-          expect((yield* Fiber.join(pending)).status).toBe(200);
-          expect((yield* Fiber.join(accepted)).status).toBe(200);
-        }).pipe(Effect.provide(serve(fixed)));
-      }),
+  it.effect("a reserve that has answered does not block the next reserve on this server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}), 2);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
+        expect((yield* reserve(http, "OLI-99")).status).toBe(200);
+        expect(fixed.qemu).toEqual([TICKET, "OLI-99"]);
+        const firstRun = yield* Effect.forkChild(run(http, "first"));
+        const secondRun = yield* Effect.forkChild(run(http, "second", headers, "OLI-99"));
+        const first = yield* fixed.spawner.nextSpawn;
+        const second = yield* fixed.spawner.nextSpawn;
+        expect(fixed.spawner.spawned.map((spawned) => spawned.args[5])).toEqual([
+          "first",
+          "second",
+        ]);
+        yield* first.exit(0);
+        yield* second.exit(0);
+        expect((yield* Fiber.join(firstRun)).status).toBe(200);
+        expect((yield* Fiber.join(secondRun)).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
   );
 
   it.effect("a run without a reservation is 400 no reservation and spawns nothing", () =>
