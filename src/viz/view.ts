@@ -659,12 +659,12 @@ const jobHeader: Text.Row = [
 // 1-based place in the ActionList when the message is one of its steps, otherwise nothing:
 // the row keeps the elapsed time. A paraphrase, a closed intent, or a ticket with no steps
 // does not get a place.
-const stepPlace = (job: Job, message: string | null): string | null => {
-  if (job.ticket === null || message === null) {
+const stepPlace = (job: Job, messages: ReadonlyArray<string>): string | null => {
+  if (job.ticket === null || messages.length === 0) {
     return null;
   }
   const steps = Steps.stepsOf(job.instruction);
-  const at = Steps.indexOf(steps, message);
+  const at = Steps.placeOf(steps, messages);
   if (at === 0) {
     return null;
   }
@@ -679,7 +679,7 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Tex
   const running = job.status === "running";
   const color = ACTION_COLOR[job.action];
   const started = ago(job.startedAt, job.queriedAt, drift);
-  const place = running ? stepPlace(job, job.intent) : null;
+  const place = running ? stepPlace(job, job.intent === null ? [] : [job.intent]) : null;
   return [
     selected,
     Text.SPACE,
@@ -1234,7 +1234,9 @@ const automationRows = (
     // follow with nothing still open shows the elapsed time rather than a stale poll.
     const color = ACTION_COLOR[job.action];
     const follow = Option.getOrNull(view.session);
-    let message = job.intent;
+    // The open follow has every intent still on screen, so a repeated line is the copy
+    // those intents have reached. A follow with nothing still open keeps the elapsed time.
+    let messages: ReadonlyArray<string> = job.intent === null ? [] : [job.intent];
     if (
       on &&
       job.ticket !== null &&
@@ -1242,12 +1244,20 @@ const automationRows = (
       follow._tag === "full" &&
       follow.ticket === job.ticket
     ) {
-      const running = follow.entries.findLast(
-        (found) => found.id === "intent" && found.state === "running",
-      );
-      message = running === undefined ? null : running.name;
+      const said: Array<string> = [];
+      let lastRunning = -1;
+      for (const found of follow.entries) {
+        if (found.id !== "intent") {
+          continue;
+        }
+        if (found.state === "running") {
+          lastRunning = said.length;
+        }
+        said.push(found.name);
+      }
+      messages = lastRunning === -1 ? [] : said.slice(0, lastRunning + 1);
     }
-    const place = stepPlace(job, message);
+    const place = stepPlace(job, messages);
     return [
       Text.muted("  "),
       marker(on, true),

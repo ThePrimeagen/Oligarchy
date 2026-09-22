@@ -120,6 +120,43 @@ describe("FollowFrame happy path", () => {
     expect(olderLatest).toBeLessThan(older);
   });
 
+  it("places a repeated step at the copy the earlier intents have already passed", async () => {
+    const page = await render(
+      FollowFrame({
+        follow: {
+          ...follow,
+          instruction: `<ActionList>
+* Press Super+Space. The menu opens.
+* Click Style.
+* Click Theme.
+* Press Super+Space. The menu opens.
+* Click Style.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`,
+          events: [
+            { kind: "intent", text: "Click Theme.", state: "completed", at: ago(40) },
+            {
+              kind: "intent",
+              text: "Press Super+Space. The menu opens.",
+              state: "completed",
+              at: ago(20),
+            },
+            { kind: "intent", text: "Click Style.", state: "running", at: ago(2) },
+            { kind: "action", name: "screendump", state: "completed", under: true, at: ago(1) },
+          ],
+        },
+      }),
+    );
+    expect(page).toContain('<p class="follow__step">5/5</p>');
+    expect(page).toContain("Click Theme.");
+    expect(page).toContain("Press Super+Space. The menu opens.");
+    const current = page.indexOf("Click Style.");
+    const earlier = page.indexOf("Click Theme.");
+    expect(current).toBeGreaterThan(-1);
+    expect(current).toBeLessThan(earlier);
+  });
+
   it("shows the step as unknown when the open intent is not one of the definition's steps", async () => {
     const page = await render(
       FollowFrame({

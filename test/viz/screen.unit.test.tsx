@@ -1765,6 +1765,45 @@ describe("session pane", () => {
     }),
   );
 
+  it.effect("an open follow places a repeated step at the copy already reached", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
+* Click Style.
+* Click Theme.
+* Click Style.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+      const stepped = { ...running, instruction, intent: "Click Style." };
+      const full = Follow.apply(
+        Follow.apply(
+          Follow.apply(
+            Follow.expand(
+              Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+              garage.url,
+            ),
+            { type: "session", status: "running" },
+          ),
+          { type: "intent", state: "started", message: "Click Theme." },
+        ),
+        { type: "intent", state: "started", message: "Click Style." },
+      );
+      const drawn = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } },
+          {
+            tab: "automation",
+            session: Option.some(full),
+            cursor: { servers: 0, clients: 1, queue: 0 },
+          },
+        ),
+      );
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
+      expect(side(drawn[6])).toContain("3/3");
+      expect(side(drawn[6])).not.toContain("1/3");
+    }),
+  );
+
   it.effect("a paraphrase or a closed stream keeps the elapsed time (unhappy)", () =>
     Effect.gen(function* () {
       const instruction = `<ActionList>

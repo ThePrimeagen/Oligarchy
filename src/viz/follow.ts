@@ -253,7 +253,13 @@ export const ticketRows = (
     at === -1
       ? view.entries.filter((entry) => typeof entry.id === "number" && entry.id > 0)
       : view.entries.slice(at + 1);
-  const place = intent === undefined ? 0 : Steps.indexOf(steps, intent.name);
+  const saidSteps: Array<string> = [];
+  for (const entry of view.entries) {
+    if (entry.id === "intent") {
+      saidSteps.push(entry.name);
+    }
+  }
+  const place = intent === undefined ? 0 : Steps.placeOf(steps, saidSteps);
   const indexText =
     intent !== undefined && place === 0
       ? `—/${String(steps.length)}`
