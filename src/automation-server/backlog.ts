@@ -1,5 +1,6 @@
 import { Cause, Effect, Schedule, Schema } from "effect";
 import * as Linear from "../ctrl/linear.ts";
+import * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -155,14 +156,27 @@ const guard = <E, R>(label: string, tick: Effect.Effect<void, E, R>) =>
 export const watch = Effect.fn("watchBoard")(function* () {
   const linear = yield* Linear.Linear;
   const log = yield* Log.Log;
+  const servers = yield* Servers.ServerStore;
   const backlog = new Map<string, Sighting>();
   const needed = new Map<string, Held>();
   const review = new Map<string, Held>();
 
   const tick = Effect.gen(function* () {
-    // One new job per check: Backlog, then Automation Needed, then Needs Review.
-    // A missing result, a duplicate, or a failed enqueue does not spend it.
-    let kicked = false;
+    // One new job per live automation client. Backlog, then Automation Needed, then
+    // Needs Review. A missing result, a duplicate, or a failed enqueue does not spend a slot.
+    const listed = yield* servers.listLiveServers("automation-client").pipe(
+      Effect.catch((error) =>
+        log
+          .error(`board watch failed: ${detail(error)}`, {
+            location: Log.Locations.automation,
+            agentId: Log.AutomationAgentId,
+            cause: error,
+          })
+          .pipe(Effect.as(undefined)),
+      ),
+    );
+    const live = listed ?? [];
+    let room = live.length;
 
     yield* guard(
       "backlog",
@@ -188,10 +202,10 @@ export const watch = Effect.fn("watchBoard")(function* () {
           const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
           const rounds = same ? prev.rounds + 1 : 0;
           backlog.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt });
-          if (kicked || rounds < ROUNDS_BEFORE_MOVE) {
+          if (room === 0 || rounds < ROUNDS_BEFORE_MOVE) {
             continue;
           }
-          // A poison ticket must not spend the check. The move is what takes a ticket off
+          // A poison ticket must not spend a slot. The move is what takes a ticket off
           // the list, and a move that did not is retried. A defect still fails the column.
           const outcome = yield* processBacklog(ticket, rounds).pipe(
             Effect.catch((error) =>
@@ -205,7 +219,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
             ),
           );
           if (outcome === "queued") {
-            kicked = true;
+            room -= 1;
           }
         }
         for (const identifier of backlog.keys()) {
@@ -241,7 +255,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           const rounds = same ? prev.rounds + 1 : 0;
           const settled = same && prev.settled;
           needed.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled });
-          if (kicked || settled || rounds < ROUNDS_BEFORE_MOVE) {
+          if (room === 0 || settled || rounds < ROUNDS_BEFORE_MOVE) {
             continue;
           }
           const outcome = yield* processAutomationNeeded(ticket, rounds).pipe(
@@ -263,7 +277,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
             });
           }
           if (outcome === "queued") {
-            kicked = true;
+            room -= 1;
           }
         }
         for (const identifier of needed.keys()) {
@@ -299,7 +313,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           const rounds = same ? prev.rounds + 1 : 0;
           const settled = same && prev.settled;
           review.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled });
-          if (kicked || settled || rounds < ROUNDS_BEFORE_MOVE) {
+          if (room === 0 || settled || rounds < ROUNDS_BEFORE_MOVE) {
             continue;
           }
           const outcome = yield* processNeedsReview(ticket, rounds).pipe(
@@ -321,7 +335,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
             });
           }
           if (outcome === "queued") {
-            kicked = true;
+            room -= 1;
           }
         }
         for (const identifier of review.keys()) {

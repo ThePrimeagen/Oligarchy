@@ -50,6 +50,7 @@ const scriptsFs = FileSystem.layerNoop({
 const DRIVE_PROMPT = `drive ${TICKET} as ${MODEL}`;
 const DIAGNOSE_PROMPT = `diagnose ${TICKET} ${RESULT_ID} ${MODEL}\n# Control`;
 const OTHER_URL = "http://127.0.0.1:55334";
+const THIRD_URL = "http://127.0.0.1:55335";
 
 type ResultStatus = Stores.FakeTestStore["results"][number]["status"];
 
@@ -311,20 +312,60 @@ describe("dispatch happy path", () => {
     }),
   );
 
-  it.effect("pending jobs whose reserve succeeds start together on the same tick", () =>
+  it.effect("a tick starts one job on each live client, round robin, and the extra job waits", () =>
     Effect.gen(function* () {
       const fixed = harness();
+      const thirdResult = "44444444-4444-4444-8444-444444444444";
+      const fourthResult = "55555555-5555-4555-8555-555555555555";
       seedPair(fixed);
-      seedLiveClient(fixed.servers);
+      seedResult(fixed.tests, "OLI-44", "pending", thirdResult);
+      seedResult(fixed.tests, "OLI-45", "pending", fourthResult);
+      seedJob(fixed.automation, "drive", thirdResult);
+      seedJob(fixed.automation, "drive", fourthResult);
+      const first = seedLiveClient(fixed.servers, URL);
+      const second = seedLiveClient(fixed.servers, OTHER_URL);
+      const third = seedLiveClient(fixed.servers, THIRD_URL);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      yield* settleAll(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
-      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
-      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
+      for (let i = 0; i < 1_000; i++) {
+        const placed = fixed.automation.jobs.slice(0, 3);
+        if (
+          placed.every((job) => job.status === "succeeded") &&
+          fixed.automation.jobs[3]?.status === "pending"
+        ) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual([
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "pending",
+      ]);
+      expect(fixed.automation.jobs.slice(0, 3).map((job) => job.serverId)).toEqual([
+        first,
+        second,
+        third,
+      ]);
       expect(
         FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive")),
-      ).toEqual([`dispatching drive; ${URL}; ${MODEL}`, `dispatching drive; ${URL}; ${MODEL}`]);
+      ).toEqual([
+        `dispatching drive; ${URL}; ${MODEL}`,
+        `dispatching drive; ${OTHER_URL}; ${MODEL}`,
+        `dispatching drive; ${THIRD_URL}; ${MODEL}`,
+      ]);
+      yield* TestClock.adjust("5 seconds");
+      yield* settleAll(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs[3]?.serverId).toBe(first);
+      expect(
+        FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive")),
+      ).toEqual([
+        `dispatching drive; ${URL}; ${MODEL}`,
+        `dispatching drive; ${OTHER_URL}; ${MODEL}`,
+        `dispatching drive; ${THIRD_URL}; ${MODEL}`,
+        `dispatching drive; ${URL}; ${MODEL}`,
+      ]);
     }),
   );
 
@@ -333,6 +374,7 @@ describe("dispatch happy path", () => {
       const fixed = harness();
       seedPair(fixed);
       seedLiveClient(fixed.servers);
+      seedLiveClient(fixed.servers, OTHER_URL);
       const firstStarted = yield* Deferred.make<void>();
       const secondStarted = yield* Deferred.make<void>();
       const firstRelease = yield* Deferred.make<void>();
@@ -745,15 +787,15 @@ describe("dispatch unhappy path", () => {
       const fixed = harness();
       seedPair(fixed);
       seedLiveClient(fixed.servers);
+      seedLiveClient(fixed.servers, OTHER_URL);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      let reserves = 0;
       const http = FakeHttp.recordRequests((request, url) => {
+        if (url.pathname === "/reserve" && url.href.startsWith(OTHER_URL)) {
+          return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+        }
         if (url.pathname === "/reserve") {
-          reserves += 1;
-          return reserves === 1
-            ? FakeHttp.json({ ok: "true" })
-            : FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+          return FakeHttp.json({ ok: "true" });
         }
         return Effect.gen(function* () {
           yield* Deferred.succeed(started, undefined);
@@ -816,6 +858,37 @@ describe("dispatch unhappy path", () => {
         `POST ${OTHER_URL}/run`,
       ]);
     }),
+  );
+
+  it.effect(
+    "a client with no room is skipped, and the client that took a job is not given another this tick",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedPair(fixed);
+        seedLiveClient(fixed.servers, URL);
+        const second = seedLiveClient(fixed.servers, OTHER_URL);
+        const third = seedLiveClient(fixed.servers, THIRD_URL);
+        const http = FakeHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve" && url.href.startsWith(URL)) {
+            return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+          }
+          return reserving(() => closing(fixed.tests))(request, url);
+        });
+        yield* start(fixed, http.layer);
+        yield* settleAll(fixed.automation.jobs, "succeeded");
+        expect(fixed.automation.jobs.map((job) => job.serverId)).toEqual([second, third]);
+        const posted = (pathname: string) =>
+          http.requests
+            .filter((request) => request.url.endsWith(pathname))
+            .map((request) => request.url);
+        expect(posted("/reserve")).toEqual([
+          `${URL}/reserve`,
+          `${OTHER_URL}/reserve`,
+          `${THIRD_URL}/reserve`,
+        ]);
+        expect(posted("/run")).toEqual([`${OTHER_URL}/run`, `${THIRD_URL}/run`]);
+      }),
   );
 
   it.effect("a resume drive posts the run's iso and a 409 leaves the job pending", () =>

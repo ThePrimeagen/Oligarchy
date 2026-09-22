@@ -12,9 +12,30 @@ import * as Stores from "../support/stores.ts";
 const TICKET = "OLI-45";
 const OTHER = "OLI-46";
 const THIRD = "OLI-47";
+const FOURTH = "OLI-48";
 const RESULT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const OTHER_RESULT = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 const THIRD_RESULT = "cccccccc-dddd-4eee-8fff-111111111111";
+const FOURTH_RESULT = "dddddddd-eeee-4fff-8aaa-222222222222";
+const CLIENT_STATS = {
+  qemus: 0,
+  memory: { totalBytes: 1, usedBytes: 0 },
+  cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+};
+
+// One live automation client, unless `url` names another. The check's budget is this list.
+const announceClient = (servers: Stores.FakeServerStore, url?: string) => {
+  const announced = url ?? `http://127.0.0.1:${String(55333 + servers.servers.length)}`;
+  const id = crypto.randomUUID();
+  servers.servers.push({ id, url: announced, name: null, type: "automation-client" });
+  servers.heartbeats.push({
+    url: announced,
+    type: "automation-client",
+    name: "garage",
+    stats: CLIENT_STATS,
+  });
+  return id;
+};
 const RUN = "11111111-1111-4111-8111-111111111111";
 const SEEN = "2026-09-22T13:00:00.000Z";
 const EDITED = "2026-09-22T13:01:00.000Z";
@@ -73,6 +94,7 @@ const start = (
         moveIssue: moveIssue ?? recordMove,
       },
     });
+    announceClient(stores.servers);
     const scope = yield* Scope.make();
     yield* Backlog.watch().pipe(
       Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -200,6 +222,7 @@ describe("backlog watch happy path", () => {
         });
         seedResult(stores.tests, TICKET);
         seedResult(stores.tests, OTHER, OTHER_RESULT);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -230,6 +253,7 @@ describe("backlog watch happy path", () => {
         });
         seedResult(stores.tests, TICKET);
         seedResult(stores.tests, OTHER, OTHER_RESULT);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -264,6 +288,77 @@ describe("backlog watch happy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(moved).toEqual([automationNeeded(TICKET), automationNeeded(OTHER)]);
         expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
+      }),
+  );
+
+  it.effect(
+    "kicks off one ripe ticket per live client and leaves the rest for the next check",
+    () =>
+      Effect.gen(function* () {
+        const board = [
+          ticket(TICKET, SEEN),
+          ticket(OTHER, SEEN),
+          ticket(THIRD, SEEN),
+          ticket(FOURTH, SEEN),
+        ];
+        const { stores, moved } = yield* start(board);
+        announceClient(stores.servers);
+        announceClient(stores.servers);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        seedResult(stores.tests, THIRD, THIRD_RESULT);
+        seedResult(stores.tests, FOURTH, FOURTH_RESULT);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved.map((item) => item.identifier)).toEqual([TICKET, OTHER, THIRD]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([
+          RESULT,
+          OTHER_RESULT,
+          THIRD_RESULT,
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved.map((item) => item.identifier)).toEqual([TICKET, OTHER, THIRD, FOURTH]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([
+          RESULT,
+          OTHER_RESULT,
+          THIRD_RESULT,
+          FOURTH_RESULT,
+        ]);
+      }),
+  );
+
+  it.effect(
+    "no live client kicks off nothing, and a client that appears is used on the next check",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const moved: Array<Move> = [];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listBacklog: Effect.sync(() => [...board]),
+            moveIssue: (issue, stateId) =>
+              Effect.sync(() => {
+                moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+                board.length = 0;
+              }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([]);
+        expect(stores.automation.jobs).toEqual([]);
+        announceClient(stores.servers);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
       }),
   );
 });
@@ -374,6 +469,7 @@ describe("backlog watch unhappy path", () => {
           },
         });
         seedResult(stores.tests, TICKET);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -491,7 +587,9 @@ describe("backlog watch unhappy path", () => {
           },
         );
         const automation = Stores.fakeAutomationStore();
+        const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
+        announceClient(servers);
         const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN), ticket(THIRD, SEEN)];
         const moved: Array<Move> = [];
         const linear = FakeLinear.fakeLinear({
@@ -512,7 +610,9 @@ describe("backlog watch unhappy path", () => {
         seedResult(tests, THIRD, THIRD_RESULT);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
-          Effect.provide(Layer.mergeAll(tests.layer, automation.layer, linear.layer, log.layer)),
+          Effect.provide(
+            Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+          ),
           Scope.provide(scope),
         );
         yield* TestClock.adjust("90 seconds");
@@ -620,6 +720,7 @@ const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =
           }),
       },
     });
+    announceClient(stores.servers);
     const scope = yield* Scope.make();
     yield* Backlog.watch().pipe(
       Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -875,6 +976,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         });
         seedResult(stores.tests, TICKET);
         seedResult(stores.tests, OTHER, OTHER_RESULT);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -932,7 +1034,9 @@ describe("automation needed and needs review watch unhappy path", () => {
           },
         );
         const automation = Stores.fakeAutomationStore();
+        const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
+        announceClient(servers);
         const board = [ticket(TICKET, SEEN)];
         const linear = FakeLinear.fakeLinear({
           overrides: {
@@ -942,7 +1046,9 @@ describe("automation needed and needs review watch unhappy path", () => {
         seedResult(tests, TICKET);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
-          Effect.provide(Layer.mergeAll(tests.layer, automation.layer, linear.layer, log.layer)),
+          Effect.provide(
+            Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+          ),
           Scope.provide(scope),
         );
         yield* TestClock.adjust("90 seconds");
