@@ -1,4 +1,4 @@
-import { Cause, Clock, Context, Effect, Layer, Ref, Schedule, Semaphore } from "effect";
+import { Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Semaphore } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Cli from "../cli.ts";
 import * as Log from "../observability/log.ts";
@@ -10,8 +10,11 @@ import * as OpenCode from "./opencode.ts";
 // A reservation is a promise that a run follows at once; the dispatcher POSTs /run right after
 // /reserve answers. One nobody runs (the dispatcher died in between) would hold a slot, and a
 // drive's guest slot with it, until this process restarted. Ten minutes unused and it is given
-// back, as a guest with no command is. In memory only: nothing durable records a reservation,
-// so a restart starts clean and a restarted dispatcher can place the job anew.
+// back, as a guest with no command is. A run that does start takes the reservation out of that
+// sweep, so a drive or a mint gives the guest slot back when the run ends: one that dies before
+// start would otherwise hold the guest for the qemu server's own ten minutes, and the fleet
+// reads as full of jobs the viz cannot show. In memory only: nothing durable records a
+// reservation, so a restart starts clean and a restarted dispatcher can place the job anew.
 const RESERVATION_TIMEOUT = "10 minutes";
 const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
 const RESERVATION_SWEEP = "10 seconds";
@@ -114,17 +117,22 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       );
     });
 
-    const consume = (ticket: string): Effect.Effect<void, Errors.BadRequest> =>
+    const consume = (ticket: string): Effect.Effect<Reservation, Errors.BadRequest> =>
       Effect.flatMap(
-        Ref.modify(slots, (held) =>
-          held.reserved.has(ticket)
-            ? ([true, { count: held.count, reserved: mapWithout(held.reserved, ticket) }] as const)
-            : ([false, held] as const),
-        ),
-        (held) =>
-          held
-            ? Effect.void
-            : Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
+        Ref.modify(slots, (held) => {
+          const reservation = Option.fromUndefinedOr(held.reserved.get(ticket));
+          return [
+            reservation,
+            Option.isNone(reservation)
+              ? held
+              : { count: held.count, reserved: mapWithout(held.reserved, ticket) },
+          ] as const;
+        }),
+        (reservation) =>
+          Option.match(reservation, {
+            onNone: () => Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
+            onSome: (found) => Effect.succeed(found),
+          }),
       );
 
     // Every reservation past the deadline leaves the reserved set and gives its slot back in one
@@ -181,11 +189,31 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     ) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          // The reservation is the run's first resource: consumed and its release registered
-          // in one uninterruptible step, so the slot is given back however the run ends, and
-          // last, after the child is reaped and the ticket forgotten.
-          yield* Effect.acquireRelease(consume(ticket), () =>
-            Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
+          // Consumed and released in one uninterruptible step, so the local slot comes back
+          // however the run ends, and last: the child is reaped and the ticket forgotten first.
+          // A drive or a mint gives its guest slot back in that same step. The sweep no longer
+          // will, and a guest the driver already stopped answers as nothing to give back.
+          yield* Effect.acquireRelease(consume(ticket), (reservation) =>
+            Effect.gen(function* () {
+              yield* Ref.update(slots, (held) => ({ ...held, count: held.count - 1 }));
+              if (reservation.action === "diagnose") {
+                return;
+              }
+              // Still present only for a duplicate that died before it was claimed. The owner
+              // removes itself first, and relinquish would abort the guest that run is driving.
+              if ((yield* Ref.get(running)).has(ticket)) {
+                return;
+              }
+              yield* relinquishQemu(ticket).pipe(
+                Effect.catch((error) =>
+                  log.error(`relinquish failed: ${Render.headline(error)}`, {
+                    location: Log.Locations.automationClient,
+                    agentId: ticket,
+                    cause: error,
+                  }),
+                ),
+              );
+            }),
           );
           const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt, model), OpenCode.ENV);
           const claimed = yield* Ref.modify(running, (map) =>
