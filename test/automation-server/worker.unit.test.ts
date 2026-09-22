@@ -312,7 +312,7 @@ describe("dispatch happy path", () => {
     }),
   );
 
-  it.effect("a tick starts one job on each live client, round robin, and the extra job waits", () =>
+  it.effect("round robin wraps, so a client that already took a job can take the next", () =>
     Effect.gen(function* () {
       const fixed = harness();
       const thirdResult = "44444444-4444-4444-8444-444444444444";
@@ -327,26 +327,12 @@ describe("dispatch happy path", () => {
       const third = seedLiveClient(fixed.servers, THIRD_URL);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      for (let i = 0; i < 1_000; i++) {
-        const placed = fixed.automation.jobs.slice(0, 3);
-        if (
-          placed.every((job) => job.status === "succeeded") &&
-          fixed.automation.jobs[3]?.status === "pending"
-        ) {
-          break;
-        }
-        yield* Effect.yieldNow;
-      }
-      expect(fixed.automation.jobs.map((job) => job.status)).toEqual([
-        "succeeded",
-        "succeeded",
-        "succeeded",
-        "pending",
-      ]);
-      expect(fixed.automation.jobs.slice(0, 3).map((job) => job.serverId)).toEqual([
+      yield* settleAll(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs.map((job) => job.serverId)).toEqual([
         first,
         second,
         third,
+        first,
       ]);
       expect(
         FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive")),
@@ -354,18 +340,77 @@ describe("dispatch happy path", () => {
         `dispatching drive; ${URL}; ${MODEL}`,
         `dispatching drive; ${OTHER_URL}; ${MODEL}`,
         `dispatching drive; ${THIRD_URL}; ${MODEL}`,
+        `dispatching drive; ${URL}; ${MODEL}`,
       ]);
-      yield* TestClock.adjust("5 seconds");
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(4);
+    }),
+  );
+
+  it.effect("the next job is not reserved until the reservation in front of it succeeds", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedPair(fixed);
+      seedLiveClient(fixed.servers, URL);
+      seedLiveClient(fixed.servers, OTHER_URL);
+      const firstHeld = yield* Deferred.make<void>();
+      const releaseFirst = yield* Deferred.make<void>();
+      const secondHeld = yield* Deferred.make<void>();
+      const releaseSecond = yield* Deferred.make<void>();
+      const firstRun = yield* Deferred.make<void>();
+      const secondRun = yield* Deferred.make<void>();
+      let reserves = 0;
+      let runs = 0;
+      const http = FakeHttp.recordRequests((request, url) => {
+        if (url.pathname === "/reserve") {
+          reserves += 1;
+          if (reserves === 1) {
+            return Effect.gen(function* () {
+              yield* Deferred.succeed(firstHeld, undefined);
+              yield* Deferred.await(releaseFirst);
+              return FakeHttp.json({ ok: "true" });
+            });
+          }
+          if (reserves === 2) {
+            return Effect.gen(function* () {
+              yield* Deferred.succeed(secondHeld, undefined);
+              yield* Deferred.await(releaseSecond);
+              return FakeHttp.json({ ok: "true" });
+            });
+          }
+          return Effect.die(new Error(`unexpected reserve ${String(reserves)}`));
+        }
+        const index = runs;
+        runs += 1;
+        return Effect.gen(function* () {
+          if (index === 0) {
+            yield* Deferred.succeed(firstRun, undefined);
+          } else if (index === 1) {
+            yield* Deferred.succeed(secondRun, undefined);
+          } else {
+            return yield* Effect.die(new Error(`unexpected /run ${String(index)}`));
+          }
+          return yield* closing(fixed.tests);
+        });
+      });
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(firstHeld);
+      for (let i = 0; i < 50; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(1);
+      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(0);
+      yield* Deferred.succeed(releaseFirst, undefined);
+      yield* Deferred.await(firstRun);
+      yield* Deferred.await(secondHeld);
+      for (let i = 0; i < 50; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
+      expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(1);
+      yield* Deferred.succeed(releaseSecond, undefined);
+      yield* Deferred.await(secondRun);
       yield* settleAll(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs[3]?.serverId).toBe(first);
-      expect(
-        FakeLog.texts(fixed.log).filter((text) => text.startsWith("dispatching drive")),
-      ).toEqual([
-        `dispatching drive; ${URL}; ${MODEL}`,
-        `dispatching drive; ${OTHER_URL}; ${MODEL}`,
-        `dispatching drive; ${THIRD_URL}; ${MODEL}`,
-        `dispatching drive; ${URL}; ${MODEL}`,
-      ]);
+      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
     }),
   );
 
@@ -782,7 +827,47 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
-  it.effect("a 503 after a successful reserve leaves the next job pending", () =>
+  it.effect(
+    "a reservation is answered before the next job is reserved, and a failure is not run",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedPair(fixed);
+        seedLiveClient(fixed.servers);
+        const held = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let reserves = 0;
+        const http = FakeHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve") {
+            reserves += 1;
+            if (reserves === 1) {
+              return Effect.gen(function* () {
+                yield* Deferred.succeed(held, undefined);
+                yield* Deferred.await(release);
+                return FakeHttp.json({ error: "opencode refused" }, 500);
+              });
+            }
+            return FakeHttp.json({ ok: "true" });
+          }
+          return closing(fixed.tests);
+        });
+        yield* start(fixed, http.layer);
+        yield* Deferred.await(held);
+        for (let i = 0; i < 50; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(http.requests).toHaveLength(1);
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "pending"]);
+        yield* Deferred.succeed(release, undefined);
+        yield* settle(fixed.automation.jobs, "failed");
+        yield* settle(fixed.automation.jobs, "succeeded");
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["failed", "succeeded"]);
+        expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(1);
+        expect(http.requests[0]?.url).toBe(`${URL}/reserve`);
+      }),
+  );
+
+  it.effect("a 503 from every client after a success leaves the next job pending", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedPair(fixed);
@@ -790,12 +875,13 @@ describe("dispatch unhappy path", () => {
       seedLiveClient(fixed.servers, OTHER_URL);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
+      let reserves = 0;
       const http = FakeHttp.recordRequests((request, url) => {
-        if (url.pathname === "/reserve" && url.href.startsWith(OTHER_URL)) {
-          return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
-        }
         if (url.pathname === "/reserve") {
-          return FakeHttp.json({ ok: "true" });
+          reserves += 1;
+          return reserves === 1
+            ? FakeHttp.json({ ok: "true" })
+            : FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
         }
         return Effect.gen(function* () {
           yield* Deferred.succeed(started, undefined);
@@ -819,10 +905,9 @@ describe("dispatch unhappy path", () => {
         finishedAt: null,
         reason: null,
       });
-      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(2);
+      expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(3);
       expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(1);
       expect(FakeLog.texts(fixed.log)).toContain("deferred; at capacity");
-      expect(fixed.log.lines.some((line) => line.text === "deferred; at capacity")).toBe(true);
       expect(fixed.log.lines.find((line) => line.text === "deferred; at capacity")?.agentId).toBe(
         TICKET_B,
       );

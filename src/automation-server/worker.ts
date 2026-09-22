@@ -171,15 +171,15 @@ const closeJob = Effect.fn("closeJob")(function* (
   }
 });
 
-// One job per live client on this tick, round robin from where the last tick stopped.
-// A client that already took a job is not asked again. A 503 is a client with no room
-// for this job, so the next client in the rotation is asked; a 503 from every client
-// still in the rotation puts the row back to pending. A mint's own 503 does not end
-// the tick. /run starts in its own fiber. A tick with no live client does not claim.
-// Claim is uninterruptible so a shutdown cannot leave a pending row half-taken; the
-// HTTP wait is restored so SIGTERM aborts an in-flight job; finish and unclaim are
-// uninterruptible so the write lands. A tick that fails is one error line; the next
-// tick runs.
+// Jobs launch one reservation at a time, round robin from where the last one stopped.
+// The next reservation is not sent until this one has answered, so two reservation
+// responses are never in flight. A success is what starts /run; /run does not hold the
+// next reservation. A 503 is a client with no room for this job, so the next client in
+// the rotation is asked; a 503 from every client puts the row back to pending. A mint's
+// own 503 does not end the tick. A tick with no live client does not claim. Claim is
+// uninterruptible so a shutdown cannot leave a pending row half-taken; the HTTP wait
+// is restored so SIGTERM aborts an in-flight job; finish and unclaim are uninterruptible
+// so the write lands. A tick that fails is one error line; the next tick runs.
 export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
@@ -199,8 +199,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
         // Mint jobs whose own reserve was 503. They stay pending and first, but this tick
         // does not claim them again; the other jobs still get a turn.
         const skipped: Array<string> = [];
-        const used = new Set<string>();
-        while (used.size < live.length) {
+        for (;;) {
           const maybe = yield* store.claim(chosen.id, skipped);
           if (Option.isNone(maybe)) {
             return;
@@ -209,10 +208,8 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           const start =
             nextUrl === undefined ? -1 : live.findIndex((server) => server.url === nextUrl);
           const at = start < 0 ? 0 : start;
-          const candidates = live
-            .slice(at)
-            .concat(live.slice(0, at))
-            .filter((server) => !used.has(server.url));
+          // place awaits each reservation before the next, including the next job.
+          const candidates = live.slice(at).concat(live.slice(0, at));
           const placed = yield* restore(place(job, candidates, model)).pipe(
             Effect.matchCause({
               onSuccess: (placement) => ({ _tag: "placed" as const, placement }),
@@ -275,11 +272,10 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           if (following !== undefined) {
             nextUrl = following.url;
           }
-          used.add(placed.placement.url);
-          // /run lives on the dispatch scope so a shutdown interrupts every in-flight
-          // job, and this tick can reserve the next pending row without waiting.
-          // Do not startImmediately: forkIn adds the interrupt finalizer only after
-          // that evaluate returns, and /run parks on the HTTP wait.
+          // The reservation already returned. /run does not hold the next one. The fiber
+          // lives on the dispatch scope so a shutdown interrupts it. Do not
+          // startImmediately: forkIn adds the interrupt finalizer only after that
+          // evaluate returns, and /run parks on the HTTP wait.
           yield* Effect.forkIn(
             Effect.uninterruptibleMask((release) =>
               release(perform(job, placed.placement, model)).pipe(
