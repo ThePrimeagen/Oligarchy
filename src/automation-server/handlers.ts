@@ -13,6 +13,7 @@ import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AutomationClient from "./client.ts";
 import * as Enqueue from "./enqueue.ts";
+import * as Ready from "./ready.ts";
 import * as Signature from "./signature.ts";
 import * as Webhook from "./webhook.ts";
 
@@ -127,6 +128,9 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             location: Log.Locations.automation,
             agentId: payload.ticket,
           });
+          if (payload.action !== "diagnose") {
+            yield* Ready.release(payload.ticket);
+          }
           return ok;
         }
         const job = yield* automation
@@ -189,6 +193,9 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             location: Log.Locations.automation,
             agentId: payload.ticket,
           });
+          if (job.value.action !== "diagnose") {
+            yield* Ready.release(payload.ticket);
+          }
         }
         // The client already stopped; a lost finish race is another closer.
         return ok;

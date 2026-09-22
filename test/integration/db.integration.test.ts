@@ -1151,8 +1151,10 @@ Postgres.describeWithDatabase("database", () => {
           });
           const resultId = created.results[0].id;
           expect(yield* automation.hasPending(resultId, "drive")).toBe(false);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.none());
           yield* automation.enqueue({ resultId, action: "drive" });
           expect(yield* automation.hasPending(resultId, "drive")).toBe(true);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.some("pending"));
           expect(yield* automation.hasPending(resultId, "diagnose")).toBe(false);
           const claimed = yield* automation.claim(crypto.randomUUID());
           expect(Option.isSome(claimed)).toBe(true);
@@ -1161,6 +1163,7 @@ Postgres.describeWithDatabase("database", () => {
             expect(yield* automation.finish(claimed.value.id, "failed", "no")).toBe(true);
           }
           expect(yield* automation.hasPending(resultId, "drive")).toBe(false);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.some("failed"));
         }),
     );
 

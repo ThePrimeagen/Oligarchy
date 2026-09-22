@@ -34,5 +34,13 @@ export const enqueueTicket = Effect.fn("enqueueTicket")(function* (
       isDuplicateJob(error) ? Effect.succeed("duplicate" as const) : Effect.fail(error),
     ),
   );
+  if (outcome === "duplicate") {
+    const status = yield* automation.jobStatus(found.value.id, queued);
+    return {
+      result: outcome,
+      action: queued,
+      status: Option.getOrElse(status, () => "pending" as const),
+    };
+  }
   return { result: outcome, action: queued };
 });

@@ -1,6 +1,8 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, FileSystem, Layer, Option, Redacted, Scope } from "effect";
+import * as Errors from "../../src/shared/errors.ts";
+import * as FakeLinear from "../support/fake-linear.ts";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
 import * as AutomationClient from "../../src/automation-server/client.ts";
@@ -119,16 +121,20 @@ type Harness = {
   readonly servers: Stores.FakeServerStore;
   readonly tests: Stores.FakeTestStore;
   readonly log: FakeLog.FakeLog;
+  readonly linear: FakeLinear.FakeLinear;
   readonly pins: Map<string, string>;
 };
 
-const harness = (): Harness => ({
+const harness = (linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear()): Harness => ({
   automation: Stores.fakeAutomationStore(),
   servers: Stores.fakeServerStore(),
   tests: Stores.fakeTestStore(),
   log: FakeLog.fakeLog(),
+  linear,
   pins: new Map(),
 });
+
+const cleared = (identifier: string) => ({ method: "clearReady" as const, identifier });
 
 const unexpected = (method: string) =>
   Effect.die(new Error(`unexpected SetupRequestStore.${method}`));
@@ -160,6 +166,7 @@ const layers = (
     fixed.servers.layer,
     fixed.tests.layer,
     fixed.log.layer,
+    fixed.linear.layer,
     setupLayer(fixed.pins),
     token,
     fs,
@@ -267,6 +274,9 @@ describe("dispatch happy path", () => {
           `dispatching drive; ${URL}; ${MODEL}`,
           "drive succeeded",
         ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+          cleared(TICKET),
+        ]);
         expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       }),
   );
@@ -308,6 +318,7 @@ describe("dispatch happy path", () => {
         `dispatching diagnose; ${URL}; ${MODEL}`,
         "diagnose succeeded",
       ]);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
     }),
   );
 
@@ -630,6 +641,86 @@ describe("dispatch unhappy path", () => {
       yield* settle(fixed.automation.jobs, "failed");
       expect(fixed.automation.jobs[0]?.status).toBe("failed");
       expect(fixed.automation.jobs[0]?.reason).toMatch(/^prompt:/);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+        cleared(TICKET),
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a ready label that keeps failing is retried and then logged, and the job stays failed",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "clearReady",
+          message: `linear: clearing ${TICKET} ready failed`,
+        });
+        let attempts = 0;
+        const fixed = harness(
+          FakeLinear.fakeLinear({
+            overrides: {
+              clearReady: () =>
+                Effect.sync(() => {
+                  attempts += 1;
+                }).pipe(Effect.andThen(Effect.fail(refused))),
+            },
+          }),
+        );
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const fs = FileSystem.layerNoop({
+          readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
+        });
+        yield* start(fixed, FakeHttp.die, fs);
+        yield* settle(fixed.automation.jobs, "failed");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("failed");
+        expect(
+          fixed.log.lines.some((line) => line.text.startsWith("ready label clear failed")),
+        ).toBe(true);
+        expect(
+          fixed.log.lines.find((line) => line.text.startsWith("ready label clear failed")),
+        ).toMatchObject({
+          level: "error",
+          text: `ready label clear failed: linear: clearing ${TICKET} ready failed`,
+          agentId: TICKET,
+          cause: refused,
+        });
+      }),
+  );
+
+  it.effect("a ready label that fails once is cleared on the retry, with no error line", () =>
+    Effect.gen(function* () {
+      const refused = Errors.LinearError.make({
+        operation: "clearReady",
+        message: `linear: clearing ${TICKET} ready failed`,
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            clearReady: () =>
+              Effect.sync(() => {
+                attempts += 1;
+                return attempts < 2;
+              }).pipe(Effect.flatMap((fail) => (fail ? Effect.fail(refused) : Effect.void))),
+          },
+        }),
+      );
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const fs = FileSystem.layerNoop({
+        readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
+      });
+      yield* start(fixed, FakeHttp.die, fs);
+      yield* settle(fixed.automation.jobs, "failed");
+      expect(attempts).toBe(2);
+      expect(fixed.automation.jobs[0]?.status).toBe("failed");
+      expect(
+        FakeLog.texts(fixed.log).some((text) => text.startsWith("ready label clear failed")),
+      ).toBe(false);
     }),
   );
 
@@ -646,6 +737,7 @@ describe("dispatch unhappy path", () => {
         reason: "no Linear ticket",
       });
       expect(FakeLog.texts(fixed.log)).toEqual(["drive failed; no Linear ticket"]);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
     }),
   );
 
@@ -734,6 +826,7 @@ describe("dispatch unhappy path", () => {
         `${OTHER_URL}/reserve`,
       ]);
       expect(FakeLog.texts(fixed.log)).toEqual(["deferred; at capacity"]);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       expect(first).toBeDefined();
       expect(second).toBeDefined();

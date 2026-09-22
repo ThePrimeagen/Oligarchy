@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Cause, Effect, Layer, Redacted } from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, Redacted } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
@@ -393,6 +393,83 @@ describe("Linear happy path", () => {
       ]);
     }),
   );
+
+  it.effect("two simultaneous markReady calls look the ready label up once", () =>
+    Effect.gen(function* () {
+      const hold = yield* Deferred.make<void>();
+      let lookups = 0;
+      const http = FakeHttp.recordRequests((request) =>
+        Effect.gen(function* () {
+          const body = graphql(request);
+          if (body.query.includes("teams(")) {
+            lookups += 1;
+            yield* Deferred.await(hold);
+            return teamResponse();
+          }
+          return happyLinear(body);
+        }),
+      );
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      const other = {
+        id: "issue-OLI-46",
+        identifier: "OLI-46",
+        url: "https://linear.app/issue/OLI-46",
+      };
+      const fiber = yield* Effect.flatMap(Linear.Linear, (client) =>
+        Effect.all([client.markReady(issue), client.markReady(other)], { concurrency: 2 }),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))), Effect.forkChild);
+      for (let i = 0; i < 100; i++) {
+        if (lookups > 0) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      for (let i = 0; i < 20; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(lookups).toBe(1);
+      yield* Deferred.succeed(hold, undefined);
+      yield* Fiber.join(fiber);
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueLabels"))).toHaveLength(1);
+    }),
+  );
+
+  it.effect("clearReady removes the ready label and reuses the id markReady looked up", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      yield* Effect.flatMap(Linear.Linear, (client) =>
+        client.markReady(issue).pipe(Effect.andThen(client.clearReady(issue.identifier))),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueLabels"))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueUpdate"))).toEqual([
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: issue.identifier, input: { removedLabelIds: [labelId("ready")] } },
+        },
+      ]);
+    }),
+  );
 });
 
 describe("Linear unhappy path", () => {
@@ -550,6 +627,24 @@ describe("Linear unhappy path", () => {
         _tag: "LinearError",
         operation: "markReady",
         message: "linear: labeling OLI-45 ready failed",
+      });
+    }),
+  );
+
+  it.effect("clearReady reports a label update that did not succeed", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.clearReady("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "clearReady",
+        message: "linear: clearing OLI-45 ready failed",
       });
     }),
   );

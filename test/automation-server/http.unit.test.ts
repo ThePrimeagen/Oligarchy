@@ -8,6 +8,7 @@ import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Handlers from "../../src/automation-server/handlers.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as FakeHttp from "../support/fake-http.ts";
+import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
@@ -28,12 +29,14 @@ const SecretLive = Layer.succeed(Handlers.LinearWebhookSecret)(
 type Fixture = {
   readonly stores: ReturnType<typeof Stores.fakeStores>;
   readonly log: FakeLog.FakeLog;
+  readonly linear: FakeLinear.FakeLinear;
   readonly reporter: Reporter.Collector;
 };
 
 const fixture = (): Fixture => ({
   stores: Stores.fakeStores(),
   log: FakeLog.fakeLog(),
+  linear: FakeLinear.fakeLinear(),
   reporter: Reporter.collect(),
 });
 
@@ -44,7 +47,14 @@ const TokenLive = Layer.succeed(AutomationClient.OligarchyToken)(
 const serve = (fixed: Fixture, outbound: Layer.Layer<HttpClient.HttpClient> = FakeHttp.die) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provide(
-      Layer.mergeAll(fixed.stores.layer, fixed.log.layer, SecretLive, TokenLive, outbound),
+      Layer.mergeAll(
+        fixed.stores.layer,
+        fixed.log.layer,
+        fixed.linear.layer,
+        SecretLive,
+        TokenLive,
+        outbound,
+      ),
     ),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
@@ -392,6 +402,9 @@ describe("POST /abort", () => {
         finishedAt: expect.any(Date),
       });
       expect(FakeLog.texts(fixed.log)).toEqual([`aborted drive; ${CLIENT_URL}`]);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+        { method: "clearReady", identifier: TICKET },
+      ]);
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
     }),
   );
@@ -432,6 +445,9 @@ describe("POST /abort", () => {
         finishedAt: expect.any(Date),
       });
       expect(FakeLog.texts(fixed.log)).toEqual(["aborted pending drive"]);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+        { method: "clearReady", identifier: TICKET },
+      ]);
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
     }),
   );
@@ -463,6 +479,7 @@ describe("POST /abort", () => {
           reason: "aborted",
         });
         expect(FakeLog.texts(fixed.log)).toEqual(["aborted pending diagnose"]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
       }),
   );
 });

@@ -1,4 +1,5 @@
-import { Array as Arr, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
+import { Array as Arr, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -183,6 +184,8 @@ export type LinearService = {
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly markReady: (ticket: LinearTicket) => Effect.Effect<void, Errors.LinearError>;
+  // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
+  readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -409,32 +412,55 @@ const makeLinear = (
       state: { name: { eq: name } },
     });
 
-    // The id does not change for the life of the process. A failed lookup is not stored, so the
-    // next ticket can try again. A tick that labels many tickets pays for the lookup once.
-    const readyLabel = yield* Ref.make<Option.Option<string>>(Option.none());
+    // The id does not change for the life of the process. The two watches can label at once, so
+    // the lookup runs one at a time and a failed lookup is not stored. The next ticket tries again.
+    const readyLabel = yield* SynchronizedRef.make<Option.Option<string>>(Option.none());
 
-    const markReady = Effect.fn("Linear.markReady")(function* (ticket: LinearTicket) {
-      const cached = yield* Ref.get(readyLabel);
-      let id = Option.getOrUndefined(cached);
-      if (id === undefined) {
-        const team = yield* teamId;
-        id = yield* labelId(team, READY_LABEL);
-        yield* Ref.set(readyLabel, Option.some(id));
-      }
-      yield* request(
-        "markReady",
-        ISSUE_UPDATE_MUTATION,
-        { id: ticket.id, input: { addedLabelIds: [id] } },
-        IssueUpdate,
-      ).pipe(
+    const readyLabelId = Effect.fn("Linear.readyLabelId")(function* () {
+      return yield* SynchronizedRef.modifyEffect(readyLabel, (cached) =>
+        Option.match(cached, {
+          onSome: (found) => Effect.succeed([found, cached] as const),
+          onNone: () =>
+            teamId.pipe(
+              Effect.flatMap((team) => labelId(team, READY_LABEL)),
+              Effect.map((created) => [created, Option.some(created)] as const),
+            ),
+        }),
+      );
+    });
+
+    const setReady = (
+      operation: "markReady" | "clearReady",
+      id: string,
+      input:
+        | { readonly addedLabelIds: ReadonlyArray<string> }
+        | { readonly removedLabelIds: ReadonlyArray<string> },
+      message: string,
+    ) =>
+      request(operation, ISSUE_UPDATE_MUTATION, { id, input }, IssueUpdate).pipe(
         Effect.filterOrFail(
           (updated) => updated.issueUpdate.success,
-          () =>
-            Errors.LinearError.make({
-              operation: "markReady",
-              message: `linear: labeling ${ticket.identifier} ready failed`,
-            }),
+          () => Errors.LinearError.make({ operation, message }),
         ),
+      );
+
+    const markReady = Effect.fn("Linear.markReady")(function* (ticket: LinearTicket) {
+      const id = yield* readyLabelId();
+      yield* setReady(
+        "markReady",
+        ticket.id,
+        { addedLabelIds: [id] },
+        `linear: labeling ${ticket.identifier} ready failed`,
+      );
+    });
+
+    const clearReady = Effect.fn("Linear.clearReady")(function* (identifier: string) {
+      const id = yield* readyLabelId();
+      yield* setReady(
+        "clearReady",
+        identifier,
+        { removedLabelIds: [id] },
+        `linear: clearing ${identifier} ready failed`,
       );
     });
 
@@ -456,6 +482,7 @@ const makeLinear = (
       describeIssue,
       moveIssue,
       markReady,
+      clearReady,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,

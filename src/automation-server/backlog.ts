@@ -22,6 +22,12 @@ const labeled = (ticket: Linear.LinearBacklogTicket): Linear.LinearTicket => ({
   url: ticket.url,
 });
 
+// A pending row is the queue. Anything else the unique index kept is named by its status.
+const already = (
+  action: Automation.AutomationAction,
+  status: Automation.AutomationJobRow["status"],
+): string => `${action} already ${status === "pending" ? "queued" : status}`;
+
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>
   isDatabaseError(error)
@@ -58,30 +64,23 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     }
     return;
   }
+  const tests = yield* Tests.TestStore;
+  const automation = yield* Automation.AutomationStore;
+  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  // Label before the move. A miss leaves the ticket in Backlog, and the next poll tries again.
+  // The pending row is already what the dispatcher claims.
+  if (Option.isSome(found) && (yield* automation.hasPending(found.value.id, placed.action))) {
+    yield* linear.markReady(labeled(ticket));
+  }
   const team = yield* linear.teamId;
   const states = yield* linear.stateIds(team);
   yield* linear.moveIssue(ticket, states.automationNeeded);
   const note =
-    placed.result === "queued" ? `queued ${placed.action}` : `${placed.action} already queued`;
+    placed.result === "queued" ? `queued ${placed.action}` : already(placed.action, placed.status);
   yield* log.info(`backlog watch moved to Automation Needed; ${note}`, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
-  const tests = yield* Tests.TestStore;
-  const automation = yield* Automation.AutomationStore;
-  const found = yield* tests.findResultByLinearId(ticket.identifier);
-  // The move put it in the column the other watch reads. Ready means that watch can leave it.
-  if (Option.isSome(found) && (yield* automation.hasPending(found.value.id, placed.action))) {
-    yield* linear.markReady(labeled(ticket)).pipe(
-      Effect.catch((error) =>
-        log.error(`backlog watch failed to label ready: ${detail(error)}`, {
-          location: Log.Locations.automation,
-          agentId: ticket.identifier,
-          cause: error,
-        }),
-      ),
-    );
-  }
 });
 
 // The ticket stays in Automation Needed while the drive runs, so the caller settles a landed
@@ -125,12 +124,13 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   const line =
     placed.result === "queued"
       ? `automation needed watch queued ${placed.action}`
-      : `automation needed watch; ${placed.action} already queued`;
+      : `automation needed watch; ${already(placed.action, placed.status)}`;
   yield* log.info(line, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
   // A new row is pending. A duplicate of a finished row is not, and stays unlabeled.
+  // Returning settles this snapshot. The label is what a restart uses.
   if (placed.result === "queued") {
     yield* linear.markReady(labeled(ticket));
   }

@@ -146,6 +146,26 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return rows.length > 0;
       });
 
+      // The row the unique index kept. The watch names that status when a second insert loses.
+      const jobStatus = Effect.fn("db.automationJobStatus")(function* (
+        resultId: string,
+        action: AutomationAction,
+      ) {
+        const rows = yield* database.run("automationJobStatus", (db) =>
+          db
+            .select({ status: DbSchema.automationJobs.status })
+            .from(DbSchema.automationJobs)
+            .where(
+              and(
+                eq(DbSchema.automationJobs.resultId, resultId),
+                eq(DbSchema.automationJobs.action, action),
+              ),
+            )
+            .limit(1),
+        );
+        return Option.map(Arr.head(rows), (row) => row.status);
+      });
+
       const findRunning = Effect.fn("db.findRunningAutomationJob")(function* (resultId: string) {
         const rows = yield* database.run("findRunningAutomationJob", (db) =>
           db
@@ -340,6 +360,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         enqueue,
         claim,
         hasPending,
+        jobStatus,
         findRunning,
         abortPending,
         unclaim,

@@ -340,6 +340,59 @@ describe("backlog watch unhappy path", () => {
     }),
   );
 
+  it.effect(
+    "a ready label that fails leaves the ticket in Backlog, and the next poll labels and moves it",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "markReady",
+          message: `linear: labeling ${TICKET} ready failed`,
+        });
+        let fail = true;
+        const board = [ticket(TICKET, SEEN)];
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const steps: Array<string> = [];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listBacklog: Effect.sync(() => [...board]),
+            markReady: () =>
+              fail
+                ? Effect.fail(refused)
+                : Effect.sync(() => {
+                    steps.push("ready");
+                  }),
+            moveIssue: () =>
+              Effect.sync(() => {
+                steps.push("move");
+              }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(steps).toEqual([]);
+        expect(log.lines[0]).toMatchObject({
+          level: "error",
+          text: `backlog watch failed: linear: labeling ${TICKET} ready failed`,
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        });
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(steps).toEqual(["ready", "move"]);
+        expect(stores.automation.jobs).toHaveLength(1);
+      }),
+  );
+
   it.effect("stops polling when its scope closes", () =>
     Effect.gen(function* () {
       let polls = 0;
@@ -633,7 +686,7 @@ describe("automation needed and needs review watch unhappy path", () => {
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "failed" }),
         ]);
         expect(moved).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already queued"]);
+        expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already failed"]);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
