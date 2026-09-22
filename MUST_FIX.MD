@@ -95,6 +95,8 @@ flowchart TB
   N5["+ Automation server tracks current jobs in memory<br/>and reconciles all inherited rows on startup"]:::added
   N6["+ Terminal writes retry;<br/>periodic reconciliation repairs misses"]:::added
   N7["+ Dashboard distinguishes queued, dispatching,<br/>driver running, guest running, and stale"]:::added
+  N8["+ Dispatch remains gated until every inherited row<br/>is reattached or closed"]:::added
+  N9["+ Normal dispatch loop starts"]:::added
 
   R1 -. "replace" .-> N1
   R2 -. "replace" .-> N2
@@ -130,6 +132,11 @@ flowchart TB
   QUERY -->|"reserved"| RESERVED --> P
   QUERY -->|"absent"| ABSENT --> DONE
   QUERY -->|"unreachable"| UNREACHABLE --> QUERY
+  ACTIVE --> N8
+  RESERVED --> N8
+  ABSENT --> N8
+  N8 --> N9
+  N9 --> P
 ```
 
 ## 1. Reconcile orphaned running jobs after process death
@@ -145,6 +152,14 @@ flowchart TB
       memory.
 - [ ] On startup, treat every existing nonterminal row as inherited work and reconcile it against
       the assigned automation client.
+- [ ] Run startup reconciliation before the dispatch loop may claim any pending job.
+- [ ] Do not assume an inherited row is dead: its OpenCode child may still be active on the
+      automation client after the previous server connection disappeared.
+- [ ] Reattach monitoring to a confirmed active execution, release a reservation that never
+      started, close an absent execution owner-lost, and retain an unreachable execution as
+      unresolved for retry.
+- [ ] Keep new dispatch gated while inherited work is unresolved so a restart cannot exceed real
+      client or QEMU capacity.
 - [ ] Periodically reconcile database-running rows that are absent from the current process's
       ownership registry.
 - [ ] Abort client work before closing inherited work when the automation client still owns that
