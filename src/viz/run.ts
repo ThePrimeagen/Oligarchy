@@ -56,8 +56,9 @@ const OPEN_WAIT = Duration.seconds(2);
 // that landed on the last read opens the peek within a second, with no second query.
 const SESSION_WAIT = Duration.seconds(1);
 
-// What the screen asks OpenTUI to draw a screenshot with. auto is its own choice; kitty is
-// forced where that choice is blocks (tmux) and the attached terminal can actually draw it.
+// What the screen draws a screenshot with. auto is OpenTUI's choice, which is blocks inside
+// tmux. kitty means the attached terminal speaks kitty graphics, so the screen pins the
+// picture to placeholder cells instead of a cursor placement.
 export type ImageDraw = "kitty" | "auto";
 
 // The screen the view draws on: OpenTUI's renderer, which takes the alternate screen and raw
@@ -69,16 +70,30 @@ type Opener = {
   readonly open: Effect.Effect<CliRenderer, Errors.CommandError, Scope.Scope>;
   // Read when the screen opens, after the command has accepted its flags.
   readonly imageProtocol: Effect.Effect<ImageDraw>;
+  // A graphics sequence, written whole. The screen sends a screenshot's placement through it.
+  readonly writeTerminal: (sequence: string) => void;
 };
 
 export class Renderer extends Context.Service<Renderer, Opener>()("@oligarchy/viz/Renderer") {
-  static readonly layer = (imageProtocol: Effect.Effect<ImageDraw>): Layer.Layer<Renderer> =>
+  static readonly layer = (
+    imageProtocol: Effect.Effect<ImageDraw>,
+    writeTerminal: (sequence: string) => void,
+  ): Layer.Layer<Renderer> =>
     Layer.succeed(this)(
       this.of({
         imageProtocol,
+        writeTerminal,
         open: Effect.acquireRelease(
           Effect.tryPromise({
-            try: () => createCliRenderer({ exitOnCtrlC: false, exitSignals: [], useMouse: false }),
+            // The render thread would write a frame while a screenshot sequence is written,
+            // and the two would split each other. Linux already runs on this thread.
+            try: () =>
+              createCliRenderer({
+                exitOnCtrlC: false,
+                exitSignals: [],
+                useMouse: false,
+                useThread: false,
+              }),
             catch: (cause) =>
               Errors.CommandError.make({
                 message: `viz could not open the screen: ${Render.errorDetail(cause)}`,
@@ -349,7 +364,9 @@ export const run: Effect.Effect<
   yield* Effect.scoped(
     Effect.gen(function* () {
       const renderer = yield* screen.open;
-      yield* Effect.promise(() => Screen.mount(renderer, { view, now, imageProtocol }));
+      yield* Effect.promise(() =>
+        Screen.mount(renderer, { view, now, imageProtocol, place: screen.writeTerminal }),
+      );
       const startFollow = <R>(work: Effect.Effect<void, never, R>) =>
         Effect.gen(function* () {
           yield* stopFollow;

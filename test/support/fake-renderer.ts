@@ -39,7 +39,11 @@ export const fakeRenderer = (
   );
   return {
     layer: Layer.succeed(Run.Renderer)(
-      Run.Renderer.of({ open, imageProtocol: Effect.succeed("auto") }),
+      Run.Renderer.of({
+        open,
+        imageProtocol: Effect.succeed("auto"),
+        writeTerminal: () => undefined,
+      }),
     ),
     open,
     opened: Deferred.await(first),
