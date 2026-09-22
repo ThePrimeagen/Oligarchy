@@ -21,6 +21,52 @@ const abort = (body: string | Record<string, unknown>) =>
     env,
   );
 
+const SENTINEL_PASSWORD = "sentinel-secret-pw";
+
+const closeSuite = (run: string, headers: Record<string, string> = {}) =>
+  app.request(
+    "/suites/close",
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams({ run }).toString(),
+    },
+    {
+      ...env,
+      HYPERDRIVE: {
+        connectionString: `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`,
+      },
+    },
+  );
+
+describe("POST /suites/close happy path", () => {
+  it("sends a form that names no suite back to the servers page", async () => {
+    const response = await closeSuite("");
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/servers");
+  });
+});
+
+describe("POST /suites/close unhappy path", () => {
+  it("sends a form whose run id is not a uuid back to the servers page", async () => {
+    const response = await closeSuite("not-a-suite");
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/servers");
+    expect(await response.text()).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("says the close failed when the database cannot be read, and does not echo the password", async () => {
+    const response = await closeSuite("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", {
+      "hx-request": "true",
+    });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<p>error: internal error</p>");
+    expect(html).not.toContain(SENTINEL_PASSWORD);
+    expect(html).not.toContain("postgres://");
+  });
+});
+
 describe("POST /abort happy path", () => {
   it("answers 200 with ok for a well-formed body that names no ticket", async () => {
     const response = await abort({});

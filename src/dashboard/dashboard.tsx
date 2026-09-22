@@ -6,6 +6,8 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import {
   abortAutomationJob,
   addServer,
+  closeTestSuite,
+  listOpenSuiteJobs,
   definitionStats,
   deleteOldRows,
   getImage,
@@ -975,6 +977,82 @@ app.post("/abort", async (context) => {
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: aborting a job:", errorMessage(error));
+  }
+  return reply();
+});
+
+// A uuid, the shape test_runs.id has. Anything else never reaches the database.
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// POST /suites/close stops one suite that never finished. A running job is the automation
+// server's to stop, same as /abort, so the guest does not keep driving after the row closes;
+// a miss there still closes the row here. Pending jobs have no client. The results still
+// pending or running become aborted, which is what takes the suite out of the running count,
+// and each of their tickets moves to Aborted. A suite that has already finished is left as it
+// is. A Linear miss is logged and the rows stay closed. The click answers with the queue.
+app.post("/suites/close", async (context) => {
+  const wantsFragment = context.req.header("hx-request") === "true";
+  const connectionString = context.env.HYPERDRIVE.connectionString;
+  const reply = async () => {
+    if (!wantsFragment) {
+      return context.redirect("/servers", 303);
+    }
+    try {
+      const queue = await listAutomationQueue(connectionString);
+      return context.html(<Queue queue={queue} />);
+    } catch (error) {
+      Sentry.captureException(error);
+      console.error("dashboard: closing a suite:", errorMessage(error));
+      return context.html(<p>error: internal error</p>);
+    }
+  };
+  try {
+    const body = await context.req.parseBody();
+    const run = body.run;
+    if (typeof run !== "string" || !RUN_ID.test(run)) {
+      return reply();
+    }
+    const jobs = await listOpenSuiteJobs(connectionString, run);
+    for (const job of jobs) {
+      if (job.ticket === null) {
+        continue;
+      }
+      try {
+        const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ticket: job.ticket, action: job.action }),
+          signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+        });
+        if (response.status !== 200) {
+          console.error(
+            `dashboard: closing a suite: automation server returned ${String(response.status)}`,
+          );
+        }
+      } catch (error) {
+        console.error("dashboard: closing a suite:", errorMessage(error));
+      }
+    }
+    const closed = await closeTestSuite(connectionString, run);
+    if (closed.closed) {
+      for (const ticket of closed.tickets) {
+        try {
+          await abortLinearIssue(context.env, ticket);
+        } catch (error) {
+          Sentry.captureException(error);
+          console.error(
+            `dashboard: closing a suite: ${ticket} stays on the board:`,
+            errorMessage(error),
+          );
+        }
+      }
+    }
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: closing a suite:", errorMessage(error));
   }
   return reply();
 });

@@ -5,6 +5,8 @@ import type {
   AutomationQueue,
   ProcessSeries,
   Server,
+  SuiteBoard,
+  SuitePill,
 } from "../../src/dashboard/query.ts";
 import { Fleet, Process, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
 
@@ -83,14 +85,58 @@ const failed: AutomationJob = {
   queriedAt: QUERIED_AT,
 };
 
-const SUITES_QUIET = { running: 0, passed: 0, failed: 0 };
+const PASSED_RUN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+const FAILED_RUN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+const RUNNING_RUN = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+const PENDING_RUN = "dddddddd-dddd-4ddd-8ddd-ddddddddddd4";
+
+const suitePill = (
+  id: string,
+  status: SuitePill["status"],
+  startedAt: Date,
+  counts: Partial<Pick<SuitePill, "pending" | "running" | "passed" | "failed">> = {},
+): SuitePill => ({
+  id,
+  name: "Omarchy experiment",
+  status,
+  startedAt,
+  pending: 0,
+  running: 0,
+  passed: 0,
+  failed: 0,
+  ...counts,
+});
+
+const SUITES: SuiteBoard = {
+  pending: 1,
+  running: 1,
+  passed: 4,
+  failed: 1,
+  aborted: 0,
+  queriedAt: QUERIED_AT,
+  pills: [
+    suitePill(PASSED_RUN, "passed", ago(3_600), { passed: 8 }),
+    suitePill(FAILED_RUN, "failed", ago(1_800), { passed: 1, failed: 2 }),
+    suitePill(RUNNING_RUN, "running", ago(900), { running: 1, failed: 2 }),
+    suitePill(PENDING_RUN, "pending", ago(30), { pending: 3 }),
+  ],
+};
+const SUITES_QUIET: SuiteBoard = {
+  pending: 0,
+  running: 0,
+  passed: 0,
+  failed: 0,
+  aborted: 0,
+  queriedAt: QUERIED_AT,
+  pills: [],
+};
 const QUEUE: AutomationQueue = {
   running: [running],
   pending: [pending],
   completed: [failed],
   runningCount: 1,
   pendingCount: 1,
-  suites: { running: 2, passed: 8, failed: 2 },
+  suites: SUITES,
 };
 const EMPTY_QUEUE: AutomationQueue = {
   running: [],
@@ -151,6 +197,12 @@ const ticketRow = (
 // its key. The button's icon is not part of what the post does.
 const abortForm = (ticket: string, action: AutomationJob["action"]): string =>
   `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><button type="submit" class="abort" aria-label="abort">`;
+
+const closeForm = (run: string): string =>
+  `<form method="post" action="/suites/close" hx-post="/suites/close" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="run" value="${run}"/><button type="submit">close</button></form>`;
+
+const listItem = (page: string, text: string): string =>
+  page.split("<li>").find((item) => item.includes(text)) ?? "";
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -268,18 +320,39 @@ describe("Queue happy path", () => {
     expect(page).not.toContain("<h3>completed ");
   });
 
-  it("states how many test suites are still running and their pass rate, above the queue", async () => {
+  it("lists how many suites are pending, running, succeeded and failed, and pills them finished then running then pending", async () => {
     const page = await render(Queue({ queue: QUEUE }));
-    expect(page).toContain("<p>2 test suites running · 8 passed · 2 failed · 80.0% pass</p>");
-  });
-
-  it("says one test suite, and rounds the pass rate to a tenth", async () => {
-    const page = await render(
-      Queue({
-        queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 1, failed: 2 } },
-      }),
+    expect(page).toContain("<p>pending 1 · running 1 · succeeded 4 · failed 1</p>");
+    expect(page).toContain('<ul class="definition-runs" aria-label="Test suites">');
+    const passed = listItem(page, PASSED_RUN.slice(0, 6));
+    const failedSuite = listItem(page, FAILED_RUN.slice(0, 6));
+    const runningSuite = listItem(page, RUNNING_RUN.slice(0, 6));
+    const pendingSuite = listItem(page, PENDING_RUN.slice(0, 6));
+    expect(passed).toContain('class="definition-pill definition-pill--passed"');
+    expect(passed).toContain(">succeeded<");
+    expect(passed).toContain("0 pending · 0 running · 8 passed · 0 failed");
+    expect(passed).toContain('datetime="2026-09-09T15:00:00.000Z"');
+    expect(passed).toContain(">1 h ago<");
+    expect(passed).not.toContain("close");
+    expect(failedSuite).toContain('class="definition-pill definition-pill--failed"');
+    expect(failedSuite).toContain(">failed<");
+    expect(failedSuite).toContain("0 pending · 0 running · 1 passed · 2 failed");
+    expect(failedSuite).not.toContain(closeForm(FAILED_RUN));
+    expect(runningSuite).toContain('class="definition-pill definition-pill--running"');
+    expect(runningSuite).toContain(">running<");
+    expect(runningSuite).toContain("0 pending · 1 running · 0 passed · 2 failed");
+    expect(runningSuite).toContain(closeForm(RUNNING_RUN));
+    expect(pendingSuite).toContain('class="definition-pill definition-pill--pending"');
+    expect(pendingSuite).toContain(">pending<");
+    expect(pendingSuite).toContain("3 pending · 0 running · 0 passed · 0 failed");
+    expect(pendingSuite).toContain(closeForm(PENDING_RUN));
+    expect(page.indexOf(PASSED_RUN.slice(0, 6))).toBeLessThan(page.indexOf(FAILED_RUN.slice(0, 6)));
+    expect(page.indexOf(FAILED_RUN.slice(0, 6))).toBeLessThan(
+      page.indexOf(RUNNING_RUN.slice(0, 6)),
     );
-    expect(page).toContain("<p>1 test suite running · 1 passed · 2 failed · 33.3% pass</p>");
+    expect(page.indexOf(RUNNING_RUN.slice(0, 6))).toBeLessThan(
+      page.indexOf(PENDING_RUN.slice(0, 6)),
+    );
   });
 
   it("uses the totals, not how many rows the fifty-row lists still show", async () => {
@@ -290,13 +363,13 @@ describe("Queue happy path", () => {
           running: [running],
           runningCount: 60,
           pendingCount: 52,
-          suites: { running: 3, passed: 2, failed: 1 },
+          suites: { ...SUITES_QUIET, pending: 4, running: 3, passed: 2, failed: 1 },
         },
       }),
     );
     expect(page).toContain("<h3>running 60</h3>");
     expect(page).toContain("<h3>pending 52</h3><p>none</p>");
-    expect(page).toContain("<p>3 test suites running · 2 passed · 1 failed · 66.7% pass</p>");
+    expect(page).toContain("<p>pending 4 · running 3 · succeeded 2 · failed 1</p>");
   });
 
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
@@ -371,31 +444,63 @@ describe("Queue unhappy path", () => {
   it("says none under a heading with nothing in its list, and draws no table for it", async () => {
     const page = await render(Queue({ queue: EMPTY_QUEUE }));
     expect(page).toBe(
-      "<p>0 test suites running</p><h3>running 0</h3><p>none</p><h3>pending 0</h3><p>none</p><h3>completed</h3><p>none</p>",
+      "<p>pending 0 · running 0 · succeeded 0 · failed 0</p><h3>running 0</h3><p>none</p><h3>pending 0</h3><p>none</p><h3>completed</h3><p>none</p>",
     );
   });
 
-  it("names a running suite that has no pass or fail yet, and prints no rate", async () => {
+  it("names an aborted suite in the count and draws it with the finished pills, with no close", async () => {
+    const stopped = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee5";
     const page = await render(
-      Queue({ queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 0, failed: 0 } } }),
+      Queue({
+        queue: {
+          ...EMPTY_QUEUE,
+          suites: {
+            ...SUITES_QUIET,
+            aborted: 1,
+            pills: [suitePill(stopped, "aborted", ago(86_400))],
+          },
+        },
+      }),
     );
-    expect(page).toContain("<p>1 test suite running · 0 passed · 0 failed</p>");
-    expect(page).not.toContain("% pass");
+    expect(page).toContain("<p>pending 0 · running 0 · succeeded 0 · failed 0 · aborted 1</p>");
+    const item = listItem(page, stopped.slice(0, 6));
+    expect(item).toContain('class="definition-pill definition-pill--aborted"');
+    expect(item).toContain(">aborted<");
+    expect(item).toContain(">1 d ago<");
+    expect(item).not.toContain("close");
   });
 
-  it("prints 0% when every finished result in the running suites failed, and 100% when every one passed", async () => {
-    const nonePassed = await render(
-      Queue({ queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 0, failed: 4 } } }),
+  it("says a suite started just now when its clock is ahead of the read", async () => {
+    const ahead = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const page = await render(
+      Queue({
+        queue: {
+          ...EMPTY_QUEUE,
+          suites: {
+            ...SUITES_QUIET,
+            running: 1,
+            pills: [suitePill(ahead, "running", new Date(QUERIED_AT.getTime() + 5_000))],
+          },
+        },
+      }),
     );
-    expect(
-      nonePassed.includes("<p>1 test suite running · 0 passed · 4 failed · 0.0% pass</p>"),
-    ).toBe(true);
-    const allPassed = await render(
-      Queue({ queue: { ...EMPTY_QUEUE, suites: { running: 1, passed: 5, failed: 0 } } }),
+    expect(listItem(page, ahead.slice(0, 6))).toContain(">0 s ago<");
+  });
+
+  it("escapes a suite name", async () => {
+    const page = await render(
+      Queue({
+        queue: {
+          ...EMPTY_QUEUE,
+          suites: {
+            ...SUITES,
+            pills: [{ ...SUITES.pills[0], name: 'a<"b' }],
+          },
+        },
+      }),
     );
-    expect(
-      allPassed.includes("<p>1 test suite running · 5 passed · 0 failed · 100.0% pass</p>"),
-    ).toBe(true);
+    expect(page).toContain("a&lt;&quot;b");
+    expect(page).not.toContain('a<"b');
   });
 
   it("shows a dash for a job whose result has no ticket yet", async () => {
@@ -555,7 +660,7 @@ describe("ServersPage happy path", () => {
     expect(page).toContain(
       '<h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">',
     );
-    expect(page).toContain("<p>2 test suites running · 8 passed · 2 failed · 80.0% pass</p>");
+    expect(page).toContain("<p>pending 1 · running 1 · succeeded 4 · failed 1</p>");
     expect(page).toContain("<h3>running 1</h3>");
     expect(page).toContain(linearLink("OLI-61"));
     expect(page).toContain(

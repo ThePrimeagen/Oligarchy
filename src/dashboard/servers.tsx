@@ -325,29 +325,73 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
     </table>
   );
 
-// A suite is open while any of its results is still pending or running. The rate is of the
-// results that have already passed or failed; none yet, and there is no rate to invent.
+// Suite counts are suites, not the results inside the ones still open. Succeeded is a
+// passed suite. Aborted is omitted until one exists: a close, or a run whose results
+// were only aborted or timed out.
 const suiteLine = (suites: AutomationQueue["suites"]): string => {
-  const noun = suites.running === 1 ? "test suite" : "test suites";
-  const running = `${String(suites.running)} ${noun} running`;
-  if (suites.running === 0) {
-    return running;
+  const line = `pending ${String(suites.pending)} · running ${String(suites.running)} · succeeded ${String(suites.passed)} · failed ${String(suites.failed)}`;
+  if (suites.aborted === 0) {
+    return line;
   }
-  const closed = suites.passed + suites.failed;
-  const verdicts = `${String(suites.passed)} passed · ${String(suites.failed)} failed`;
-  if (closed === 0) {
-    return `${running} · ${verdicts}`;
-  }
-  return `${running} · ${verdicts} · ${percent((suites.passed / closed) * 100)} pass`;
+  return `${line} · aborted ${String(suites.aborted)}`;
 };
 
+const resultLine = (pill: AutomationQueue["suites"]["pills"][number]): string =>
+  `${String(pill.pending)} pending · ${String(pill.running)} running · ${String(pill.passed)} passed · ${String(pill.failed)} failed`;
+
+// The word on the pill. A passed suite is a run that succeeded; the result tally beside
+// it still says passed, which is the result's own status.
+const suiteWord = (status: AutomationQueue["suites"]["pills"][number]["status"]): string =>
+  status === "passed" ? "succeeded" : status;
+
+const shortRunId = (id: string): string => id.slice(0, 6);
+
+// The same chips a definition's runs use. Finished first, then running, then pending, in
+// the order the board already sorted. An open suite can be closed: that aborts the results
+// still pending or running, which is what drops it out of the running count.
+const SuitePills: FC<{ board: AutomationQueue["suites"] }> = ({ board }) =>
+  board.pills.length === 0 ? null : (
+    <ul class="definition-runs" aria-label="Test suites">
+      {board.pills.map((pill) => {
+        const open = pill.status === "pending" || pill.status === "running";
+        const elapsed = Math.max(0, board.queriedAt.getTime() - pill.startedAt.getTime());
+        return (
+          <li>
+            <span class={`definition-pill definition-pill--${pill.status}`}>
+              {shortRunId(pill.id)}
+            </span>
+            <span>{suiteWord(pill.status)}</span>
+            <span>{pill.name}</span>
+            <span>{resultLine(pill)}</span>
+            <time datetime={pill.startedAt.toISOString()}>{age(elapsed)} ago</time>
+            {open ? (
+              <form
+                method="post"
+                action="/suites/close"
+                hx-post="/suites/close"
+                hx-confirm="are you sure?"
+                hx-target="#queue"
+                hx-swap="innerHTML"
+              >
+                <input type="hidden" name="run" value={pill.id} />
+                <button type="submit">close</button>
+              </form>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
 // The automation queue in the order the database sorted it: what runs, what waits, what finished.
-// What the automation half polls for, every thirty seconds. The line above is the test suites
-// still open. The numbers beside running and pending are the totals, not the length of the
-// fifty-row lists. Completed has no number: that total only grows.
+// What the automation half polls for, every thirty seconds. The line above is every test suite,
+// and the chips under it are the latest finished ones, then the ones still running, then pending.
+// The numbers beside running and pending jobs are the totals, not the length of the fifty-row
+// lists. Completed has no number: that total only grows.
 export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
   <>
     <p>{suiteLine(queue.suites)}</p>
+    <SuitePills board={queue.suites} />
     <h3>running {queue.runningCount}</h3>
     <Jobs jobs={queue.running} />
     <h3>pending {queue.pendingCount}</h3>
