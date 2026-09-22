@@ -48,17 +48,32 @@ const processBacklog = Effect.fn("processBacklog")(function* (
         agentId: ticket.identifier,
       });
     }
-    return;
+    return "missing";
   }
-  const team = yield* linear.teamId;
-  const states = yield* linear.stateIds(team);
-  yield* linear.moveIssue(ticket, states.automationNeeded);
-  const note =
-    placed.result === "queued" ? `queued ${placed.action}` : `${placed.action} already queued`;
-  yield* log.info(`backlog watch moved to Automation Needed; ${note}`, {
-    location: Log.Locations.automation,
-    agentId: ticket.identifier,
-  });
+  const adopted = placed.result;
+  return yield* Effect.gen(function* () {
+    const team = yield* linear.teamId;
+    const states = yield* linear.stateIds(team);
+    yield* linear.moveIssue(ticket, states.automationNeeded);
+    const note =
+      adopted === "queued" ? `queued ${placed.action}` : `${placed.action} already queued`;
+    yield* log.info(`backlog watch moved to Automation Needed; ${note}`, {
+      location: Log.Locations.automation,
+      agentId: ticket.identifier,
+    });
+    return adopted;
+  }).pipe(
+    // Keep the landed enqueue when the move fails, so a new job still spends the check.
+    Effect.catch((error) =>
+      log
+        .error(`backlog watch failed: ${detail(error)}`, {
+          location: Log.Locations.automation,
+          agentId: ticket.identifier,
+          cause: error,
+        })
+        .pipe(Effect.as(adopted)),
+    ),
+  );
 });
 
 // The ticket stays in Automation Needed while the drive runs, so the caller settles a landed
@@ -76,7 +91,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
         agentId: ticket.identifier,
       });
     }
-    return false;
+    return "missing";
   }
   const line =
     placed.result === "queued"
@@ -86,7 +101,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
-  return true;
+  return placed.result;
 });
 
 // Needs Review stays a diagnose, including for the mint definition. The ticket stays in the
@@ -104,7 +119,7 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
         agentId: ticket.identifier,
       });
     }
-    return false;
+    return "missing";
   }
   const line =
     placed.result === "queued"
@@ -114,221 +129,212 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
-  return true;
+  return placed.result;
 });
 
-const watchBacklog = Effect.gen(function* () {
-  const linear = yield* Linear.Linear;
-  const log = yield* Log.Log;
-  const sightings = new Map<string, Sighting>();
-
-  const tick = Effect.gen(function* () {
-    const tickets = yield* linear.listBacklog.pipe(
-      Effect.catch((error) =>
-        log
-          .error(`backlog watch failed: ${detail(error)}`, {
-            location: Log.Locations.automation,
-            agentId: Log.AutomationAgentId,
-            cause: error,
-          })
-          .pipe(Effect.as(undefined)),
-      ),
-    );
-    // A failed poll keeps the rounds already saved.
-    if (tickets === undefined) {
-      return;
-    }
-    const present = new Set<string>();
-    for (const ticket of tickets) {
-      present.add(ticket.identifier);
-      const prev = sightings.get(ticket.identifier);
-      const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
-      const rounds = same ? prev.rounds + 1 : 0;
-      sightings.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt });
-      if (rounds < ROUNDS_BEFORE_MOVE) {
-        continue;
-      }
-      // One poison ticket must not starve the rest of this poll. A defect still fails the tick.
-      // Not settled: the move is what takes it off the list, and a move that did not is retried.
-      yield* processBacklog(ticket, rounds).pipe(
-        Effect.catch((error) =>
-          log.error(`backlog watch failed: ${detail(error)}`, {
-            location: Log.Locations.automation,
-            agentId: ticket.identifier,
-            cause: error,
-          }),
-        ),
-      );
-    }
-    for (const identifier of sightings.keys()) {
-      if (!present.has(identifier)) {
-        sightings.delete(identifier);
-      }
-    }
-  }).pipe(
+// A defect in one column logs and the other columns of this check still run. An interrupt
+// still shuts the loop down.
+const guard = <E, R>(label: string, tick: Effect.Effect<void, E, R>) =>
+  tick.pipe(
     Effect.catchCause((cause) => {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.failCause(cause);
       }
       const error = Cause.squash(cause);
-      return log.error(`backlog watch failed: ${detail(error)}`, {
-        location: Log.Locations.automation,
-        agentId: Log.AutomationAgentId,
-        cause: error,
+      return Effect.gen(function* () {
+        const log = yield* Log.Log;
+        yield* log.error(`${label} watch failed: ${detail(error)}`, {
+          location: Log.Locations.automation,
+          agentId: Log.AutomationAgentId,
+          cause: error,
+        });
       });
     }),
   );
-
-  yield* tick.pipe(
-    Effect.repeat(Schedule.spaced(POLL_INTERVAL)),
-    Effect.forkScoped({ startImmediately: true }),
-  );
-});
-
-const watchAutomationNeeded = Effect.gen(function* () {
-  const linear = yield* Linear.Linear;
-  const log = yield* Log.Log;
-  const sightings = new Map<string, Held>();
-
-  const tick = Effect.gen(function* () {
-    const tickets = yield* linear.listAutomationNeeded.pipe(
-      Effect.catch((error) =>
-        log
-          .error(`automation needed watch failed: ${detail(error)}`, {
-            location: Log.Locations.automation,
-            agentId: Log.AutomationAgentId,
-            cause: error,
-          })
-          .pipe(Effect.as(undefined)),
-      ),
-    );
-    if (tickets === undefined) {
-      return;
-    }
-    const present = new Set<string>();
-    for (const ticket of tickets) {
-      present.add(ticket.identifier);
-      const prev = sightings.get(ticket.identifier);
-      const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
-      const rounds = same ? prev.rounds + 1 : 0;
-      const settled = same && prev.settled;
-      sightings.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled });
-      if (settled || rounds < ROUNDS_BEFORE_MOVE) {
-        continue;
-      }
-      const done = yield* processAutomationNeeded(ticket, rounds).pipe(
-        Effect.catch((error) =>
-          log
-            .error(`automation needed watch failed: ${detail(error)}`, {
-              location: Log.Locations.automation,
-              agentId: ticket.identifier,
-              cause: error,
-            })
-            .pipe(Effect.as(false)),
-        ),
-      );
-      if (done) {
-        sightings.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled: true });
-      }
-    }
-    for (const identifier of sightings.keys()) {
-      if (!present.has(identifier)) {
-        sightings.delete(identifier);
-      }
-    }
-  }).pipe(
-    Effect.catchCause((cause) => {
-      if (Cause.hasInterruptsOnly(cause)) {
-        return Effect.failCause(cause);
-      }
-      const error = Cause.squash(cause);
-      return log.error(`automation needed watch failed: ${detail(error)}`, {
-        location: Log.Locations.automation,
-        agentId: Log.AutomationAgentId,
-        cause: error,
-      });
-    }),
-  );
-
-  yield* tick.pipe(
-    Effect.repeat(Schedule.spaced(POLL_INTERVAL)),
-    Effect.forkScoped({ startImmediately: true }),
-  );
-});
-
-const watchNeedsReview = Effect.gen(function* () {
-  const linear = yield* Linear.Linear;
-  const log = yield* Log.Log;
-  const sightings = new Map<string, Held>();
-
-  const tick = Effect.gen(function* () {
-    const tickets = yield* linear.listNeedsReview.pipe(
-      Effect.catch((error) =>
-        log
-          .error(`needs review watch failed: ${detail(error)}`, {
-            location: Log.Locations.automation,
-            agentId: Log.AutomationAgentId,
-            cause: error,
-          })
-          .pipe(Effect.as(undefined)),
-      ),
-    );
-    if (tickets === undefined) {
-      return;
-    }
-    const present = new Set<string>();
-    for (const ticket of tickets) {
-      present.add(ticket.identifier);
-      const prev = sightings.get(ticket.identifier);
-      const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
-      const rounds = same ? prev.rounds + 1 : 0;
-      const settled = same && prev.settled;
-      sightings.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled });
-      if (settled || rounds < ROUNDS_BEFORE_MOVE) {
-        continue;
-      }
-      const done = yield* processNeedsReview(ticket, rounds).pipe(
-        Effect.catch((error) =>
-          log
-            .error(`needs review watch failed: ${detail(error)}`, {
-              location: Log.Locations.automation,
-              agentId: ticket.identifier,
-              cause: error,
-            })
-            .pipe(Effect.as(false)),
-        ),
-      );
-      if (done) {
-        sightings.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled: true });
-      }
-    }
-    for (const identifier of sightings.keys()) {
-      if (!present.has(identifier)) {
-        sightings.delete(identifier);
-      }
-    }
-  }).pipe(
-    Effect.catchCause((cause) => {
-      if (Cause.hasInterruptsOnly(cause)) {
-        return Effect.failCause(cause);
-      }
-      const error = Cause.squash(cause);
-      return log.error(`needs review watch failed: ${detail(error)}`, {
-        location: Log.Locations.automation,
-        agentId: Log.AutomationAgentId,
-        cause: error,
-      });
-    }),
-  );
-
-  yield* tick.pipe(
-    Effect.repeat(Schedule.spaced(POLL_INTERVAL)),
-    Effect.forkScoped({ startImmediately: true }),
-  );
-});
 
 export const watch = Effect.fn("watchBoard")(function* () {
-  yield* watchBacklog;
-  yield* watchAutomationNeeded;
-  yield* watchNeedsReview;
+  const linear = yield* Linear.Linear;
+  const log = yield* Log.Log;
+  const backlog = new Map<string, Sighting>();
+  const needed = new Map<string, Held>();
+  const review = new Map<string, Held>();
+
+  const tick = Effect.gen(function* () {
+    // One new job per check: Backlog, then Automation Needed, then Needs Review.
+    // A missing result, a duplicate, or a failed enqueue does not spend it.
+    let kicked = false;
+
+    yield* guard(
+      "backlog",
+      Effect.gen(function* () {
+        const tickets = yield* linear.listBacklog.pipe(
+          Effect.catch((error) =>
+            log
+              .error(`backlog watch failed: ${detail(error)}`, {
+                location: Log.Locations.automation,
+                agentId: Log.AutomationAgentId,
+                cause: error,
+              })
+              .pipe(Effect.as(undefined)),
+          ),
+        );
+        if (tickets === undefined) {
+          return;
+        }
+        const present = new Set<string>();
+        for (const ticket of tickets) {
+          present.add(ticket.identifier);
+          const prev = backlog.get(ticket.identifier);
+          const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
+          const rounds = same ? prev.rounds + 1 : 0;
+          backlog.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt });
+          if (kicked || rounds < ROUNDS_BEFORE_MOVE) {
+            continue;
+          }
+          // A poison ticket must not spend the check. The move is what takes a ticket off
+          // the list, and a move that did not is retried. A defect still fails the column.
+          const outcome = yield* processBacklog(ticket, rounds).pipe(
+            Effect.catch((error) =>
+              log
+                .error(`backlog watch failed: ${detail(error)}`, {
+                  location: Log.Locations.automation,
+                  agentId: ticket.identifier,
+                  cause: error,
+                })
+                .pipe(Effect.as("failed" as const)),
+            ),
+          );
+          if (outcome === "queued") {
+            kicked = true;
+          }
+        }
+        for (const identifier of backlog.keys()) {
+          if (!present.has(identifier)) {
+            backlog.delete(identifier);
+          }
+        }
+      }),
+    );
+
+    yield* guard(
+      "automation needed",
+      Effect.gen(function* () {
+        const tickets = yield* linear.listAutomationNeeded.pipe(
+          Effect.catch((error) =>
+            log
+              .error(`automation needed watch failed: ${detail(error)}`, {
+                location: Log.Locations.automation,
+                agentId: Log.AutomationAgentId,
+                cause: error,
+              })
+              .pipe(Effect.as(undefined)),
+          ),
+        );
+        if (tickets === undefined) {
+          return;
+        }
+        const present = new Set<string>();
+        for (const ticket of tickets) {
+          present.add(ticket.identifier);
+          const prev = needed.get(ticket.identifier);
+          const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
+          const rounds = same ? prev.rounds + 1 : 0;
+          const settled = same && prev.settled;
+          needed.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled });
+          if (kicked || settled || rounds < ROUNDS_BEFORE_MOVE) {
+            continue;
+          }
+          const outcome = yield* processAutomationNeeded(ticket, rounds).pipe(
+            Effect.catch((error) =>
+              log
+                .error(`automation needed watch failed: ${detail(error)}`, {
+                  location: Log.Locations.automation,
+                  agentId: ticket.identifier,
+                  cause: error,
+                })
+                .pipe(Effect.as("failed" as const)),
+            ),
+          );
+          if (outcome === "queued" || outcome === "duplicate") {
+            needed.set(ticket.identifier, {
+              rounds,
+              updatedAt: ticket.updatedAt,
+              settled: true,
+            });
+          }
+          if (outcome === "queued") {
+            kicked = true;
+          }
+        }
+        for (const identifier of needed.keys()) {
+          if (!present.has(identifier)) {
+            needed.delete(identifier);
+          }
+        }
+      }),
+    );
+
+    yield* guard(
+      "needs review",
+      Effect.gen(function* () {
+        const tickets = yield* linear.listNeedsReview.pipe(
+          Effect.catch((error) =>
+            log
+              .error(`needs review watch failed: ${detail(error)}`, {
+                location: Log.Locations.automation,
+                agentId: Log.AutomationAgentId,
+                cause: error,
+              })
+              .pipe(Effect.as(undefined)),
+          ),
+        );
+        if (tickets === undefined) {
+          return;
+        }
+        const present = new Set<string>();
+        for (const ticket of tickets) {
+          present.add(ticket.identifier);
+          const prev = review.get(ticket.identifier);
+          const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
+          const rounds = same ? prev.rounds + 1 : 0;
+          const settled = same && prev.settled;
+          review.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt, settled });
+          if (kicked || settled || rounds < ROUNDS_BEFORE_MOVE) {
+            continue;
+          }
+          const outcome = yield* processNeedsReview(ticket, rounds).pipe(
+            Effect.catch((error) =>
+              log
+                .error(`needs review watch failed: ${detail(error)}`, {
+                  location: Log.Locations.automation,
+                  agentId: ticket.identifier,
+                  cause: error,
+                })
+                .pipe(Effect.as("failed" as const)),
+            ),
+          );
+          if (outcome === "queued" || outcome === "duplicate") {
+            review.set(ticket.identifier, {
+              rounds,
+              updatedAt: ticket.updatedAt,
+              settled: true,
+            });
+          }
+          if (outcome === "queued") {
+            kicked = true;
+          }
+        }
+        for (const identifier of review.keys()) {
+          if (!present.has(identifier)) {
+            review.delete(identifier);
+          }
+        }
+      }),
+    );
+  });
+
+  yield* tick.pipe(
+    Effect.repeat(Schedule.spaced(POLL_INTERVAL)),
+    Effect.forkScoped({ startImmediately: true }),
+  );
 });
