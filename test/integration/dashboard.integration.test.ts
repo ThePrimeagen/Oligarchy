@@ -1890,7 +1890,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     const { status, html } = await getPage("/servers", dbUrl);
     expect(status).toBe(200);
     expect(html).toMatch(
-      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 2<\/h3><table>/,
+      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>(?:<ul[^>]*aria-label="Test suites"[^>]*>[\s\S]*?<\/ul>)?<h3>running 2<\/h3><table>/,
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
@@ -1911,7 +1911,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     const { status, html } = await getPage("/servers/queue", dbUrl);
     expect(status).toBe(200);
     expect(html).toMatch(
-      /^<p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 2<\/h3><table>/,
+      /^<p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>/,
     );
     expect(html).toContain('href="https://linear.app/issue/QUE-102"');
     expect(html).toContain('href="/tickets/QUE-102"');
@@ -1959,12 +1959,12 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
     ]);
   });
 
-  it("counts running and pending jobs in full, and pass and fail only inside suites that still have a result open", async () => {
+  it("counts an open result as pending or running, and a closed suite with a failure as failed", async () => {
     const read = async (): Promise<ReadonlyArray<number>> => {
       const result = await runQuery(
         `
 const queue = await query.listAutomationQueue(url);
-console.log([queue.runningCount, queue.pendingCount, queue.suites.running, queue.suites.passed, queue.suites.failed].join(" "));
+console.log([queue.runningCount, queue.pendingCount, queue.suites.pending, queue.suites.running, queue.suites.passed, queue.suites.failed, queue.suites.aborted].join(" "));
 `,
         dbUrl,
       );
@@ -2052,14 +2052,219 @@ console.log([queue.runningCount, queue.pendingCount, queue.suites.running, queue
       const after = await read();
       expect(after[0] - before[0]).toBe(0);
       expect(after[1] - before[1]).toBe(0);
-      expect(after[2] - before[2]).toBe(2);
+      expect(after[2] - before[2]).toBe(1);
       expect(after[3] - before[3]).toBe(1);
-      expect(after[4] - before[4]).toBe(1);
+      expect(after[4] - before[4]).toBe(0);
+      expect(after[5] - before[5]).toBe(1);
+      expect(after[6] - before[6]).toBe(0);
     } finally {
       await seed(dbUrl, async (db) => {
         await db.delete(testResults).where(inArray(testResults.runId, inserted.runIds));
         await db.delete(testRuns).where(inArray(testRuns.id, inserted.runIds));
         await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+      });
+    }
+  });
+});
+
+const abortSuiteBindings = (databaseUrl: string) => ({
+  HYPERDRIVE: { connectionString: databaseUrl },
+  OLIGARCHY_TOKEN: "t",
+  AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
+  LINEAR_API_URL: "http://127.0.0.1:1/graphql",
+  LINEAR_API_TOKEN: "lin",
+});
+
+const postAbortSuite = async (databaseUrl: string, run: string): Promise<Page> => {
+  const response = await app.request(
+    "/suites/abort",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "hx-request": "true",
+      },
+      body: new URLSearchParams({ run }).toString(),
+    },
+    abortSuiteBindings(databaseUrl),
+  );
+  return { status: response.status, html: await response.text() };
+};
+
+// Aborting is the operator's way off a suite whose results never reached a verdict. The
+// automation server and Linear are down here: a running job still aborts in the database,
+// and the ticket stays on the board.
+describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
+  it("aborts the results still open and their jobs, and leaves a result that already passed", async () => {
+    const inserted = await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({ name: "suite-close", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "suite-close",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          status: "pending",
+        })
+        .returning({ id: testRuns.id });
+      const [second] = await db
+        .insert(testDefinitions)
+        .values({ name: "suite-close-b", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [third] = await db
+        .insert(testDefinitions)
+        .values({ name: "suite-close-c", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const results = await db
+        .insert(testResults)
+        .values([
+          {
+            runId: run.id,
+            definitionId: definition.id,
+            status: "running",
+            linearId: "CLS-RUN",
+          },
+          {
+            runId: run.id,
+            definitionId: second.id,
+            status: "pending",
+            linearId: "CLS-PEN",
+          },
+          { runId: run.id, definitionId: third.id, status: "passed", linearId: "CLS-OK" },
+        ])
+        .returning({ id: testResults.id, status: testResults.status });
+      const runningResult = results.find((row) => row.status === "running");
+      const pendingResult = results.find((row) => row.status === "pending");
+      const passedResult = results.find((row) => row.status === "passed");
+      if (
+        runningResult === undefined ||
+        pendingResult === undefined ||
+        passedResult === undefined
+      ) {
+        throw new Error("suite-close results were not inserted");
+      }
+      await db.insert(automationJobs).values([
+        { resultId: runningResult.id, action: "drive", status: "running" },
+        { resultId: pendingResult.id, action: "drive", status: "pending" },
+        { resultId: passedResult.id, action: "diagnose", status: "pending" },
+      ]);
+      return {
+        runId: run.id,
+        definitionIds: [definition.id, second.id, third.id],
+        resultIds: results.map((row) => row.id),
+        passedId: passedResult.id,
+      };
+    });
+    try {
+      const before = await getPage("/servers/queue", dbUrl);
+      expect(before.html).toContain(`value="${inserted.runId}"`);
+      const page = await postAbortSuite(dbUrl, inserted.runId);
+      expect(page.status).toBe(200);
+      expect(page.html).not.toContain(`value="${inserted.runId}"`);
+      expect(page.html).toContain(`>${inserted.runId.slice(0, 6)}</span><span>aborted</span>`);
+      expect(page.html).not.toContain("postgres://");
+      const stored = await seed(dbUrl, async (db) => {
+        const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
+        const results = await db
+          .select({
+            id: testResults.id,
+            status: testResults.status,
+            reason: testResults.reason,
+            finishedAt: testResults.finishedAt,
+          })
+          .from(testResults)
+          .where(eq(testResults.runId, inserted.runId));
+        const jobs = await db
+          .select({
+            resultId: automationJobs.resultId,
+            status: automationJobs.status,
+            reason: automationJobs.reason,
+            finishedAt: automationJobs.finishedAt,
+          })
+          .from(automationJobs)
+          .where(inArray(automationJobs.resultId, inserted.resultIds));
+        return { run, results, jobs };
+      });
+      expect(stored.run?.status).toBe("aborted");
+      expect(stored.run?.reason).toBe("aborted");
+      expect(stored.run?.endedAt).toBeInstanceOf(Date);
+      const byId = new Map(stored.results.map((row) => [row.id, row]));
+      const passed = byId.get(inserted.passedId);
+      expect(passed?.status).toBe("passed");
+      expect(passed?.finishedAt).toBeNull();
+      for (const result of stored.results) {
+        if (result.id === inserted.passedId) {
+          continue;
+        }
+        expect(result.status).toBe("aborted");
+        expect(result.reason).toBe("aborted");
+        expect(result.finishedAt).toBeInstanceOf(Date);
+      }
+      const passedJob = stored.jobs.find((job) => job.resultId === inserted.passedId);
+      expect(passedJob?.status).toBe("pending");
+      expect(passedJob?.finishedAt).toBeNull();
+      for (const job of stored.jobs) {
+        if (job.resultId === inserted.passedId) {
+          continue;
+        }
+        expect(job.status).toBe("aborted");
+        expect(job.reason).toBe("aborted");
+        expect(job.finishedAt).toBeInstanceOf(Date);
+      }
+    } finally {
+      await seed(dbUrl, async (db) => {
+        await db.delete(automationJobs).where(inArray(automationJobs.resultId, inserted.resultIds));
+        await db.delete(testResults).where(eq(testResults.runId, inserted.runId));
+        await db.delete(testRuns).where(eq(testRuns.id, inserted.runId));
+        await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+      });
+    }
+  });
+
+  it("leaves a suite whose results have all closed", async () => {
+    const inserted = await seed(dbUrl, async (db) => {
+      const [definition] = await db
+        .insert(testDefinitions)
+        .values({ name: "suite-close-done", description: "d", instruction: "i", proof: "p" })
+        .returning({ id: testDefinitions.id });
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "suite-close-done",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          status: "pending",
+        })
+        .returning({ id: testRuns.id });
+      const [result] = await db
+        .insert(testResults)
+        .values({ runId: run.id, definitionId: definition.id, status: "passed" })
+        .returning({ id: testResults.id });
+      return { runId: run.id, definitionId: definition.id, resultId: result.id };
+    });
+    try {
+      const page = await postAbortSuite(dbUrl, inserted.runId);
+      expect(page.status).toBe(200);
+      expect(page.html).not.toContain(`value="${inserted.runId}"`);
+      const stored = await seed(dbUrl, async (db) => {
+        const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
+        const [result] = await db
+          .select({ status: testResults.status })
+          .from(testResults)
+          .where(eq(testResults.id, inserted.resultId));
+        return { run, result };
+      });
+      expect(stored.run?.status).toBe("pending");
+      expect(stored.run?.endedAt).toBeNull();
+      expect(stored.result?.status).toBe("passed");
+    } finally {
+      await seed(dbUrl, async (db) => {
+        await db.delete(testResults).where(eq(testResults.runId, inserted.runId));
+        await db.delete(testRuns).where(eq(testRuns.id, inserted.runId));
+        await db.delete(testDefinitions).where(eq(testDefinitions.id, inserted.definitionId));
       });
     }
   });
@@ -2771,8 +2976,9 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       expect(response.status).toBe(200);
       const html = await response.text();
       expect(html).toMatch(
-        /^<p>\d+ test suites? running(?: · \d+ passed · \d+ failed(?: · \d+\.\d% pass)?)?<\/p><h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/,
+        /^<p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>/,
       );
+      expect(html).toMatch(/<h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/);
       expect(html).toMatch(
         /<h3>pending 1<\/h3><table>.*?<a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-2">ABT-HX-2<\/a>.*?<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-1">ABT-HX-1<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1">abort-htmx-pending<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><\/td><\/tr>/s,
       );

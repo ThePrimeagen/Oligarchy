@@ -70,26 +70,62 @@ export type AutomationJob = {
   readonly queriedAt: Date;
 };
 
-// Test suites still open, and how their results have landed so far. A suite is open
-// while any of its results is pending or running; passed and failed are those
-// results, not the ones in a suite that has already closed.
-export type TestSuiteSummary = {
+// A suite is one test run, judged from its results. The run row's own status is not
+// that: it is opened pending, and a row that still says running can already be finished.
+// Running wins over pending, and either wins over a verdict, so a suite with one result
+// still open stays open. A closed suite with a failure is failed; one with a pass and no
+// failure is passed; one whose results were only aborted or timed out is aborted.
+export type SuiteStatus = "pending" | "running" | "passed" | "failed" | "aborted";
+
+// One run's result tallies. startedAt is the run's created stamp, milliseconds.
+// stopped is results aborted or timed out: a pass beside one of those is not a success.
+export type SuiteRow = {
+  readonly id: string;
+  readonly name: string;
+  readonly startedAt: number;
+  readonly pending: number;
+  readonly running: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly stopped: number;
+};
+
+// The same row, classified, with startedAt as the clock the page reads an age from.
+export type SuitePill = {
+  readonly id: string;
+  readonly name: string;
+  readonly status: SuiteStatus;
+  readonly startedAt: Date;
+  readonly pending: number;
   readonly running: number;
   readonly passed: number;
   readonly failed: number;
 };
 
+// Counts are every suite. pills are the fifty newest finished, then the fifty oldest
+// still running, then the fifty oldest still pending: the finished ones show how the
+// last runs landed, and the open ones are the runs that never quite finished.
+export type SuiteBoard = {
+  readonly pending: number;
+  readonly running: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly aborted: number;
+  readonly queriedAt: Date;
+  readonly pills: ReadonlyArray<SuitePill>;
+};
+
 // The queue as the page shows it. running and pending are the fifty an operator
-// reads; the counts beside those headings are the whole lists. suites is every
-// run that still has a result open. Completed is the fifty that finished last,
-// and has no count: that total only grows.
+// reads; the counts beside those headings are the whole lists. suites is every run,
+// counted in full, with the pills cut at fifty. Completed is the fifty that finished
+// last, and has no count: that total only grows.
 export type AutomationQueue = {
   readonly running: ReadonlyArray<AutomationJob>;
   readonly pending: ReadonlyArray<AutomationJob>;
   readonly completed: ReadonlyArray<AutomationJob>;
   readonly runningCount: number;
   readonly pendingCount: number;
-  readonly suites: TestSuiteSummary;
+  readonly suites: SuiteBoard;
 };
 
 const countOf = (
@@ -800,13 +836,74 @@ export function listServers(connectionString: string): Promise<Server[]> {
 // Fifty of each list: an operator reads the front of the queue and what finished last.
 const QUEUE_LIMIT = 50;
 
-// A run still in progress: one of its results has not closed. The run row's own status is not
-// that — it is opened pending, and a row that still says running can already be finished.
-const openRunIds = (db: NodePgDatabase) =>
-  db
-    .selectDistinct({ runId: testResults.runId })
-    .from(testResults)
-    .where(inArray(testResults.status, ["pending", "running"]));
+// The same fifty for suite pills. Finished keeps the newest: that is how the last runs landed.
+// Running and pending keep the oldest: those are the ones that never quite finished.
+const SUITE_PILL_LIMIT = 50;
+
+const suiteStatusOf = (row: SuiteRow): SuiteStatus => {
+  if (row.running > 0) {
+    return "running";
+  }
+  if (row.pending > 0) {
+    return "pending";
+  }
+  if (row.failed > 0) {
+    return "failed";
+  }
+  if (row.passed > 0 && row.stopped === 0) {
+    return "passed";
+  }
+  return "aborted";
+};
+
+const byStartedAt = (
+  left: { readonly startedAt: number; readonly id: string },
+  right: { readonly startedAt: number; readonly id: string },
+): number => left.startedAt - right.startedAt || left.id.localeCompare(right.id);
+
+type OrderedSuite = SuiteRow & { readonly status: SuiteStatus };
+
+export type OrderedSuites = {
+  readonly pending: number;
+  readonly running: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly aborted: number;
+  readonly pills: ReadonlyArray<OrderedSuite>;
+};
+
+// Counts are the whole set. The pills are three groups in the order an operator scans them:
+// the latest finished runs, oldest of that fifty on the left, then the oldest runs still
+// running, then the oldest still pending.
+export function orderSuites(rows: ReadonlyArray<SuiteRow>): OrderedSuites {
+  const counted = { pending: 0, running: 0, passed: 0, failed: 0, aborted: 0 };
+  const finished: OrderedSuite[] = [];
+  const running: OrderedSuite[] = [];
+  const pending: OrderedSuite[] = [];
+  for (const row of rows) {
+    const status = suiteStatusOf(row);
+    counted[status] += 1;
+    const pill: OrderedSuite = { ...row, status };
+    if (status === "running") {
+      running.push(pill);
+    } else if (status === "pending") {
+      pending.push(pill);
+    } else {
+      finished.push(pill);
+    }
+  }
+  finished.sort(byStartedAt);
+  running.sort(byStartedAt);
+  pending.sort(byStartedAt);
+  return {
+    ...counted,
+    pills: [
+      ...finished.slice(-SUITE_PILL_LIMIT),
+      ...running.slice(0, SUITE_PILL_LIMIT),
+      ...pending.slice(0, SUITE_PILL_LIMIT),
+    ],
+  };
+}
 
 // The queue in three lists, each ordered and cut by the database, plus the totals the headings
 // show and the open suites. Running and pending follow claim order: mint, then diagnose, then
@@ -855,18 +952,47 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .from(automationJobs)
       .where(inArray(automationJobs.status, ["running", "pending"]))
       .groupBy(automationJobs.status);
-    const suiteCounts = await db
-      .select({ total: count().mapWith(Number) })
-      .from(openRunIds(db).as("open_runs"));
-    const verdicts = await db
+    // One row per run. A result still pending or running keeps the suite open even when
+    // every job for it has already stopped, which is how the running count used to stick.
+    const suiteRows = await db
       .select({
-        status: testResults.status,
-        total: count().mapWith(Number),
+        id: testRuns.id,
+        name: testRuns.name,
+        startedAt: testRuns.startedAt,
+        pending: sql<number>`count(*) filter (where ${testResults.status} = 'pending')`.mapWith(
+          Number,
+        ),
+        running: sql<number>`count(*) filter (where ${testResults.status} = 'running')`.mapWith(
+          Number,
+        ),
+        passed: sql<number>`count(*) filter (where ${testResults.status} = 'passed')`.mapWith(
+          Number,
+        ),
+        failed: sql<number>`count(*) filter (where ${testResults.status} = 'failed')`.mapWith(
+          Number,
+        ),
+        stopped:
+          sql<number>`count(*) filter (where ${testResults.status} in ('aborted', 'timed_out'))`.mapWith(
+            Number,
+          ),
+        queriedAt: sql<Date>`(select CURRENT_TIMESTAMP)`.mapWith(testRuns.startedAt),
       })
-      .from(testResults)
-      .where(inArray(testResults.runId, openRunIds(db)))
-      .groupBy(testResults.status);
-    const [suiteCount] = suiteCounts;
+      .from(testRuns)
+      .innerJoin(testResults, eq(testResults.runId, testRuns.id))
+      .groupBy(testRuns.id, testRuns.name, testRuns.startedAt);
+    const [firstSuite] = suiteRows;
+    const ordered = orderSuites(
+      suiteRows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        startedAt: row.startedAt.getTime(),
+        pending: row.pending,
+        running: row.running,
+        passed: row.passed,
+        failed: row.failed,
+        stopped: row.stopped,
+      })),
+    );
     return {
       running,
       pending,
@@ -874,9 +1000,22 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       runningCount: countOf(jobCounts, "running"),
       pendingCount: countOf(jobCounts, "pending"),
       suites: {
-        running: suiteCount?.total ?? 0,
-        passed: countOf(verdicts, "passed"),
-        failed: countOf(verdicts, "failed"),
+        pending: ordered.pending,
+        running: ordered.running,
+        passed: ordered.passed,
+        failed: ordered.failed,
+        aborted: ordered.aborted,
+        queriedAt: firstSuite?.queriedAt ?? new Date(0),
+        pills: ordered.pills.map((pill) => ({
+          id: pill.id,
+          name: pill.name,
+          status: pill.status,
+          startedAt: new Date(pill.startedAt),
+          pending: pill.pending,
+          running: pill.running,
+          passed: pill.passed,
+          failed: pill.failed,
+        })),
       },
     };
   });
@@ -1273,6 +1412,112 @@ export function abortAutomationJob(
       .returning({ id: automationJobs.id });
     return rows.length > 0;
   });
+}
+
+export type OpenSuiteJob = {
+  readonly ticket: string | null;
+  readonly action: (typeof automationJobs.$inferSelect)["action"];
+};
+
+// Pending jobs of results this suite has not aborted. Aborting them before the
+// automation-server round trip is what keeps a claim from starting a guest during
+// that wait. A job whose result already passed or failed stays: its diagnose is
+// still the review.
+export function abortPendingSuiteJobs(connectionString: string, runId: string): Promise<void> {
+  return withDatabase(connectionString, async (db) => {
+    await db
+      .update(automationJobs)
+      .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
+      .where(
+        and(
+          eq(automationJobs.status, "pending"),
+          inArray(
+            automationJobs.resultId,
+            db
+              .select({ id: testResults.id })
+              .from(testResults)
+              .where(
+                and(
+                  eq(testResults.runId, runId),
+                  inArray(testResults.status, ["pending", "running"]),
+                ),
+              ),
+          ),
+        ),
+      );
+  });
+}
+
+// Running jobs of results this suite has not aborted. A pending job has no client,
+// so it is aborted before this read. The clock keeps the read out of Hyperdrive's
+// cache, so a job claimed since the last poll is still here to abort.
+export function listOpenSuiteJobs(
+  connectionString: string,
+  runId: string,
+): Promise<OpenSuiteJob[]> {
+  return withDatabase(connectionString, (db) =>
+    db
+      .select({
+        ticket: testResults.linearId,
+        action: automationJobs.action,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+      })
+      .from(automationJobs)
+      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+      .where(
+        and(
+          eq(testResults.runId, runId),
+          inArray(testResults.status, ["pending", "running"]),
+          eq(automationJobs.status, "running"),
+        ),
+      ),
+  );
+}
+
+export type AbortedSuite = {
+  readonly aborted: boolean;
+  readonly tickets: ReadonlyArray<string>;
+};
+
+// Aborts a suite that still has a result open. Those results, and the jobs still waiting
+// or running for them, become aborted, and the run row ends with them. A suite that has
+// already finished is left alone, so a second abort does not rewrite a pass. The tickets
+// are the ones the board should move; a result with none has nothing to move.
+export function abortTestSuite(connectionString: string, runId: string): Promise<AbortedSuite> {
+  return withDatabase(connectionString, (db) =>
+    db.transaction(async (tx) => {
+      const results = await tx
+        .update(testResults)
+        .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
+        .where(
+          and(eq(testResults.runId, runId), inArray(testResults.status, ["pending", "running"])),
+        )
+        .returning({ id: testResults.id, ticket: testResults.linearId });
+      if (results.length === 0) {
+        return { aborted: false, tickets: [] };
+      }
+      await tx
+        .update(automationJobs)
+        .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
+        .where(
+          and(
+            inArray(
+              automationJobs.resultId,
+              results.map((result) => result.id),
+            ),
+            inArray(automationJobs.status, ["pending", "running"]),
+          ),
+        );
+      await tx
+        .update(testRuns)
+        .set({ status: "aborted", reason: "aborted", endedAt: sql`now()` })
+        .where(eq(testRuns.id, runId));
+      return {
+        aborted: true,
+        tickets: results.flatMap((result) => (result.ticket === null ? [] : [result.ticket])),
+      };
+    }),
+  );
 }
 
 // Readings already ordered by type, name, then reported_at: consecutive rows of the same

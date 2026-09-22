@@ -6,6 +6,9 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import {
   abortAutomationJob,
   addServer,
+  abortPendingSuiteJobs,
+  abortTestSuite,
+  listOpenSuiteJobs,
   definitionStats,
   deleteOldRows,
   getImage,
@@ -975,6 +978,100 @@ app.post("/abort", async (context) => {
   } catch (error) {
     Sentry.captureException(error);
     console.error("dashboard: aborting a job:", errorMessage(error));
+  }
+  return reply();
+});
+
+// A uuid, the shape test_runs.id has. Anything else is not a suite to abort.
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// POST /suites/abort stops one suite that never finished. Pending jobs abort here first, the
+// same way /abort does, so a claim during the round trip never sees them. A running job is the
+// automation server's to stop. A miss still aborts the row here, same as /abort's running
+// fallback, and the client may still be driving; the VM itself ends when commands stop. The
+// results still pending or running become aborted, which is what takes the suite out of the
+// running count, and each of their tickets moves to Aborted. A suite that has already finished
+// is left as it is. A Linear miss is logged and the rows stay aborted. The click answers with
+// the queue.
+app.post("/suites/abort", async (context) => {
+  const wantsFragment = context.req.header("hx-request") === "true";
+  const connectionString = context.env.HYPERDRIVE.connectionString;
+  const reply = async () => {
+    if (!wantsFragment) {
+      return context.redirect("/servers", 303);
+    }
+    try {
+      const queue = await listAutomationQueue(connectionString);
+      return context.html(<Queue queue={queue} />);
+    } catch (error) {
+      Sentry.captureException(error);
+      console.error("dashboard: aborting a suite:", errorMessage(error));
+      return context.html(<p>error: internal error</p>);
+    }
+  };
+  try {
+    const body = await context.req.parseBody();
+    const run = body.run;
+    if (typeof run !== "string" || !RUN_ID.test(run)) {
+      return reply();
+    }
+    await abortPendingSuiteJobs(connectionString, run);
+    // The first pass is the slow one. A claim that won the pending abort shows up on
+    // the second. A job that becomes running during that second pass is still running
+    // afterwards; that window is one read, not the whole abort loop.
+    const stopRunning = async (): Promise<boolean> => {
+      const jobs = await listOpenSuiteJobs(connectionString, run);
+      let missed = false;
+      for (const job of jobs) {
+        if (job.ticket === null) {
+          missed = true;
+          continue;
+        }
+        try {
+          const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ticket: job.ticket, action: job.action }),
+            signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+          });
+          if (response.status !== 200) {
+            missed = true;
+            console.error(
+              `dashboard: aborting a suite: automation server returned ${String(response.status)}`,
+            );
+          }
+        } catch (error) {
+          missed = true;
+          console.error("dashboard: aborting a suite:", errorMessage(error));
+        }
+      }
+      return missed;
+    };
+    const missedFirst = await stopRunning();
+    const missed = (await stopRunning()) || missedFirst;
+    const suite = await abortTestSuite(connectionString, run);
+    if (suite.aborted && missed) {
+      Sentry.captureException(new Error("Cloudflare aborted job"));
+    }
+    if (suite.aborted) {
+      for (const ticket of suite.tickets) {
+        try {
+          await abortLinearIssue(context.env, ticket);
+        } catch (error) {
+          Sentry.captureException(error);
+          console.error(
+            `dashboard: aborting a suite: ${ticket} stays on the board:`,
+            errorMessage(error),
+          );
+        }
+      }
+    }
+  } catch (error) {
+    Sentry.captureException(error);
+    console.error("dashboard: aborting a suite:", errorMessage(error));
   }
   return reply();
 });

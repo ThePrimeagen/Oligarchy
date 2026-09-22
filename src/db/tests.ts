@@ -1,4 +1,4 @@
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -183,7 +183,14 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
               sessionId === null ? undefined : { sessionId },
             ),
           )
-          .where(eq(DbSchema.testResults.id, resultId))
+          .where(
+            and(
+              eq(DbSchema.testResults.id, resultId),
+              // An operator close writes aborted. A later test-results must not replace it.
+              // A pass or a fail may still be revised.
+              ne(DbSchema.testResults.status, "aborted"),
+            ),
+          )
           .returning({ id: DbSchema.testResults.id }),
       );
       return rows.length > 0;

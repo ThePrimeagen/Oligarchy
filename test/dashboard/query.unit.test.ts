@@ -7,6 +7,7 @@ import {
   failureDiagnosis,
   recentDefinitionRuns,
   resultDurationMs,
+  orderSuites,
   runningForDefinition,
   durationChart,
   followEvents,
@@ -21,6 +22,7 @@ import {
   type FollowLog,
   type ProcessStat,
   type Session,
+  type SuiteRow,
   type TestDefinition,
   type TestResultOutcome,
 } from "../../src/dashboard/query.ts";
@@ -836,5 +838,132 @@ describe("followEvents unhappy path", () => {
       true,
       "running",
     ]);
+  });
+});
+
+const suiteRow = (
+  id: string,
+  startedAt: number,
+  counts: Partial<Pick<SuiteRow, "pending" | "running" | "passed" | "failed" | "stopped">> = {},
+): SuiteRow => ({
+  id,
+  name: id,
+  startedAt,
+  pending: 0,
+  running: 0,
+  passed: 0,
+  failed: 0,
+  stopped: 0,
+  ...counts,
+});
+
+describe("orderSuites happy path", () => {
+  it("counts every suite and orders the pills finished, then running, then pending, each by createdAt", () => {
+    const board = orderSuites([
+      suiteRow("run-pending-new", 50, { pending: 2, passed: 1 }),
+      suiteRow("run-failed", 20, { failed: 1, passed: 3 }),
+      suiteRow("run-running-old", 5, { running: 1, pending: 4 }),
+      suiteRow("run-passed", 10, { passed: 2 }),
+      suiteRow("run-pending-old", 4, { pending: 1 }),
+      suiteRow("run-running-new", 40, { running: 2 }),
+    ]);
+    expect(board.pending).toBe(2);
+    expect(board.running).toBe(2);
+    expect(board.passed).toBe(1);
+    expect(board.failed).toBe(1);
+    expect(board.aborted).toBe(0);
+    expect(board.pills.map((pill) => pill.id)).toEqual([
+      "run-passed",
+      "run-failed",
+      "run-running-old",
+      "run-running-new",
+      "run-pending-old",
+      "run-pending-new",
+    ]);
+    expect(board.pills.map((pill) => pill.status)).toEqual([
+      "passed",
+      "failed",
+      "running",
+      "running",
+      "pending",
+      "pending",
+    ]);
+  });
+
+  it("keeps the latest fifty finished suites and the oldest fifty that are still open", () => {
+    const finished = Array.from({ length: 51 }, (_, index) =>
+      suiteRow(`fin-${String(index).padStart(2, "0")}`, index, { passed: 1 }),
+    );
+    const running = Array.from({ length: 51 }, (_, index) =>
+      suiteRow(`run-${String(index).padStart(2, "0")}`, 1_000 + index, { running: 1 }),
+    );
+    const pending = Array.from({ length: 51 }, (_, index) =>
+      suiteRow(`pen-${String(index).padStart(2, "0")}`, 2_000 + index, { pending: 1 }),
+    );
+    const board = orderSuites([...pending, ...running, ...finished]);
+    expect(board.passed).toBe(51);
+    expect(board.running).toBe(51);
+    expect(board.pending).toBe(51);
+    const ids = board.pills.map((pill) => pill.id);
+    expect(ids).toHaveLength(150);
+    expect(ids.slice(0, 50)).toEqual(
+      Array.from({ length: 50 }, (_, index) => `fin-${String(index + 1).padStart(2, "0")}`),
+    );
+    expect(ids.slice(50, 100)).toEqual(
+      Array.from({ length: 50 }, (_, index) => `run-${String(index).padStart(2, "0")}`),
+    );
+    expect(ids.slice(100)).toEqual(
+      Array.from({ length: 50 }, (_, index) => `pen-${String(index).padStart(2, "0")}`),
+    );
+    expect(ids).not.toContain("fin-00");
+    expect(ids).not.toContain("run-50");
+    expect(ids).not.toContain("pen-50");
+  });
+
+  it("orders two suites created together by id", () => {
+    const board = orderSuites([suiteRow("b", 1, { passed: 1 }), suiteRow("a", 1, { failed: 1 })]);
+    expect(board.pills.map((pill) => pill.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("orderSuites unhappy path", () => {
+  it("is empty when nothing has run", () => {
+    expect(orderSuites([])).toEqual({
+      pending: 0,
+      running: 0,
+      passed: 0,
+      failed: 0,
+      aborted: 0,
+      pills: [],
+    });
+  });
+
+  it("calls a suite aborted when every result was aborted or timed out, and does not count it failed", () => {
+    const board = orderSuites([suiteRow("stopped", 3, { stopped: 2 })]);
+    expect(board.aborted).toBe(1);
+    expect(board.failed).toBe(0);
+    expect(board.passed).toBe(0);
+    expect(board.pills.map((pill) => pill.status)).toEqual(["aborted"]);
+  });
+
+  it("does not call a suite succeeded when a pass shares the run with an abort", () => {
+    const board = orderSuites([suiteRow("mixed", 6, { passed: 1, stopped: 2 })]);
+    expect(board.aborted).toBe(1);
+    expect(board.passed).toBe(0);
+    expect(board.pills[0]?.status).toBe("aborted");
+  });
+
+  it("stays pending while a result is still pending, even after another result failed", () => {
+    const board = orderSuites([suiteRow("open", 8, { pending: 1, failed: 2, passed: 1 })]);
+    expect(board.pending).toBe(1);
+    expect(board.failed).toBe(0);
+    expect(board.pills[0]?.status).toBe("pending");
+  });
+
+  it("is failed once it has closed with a failure, even when other results passed", () => {
+    const board = orderSuites([suiteRow("done", 8, { failed: 1, passed: 4 })]);
+    expect(board.failed).toBe(1);
+    expect(board.passed).toBe(0);
+    expect(board.pills[0]?.status).toBe("failed");
   });
 });

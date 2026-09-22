@@ -685,26 +685,28 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const tests = yield* Tests.TestStore;
     const log = yield* Log.Log;
     const agentSession = yield* sessions.sessionForAgent(input.agentId);
-    yield* tests
-      .closeResult(
-        input.id,
-        input.status,
-        Option.getOrNull(input.reason),
-        Option.getOrNull(agentSession),
-      )
-      .pipe(
-        Effect.filterOrFail(
-          (closed) => closed,
-          () => refuse(`test-results: result ${input.id} not found`),
-        ),
+    const closed = yield* tests.closeResult(
+      input.id,
+      input.status,
+      Option.getOrNull(input.reason),
+      Option.getOrNull(agentSession),
+    );
+    if (!closed) {
+      const found = yield* tests.findResult(input.id);
+      return yield* refuse(
+        Option.match(found, {
+          onNone: () => `test-results: result ${input.id} not found`,
+          onSome: (row) => `test-results: result ${input.id} is ${row.status}`,
+        }),
       );
+    }
     const reason = Option.match(input.reason, {
       onNone: () => "",
       onSome: (text) => `; ${text}`,
     });
     // The agent has no live session on this process, so its colour is taken here for the line.
     yield* log.acquireColor(input.agentId);
-    yield* log.info(
+    return yield* log.info(
       `test result ${input.id}: ${input.status}${reason}`,
       Object.assign(
         { agentId: input.agentId },
