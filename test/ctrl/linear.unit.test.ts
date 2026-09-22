@@ -262,13 +262,25 @@ describe("Linear happy path", () => {
       const pages = [
         {
           nodes: [
-            { id: "i1", identifier: "OLI-1", title: "one", url: "https://linear.app/issue/OLI-1" },
+            {
+              id: "i1",
+              identifier: "OLI-1",
+              title: "one",
+              url: "https://linear.app/issue/OLI-1",
+              updatedAt: "2026-09-22T13:00:00.000Z",
+            },
           ],
           pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
         },
         {
           nodes: [
-            { id: "i2", identifier: "OLI-2", title: "two", url: "https://linear.app/issue/OLI-2" },
+            {
+              id: "i2",
+              identifier: "OLI-2",
+              title: "two",
+              url: "https://linear.app/issue/OLI-2",
+              updatedAt: "2026-09-22T13:02:00.000Z",
+            },
           ],
           pageInfo: { hasNextPage: false, endCursor: null },
         },
@@ -288,12 +300,54 @@ describe("Linear happy path", () => {
       );
       expect(bodies).toHaveLength(2);
       expect(bodies[0]?.query).toMatch(/issues\(first: 100, after: \$after, filter: \$filter\)/);
+      expect(bodies[0]?.query).toMatch(/updatedAt/);
       expect(bodies[0]?.variables).toEqual({
         filter: { team: { name: { eq: "Oligarchy" } }, state: { type: { eq: "backlog" } } },
       });
       expect(bodies[1]?.variables).toEqual({
         filter: { team: { name: { eq: "Oligarchy" } }, state: { type: { eq: "backlog" } } },
         after: "cursor-1",
+      });
+    }),
+  );
+
+  it.effect("listAutomationNeeded asks for the Automation Needed state by name", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() =>
+        FakeHttp.json({
+          data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        }),
+      );
+      yield* Effect.flatMap(Linear.Linear, (client) => client.listAutomationNeeded).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      expect(body.variables).toEqual({
+        filter: {
+          team: { name: { eq: "Oligarchy" } },
+          state: { name: { eq: "Automation Needed" } },
+        },
+      });
+      expect(body.query).toMatch(/updatedAt/);
+    }),
+  );
+
+  it.effect("listNeedsReview asks for the Needs Review state by name", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() =>
+        FakeHttp.json({
+          data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        }),
+      );
+      yield* Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      expect(body.variables).toEqual({
+        filter: {
+          team: { name: { eq: "Oligarchy" } },
+          state: { name: { eq: "Needs Review" } },
+        },
       });
     }),
   );
@@ -434,6 +488,61 @@ describe("Linear unhappy path", () => {
     }),
   );
 
+  it.effect("moveIssue sends the state and no description", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate") ? describeResponse() : happyLinear(body),
+      );
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      yield* Effect.flatMap(Linear.Linear, (client) =>
+        client.moveIssue(issue, stateId("Automation Needed")),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies).toEqual([
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: {
+            id: "issue-OLI-45",
+            input: { stateId: stateId("Automation Needed") },
+          },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("reports a move failure by ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.moveIssue(
+            {
+              id: "issue-OLI-45",
+              identifier: "OLI-45",
+              url: "https://linear.app/issue/OLI-45",
+            },
+            stateId("Automation Needed"),
+          ),
+        ),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveIssue",
+        message: "linear: moving OLI-45 failed",
+      });
+    }),
+  );
+
   it.effect("reports a description failure by ticket", () =>
     Effect.gen(function* () {
       const http = withHttp((body) => {
@@ -486,6 +595,23 @@ describe("Linear unhappy path", () => {
         message: "linear: invalid response",
       });
       expect(http.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect("listNeedsReview fails as an invalid response when a further page has no cursor", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({
+          data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } },
+        }),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        operation: "listNeedsReview",
+        message: "linear: invalid response",
+      });
     }),
   );
 

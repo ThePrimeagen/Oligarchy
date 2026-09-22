@@ -21,6 +21,9 @@ import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
+// The board watch calls Linear as soon as the server listens, once per column. https_proxy does
+// not cover node:https under Bun, so a serving test reaches api.linear.app; each column logs one failure.
+const LINEAR_TOKEN = "lin_api_test";
 const TOKEN = "test-token";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -47,6 +50,7 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     ...process.env,
     HOME: home,
     LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    LINEAR_API_TOKEN: LINEAR_TOKEN,
     OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
     https_proxy: "http://127.0.0.1:1",
@@ -260,6 +264,16 @@ describe("automation server startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("LINEAR_WEBHOOK_SECRET is not set");
+      expect(process.stdout()).not.toContain("listening");
+    }),
+  );
+
+  it.live("a missing LINEAR_API_TOKEN exits 1 with LINEAR_API_TOKEN is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnAutomationServer([], { LINEAR_API_TOKEN: "" });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("LINEAR_API_TOKEN is not set");
       expect(process.stdout()).not.toContain("listening");
     }),
   );

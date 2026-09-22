@@ -12,6 +12,7 @@ import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AutomationClient from "./client.ts";
+import * as Enqueue from "./enqueue.ts";
 import * as Signature from "./signature.ts";
 import * as Webhook from "./webhook.ts";
 
@@ -24,9 +25,6 @@ export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
   static readonly layer = Layer.effect(this)(this.make);
 }
 
-const isDuplicateJob = (error: Errors.DatabaseError): boolean =>
-  String(error.cause).includes("duplicate key");
-
 // HMAC is over the raw bytes. After verifying, parse identifier + state and enqueue drive or
 // diagnose when the Oligarchy board moves into Automation Needed or Needs Review.
 export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear", (handlers) =>
@@ -35,8 +33,6 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
       const secret = yield* LinearWebhookSecret;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const log = yield* Log.Log;
-      const tests = yield* Tests.TestStore;
-      const automation = yield* Automation.AutomationStore;
       const bytes = new Uint8Array(
         yield* request.arrayBuffer.pipe(
           Effect.mapError((cause) => Errors.Internal.make({ cause })),
@@ -62,45 +58,24 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         });
         return ok;
       }
-      const result = yield* tests
-        .findResultByLinearId(event.ticket)
-        .pipe(
-          Effect.mapError((error) => Errors.Internal.make({ cause: error, agentId: event.ticket })),
-        );
-      if (Option.isNone(result)) {
+      const placed = yield* Enqueue.enqueueTicket(event.ticket, job.value).pipe(
+        Effect.mapError((error) => Errors.Internal.make({ cause: error, agentId: event.ticket })),
+      );
+      if (placed.result === "missing") {
         yield* log.info(`linear webhook ignored; no result for ${event.state}`, {
           location: Log.Locations.automation,
           agentId: event.ticket,
         });
         return ok;
       }
-      // Automation Needed is a drive, unless this result is the mint install: that job is a
-      // mint, not a drive, so it is claimed ahead of the resumes waiting on it.
-      const definition = yield* tests
-        .definitionName(result.value.definitionId)
-        .pipe(
-          Effect.mapError((error) => Errors.Internal.make({ cause: error, agentId: event.ticket })),
-        );
-      const action =
-        job.value === "drive" && Option.isSome(definition) && definition.value === "mint"
-          ? "mint"
-          : job.value;
-      const outcome = yield* automation.enqueue({ resultId: result.value.id, action }).pipe(
-        Effect.as("queued" as const),
-        Effect.catchTag("DatabaseError", (error) =>
-          isDuplicateJob(error)
-            ? Effect.succeed("duplicate" as const)
-            : Effect.fail(Errors.Internal.make({ cause: error, agentId: event.ticket })),
-        ),
-      );
-      if (outcome === "duplicate") {
-        yield* log.info(`linear webhook ignored; ${action} already queued`, {
+      if (placed.result === "duplicate") {
+        yield* log.info(`linear webhook ignored; ${placed.action} already queued`, {
           location: Log.Locations.automation,
           agentId: event.ticket,
         });
         return ok;
       }
-      yield* log.info(`linear webhook queued ${action}; ${event.state}`, {
+      yield* log.info(`linear webhook queued ${placed.action}; ${event.state}`, {
         location: Log.Locations.automation,
         agentId: event.ticket,
       });
