@@ -1,4 +1,4 @@
-import { Array as Arr, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Array as Arr, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -14,6 +14,9 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
+// A ticket in Automation Needed that already has its pending job. The watch's list leaves
+// these out, so a restart does not keep a map of tickets that are waiting to run.
+export const READY_LABEL = "ready";
 
 export const LinearTicket = Schema.Struct({
   id: Schema.String,
@@ -113,6 +116,12 @@ type IssueFilter = {
   readonly state:
     | { readonly type: { readonly eq: string } }
     | { readonly name: { readonly eq: string } };
+  // Absent labels, or none of them named ready. A ready ticket is already queued.
+  readonly labels?: {
+    readonly or: ReadonlyArray<
+      { readonly null: true } | { readonly every: { readonly name: { readonly neq: string } } }
+    >;
+  };
 };
 
 const Nodes = Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) });
@@ -173,6 +182,7 @@ export type LinearService = {
     ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
+  readonly markReady: (ticket: LinearTicket) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -399,11 +409,42 @@ const makeLinear = (
       state: { name: { eq: name } },
     });
 
+    // The id does not change for the life of the process. A failed lookup is not stored, so the
+    // next ticket can try again. A tick that labels many tickets pays for the lookup once.
+    const readyLabel = yield* Ref.make<Option.Option<string>>(Option.none());
+
+    const markReady = Effect.fn("Linear.markReady")(function* (ticket: LinearTicket) {
+      const cached = yield* Ref.get(readyLabel);
+      let id = Option.getOrUndefined(cached);
+      if (id === undefined) {
+        const team = yield* teamId;
+        id = yield* labelId(team, READY_LABEL);
+        yield* Ref.set(readyLabel, Option.some(id));
+      }
+      yield* request(
+        "markReady",
+        ISSUE_UPDATE_MUTATION,
+        { id: ticket.id, input: { addedLabelIds: [id] } },
+        IssueUpdate,
+      ).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "markReady",
+              message: `linear: labeling ${ticket.identifier} ready failed`,
+            }),
+        ),
+      );
+    });
+
     const listBacklog = listIssues("listBacklog", BACKLOG_FILTER);
-    const listAutomationNeeded = listIssues(
-      "listAutomationNeeded",
-      stateFilter(AUTOMATION_NEEDED_STATE),
-    );
+    const listAutomationNeeded = listIssues("listAutomationNeeded", {
+      ...stateFilter(AUTOMATION_NEEDED_STATE),
+      labels: {
+        or: [{ null: true }, { every: { name: { neq: READY_LABEL } } }],
+      },
+    });
     const listNeedsReview = listIssues("listNeedsReview", stateFilter(NEEDS_REVIEW_STATE));
 
     return {
@@ -414,6 +455,7 @@ const makeLinear = (
       createIssue,
       describeIssue,
       moveIssue,
+      markReady,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,

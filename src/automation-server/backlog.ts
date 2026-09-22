@@ -16,6 +16,12 @@ const ROUNDS_BEFORE_MOVE = 3;
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 
+const labeled = (ticket: Linear.LinearBacklogTicket): Linear.LinearTicket => ({
+  id: ticket.id,
+  identifier: ticket.identifier,
+  url: ticket.url,
+});
+
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>
   isDatabaseError(error)
@@ -61,6 +67,21 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
+  const tests = yield* Tests.TestStore;
+  const automation = yield* Automation.AutomationStore;
+  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  // The move put it in the column the other watch reads. Ready means that watch can leave it.
+  if (Option.isSome(found) && (yield* automation.hasPending(found.value.id, placed.action))) {
+    yield* linear.markReady(labeled(ticket)).pipe(
+      Effect.catch((error) =>
+        log.error(`backlog watch failed to label ready: ${detail(error)}`, {
+          location: Log.Locations.automation,
+          agentId: ticket.identifier,
+          cause: error,
+        }),
+      ),
+    );
+  }
 });
 
 // The ticket stays in Automation Needed while the drive runs, so the caller settles a landed
@@ -72,6 +93,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   rounds: number,
 ) {
   const log = yield* Log.Log;
+  const linear = yield* Linear.Linear;
   const tests = yield* Tests.TestStore;
   const automation = yield* Automation.AutomationStore;
   const found = yield* tests.findResultByLinearId(ticket.identifier);
@@ -87,6 +109,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   const definition = yield* tests.definitionName(found.value.definitionId);
   // Same action enqueue would insert. A pending diagnose is a different job.
   if (yield* automation.hasPending(found.value.id, Enqueue.queuedAction("drive", definition))) {
+    yield* linear.markReady(labeled(ticket));
     return true;
   }
   const placed = yield* Enqueue.enqueueTicket(ticket.identifier, "drive");
@@ -107,6 +130,10 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
+  // A new row is pending. A duplicate of a finished row is not, and stays unlabeled.
+  if (placed.result === "queued") {
+    yield* linear.markReady(labeled(ticket));
+  }
   return true;
 });
 

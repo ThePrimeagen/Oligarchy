@@ -79,6 +79,15 @@ const start = (
     return { stores, log, moved, linear, scope };
   });
 
+const ready = (identifier: string) => ({
+  method: "markReady" as const,
+  ticket: {
+    id: `issue-${identifier}`,
+    identifier,
+    url: `https://linear.app/issue/${identifier}`,
+  },
+});
+
 const automationNeeded = (identifier: string): Move => ({
   issueId: `issue-${identifier}`,
   identifier,
@@ -91,7 +100,7 @@ describe("backlog watch happy path", () => {
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
-        const { stores, log, moved } = yield* start(board);
+        const { stores, log, moved, linear } = yield* start(board);
         seedResult(stores.tests, TICKET);
         expect(stores.automation.jobs).toEqual([]);
         expect(moved).toEqual([]);
@@ -104,6 +113,7 @@ describe("backlog watch happy path", () => {
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
         ]);
         expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
         expect(log.lines).toEqual([
           {
             level: "info",
@@ -120,7 +130,7 @@ describe("backlog watch happy path", () => {
   it.effect("queues mint, not drive, when the backlog ticket's result is the mint definition", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, moved, log } = yield* start(board);
+      const { stores, moved, log, linear } = yield* start(board);
       stores.tests.definitions.push({
         id: 1,
         name: "mint",
@@ -135,6 +145,7 @@ describe("backlog watch happy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
       ]);
       expect(moved).toEqual([automationNeeded(TICKET)]);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       expect(FakeLog.texts(log)).toEqual(["backlog watch moved to Automation Needed; queued mint"]);
     }),
   );
@@ -217,7 +228,7 @@ describe("backlog watch unhappy path", () => {
   it.effect("a drive already queued still moves the ticket (duplicate)", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, moved, log } = yield* start(board);
+      const { stores, moved, log, linear } = yield* start(board);
       seedResult(stores.tests, TICKET);
       stores.automation.jobs.push({
         id: "00000000-0000-4000-8000-000000000001",
@@ -236,6 +247,7 @@ describe("backlog watch unhappy path", () => {
       expect(FakeLog.texts(log)).toEqual([
         "backlog watch moved to Automation Needed; drive already queued",
       ]);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
     }),
   );
 
@@ -397,7 +409,7 @@ describe("automation needed watch happy path", () => {
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
-        const { stores, log, moved } = yield* startColumn("listAutomationNeeded", board);
+        const { stores, log, moved, linear } = yield* startColumn("listAutomationNeeded", board);
         seedResult(stores.tests, TICKET);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toEqual([]);
@@ -408,16 +420,18 @@ describe("automation needed watch happy path", () => {
         ]);
         expect(moved).toEqual([]);
         expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
         expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       }),
   );
 
   it.effect("queues mint when the Automation Needed ticket's result is the mint definition", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+      const { stores, moved, log, linear } = yield* startColumn("listAutomationNeeded", board);
       stores.tests.definitions.push(mintDefinition);
       seedResult(stores.tests, TICKET);
       yield* TestClock.adjust("90 seconds");
@@ -425,6 +439,7 @@ describe("automation needed watch happy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
       ]);
       expect(moved).toEqual([]);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       expect(FakeLog.texts(log)).toEqual(["automation needed watch queued mint"]);
     }),
   );
@@ -434,7 +449,7 @@ describe("automation needed watch happy path", () => {
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
-        const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+        const { stores, moved, log, linear } = yield* startColumn("listAutomationNeeded", board);
         seedResult(stores.tests, TICKET);
         stores.automation.jobs.push({
           id: "00000000-0000-4000-8000-000000000001",
@@ -453,16 +468,18 @@ describe("automation needed watch happy path", () => {
         ]);
         expect(moved).toEqual([]);
         expect(FakeLog.texts(log)).toEqual([]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
         expect(log.lines).toHaveLength(0);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       }),
   );
 
   it.effect("a pending mint is the queue row, so the watch does not enqueue another mint", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, log } = yield* startColumn("listAutomationNeeded", board);
+      const { stores, log, linear } = yield* startColumn("listAutomationNeeded", board);
       stores.tests.definitions.push(mintDefinition);
       seedResult(stores.tests, TICKET);
       stores.automation.jobs.push({
@@ -481,9 +498,11 @@ describe("automation needed watch happy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
       ]);
       expect(FakeLog.texts(log)).toEqual([]);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       yield* TestClock.adjust("60 seconds");
       expect(stores.automation.jobs).toHaveLength(1);
       expect(log.lines).toHaveLength(0);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
     }),
   );
 });
@@ -492,7 +511,7 @@ describe("needs review watch happy path", () => {
   it.effect("queues a diagnose after three unchanged rounds and does not move the ticket", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, log, moved } = yield* startColumn("listNeedsReview", board);
+      const { stores, log, moved, linear } = yield* startColumn("listNeedsReview", board);
       seedResult(stores.tests, TICKET);
       yield* TestClock.adjust("60 seconds");
       expect(stores.automation.jobs).toEqual([]);
@@ -502,6 +521,7 @@ describe("needs review watch happy path", () => {
       ]);
       expect(moved).toEqual([]);
       expect(FakeLog.texts(log)).toEqual(["needs review watch queued diagnose"]);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
       yield* TestClock.adjust("30 seconds");
       expect(stores.automation.jobs).toHaveLength(1);
       expect(log.lines).toHaveLength(1);
@@ -595,7 +615,7 @@ describe("automation needed and needs review watch unhappy path", () => {
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
-        const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+        const { stores, moved, log, linear } = yield* startColumn("listAutomationNeeded", board);
         seedResult(stores.tests, TICKET);
         stores.automation.jobs.push({
           id: "00000000-0000-4000-8000-000000000001",
@@ -614,16 +634,18 @@ describe("automation needed and needs review watch unhappy path", () => {
         ]);
         expect(moved).toEqual([]);
         expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already queued"]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
         expect(log.lines).toHaveLength(1);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
       }),
   );
 
   it.effect("a pending diagnose is not the drive, so the watch still queues the drive", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, log } = yield* startColumn("listAutomationNeeded", board);
+      const { stores, log, linear } = yield* startColumn("listAutomationNeeded", board);
       seedResult(stores.tests, TICKET);
       stores.automation.jobs.push({
         id: "00000000-0000-4000-8000-000000000001",
@@ -642,7 +664,68 @@ describe("automation needed and needs review watch unhappy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
       ]);
       expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
     }),
+  );
+
+  it.effect(
+    "a ready label that fails leaves the pending drive unlabeled and the next poll tries again",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "markReady",
+          message: "linear: labeling OLI-45 ready failed",
+        });
+        let fail = true;
+        const board = [ticket(TICKET, SEEN)];
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const labeled: Array<string> = [];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listAutomationNeeded: Effect.sync(() => [...board]),
+            markReady: (issue) =>
+              fail
+                ? Effect.fail(refused)
+                : Effect.sync(() => {
+                    labeled.push(issue.identifier);
+                  }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        stores.automation.jobs.push({
+          id: "00000000-0000-4000-8000-000000000001",
+          resultId: RESULT,
+          action: "drive",
+          status: "pending",
+          reason: null,
+          serverId: null,
+          createdAt: new Date(),
+          startedAt: null,
+          finishedAt: null,
+        });
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(labeled).toEqual([]);
+        expect(log.lines[0]).toMatchObject({
+          level: "error",
+          text: "automation needed watch failed: linear: labeling OLI-45 ready failed",
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        });
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(labeled).toEqual([TICKET]);
+        expect(stores.automation.jobs).toHaveLength(1);
+        yield* TestClock.adjust("30 seconds");
+        expect(labeled).toEqual([TICKET]);
+      }),
   );
 
   it.effect(
