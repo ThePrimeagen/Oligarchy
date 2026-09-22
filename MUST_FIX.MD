@@ -82,81 +82,88 @@ flowchart TB
   classDef decision fill:#f3e8ff,stroke:#9333ea,color:#581c87
 
   R1["− Claim immediately means running"]:::removed
-  R2["− Long-lived /run HTTP request is the only completion owner"]:::removed
-  R3["− Server restart trusts old running rows"]:::removed
-  R4["− Client reservations and children are invisible"]:::removed
+  R2["− Unexpected reserve failure fails the ticket"]:::removed
+  R3["− Driver is responsible for moving Linear to In Progress"]:::removed
+  R4["− Server restart trusts old running rows"]:::removed
   R5["− One terminal DB write with no retry"]:::removed
-  R6["− One running label covers claim, driver, and guest"]:::removed
 
-  N1["+ Claim becomes dispatching"]:::added
-  N2["+ Client starts child, records execution ID,<br/>and returns accepted"]:::added
-  N3["+ Client exposes reserved, active,<br/>and completed executions"]:::added
-  N4["+ Job becomes running only after<br/>client execution is confirmed"]:::added
-  N5["+ Automation server tracks current jobs in memory<br/>and reconciles all inherited rows on startup"]:::added
-  N6["+ Terminal writes retry;<br/>periodic reconciliation repairs misses"]:::added
-  N7["+ Dashboard distinguishes queued, dispatching,<br/>driver running, guest running, and stale"]:::added
-  N8["+ Dispatch remains gated until every inherited row<br/>is reattached or closed"]:::added
-  N9["+ Normal dispatch loop starts"]:::added
+  N1["+ Singleton dispatcher selects one pending job locally;<br/>database remains pending"]:::added
+  N2["+ Try every eligible automation client and QEMU server"]:::added
+  N3["+ Full or not minted is expected;<br/>try the next server"]:::added
+  N4["+ Any other server failure is reported to Sentry;<br/>then try the next server"]:::added
+  N5["+ Nobody can reserve: remain pending,<br/>leave Linear unchanged, and wait"]:::added
+  N6["+ Client and optional QEMU reservation secured"]:::added
+  N7["+ Retry database pending → running three times"]:::added
+  N8["+ Automation server moves Linear to In Progress"]:::added
+  N9["+ Tell the reserved client to run"]:::added
+  N10["+ Startup cancels and fails inherited running work<br/>before normal dispatch starts"]:::added
+  N11["+ Terminal writes retry;<br/>periodic reconciliation repairs misses"]:::added
 
   R1 -. "replace" .-> N1
   R2 -. "replace" .-> N2
-  R4 -. "replace" .-> N3
-  R3 -. "replace" .-> N5
-  R5 -. "replace" .-> N6
-  R6 -. "replace" .-> N7
+  R3 -. "replace" .-> N8
+  R4 -. "replace" .-> N10
+  R5 -. "replace" .-> N11
 
-  P["automation_jobs: pending"]:::kept
-  D["automation_jobs: dispatching"]:::kept
-  RES["Client and optional QEMU reservation"]:::kept
-  EX["Confirmed client execution ID"]:::kept
-  RUN["automation_jobs: running"]:::kept
-  LIN["Driver moves Linear to In Progress"]:::kept
-  GUEST["Optional QEMU guest and test result"]:::kept
+  P["automation_jobs: pending<br/>Linear: Automation Needed"]:::kept
+  MORE{"More eligible servers?"}:::decision
+  RUN["automation_jobs: running<br/>Linear: In Progress"]:::kept
+  EXEC["OpenCode executes the test"]:::kept
   DONE["Result, Linear, client execution,<br/>and job close consistently"]:::kept
+  FAIL["automation_jobs: failed<br/>Linear: Failed"]:::kept
+  DBFAIL["+ Database still fails after three attempts:<br/>cancel reservations, report Sentry, fail"]:::added
+  LINEARFAIL["+ Linear move fails after retries:<br/>cancel reservations and fail"]:::added
+  RUNFAIL["+ Client cannot start execution:<br/>cancel reservations and fail"]:::added
 
-  P --> N1 --> D --> RES --> N2 --> EX --> N4 --> RUN --> LIN --> GUEST --> DONE
-  N3 --> EX
-  N6 --> DONE
-  RUN --> N7
-  D --> N7
+  P --> N1 --> N2
+  N2 -->|"reserved"| N6 --> N7
+  N2 -->|"full / not minted"| N3 --> MORE
+  N2 -->|"unexpected failure"| N4 --> MORE
+  MORE -->|"yes"| N2
+  MORE -->|"no"| N5 --> P
+  N7 -->|"written"| N8
+  N7 -->|"three failures"| DBFAIL --> FAIL
+  N8 -->|"moved"| N9
+  N8 -->|"retry exhausted"| LINEARFAIL --> FAIL
+  N9 -->|"started"| RUN --> EXEC --> N11 --> DONE
+  N9 -->|"start failed"| RUNFAIL --> FAIL
 
-  START["Automation server startup<br/>singleton: every existing nonterminal row is inherited"]:::decision
-  QUERY["Query assigned client execution ID or ticket"]:::decision
-  ACTIVE["Active<br/>resume monitoring"]:::added
-  RESERVED["Reserved but never started<br/>release and safely return to pending"]:::added
-  ABSENT["Absent / 404<br/>close owner-lost"]:::added
-  UNREACHABLE["Client unreachable<br/>retain unresolved and retry"]:::added
+  START["Automation server startup"]:::decision
+  INHERITED["Find every inherited running job"]:::decision
+  CANCEL["+ Cancel client reservation/process<br/>and QEMU work"]:::added
+  INHERITEDFAIL["+ Database failed and Linear Failed:<br/>automation server restarted"]:::added
+  BLOCK["+ If cleanup is unreachable, report Sentry<br/>and keep dispatch blocked"]:::added
+  NORMAL["+ Normal pending dispatch may start"]:::added
 
-  START --> N5 --> QUERY
-  QUERY -->|"active"| ACTIVE --> RUN
-  QUERY -->|"reserved"| RESERVED --> P
-  QUERY -->|"absent"| ABSENT --> DONE
-  QUERY -->|"unreachable"| UNREACHABLE --> QUERY
-  ACTIVE --> N8
-  RESERVED --> N8
-  ABSENT --> N8
-  N8 --> N9
-  N9 --> P
+  START --> INHERITED
+  INHERITED -->|"none"| NORMAL
+  INHERITED -->|"cleanup confirmed"| CANCEL --> INHERITEDFAIL --> NORMAL --> P
+  INHERITED -->|"cleanup unreachable"| BLOCK --> INHERITED
 ```
 
 ## 1. Reconcile orphaned running jobs after process death
 
 - [ ] Add an integration test that SIGKILLs `automation-server` with a drive in progress, restarts
       it, and proves the old `automation_jobs` row does not remain `running`.
-- [ ] Add an integration test for death after `claim` but before `/reserve` returns.
+- [ ] Add an integration test for death while `/reserve` is in flight and the database row is
+      still `pending`.
 - [ ] Add an integration test for death after `/reserve` succeeds but before `/run` starts.
+- [ ] Add an integration test for death after the database becomes `running` but before Linear
+      moves to In Progress.
+- [ ] Add an integration test for death after Linear moves to In Progress but before `/run`.
 - [ ] Add an integration test for death while `/run` is waiting on the automation client.
 - [ ] Add an unhappy-path test that a failed terminal `finish` database write is retried or later
       reconciled.
-- [ ] Track every claim and perform fiber owned by the current singleton automation-server in
-      memory.
+- [ ] Track every reservation attempt and perform fiber owned by the current singleton
+      automation-server in memory.
 - [ ] On startup, treat every existing nonterminal row as inherited work and reconcile it against
       the assigned automation client.
-- [ ] Run startup reconciliation before the dispatch loop may claim any pending job.
+- [ ] Run startup reconciliation before the dispatch loop may select any pending job.
 - [ ] Do not assume an inherited row is dead: its OpenCode child may still be active on the
       automation client after the previous server connection disappeared.
-- [ ] Reattach monitoring to a confirmed active execution, release a reservation that never
-      started, close an absent execution owner-lost, and retain an unreachable execution as
+- [ ] Cancel a confirmed reservation or active execution before moving its database row and Linear
+      issue to Failed.
+- [ ] Treat an absent execution as already stopped, and retain an unreachable execution as
       unresolved for retry.
 - [ ] Keep new dispatch gated while inherited work is unresolved so a restart cannot exceed real
       client or QEMU capacity.
@@ -167,7 +174,7 @@ flowchart TB
 - [ ] Treat a client `404` during inherited-work cleanup as confirmation that no process remains,
       then close the job with an explicit owner-lost reason.
 - [ ] Never requeue work whose side effects are uncertain; close it terminally unless the durable
-      phase proves `/run` never started.
+      state proves `/run` never started.
 - [ ] Prove that one automation client configured for six jobs cannot leave more than six
       client-confirmed `running` rows after reconciliation.
 
@@ -184,24 +191,23 @@ flowchart TB
 
 ## 3. Make automation-client execution observable and restart-safe
 
-- [ ] Add tests for a client instance restarting on the same URL with reservations and runs active.
+- [ ] Add tests for a client restarting on the same URL with reservations and runs active.
 - [ ] Add tests for querying a client's reservations and active ticket processes.
-- [ ] Give every automation-client process a startup instance ID.
-- [ ] Publish the instance ID, configured `max-jobs`, current reservations, and active runs through
-      its heartbeat or a status endpoint.
-- [ ] Record the client instance ID on the durable job claim.
-- [ ] Reject completion or abort acknowledgements from a different client generation.
-- [ ] Ensure a restarted client begins with no inherited claims and lets reconciliation close the
-      previous generation's jobs.
+- [ ] Publish configured `max-jobs`, current reservations, and active runs through the heartbeat or
+      a status endpoint.
+- [ ] Make reserving the same ticket and action idempotent so a crash after reservation can safely
+      retry while the database row is still pending.
+- [ ] Add one idempotent cancellation operation that releases either an unused reservation or an
+      active OpenCode process and its QEMU resources.
+- [ ] Ensure a restarted client begins with no inherited claims and reports old tickets absent.
 
 ## 4. Reconcile QEMU death with durable sessions
 
 - [ ] Add an integration test that SIGKILLs a QEMU server with active sessions and restarts it.
 - [ ] Add a test that graceful QEMU shutdown closes every session before releasing its slots.
 - [ ] Add a test that a QEMU restart does not make old database sessions appear live.
-- [ ] Give each QEMU process a startup instance ID and persist it with routed sessions.
-- [ ] On startup, close nonterminal sessions owned by the previous instance with an explicit
-      owner-lost reason.
+- [ ] On startup, close nonterminal sessions already routed to this singleton QEMU server URL with
+      an explicit owner-lost reason.
 - [ ] Ensure the affected driver receives a terminal failure instead of waiting indefinitely.
 - [ ] Reconcile the corresponding automation job after the driver exits or its client owner is
       lost.
@@ -231,10 +237,12 @@ flowchart TB
 
 - [ ] Add rendering tests for each business state without asserting presentation details.
 - [ ] Add query tests that classify an unowned inherited row as stale rather than live.
-- [ ] Persist a dispatch phase that distinguishes a database claim from confirmed client
-      execution.
-- [ ] Show `dispatching`, `driver running`, `guest running`, and `stale` separately.
-- [ ] Count dashboard `running` only when a live client generation confirms the execution.
+- [ ] Keep the durable job `pending` throughout reservation attempts.
+- [ ] Change the durable job to `running` only after the automation client and required QEMU
+      capacity have both been reserved.
+- [ ] Show `pending`, `running`, `guest running`, and inherited failure separately.
+- [ ] Count dashboard `running` only when reservations were confirmed and the database transition
+      succeeded.
 - [ ] Show queued depth separately from concurrency so `pending 29` is not presented as a
       six-slot violation.
 
@@ -265,8 +273,18 @@ flowchart TB
 - [ ] Add a worker test that one unreachable automation client does not fail the job while another
       live client can accept it.
 - [ ] Add a proxy test for a QEMU server dying between probe and reserve.
+- [ ] Add a test that every full automation client and QEMU server leaves the job pending.
+- [ ] Add a test that every not-minted QEMU server leaves the drive pending while setup proceeds.
+- [ ] Add a test that an unexpected failure from every server reports each failure to Sentry and
+      still leaves the job pending.
+- [ ] Add a test that expected full and not-minted answers do not report to Sentry.
 - [ ] Try the remaining eligible automation clients after a transient reserve failure.
 - [ ] Try the remaining eligible QEMU servers after a selected server fails its reserve request.
+- [ ] Never terminalize a job or move its Linear issue because placement was unavailable.
+- [ ] Report every reserve failure other than full or not minted to Sentry with the server URL,
+      ticket, and original cause.
+- [ ] After every eligible server has been tried, leave the job pending and wait for the next
+      dispatch pass.
 - [ ] Preserve the original network cause in `automation-client/qemu.ts`.
 - [ ] Require the automation client's QEMU proxy URL at startup instead of silently defaulting to
       an unrelated local port.
