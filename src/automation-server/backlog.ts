@@ -8,12 +8,13 @@ import * as Enqueue from "./enqueue.ts";
 
 const POLL_INTERVAL = "30 seconds";
 // The first poll only saves the ticket. Each later poll that finds the same
-// backlog snapshot counts one round. Three rounds is ninety seconds with no
-// move and no edit; then the webhook is not coming.
+// updatedAt counts one round. Three rounds is ninety seconds with no move and
+// no edit; then the webhook is not coming. An edit or a departure starts over.
 const ROUNDS_BEFORE_MOVE = 3;
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 
+// Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>
   isDatabaseError(error)
     ? Render.errorDetail(ExternalFailure.causeOf(error))
@@ -22,39 +23,40 @@ const detail = (error: unknown): string =>
 type Sighting = {
   readonly rounds: number;
   readonly updatedAt: string;
-  readonly id: string;
 };
 
-// Enqueue first. A move that lands and then loses the process still leaves the
-// ticket in Backlog, and the next poll finds the duplicate and moves it. Moving
-// first would drop a ticket the webhook never queues out of this watch.
-const adopt = Effect.fn("adoptBacklog")(function* (ticket: Linear.LinearBacklogTicket) {
+// Enqueue first, through the same path as POST /linear. An enqueue that lands and then
+// loses the process leaves the ticket in Backlog; the next poll finds the duplicate and
+// moves it. The pair stays interruptible: a torn enqueue and move is that recovery, and
+// a hung Linear request must not hold shutdown. A missing result is retried every poll
+// and logged once per snapshot. A ticket with no body is still queued.
+const adopt = Effect.fn("adoptBacklog")(function* (
+  ticket: Linear.LinearBacklogTicket,
+  rounds: number,
+) {
   const log = yield* Log.Log;
   const linear = yield* Linear.Linear;
   const placed = yield* Enqueue.enqueueTicket(ticket.identifier, "drive");
   if (placed.result === "missing") {
-    yield* log.info(`backlog watch left ${ticket.identifier}; no result`, {
-      location: Log.Locations.automation,
-      agentId: ticket.identifier,
-    });
-    return false;
+    if (rounds === ROUNDS_BEFORE_MOVE) {
+      yield* log.info("backlog watch left the ticket in Backlog; no result", {
+        location: Log.Locations.automation,
+        agentId: ticket.identifier,
+      });
+    }
+    return;
   }
   const team = yield* linear.teamId;
   const states = yield* linear.stateIds(team);
-  yield* linear.moveIssue(ticket.id, ticket.identifier, states.automationNeeded);
+  yield* linear.moveIssue(ticket, states.automationNeeded);
   const note =
     placed.result === "queued" ? `queued ${placed.action}` : `${placed.action} already queued`;
-  yield* log.info(`backlog watch moved ${ticket.identifier} to Automation Needed; ${note}`, {
+  yield* log.info(`backlog watch moved to Automation Needed; ${note}`, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
-  return true;
 });
 
-// Every thirty seconds, the Oligarchy backlog. A ticket is remembered by its
-// identifier. Three rounds of the same updatedAt, and it is moved to Automation
-// Needed and queued the way POST /linear would have queued that move. An edit
-// or a departure starts the count over. A tick that fails is one error line.
 export const watch = Effect.fn("watchBacklog")(function* () {
   const linear = yield* Linear.Linear;
   const log = yield* Log.Log;
@@ -66,36 +68,22 @@ export const watch = Effect.fn("watchBacklog")(function* () {
     for (const ticket of tickets) {
       present.add(ticket.identifier);
       const prev = sightings.get(ticket.identifier);
-      const same =
-        prev !== undefined && prev.updatedAt === ticket.updatedAt && prev.id === ticket.id;
+      const same = prev !== undefined && prev.updatedAt === ticket.updatedAt;
       const rounds = same ? prev.rounds + 1 : 0;
+      sightings.set(ticket.identifier, { rounds, updatedAt: ticket.updatedAt });
       if (rounds < ROUNDS_BEFORE_MOVE) {
-        sightings.set(ticket.identifier, {
-          rounds,
-          updatedAt: ticket.updatedAt,
-          id: ticket.id,
-        });
         continue;
       }
-      const moved = yield* adopt(ticket).pipe(
-        Effect.uninterruptible,
-        Effect.catchCause((cause) => {
-          if (Cause.hasInterruptsOnly(cause)) {
-            return Effect.failCause(cause);
-          }
-          const error = Cause.squash(cause);
-          return log
-            .error(`backlog watch failed for ${ticket.identifier}: ${detail(error)}`, {
-              location: Log.Locations.automation,
-              agentId: ticket.identifier,
-              cause: error,
-            })
-            .pipe(Effect.as(false));
-        }),
+      // One poison ticket must not starve the rest of this poll. A defect still fails the tick.
+      yield* adopt(ticket, rounds).pipe(
+        Effect.catch((error) =>
+          log.error(`backlog watch failed: ${detail(error)}`, {
+            location: Log.Locations.automation,
+            agentId: ticket.identifier,
+            cause: error,
+          }),
+        ),
       );
-      if (moved) {
-        sightings.delete(ticket.identifier);
-      }
     }
     for (const identifier of sightings.keys()) {
       if (!present.has(identifier)) {

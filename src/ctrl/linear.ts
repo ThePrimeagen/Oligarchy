@@ -80,7 +80,7 @@ const ISSUE_CREATE_MUTATION = `mutation ExperimentIssueCreate($input: IssueCreat
   }
 }`;
 
-const ISSUE_DESCRIBE_MUTATION = `mutation ExperimentIssueDescribe($id: String!, $input: IssueUpdateInput!) {
+const ISSUE_UPDATE_MUTATION = `mutation ExperimentIssueUpdate($id: String!, $input: IssueUpdateInput!) {
   issueUpdate(id: $id, input: $input) {
     success
   }
@@ -162,8 +162,7 @@ export type LinearService = {
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly moveIssue: (
-    issueId: string,
-    identifier: string,
+    ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
@@ -314,17 +313,15 @@ const makeLinear = (
       return created.issueCreate.issue;
     });
 
-    // State only. The backlog watch uses this when a ticket has sat unchanged: the body, if it
-    // was going to be written, would already have changed updatedAt and reset that wait.
+    // State only. A description of "" would wipe a body the watch does not have.
     const moveIssue = Effect.fn("Linear.moveIssue")(function* (
-      issueId: string,
-      identifier: string,
+      ticket: LinearTicket,
       stateId: string,
     ) {
       yield* request(
         "moveIssue",
-        ISSUE_DESCRIBE_MUTATION,
-        { id: issueId, input: { stateId } },
+        ISSUE_UPDATE_MUTATION,
+        { id: ticket.id, input: { stateId } },
         IssueUpdate,
       ).pipe(
         Effect.filterOrFail(
@@ -332,7 +329,7 @@ const makeLinear = (
           () =>
             Errors.LinearError.make({
               operation: "moveIssue",
-              message: `linear: moving ${identifier} failed`,
+              message: `linear: moving ${ticket.identifier} failed`,
             }),
         ),
       );
@@ -348,7 +345,7 @@ const makeLinear = (
     ) {
       yield* request(
         "describeIssue",
-        ISSUE_DESCRIBE_MUTATION,
+        ISSUE_UPDATE_MUTATION,
         { id: ticket.id, input: { description, stateId } },
         IssueUpdate,
       ).pipe(

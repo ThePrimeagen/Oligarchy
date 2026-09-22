@@ -15,8 +15,7 @@ export type LinearCall =
     }
   | {
       readonly method: "moveIssue";
-      readonly issueId: string;
-      readonly identifier: string;
+      readonly ticket: Linear.LinearTicket;
       readonly stateId: string;
     }
   | { readonly method: "listBacklog" };
@@ -80,8 +79,8 @@ export const fakeLinear = (
       ),
     describeIssue: (ticket, description, state) =>
       record({ method: "describeIssue", ticket, description, stateId: state }, Effect.void),
-    moveIssue: (issueId, identifier, state) =>
-      record({ method: "moveIssue", issueId, identifier, stateId: state }, Effect.void),
+    moveIssue: (issue, state) =>
+      record({ method: "moveIssue", ticket: issue, stateId: state }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
   };
   const overrides = options.overrides ?? {};

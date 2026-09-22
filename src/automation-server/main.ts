@@ -48,8 +48,8 @@ server.on("error", (cause) => {
   Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
 });
 
-// Dispatch and the sweep start once the listener is up, in the same scope: a port refusal starts
-// neither, and a shutdown stops both before the pool closes.
+// Dispatch, the sweep and the backlog watch start once the listener is up, in the same scope:
+// a port refusal starts none of them, and a shutdown stops them before the pool closes.
 const ServerLive = (port: number, model: string) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
@@ -76,15 +76,15 @@ const ServerLive = (port: number, model: string) =>
 
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
+const LinearLive = Layer.unwrap(
+  Effect.map(Config.linearApiToken, (token) => Linear.Linear.layer(token)),
+);
+
 // LINEAR_WEBHOOK_SECRET signs POST /linear; LINEAR_API_TOKEN reads the backlog the webhook
 // missed; OLIGARCHY_TOKEN authenticates POST /run to a client and POST /abort from
 // Cloudflare; DATABASE_URL holds the queue, the live-server list and the logs rows. Sentry sits
 // beneath Log so Log captures the reporter. Lines land in logs with location/agentId
 // "automation"; durable jobs remain automation_jobs.
-const LinearLive = Layer.unwrap(
-  Effect.map(Config.linearApiToken, (token) => Linear.Linear.layer(token)),
-);
-
 const MainLive = Layer.mergeAll(
   Log.Log.layer,
   Handlers.LinearWebhookSecret.layer,

@@ -4,7 +4,6 @@ import { Effect, Exit, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Backlog from "../../src/automation-server/backlog.ts";
 import * as Linear from "../../src/ctrl/linear.ts";
-import * as Log from "../../src/observability/log.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
@@ -47,35 +46,34 @@ const seedResult = (tests: Stores.FakeTestStore, linearId: string, resultId = RE
   });
 };
 
-// The loop in a scope of its own, so a test can close it. `backlog` is read on every poll.
+// The loop in a scope of its own, so a test can close it. Each poll copies `board`: a move
+// splices the ticket out, and the next query is what no longer lists it. Mutating the array
+// the poll is walking would skip the ticket after it.
 const start = (
-  backlog: () => ReadonlyArray<Linear.LinearBacklogTicket>,
+  board: Array<Linear.LinearBacklogTicket>,
   moveIssue?: Linear.LinearService["moveIssue"],
 ) =>
   Effect.gen(function* () {
     const stores = Stores.fakeStores();
     const log = FakeLog.fakeLog();
     const moved: Array<Move> = [];
-    const recordMove: Linear.LinearService["moveIssue"] = (issueId, identifier, stateId) =>
+    const recordMove: Linear.LinearService["moveIssue"] = (issue, stateId) =>
       Effect.sync(() => {
-        moved.push({ issueId, identifier, stateId });
+        moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+        const index = board.findIndex((item) => item.identifier === issue.identifier);
+        if (index !== -1) {
+          board.splice(index, 1);
+        }
       });
     const linear = FakeLinear.fakeLinear({
       overrides: {
-        listBacklog: Effect.suspend(() => Effect.succeed(backlog())),
+        listBacklog: Effect.sync(() => [...board]),
         moveIssue: moveIssue ?? recordMove,
       },
     });
     const scope = yield* Scope.make();
     yield* Backlog.watch().pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          stores.layer,
-          linear.layer,
-          log.layer,
-          Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution),
-        ),
-      ),
+      Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
       Scope.provide(scope),
     );
     return { stores, log, moved, linear, scope };
@@ -93,7 +91,7 @@ describe("backlog watch happy path", () => {
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
-        const { stores, log, moved } = yield* start(() => board);
+        const { stores, log, moved } = yield* start(board);
         seedResult(stores.tests, TICKET);
         expect(stores.automation.jobs).toEqual([]);
         expect(moved).toEqual([]);
@@ -109,7 +107,7 @@ describe("backlog watch happy path", () => {
         expect(log.lines).toEqual([
           {
             level: "info",
-            text: `backlog watch moved ${TICKET} to Automation Needed; queued drive`,
+            text: "backlog watch moved to Automation Needed; queued drive",
             location: "automation",
             agentId: TICKET,
             skipSentry: false,
@@ -121,7 +119,8 @@ describe("backlog watch happy path", () => {
 
   it.effect("queues mint, not drive, when the backlog ticket's result is the mint definition", () =>
     Effect.gen(function* () {
-      const { stores, moved, log } = yield* start(() => [ticket(TICKET, SEEN)]);
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved, log } = yield* start(board);
       stores.tests.definitions.push({
         id: 1,
         name: "mint",
@@ -136,20 +135,18 @@ describe("backlog watch happy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
       ]);
       expect(moved).toEqual([automationNeeded(TICKET)]);
-      expect(FakeLog.texts(log)).toEqual([
-        `backlog watch moved ${TICKET} to Automation Needed; queued mint`,
-      ]);
+      expect(FakeLog.texts(log)).toEqual(["backlog watch moved to Automation Needed; queued mint"]);
     }),
   );
 
   it.effect("adopts each ticket on its own rounds, leaving a newer one in the backlog", () =>
     Effect.gen(function* () {
-      let board = [ticket(TICKET, SEEN)];
-      const { stores, moved } = yield* start(() => board);
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved } = yield* start(board);
       seedResult(stores.tests, TICKET);
       seedResult(stores.tests, OTHER, OTHER_RESULT);
       yield* TestClock.adjust("59 seconds");
-      board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+      board.push(ticket(OTHER, SEEN));
       yield* TestClock.adjust("31 seconds");
       expect(moved).toEqual([automationNeeded(TICKET)]);
       expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT]);
@@ -163,11 +160,11 @@ describe("backlog watch happy path", () => {
 describe("backlog watch unhappy path", () => {
   it.effect("an edit resets the rounds, so the original ninety seconds does not move it", () =>
     Effect.gen(function* () {
-      let updatedAt = SEEN;
-      const { stores, moved } = yield* start(() => [ticket(TICKET, updatedAt)]);
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved } = yield* start(board);
       seedResult(stores.tests, TICKET);
       yield* TestClock.adjust("59 seconds");
-      updatedAt = EDITED;
+      board[0] = ticket(TICKET, EDITED);
       // The edit lands on the second round. Ninety seconds from the start is not three
       // rounds of this new snapshot.
       yield* TestClock.adjust("61 seconds");
@@ -183,13 +180,13 @@ describe("backlog watch unhappy path", () => {
 
   it.effect("a ticket that leaves the backlog is forgotten, and coming back starts over", () =>
     Effect.gen(function* () {
-      let board = [ticket(TICKET, SEEN)];
-      const { stores, moved } = yield* start(() => board);
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved } = yield* start(board);
       seedResult(stores.tests, TICKET);
       yield* TestClock.adjust("59 seconds");
-      board = [];
+      board.length = 0;
       yield* TestClock.adjust("1 second");
-      board = [ticket(TICKET, SEEN)];
+      board.push(ticket(TICKET, SEEN));
       yield* TestClock.adjust("90 seconds");
       expect(moved).toEqual([]);
       expect(stores.automation.jobs).toEqual([]);
@@ -202,11 +199,12 @@ describe("backlog watch unhappy path", () => {
     "no result leaves the ticket in the backlog, and a result that appears later is adopted on the next poll",
     () =>
       Effect.gen(function* () {
-        const { stores, moved, log } = yield* start(() => [ticket(TICKET, SEEN)]);
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, moved, log } = yield* start(board);
         yield* TestClock.adjust("90 seconds");
         expect(moved).toEqual([]);
         expect(stores.automation.jobs).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual([`backlog watch left ${TICKET}; no result`]);
+        expect(FakeLog.texts(log)).toEqual(["backlog watch left the ticket in Backlog; no result"]);
         seedResult(stores.tests, TICKET);
         yield* TestClock.adjust("30 seconds");
         expect(moved).toEqual([automationNeeded(TICKET)]);
@@ -218,7 +216,8 @@ describe("backlog watch unhappy path", () => {
 
   it.effect("a drive already queued still moves the ticket (duplicate)", () =>
     Effect.gen(function* () {
-      const { stores, moved, log } = yield* start(() => [ticket(TICKET, SEEN)]);
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved, log } = yield* start(board);
       seedResult(stores.tests, TICKET);
       stores.automation.jobs.push({
         id: "00000000-0000-4000-8000-000000000001",
@@ -235,7 +234,7 @@ describe("backlog watch unhappy path", () => {
       expect(stores.automation.jobs).toHaveLength(1);
       expect(moved).toEqual([automationNeeded(TICKET)]);
       expect(FakeLog.texts(log)).toEqual([
-        `backlog watch moved ${TICKET} to Automation Needed; drive already queued`,
+        "backlog watch moved to Automation Needed; drive already queued",
       ]);
     }),
   );
@@ -257,9 +256,9 @@ describe("backlog watch unhappy path", () => {
             listBacklog: Effect.suspend(() =>
               fail ? Effect.fail(refused) : Effect.succeed([ticket(TICKET, SEEN)]),
             ),
-            moveIssue: (issueId, identifier, stateId) =>
+            moveIssue: (issue, stateId) =>
               Effect.sync(() => {
-                moved.push({ issueId, identifier, stateId });
+                moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
               }),
           },
         });
@@ -299,16 +298,15 @@ describe("backlog watch unhappy path", () => {
       });
       let fail = true;
       const moved: Array<Move> = [];
-      const { stores, log } = yield* start(
-        () => [ticket(TICKET, SEEN)],
-        (issueId, identifier, stateId) =>
-          Effect.suspend(() => {
-            if (fail) {
-              return Effect.fail(refused);
-            }
-            moved.push({ issueId, identifier, stateId });
-            return Effect.void;
-          }),
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, log } = yield* start(board, (issue, stateId) =>
+        Effect.suspend(() => {
+          if (fail) {
+            return Effect.fail(refused);
+          }
+          moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+          return Effect.void;
+        }),
       );
       seedResult(stores.tests, TICKET);
       yield* TestClock.adjust("90 seconds");
@@ -318,7 +316,7 @@ describe("backlog watch unhappy path", () => {
       expect(moved).toEqual([]);
       expect(log.lines[0]).toMatchObject({
         level: "error",
-        text: `backlog watch failed for ${TICKET}: linear: moving ${TICKET} failed`,
+        text: `backlog watch failed: linear: moving ${TICKET} failed`,
         location: "automation",
         agentId: TICKET,
         cause: refused,

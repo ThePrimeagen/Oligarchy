@@ -452,8 +452,13 @@ describe("Linear unhappy path", () => {
       const http = withHttp((body) =>
         body.query.includes("issueUpdate") ? describeResponse() : happyLinear(body),
       );
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
       yield* Effect.flatMap(Linear.Linear, (client) =>
-        client.moveIssue("issue-OLI-45", "OLI-45", stateId("Automation Needed")),
+        client.moveIssue(issue, stateId("Automation Needed")),
       ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
       const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
         JSON.parse(request.body),
@@ -479,7 +484,14 @@ describe("Linear unhappy path", () => {
       );
       const error = yield* failureOf(
         Effect.flatMap(Linear.Linear, (client) =>
-          client.moveIssue("issue-OLI-45", "OLI-45", stateId("Automation Needed")),
+          client.moveIssue(
+            {
+              id: "issue-OLI-45",
+              identifier: "OLI-45",
+              url: "https://linear.app/issue/OLI-45",
+            },
+            stateId("Automation Needed"),
+          ),
         ),
       ).pipe(Effect.provide(http.layer));
       expect(error).toMatchObject({
