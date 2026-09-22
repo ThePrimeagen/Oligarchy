@@ -26,6 +26,8 @@ export const LinearBacklogTicket = Schema.Struct({
   identifier: Schema.String,
   title: Schema.String,
   url: Schema.String,
+  // Compared as text: an edit is a different string, and that is the whole signal.
+  updatedAt: Schema.String,
 });
 export type LinearBacklogTicket = typeof LinearBacklogTicket.Type;
 
@@ -78,7 +80,7 @@ const ISSUE_CREATE_MUTATION = `mutation ExperimentIssueCreate($input: IssueCreat
   }
 }`;
 
-const ISSUE_DESCRIBE_MUTATION = `mutation ExperimentIssueDescribe($id: String!, $input: IssueUpdateInput!) {
+const ISSUE_UPDATE_MUTATION = `mutation ExperimentIssueUpdate($id: String!, $input: IssueUpdateInput!) {
   issueUpdate(id: $id, input: $input) {
     success
   }
@@ -91,6 +93,7 @@ const BACKLOG_QUERY = `query ExperimentBacklog($filter: IssueFilter!, $after: St
       identifier
       title
       url
+      updatedAt
     }
     pageInfo {
       hasNextPage
@@ -156,6 +159,10 @@ export type LinearService = {
   readonly describeIssue: (
     ticket: LinearTicket,
     description: string,
+    stateId: string,
+  ) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveIssue: (
+    ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
@@ -306,6 +313,28 @@ const makeLinear = (
       return created.issueCreate.issue;
     });
 
+    // State only. A description of "" would wipe a body the watch does not have.
+    const moveIssue = Effect.fn("Linear.moveIssue")(function* (
+      ticket: LinearTicket,
+      stateId: string,
+    ) {
+      yield* request(
+        "moveIssue",
+        ISSUE_UPDATE_MUTATION,
+        { id: ticket.id, input: { stateId } },
+        IssueUpdate,
+      ).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveIssue",
+              message: `linear: moving ${ticket.identifier} failed`,
+            }),
+        ),
+      );
+    });
+
     // Linear assigns the identifier on create, and the description names it as the driver's agent
     // id, so the body can only land in a second call. The move to `stateId` rides in that same
     // update: the ticket is never in Automation Needed without its body.
@@ -316,7 +345,7 @@ const makeLinear = (
     ) {
       yield* request(
         "describeIssue",
-        ISSUE_DESCRIBE_MUTATION,
+        ISSUE_UPDATE_MUTATION,
         { id: ticket.id, input: { description, stateId } },
         IssueUpdate,
       ).pipe(
@@ -359,6 +388,7 @@ const makeLinear = (
       stateIds,
       createIssue,
       describeIssue,
+      moveIssue,
       listBacklog,
     } satisfies LinearService;
   });

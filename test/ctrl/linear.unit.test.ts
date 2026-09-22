@@ -262,13 +262,25 @@ describe("Linear happy path", () => {
       const pages = [
         {
           nodes: [
-            { id: "i1", identifier: "OLI-1", title: "one", url: "https://linear.app/issue/OLI-1" },
+            {
+              id: "i1",
+              identifier: "OLI-1",
+              title: "one",
+              url: "https://linear.app/issue/OLI-1",
+              updatedAt: "2026-09-22T13:00:00.000Z",
+            },
           ],
           pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
         },
         {
           nodes: [
-            { id: "i2", identifier: "OLI-2", title: "two", url: "https://linear.app/issue/OLI-2" },
+            {
+              id: "i2",
+              identifier: "OLI-2",
+              title: "two",
+              url: "https://linear.app/issue/OLI-2",
+              updatedAt: "2026-09-22T13:02:00.000Z",
+            },
           ],
           pageInfo: { hasNextPage: false, endCursor: null },
         },
@@ -288,6 +300,7 @@ describe("Linear happy path", () => {
       );
       expect(bodies).toHaveLength(2);
       expect(bodies[0]?.query).toMatch(/issues\(first: 100, after: \$after, filter: \$filter\)/);
+      expect(bodies[0]?.query).toMatch(/updatedAt/);
       expect(bodies[0]?.variables).toEqual({
         filter: { team: { name: { eq: "Oligarchy" } }, state: { type: { eq: "backlog" } } },
       });
@@ -431,6 +444,61 @@ describe("Linear unhappy path", () => {
       });
       const error = yield* failureOf(createTicket).pipe(Effect.provide(http.layer));
       expect(error.message).toBe("linear: issue creation failed");
+    }),
+  );
+
+  it.effect("moveIssue sends the state and no description", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate") ? describeResponse() : happyLinear(body),
+      );
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      yield* Effect.flatMap(Linear.Linear, (client) =>
+        client.moveIssue(issue, stateId("Automation Needed")),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies).toEqual([
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: {
+            id: "issue-OLI-45",
+            input: { stateId: stateId("Automation Needed") },
+          },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("reports a move failure by ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.moveIssue(
+            {
+              id: "issue-OLI-45",
+              identifier: "OLI-45",
+              url: "https://linear.app/issue/OLI-45",
+            },
+            stateId("Automation Needed"),
+          ),
+        ),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveIssue",
+        message: "linear: moving OLI-45 failed",
+      });
     }),
   );
 
