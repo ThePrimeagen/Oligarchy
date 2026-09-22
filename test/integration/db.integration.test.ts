@@ -890,6 +890,17 @@ Postgres.describeWithDatabase("database", () => {
         expect(reasoned?.result.reason).toBe("installer hung");
         expect(yield* tests.closeResult(uuid(), "failed", null, null)).toBe(false);
         expect(yield* tests.resultForSession(uuid())).toEqual([]);
+        const database = yield* Client.Database;
+        yield* database.run("markAborted", (db) =>
+          db
+            .update(DbSchema.testResults)
+            .set({ status: "aborted", reason: "aborted" })
+            .where(eq(DbSchema.testResults.id, result.id)),
+        );
+        expect(yield* tests.closeResult(result.id, "passed", "late report", null)).toBe(false);
+        const [aborted] = yield* tests.resultForSession(sessionId);
+        expect(aborted?.result.status).toBe("aborted");
+        expect(aborted?.result.reason).toBe("aborted");
       }),
     );
 

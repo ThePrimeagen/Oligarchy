@@ -1959,7 +1959,7 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
     ]);
   });
 
-  it("counts running and pending jobs in full, and pass and fail only inside suites that still have a result open", async () => {
+  it("counts an open result as pending or running, and a closed suite with a failure as failed", async () => {
     const read = async (): Promise<ReadonlyArray<number>> => {
       const result = await runQuery(
         `

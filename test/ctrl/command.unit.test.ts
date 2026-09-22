@@ -2010,6 +2010,31 @@ describe("test-results", () => {
     }),
   );
 
+  it.effect("rejects a result an operator already aborted and leaves it aborted (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(result(RESULT_ID, "aborted", SESSION_ID));
+      const exit = yield* h.run([
+        "test-results",
+        "--agent-id",
+        "agent-1",
+        "--id",
+        RESULT_ID,
+        "--status",
+        "failed",
+        "--reason",
+        "installer hung",
+      ]);
+      expect(failure(exit)).toMatchObject({
+        _tag: "CommandError",
+        message: `test-results: result ${RESULT_ID} is aborted`,
+      });
+      expect(h.stores.tests.results[0]?.status).toBe("aborted");
+      expect(h.log.lines).toEqual([]);
+      expect(h.log.acquired).toEqual([]);
+    }),
+  );
+
   it.effect("requires --agent-id and a known status (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();

@@ -1419,8 +1419,38 @@ export type OpenSuiteJob = {
   readonly action: (typeof automationJobs.$inferSelect)["action"];
 };
 
-// Running jobs of results this suite has not closed. A pending job has no client to stop,
-// so it is not here; closing its row is the suite close itself.
+// Pending jobs of results this suite has not closed. Closing them before the
+// automation-server round trip is what keeps a claim from starting a guest during
+// that wait. A job whose result already passed or failed stays: its diagnose is
+// still the review.
+export function abortPendingSuiteJobs(connectionString: string, runId: string): Promise<void> {
+  return withDatabase(connectionString, async (db) => {
+    await db
+      .update(automationJobs)
+      .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
+      .where(
+        and(
+          eq(automationJobs.status, "pending"),
+          inArray(
+            automationJobs.resultId,
+            db
+              .select({ id: testResults.id })
+              .from(testResults)
+              .where(
+                and(
+                  eq(testResults.runId, runId),
+                  inArray(testResults.status, ["pending", "running"]),
+                ),
+              ),
+          ),
+        ),
+      );
+  });
+}
+
+// Running jobs of results this suite has not closed. A pending job has no client,
+// so it is closed before this read. The clock keeps the read out of Hyperdrive's
+// cache, so a job claimed since the last poll is still here to abort.
 export function listOpenSuiteJobs(
   connectionString: string,
   runId: string,

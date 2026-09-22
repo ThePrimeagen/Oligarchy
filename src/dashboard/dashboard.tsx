@@ -6,6 +6,7 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import {
   abortAutomationJob,
   addServer,
+  abortPendingSuiteJobs,
   closeTestSuite,
   listOpenSuiteJobs,
   definitionStats,
@@ -981,15 +982,17 @@ app.post("/abort", async (context) => {
   return reply();
 });
 
-// A uuid, the shape test_runs.id has. Anything else never reaches the database.
+// A uuid, the shape test_runs.id has. Anything else is not a suite to close.
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// POST /suites/close stops one suite that never finished. A running job is the automation
-// server's to stop, same as /abort, so the guest does not keep driving after the row closes;
-// a miss there still closes the row here. Pending jobs have no client. The results still
-// pending or running become aborted, which is what takes the suite out of the running count,
-// and each of their tickets moves to Aborted. A suite that has already finished is left as it
-// is. A Linear miss is logged and the rows stay closed. The click answers with the queue.
+// POST /suites/close stops one suite that never finished. Pending jobs close here first, the
+// same way /abort does, so a claim during the round trip never sees them. A running job is the
+// automation server's to stop. A miss still closes the row here, same as /abort's running
+// fallback, and the client may still be driving; the VM itself ends when commands stop. The
+// results still pending or running become aborted, which is what takes the suite out of the
+// running count, and each of their tickets moves to Aborted. A suite that has already finished
+// is left as it is. A Linear miss is logged and the rows stay closed. The click answers with
+// the queue.
 app.post("/suites/close", async (context) => {
   const wantsFragment = context.req.header("hx-request") === "true";
   const connectionString = context.env.HYPERDRIVE.connectionString;
@@ -1012,31 +1015,47 @@ app.post("/suites/close", async (context) => {
     if (typeof run !== "string" || !RUN_ID.test(run)) {
       return reply();
     }
-    const jobs = await listOpenSuiteJobs(connectionString, run);
-    for (const job of jobs) {
-      if (job.ticket === null) {
-        continue;
-      }
-      try {
-        const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ ticket: job.ticket, action: job.action }),
-          signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
-        });
-        if (response.status !== 200) {
-          console.error(
-            `dashboard: closing a suite: automation server returned ${String(response.status)}`,
-          );
+    await abortPendingSuiteJobs(connectionString, run);
+    // The first pass is the slow one. A claim that won the pending close shows up on
+    // the second. A job that becomes running during that second pass is still running
+    // afterwards; that window is one read, not the whole abort loop.
+    const stopRunning = async (): Promise<boolean> => {
+      const jobs = await listOpenSuiteJobs(connectionString, run);
+      let missed = false;
+      for (const job of jobs) {
+        if (job.ticket === null) {
+          missed = true;
+          continue;
         }
-      } catch (error) {
-        console.error("dashboard: closing a suite:", errorMessage(error));
+        try {
+          const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ticket: job.ticket, action: job.action }),
+            signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+          });
+          if (response.status !== 200) {
+            missed = true;
+            console.error(
+              `dashboard: closing a suite: automation server returned ${String(response.status)}`,
+            );
+          }
+        } catch (error) {
+          missed = true;
+          console.error("dashboard: closing a suite:", errorMessage(error));
+        }
       }
-    }
+      return missed;
+    };
+    const missedFirst = await stopRunning();
+    const missed = (await stopRunning()) || missedFirst;
     const closed = await closeTestSuite(connectionString, run);
+    if (closed.closed && missed) {
+      Sentry.captureException(new Error("Cloudflare aborted job"));
+    }
     if (closed.closed) {
       for (const ticket of closed.tickets) {
         try {
