@@ -310,6 +310,47 @@ describe("Linear happy path", () => {
       });
     }),
   );
+
+  it.effect("listAutomationNeeded asks for the Automation Needed state by name", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() =>
+        FakeHttp.json({
+          data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        }),
+      );
+      yield* Effect.flatMap(Linear.Linear, (client) => client.listAutomationNeeded).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      expect(body.variables).toEqual({
+        filter: {
+          team: { name: { eq: "Oligarchy" } },
+          state: { name: { eq: "Automation Needed" } },
+        },
+      });
+      expect(body.query).toMatch(/updatedAt/);
+    }),
+  );
+
+  it.effect("listNeedsReview asks for the Needs Review state by name", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() =>
+        FakeHttp.json({
+          data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        }),
+      );
+      yield* Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      expect(body.variables).toEqual({
+        filter: {
+          team: { name: { eq: "Oligarchy" } },
+          state: { name: { eq: "Needs Review" } },
+        },
+      });
+    }),
+  );
 });
 
 describe("Linear unhappy path", () => {
@@ -554,6 +595,23 @@ describe("Linear unhappy path", () => {
         message: "linear: invalid response",
       });
       expect(http.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect("listNeedsReview fails as an invalid response when a further page has no cursor", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({
+          data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } },
+        }),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        operation: "listNeedsReview",
+        message: "linear: invalid response",
+      });
     }),
   );
 

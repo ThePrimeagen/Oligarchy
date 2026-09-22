@@ -79,6 +79,6 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
       }),
   ).pipe(
     Command.withDescription(
-      "The automation server: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs, then dispatches them to live automation clients; every thirty seconds a backlog ticket unchanged for ninety seconds is moved to Automation Needed and queued the same way; POST /abort closes a pending job or stops a running one",
+      "The automation server: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs, then dispatches them to live automation clients; every thirty seconds a ticket unchanged for ninety seconds in Backlog is moved to Automation Needed and queued, and one unchanged in Automation Needed or Needs Review is queued the way that webhook would have queued it; POST /abort closes a pending job or stops a running one",
     ),
   );
