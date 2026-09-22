@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Cause, Effect, Layer, Redacted } from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, Redacted } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
@@ -326,6 +326,9 @@ describe("Linear happy path", () => {
         filter: {
           team: { name: { eq: "Oligarchy" } },
           state: { name: { eq: "Automation Needed" } },
+          labels: {
+            or: [{ null: true }, { every: { name: { neq: "ready" } } }],
+          },
         },
       });
       expect(body.query).toMatch(/updatedAt/);
@@ -349,6 +352,122 @@ describe("Linear happy path", () => {
           state: { name: { eq: "Needs Review" } },
         },
       });
+    }),
+  );
+
+  it.effect("markReady adds the ready label, and a second ticket reuses that label id", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      const other = {
+        id: "issue-OLI-46",
+        identifier: "OLI-46",
+        url: "https://linear.app/issue/OLI-46",
+      };
+      yield* Effect.flatMap(Linear.Linear, (client) =>
+        client.markReady(issue).pipe(Effect.andThen(client.markReady(other))),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueLabels"))).toEqual([
+        {
+          query: expect.stringContaining("issueLabels"),
+          variables: { name: "ready", teamId: "team-id" },
+        },
+      ]);
+      expect(bodies.filter((body) => body.query.includes("issueUpdate"))).toEqual([
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: other.id, input: { addedLabelIds: [labelId("ready")] } },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("two simultaneous markReady calls look the ready label up once", () =>
+    Effect.gen(function* () {
+      const hold = yield* Deferred.make<void>();
+      let lookups = 0;
+      const http = FakeHttp.recordRequests((request) =>
+        Effect.gen(function* () {
+          const body = graphql(request);
+          if (body.query.includes("teams(")) {
+            lookups += 1;
+            yield* Deferred.await(hold);
+            return teamResponse();
+          }
+          return happyLinear(body);
+        }),
+      );
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      const other = {
+        id: "issue-OLI-46",
+        identifier: "OLI-46",
+        url: "https://linear.app/issue/OLI-46",
+      };
+      const fiber = yield* Effect.flatMap(Linear.Linear, (client) =>
+        Effect.all([client.markReady(issue), client.markReady(other)], { concurrency: 2 }),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))), Effect.forkChild);
+      for (let i = 0; i < 100; i++) {
+        if (lookups > 0) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      for (let i = 0; i < 20; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(lookups).toBe(1);
+      yield* Deferred.succeed(hold, undefined);
+      yield* Fiber.join(fiber);
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueLabels"))).toHaveLength(1);
+    }),
+  );
+
+  it.effect("clearReady removes the ready label and reuses the id markReady looked up", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      const issue = {
+        id: "issue-OLI-45",
+        identifier: "OLI-45",
+        url: "https://linear.app/issue/OLI-45",
+      };
+      yield* Effect.flatMap(Linear.Linear, (client) =>
+        client.markReady(issue).pipe(Effect.andThen(client.clearReady(issue.identifier))),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueLabels"))).toHaveLength(1);
+      expect(bodies.filter((body) => body.query.includes("issueUpdate"))).toEqual([
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: issue.identifier, input: { removedLabelIds: [labelId("ready")] } },
+        },
+      ]);
     }),
   );
 });
@@ -486,6 +605,91 @@ describe("Linear unhappy path", () => {
       const error = yield* failureOf(createTicket).pipe(Effect.provide(http.layer));
       expect(error.message).toBe("linear: issue creation failed");
     }),
+  );
+
+  it.effect("markReady reports a label update that did not succeed", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.markReady({
+            id: "issue-OLI-45",
+            identifier: "OLI-45",
+            url: "https://linear.app/issue/OLI-45",
+          }),
+        ),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "markReady",
+        message: "linear: labeling OLI-45 ready failed",
+      });
+    }),
+  );
+
+  it.effect("clearReady reports a label update that did not succeed", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.clearReady("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "clearReady",
+        message: "linear: clearing OLI-45 ready failed",
+      });
+    }),
+  );
+
+  it.effect(
+    "markReady does not cache a label lookup that failed, and the next call can succeed",
+    () =>
+      Effect.gen(function* () {
+        let fail = true;
+        const http = withHttp((body) => {
+          if (body.query.includes("teams(") && fail) {
+            fail = false;
+            return FakeHttp.json({ data: { teams: { nodes: [] } } });
+          }
+          return happyLinear(body);
+        });
+        const issue = {
+          id: "issue-OLI-45",
+          identifier: "OLI-45",
+          url: "https://linear.app/issue/OLI-45",
+        };
+        const run = Effect.gen(function* () {
+          const client = yield* Linear.Linear;
+          const error = yield* Effect.flip(client.markReady(issue));
+          expect(error.message).toBe("linear: no team named Oligarchy");
+          yield* client.markReady(issue);
+        });
+        yield* run.pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+        const updates = http.requests
+          .map((request) => JSON.parse(request.body))
+          .filter(
+            (body): body is GraphQl =>
+              typeof body === "object" &&
+              body !== null &&
+              "query" in body &&
+              typeof body.query === "string" &&
+              body.query.includes("issueUpdate"),
+          );
+        expect(updates).toEqual([
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
+          },
+        ]);
+      }),
   );
 
   it.effect("moveIssue sends the state and no description", () =>

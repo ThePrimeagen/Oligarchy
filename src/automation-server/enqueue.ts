@@ -8,7 +8,14 @@ const isDuplicateJob = (error: Errors.DatabaseError): boolean =>
 
 // Automation Needed is a drive, unless this result is the mint install: that job is a
 // mint, not a drive, so it is claimed ahead of the resumes waiting on it. Needs Review
-// stays a diagnose. A missing result is not a job.
+// stays a diagnose.
+export const queuedAction = (
+  action: Automation.AutomationAction,
+  definition: Option.Option<string>,
+): Automation.AutomationAction =>
+  action === "drive" && Option.isSome(definition) && definition.value === "mint" ? "mint" : action;
+
+// A missing result is not a job.
 export const enqueueTicket = Effect.fn("enqueueTicket")(function* (
   ticket: string,
   action: Automation.AutomationAction,
@@ -20,15 +27,20 @@ export const enqueueTicket = Effect.fn("enqueueTicket")(function* (
     return { result: "missing" as const };
   }
   const definition = yield* tests.definitionName(found.value.definitionId);
-  const queued =
-    action === "drive" && Option.isSome(definition) && definition.value === "mint"
-      ? "mint"
-      : action;
+  const queued = queuedAction(action, definition);
   const outcome = yield* automation.enqueue({ resultId: found.value.id, action: queued }).pipe(
     Effect.as("queued" as const),
     Effect.catchTag("DatabaseError", (error) =>
       isDuplicateJob(error) ? Effect.succeed("duplicate" as const) : Effect.fail(error),
     ),
   );
+  if (outcome === "duplicate") {
+    const status = yield* automation.jobStatus(found.value.id, queued);
+    return {
+      result: outcome,
+      action: queued,
+      status: Option.getOrElse(status, () => "pending" as const),
+    };
+  }
   return { result: outcome, action: queued };
 });

@@ -9,6 +9,7 @@ import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AutomationClient from "./client.ts";
 import * as Prompts from "./prompts.ts";
+import * as Ready from "./ready.ts";
 
 const DISPATCH_INTERVAL = "5 seconds";
 
@@ -166,9 +167,20 @@ const closeJob = Effect.fn("closeJob")(function* (
   const store = yield* Automation.AutomationStore;
   const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
   // abort may have closed the row first
-  if (closed) {
-    yield* logOutcome(job, outcome);
+  if (!closed) {
+    return;
   }
+  yield* logOutcome(job, outcome);
+  // Ready means a pending drive or mint. A diagnose was never labeled. A 503 unclaim does not close.
+  if (job.action === "diagnose") {
+    return;
+  }
+  const tests = yield* Tests.TestStore;
+  const result = yield* tests.findResult(job.resultId);
+  if (Option.isNone(result) || result.value.linearId === null) {
+    return;
+  }
+  yield* Ready.release(result.value.linearId);
 });
 
 // Jobs launch one reservation at a time, round robin from where the last one stopped.

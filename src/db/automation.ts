@@ -124,6 +124,48 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         );
       });
 
+      // The row the Automation Needed watch must not insert over: a pending job is the
+      // queue entry, waiting for claim. A running or finished row is not that wait.
+      const hasPending = Effect.fn("db.hasPendingAutomationJob")(function* (
+        resultId: string,
+        action: AutomationAction,
+      ) {
+        const rows = yield* database.run("hasPendingAutomationJob", (db) =>
+          db
+            .select({ id: DbSchema.automationJobs.id })
+            .from(DbSchema.automationJobs)
+            .where(
+              and(
+                eq(DbSchema.automationJobs.resultId, resultId),
+                eq(DbSchema.automationJobs.action, action),
+                eq(DbSchema.automationJobs.status, "pending"),
+              ),
+            )
+            .limit(1),
+        );
+        return rows.length > 0;
+      });
+
+      // The row the unique index kept. The watch names that status when a second insert loses.
+      const jobStatus = Effect.fn("db.automationJobStatus")(function* (
+        resultId: string,
+        action: AutomationAction,
+      ) {
+        const rows = yield* database.run("automationJobStatus", (db) =>
+          db
+            .select({ status: DbSchema.automationJobs.status })
+            .from(DbSchema.automationJobs)
+            .where(
+              and(
+                eq(DbSchema.automationJobs.resultId, resultId),
+                eq(DbSchema.automationJobs.action, action),
+              ),
+            )
+            .limit(1),
+        );
+        return Option.map(Arr.head(rows), (row) => row.status);
+      });
+
       const findRunning = Effect.fn("db.findRunningAutomationJob")(function* (resultId: string) {
         const rows = yield* database.run("findRunningAutomationJob", (db) =>
           db
@@ -314,7 +356,18 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return { running, pending, completed };
       });
 
-      return { enqueue, claim, findRunning, abortPending, unclaim, assign, finish, listJobs };
+      return {
+        enqueue,
+        claim,
+        hasPending,
+        jobStatus,
+        findRunning,
+        abortPending,
+        unclaim,
+        assign,
+        finish,
+        listJobs,
+      };
     }),
   },
 ) {

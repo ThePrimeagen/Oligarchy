@@ -1136,6 +1136,37 @@ Postgres.describeWithDatabase("database", () => {
       yield* database.run("emptyQueue", (db) => db.delete(DbSchema.automationJobs));
     });
 
+    scoped.effect(
+      "AutomationStore hasPending is only a waiting row of that action (unhappy: missing, other action, running, finished)",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          expect(yield* automation.hasPending(resultId, "drive")).toBe(false);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.none());
+          yield* automation.enqueue({ resultId, action: "drive" });
+          expect(yield* automation.hasPending(resultId, "drive")).toBe(true);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.some("pending"));
+          expect(yield* automation.hasPending(resultId, "diagnose")).toBe(false);
+          const claimed = yield* automation.claim(crypto.randomUUID());
+          expect(Option.isSome(claimed)).toBe(true);
+          expect(yield* automation.hasPending(resultId, "drive")).toBe(false);
+          if (Option.isSome(claimed)) {
+            expect(yield* automation.finish(claimed.value.id, "failed", "no")).toBe(true);
+          }
+          expect(yield* automation.hasPending(resultId, "drive")).toBe(false);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.some("failed"));
+        }),
+    );
+
     scoped.effect("AutomationStore claims the oldest pending job, then none", () =>
       Effect.gen(function* () {
         yield* emptyQueue;

@@ -1,4 +1,13 @@
-import { Array as Arr, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Redacted,
+  Schema,
+  SynchronizedRef,
+} from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -14,6 +23,9 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
+// A ticket in Automation Needed that already has its pending job. The watch's list leaves
+// these out, so a restart does not keep a map of tickets that are waiting to run.
+export const READY_LABEL = "ready";
 
 export const LinearTicket = Schema.Struct({
   id: Schema.String,
@@ -113,6 +125,12 @@ type IssueFilter = {
   readonly state:
     | { readonly type: { readonly eq: string } }
     | { readonly name: { readonly eq: string } };
+  // Absent labels, or none of them named ready. A ready ticket is already queued.
+  readonly labels?: {
+    readonly or: ReadonlyArray<
+      { readonly null: true } | { readonly every: { readonly name: { readonly neq: string } } }
+    >;
+  };
 };
 
 const Nodes = Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) });
@@ -173,6 +191,9 @@ export type LinearService = {
     ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
+  readonly markReady: (ticket: LinearTicket) => Effect.Effect<void, Errors.LinearError>;
+  // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
+  readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -399,11 +420,65 @@ const makeLinear = (
       state: { name: { eq: name } },
     });
 
+    // The id does not change for the life of the process. The two watches can label at once, so
+    // the lookup runs one at a time and a failed lookup is not stored. The next ticket tries again.
+    const readyLabel = yield* SynchronizedRef.make<Option.Option<string>>(Option.none());
+
+    const readyLabelId = Effect.fn("Linear.readyLabelId")(function* () {
+      return yield* SynchronizedRef.modifyEffect(readyLabel, (cached) =>
+        Option.match(cached, {
+          onSome: (found) => Effect.succeed([found, cached] as const),
+          onNone: () =>
+            teamId.pipe(
+              Effect.flatMap((team) => labelId(team, READY_LABEL)),
+              Effect.map((created) => [created, Option.some(created)] as const),
+            ),
+        }),
+      );
+    });
+
+    const setReady = (
+      operation: "markReady" | "clearReady",
+      id: string,
+      input:
+        | { readonly addedLabelIds: ReadonlyArray<string> }
+        | { readonly removedLabelIds: ReadonlyArray<string> },
+      message: string,
+    ) =>
+      request(operation, ISSUE_UPDATE_MUTATION, { id, input }, IssueUpdate).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () => Errors.LinearError.make({ operation, message }),
+        ),
+      );
+
+    const markReady = Effect.fn("Linear.markReady")(function* (ticket: LinearTicket) {
+      const id = yield* readyLabelId();
+      yield* setReady(
+        "markReady",
+        ticket.id,
+        { addedLabelIds: [id] },
+        `linear: labeling ${ticket.identifier} ready failed`,
+      );
+    });
+
+    const clearReady = Effect.fn("Linear.clearReady")(function* (identifier: string) {
+      const id = yield* readyLabelId();
+      yield* setReady(
+        "clearReady",
+        identifier,
+        { removedLabelIds: [id] },
+        `linear: clearing ${identifier} ready failed`,
+      );
+    });
+
     const listBacklog = listIssues("listBacklog", BACKLOG_FILTER);
-    const listAutomationNeeded = listIssues(
-      "listAutomationNeeded",
-      stateFilter(AUTOMATION_NEEDED_STATE),
-    );
+    const listAutomationNeeded = listIssues("listAutomationNeeded", {
+      ...stateFilter(AUTOMATION_NEEDED_STATE),
+      labels: {
+        or: [{ null: true }, { every: { name: { neq: READY_LABEL } } }],
+      },
+    });
     const listNeedsReview = listIssues("listNeedsReview", stateFilter(NEEDS_REVIEW_STATE));
 
     return {
@@ -414,6 +489,8 @@ const makeLinear = (
       createIssue,
       describeIssue,
       moveIssue,
+      markReady,
+      clearReady,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,

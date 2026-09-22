@@ -1,6 +1,8 @@
-import { Cause, Effect, Schedule, Schema } from "effect";
+import { Cause, Effect, Option, Schedule, Schema } from "effect";
 import * as Linear from "../ctrl/linear.ts";
+import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
+import * as Tests from "../db/tests.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -14,6 +16,18 @@ const POLL_INTERVAL = "30 seconds";
 const ROUNDS_BEFORE_MOVE = 3;
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
+
+const labeled = (ticket: Linear.LinearBacklogTicket): Linear.LinearTicket => ({
+  id: ticket.id,
+  identifier: ticket.identifier,
+  url: ticket.url,
+});
+
+// A pending row is the queue. Anything else the unique index kept is named by its status.
+const already = (
+  action: Automation.AutomationAction,
+  status: Automation.AutomationJobRow["status"],
+): string => `${action} already ${status === "pending" ? "queued" : status}`;
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>
@@ -53,18 +67,27 @@ const processBacklog = Effect.fn("processBacklog")(function* (
   }
   const adopted = placed.result;
   return yield* Effect.gen(function* () {
+    const tests = yield* Tests.TestStore;
+    const automation = yield* Automation.AutomationStore;
+    const found = yield* tests.findResultByLinearId(ticket.identifier);
+    // Label before the move. A miss leaves the ticket in Backlog; the next poll tries again.
+    if (Option.isSome(found) && (yield* automation.hasPending(found.value.id, placed.action))) {
+      yield* linear.markReady(labeled(ticket));
+    }
     const team = yield* linear.teamId;
     const states = yield* linear.stateIds(team);
     yield* linear.moveIssue(ticket, states.automationNeeded);
     const note =
-      adopted === "queued" ? `queued ${placed.action}` : `${placed.action} already queued`;
+      placed.result === "queued"
+        ? `queued ${placed.action}`
+        : already(placed.action, placed.status);
     yield* log.info(`backlog watch moved to Automation Needed; ${note}`, {
       location: Log.Locations.automation,
       agentId: ticket.identifier,
     });
     return adopted;
   }).pipe(
-    // Keep the landed enqueue when the move fails, so a new job still spends the check.
+    // Keep the landed enqueue when the label or the move fails, so a new job still spends the check.
     Effect.catch((error) =>
       log
         .error(`backlog watch failed: ${detail(error)}`, {
@@ -78,12 +101,34 @@ const processBacklog = Effect.fn("processBacklog")(function* (
 });
 
 // The ticket stays in Automation Needed while the drive runs, so the caller settles a landed
-// enqueue until the snapshot changes. A missing result is retried every poll and logged once.
+// enqueue until the snapshot changes. A pending job is that wait already: the row holds the
+// fulfilled work until claim, and another insert would only rediscover it. A missing result
+// is retried every poll and logged once.
 const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   ticket: Linear.LinearBacklogTicket,
   rounds: number,
 ) {
   const log = yield* Log.Log;
+  const linear = yield* Linear.Linear;
+  const tests = yield* Tests.TestStore;
+  const automation = yield* Automation.AutomationStore;
+  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  if (Option.isNone(found)) {
+    if (rounds === ROUNDS_BEFORE_MOVE) {
+      yield* log.info("automation needed watch left the ticket in Automation Needed; no result", {
+        location: Log.Locations.automation,
+        agentId: ticket.identifier,
+      });
+    }
+    return "missing";
+  }
+  const definition = yield* tests.definitionName(found.value.definitionId);
+  // Same action enqueue would insert. A pending diagnose is a different job.
+  if (yield* automation.hasPending(found.value.id, Enqueue.queuedAction("drive", definition))) {
+    yield* linear.markReady(labeled(ticket));
+    // Already waiting. Settled, and it does not spend this check's one new job.
+    return "duplicate";
+  }
   const placed = yield* Enqueue.enqueueTicket(ticket.identifier, "drive");
   if (placed.result === "missing") {
     if (rounds === ROUNDS_BEFORE_MOVE) {
@@ -97,11 +142,16 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   const line =
     placed.result === "queued"
       ? `automation needed watch queued ${placed.action}`
-      : `automation needed watch; ${placed.action} already queued`;
+      : `automation needed watch; ${already(placed.action, placed.status)}`;
   yield* log.info(line, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,
   });
+  // A new row is pending. A duplicate of a finished row is not, and stays unlabeled.
+  // Returning settles this snapshot. The label is what a restart uses.
+  if (placed.result === "queued") {
+    yield* linear.markReady(labeled(ticket));
+  }
   return placed.result;
 });
 
