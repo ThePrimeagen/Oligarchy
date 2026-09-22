@@ -611,6 +611,13 @@ export const fakeAutomationStore = (
         job.serverId = serverId;
         return Option.some(job);
       }),
+    hasPending: (resultId, action) =>
+      Effect.sync(() =>
+        jobs.some(
+          (job) =>
+            sameId(job.resultId, resultId) && job.action === action && job.status === "pending",
+        ),
+      ),
     findRunning: (resultId) =>
       Effect.sync(() =>
         Option.fromUndefinedOr(

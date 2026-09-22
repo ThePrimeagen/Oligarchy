@@ -428,6 +428,64 @@ describe("automation needed watch happy path", () => {
       expect(FakeLog.texts(log)).toEqual(["automation needed watch queued mint"]);
     }),
   );
+
+  it.effect(
+    "a pending drive is the queue row, so the watch does not enqueue again and says nothing",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+        seedResult(stores.tests, TICKET);
+        stores.automation.jobs.push({
+          id: "00000000-0000-4000-8000-000000000001",
+          resultId: RESULT,
+          action: "drive",
+          status: "pending",
+          reason: null,
+          serverId: null,
+          createdAt: new Date(),
+          startedAt: null,
+          finishedAt: null,
+        });
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(moved).toEqual([]);
+        expect(FakeLog.texts(log)).toEqual([]);
+        yield* TestClock.adjust("60 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(log.lines).toHaveLength(0);
+      }),
+  );
+
+  it.effect("a pending mint is the queue row, so the watch does not enqueue another mint", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, log } = yield* startColumn("listAutomationNeeded", board);
+      stores.tests.definitions.push(mintDefinition);
+      seedResult(stores.tests, TICKET);
+      stores.automation.jobs.push({
+        id: "00000000-0000-4000-8000-000000000001",
+        resultId: RESULT,
+        action: "mint",
+        status: "pending",
+        reason: null,
+        serverId: null,
+        createdAt: new Date(),
+        startedAt: null,
+        finishedAt: null,
+      });
+      yield* TestClock.adjust("90 seconds");
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
+      ]);
+      expect(FakeLog.texts(log)).toEqual([]);
+      yield* TestClock.adjust("60 seconds");
+      expect(stores.automation.jobs).toHaveLength(1);
+      expect(log.lines).toHaveLength(0);
+    }),
+  );
 });
 
 describe("needs review watch happy path", () => {
@@ -532,15 +590,45 @@ describe("automation needed and needs review watch unhappy path", () => {
       }),
   );
 
-  it.effect("a drive already queued is recorded once and left alone", () =>
+  it.effect(
+    "a failed drive is not waiting, so the watch records the duplicate and does not insert",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+        seedResult(stores.tests, TICKET);
+        stores.automation.jobs.push({
+          id: "00000000-0000-4000-8000-000000000001",
+          resultId: RESULT,
+          action: "drive",
+          status: "failed",
+          reason: "drive failed",
+          serverId: null,
+          createdAt: new Date(),
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        });
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "failed" }),
+        ]);
+        expect(moved).toEqual([]);
+        expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already queued"]);
+        yield* TestClock.adjust("60 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(log.lines).toHaveLength(1);
+      }),
+  );
+
+  it.effect("a pending diagnose is not the drive, so the watch still queues the drive", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
-      const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+      const { stores, log } = yield* startColumn("listAutomationNeeded", board);
       seedResult(stores.tests, TICKET);
       stores.automation.jobs.push({
         id: "00000000-0000-4000-8000-000000000001",
         resultId: RESULT,
-        action: "drive",
+        action: "diagnose",
         status: "pending",
         reason: null,
         serverId: null,
@@ -549,13 +637,59 @@ describe("automation needed and needs review watch unhappy path", () => {
         finishedAt: null,
       });
       yield* TestClock.adjust("90 seconds");
-      expect(stores.automation.jobs).toHaveLength(1);
-      expect(moved).toEqual([]);
-      expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already queued"]);
-      yield* TestClock.adjust("60 seconds");
-      expect(stores.automation.jobs).toHaveLength(1);
-      expect(log.lines).toHaveLength(1);
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+        expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+      ]);
+      expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
     }),
+  );
+
+  it.effect(
+    "a pending-job lookup that fails is one error line, and the next poll still queues",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.DatabaseError.make({
+          operation: "hasPendingAutomationJob",
+          message: "Failed query: select from automation_jobs",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        let fail = true;
+        const tests = Stores.fakeTestStore();
+        const automation = Stores.fakeAutomationStore({
+          hasPending: () => (fail ? Effect.fail(refused) : Effect.succeed(false)),
+        });
+        const log = FakeLog.fakeLog();
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listAutomationNeeded: Effect.sync(() => [ticket(TICKET, SEEN)]),
+          },
+        });
+        seedResult(tests, TICKET);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(tests.layer, automation.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(automation.jobs).toEqual([]);
+        expect(log.lines[0]).toMatchObject({
+          level: "error",
+          text: "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        });
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(FakeLog.texts(log)).toEqual([
+          "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+          "automation needed watch queued drive",
+        ]);
+      }),
   );
 
   it.effect(
