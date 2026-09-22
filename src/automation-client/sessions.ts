@@ -8,10 +8,11 @@ import * as Errors from "../shared/errors.ts";
 import * as OpenCode from "./opencode.ts";
 
 // A reservation is a promise that a run follows at once; the dispatcher POSTs /run right after
-// /reserve answers. One nobody runs (the dispatcher died in between) would hold a slot, and a
-// drive's guest slot with it, until this process restarted. Ten minutes unused and it is given
-// back, as a guest with no command is. In memory only: nothing durable records a reservation,
-// so a restart starts clean and a restarted dispatcher can place the job anew.
+// /reserve answers. One nobody runs (the dispatcher died in between) holds this client's one
+// reservation, its slot, and a drive's guest slot, so nothing new lands until it is given back.
+// Ten minutes unused and it is given back, as a guest with no command is. In memory only:
+// nothing durable records a reservation, so a restart starts clean and a restarted dispatcher
+// can place the job anew.
 const RESERVATION_TIMEOUT = "10 minutes";
 const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
 const RESERVATION_SWEEP = "10 seconds";
@@ -62,7 +63,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       });
 
     // One reserve at a time: two tickets must not both reserve QEMU when only one local
-    // slot remains.
+    // slot remains, and only a reserve adds a reservation, so a snapshot read here cannot grow.
     const reserveGate = yield* Semaphore.make(1);
 
     const reserve = Effect.fn("Sessions.reserve")(function* (

@@ -447,7 +447,7 @@ describe("POST /run unhappy path", () => {
     "a second reserve while one reservation is outstanding is 503 and does not ask QEMU",
     () =>
       Effect.gen(function* () {
-        const fixed = fixture(() => ({}), 1);
+        const fixed = fixture(() => ({}), 2);
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
           expect((yield* reserve(http)).status).toBe(200);
@@ -484,7 +484,7 @@ describe("POST /run unhappy path", () => {
           expect(yield* refused.json).toEqual({ error: "a reservation is already outstanding" });
           expect(fixed.qemu).toEqual([TICKET]);
           const pending = yield* Effect.forkChild(run(http, "first"));
-          yield* fixed.spawner.nextSpawn;
+          const first = yield* fixed.spawner.nextSpawn;
           expect((yield* reserve(http, "OLI-99")).status).toBe(200);
           expect(fixed.qemu).toEqual([TICKET, "OLI-99"]);
           const accepted = yield* Effect.forkChild(run(http, "second", headers, "OLI-99"));
@@ -493,7 +493,7 @@ describe("POST /run unhappy path", () => {
             "first",
             "second",
           ]);
-          yield* fixed.spawner.spawned[0]?.exit(0) ?? Effect.void;
+          yield* first.exit(0);
           yield* second.exit(0);
           expect((yield* Fiber.join(pending)).status).toBe(200);
           expect((yield* Fiber.join(accepted)).status).toBe(200);

@@ -346,24 +346,6 @@ describe("Sessions.abort unhappy path", () => {
 });
 
 describe("capacity", () => {
-  it.effect(
-    "a second reservation while one is outstanding is AtCapacity and spawns nothing",
-    () => {
-      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
-      return Effect.gen(function* () {
-        const sessions = yield* Sessions.Sessions;
-        yield* sessions.reserve(TICKET, "drive");
-        const error = yield* Effect.flip(sessions.reserve(OTHER, "drive"));
-        expect(error).toMatchObject({
-          _tag: "AtCapacity",
-          message: "a reservation is already outstanding",
-          agentId: OTHER,
-        });
-        expect(spawner.spawned).toHaveLength(0);
-      }).pipe(Effect.provide(layer(spawner, 1)));
-    },
-  );
-
   it.effect("a second reserve for the same ticket is already reserved", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
