@@ -1,5 +1,13 @@
-import { Array as Arr, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
-import * as SynchronizedRef from "effect/SynchronizedRef";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Redacted,
+  Schema,
+  SynchronizedRef,
+} from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";

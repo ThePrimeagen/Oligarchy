@@ -4,8 +4,10 @@ import { it } from "@effect/vitest";
 import { ImageRenderable, type Renderable } from "@opentui/core";
 import { testRender } from "@opentui/solid";
 import { Effect, Option } from "effect";
+import { createSignal } from "solid-js";
 import type * as Servers from "../../src/db/servers.ts";
 import * as Follow from "../../src/viz/follow.ts";
+import * as Placeholder from "../../src/viz/placeholder.ts";
 import * as Screen from "../../src/viz/screen.tsx";
 import * as View from "../../src/viz/view.ts";
 import * as FakeRenderer from "../support/fake-renderer.ts";
@@ -130,6 +132,41 @@ const imageProtocols = (node: Renderable): ReadonlyArray<string> => [
   ...(node instanceof ImageRenderable ? [node.protocol] : []),
   ...node.getChildren().flatMap(imageProtocols),
 ];
+
+// OpenTUI stores every multi-codepoint cluster as a grapheme, including ordinary text, so the
+// grapheme flag is not the screenshot. The placeholder clusters are interned, and encoding the
+// grid again returns the same cell values the picture was drawn with. The char frame expands
+// each cluster, so a column check has to read those cells.
+const placeholderIds = (
+  setup: Awaited<ReturnType<typeof testRender>>,
+  columns: number,
+  rows: number,
+): ReadonlySet<number> => {
+  const buffer = setup.renderer.currentRenderBuffer;
+  const ids = new Set<number>();
+  for (const line of Placeholder.lines(columns, rows)) {
+    const encoded = buffer.encodeUnicode(line);
+    if (encoded === null) {
+      continue;
+    }
+    for (const glyph of encoded.data) {
+      ids.add(glyph.char);
+    }
+    buffer.freeUnicode(encoded);
+  }
+  return ids;
+};
+const pinnedColumns = (
+  setup: Awaited<ReturnType<typeof testRender>>,
+  y: number,
+  width: number,
+  ids: ReadonlySet<number>,
+): ReadonlyArray<number> => {
+  const chars = setup.renderer.currentRenderBuffer.buffers.char;
+  return Array.from({ length: width }, (_, x) => x).filter((x) =>
+    ids.has(chars[y * width + x] ?? 0),
+  );
+};
 
 describe("screen happy path", () => {
   it.effect("fills every row of the terminal, each as wide as the terminal", () =>
@@ -1022,9 +1059,10 @@ describe("screen follow", () => {
   );
 
   it.effect(
-    "a ghostty or kitty host asks for kitty graphics; anything else leaves the image on auto and draws blocks",
+    "a kitty host pins the peek's screenshot to the cells beside the commands; auto draws blocks",
     () =>
       Effect.gen(function* () {
+        const placed: Array<string> = [];
         const kitty = yield* Effect.promise(() =>
           testRender(
             () => (
@@ -1032,13 +1070,34 @@ describe("screen follow", () => {
                 view={() => peeking(peek)}
                 now={() => QUERIED_AT_MS}
                 imageProtocol="kitty"
+                place={(sequence) => {
+                  placed.push(sequence);
+                }}
               />
             ),
             { width: COLUMNS, height: ROWS },
           ),
         );
         yield* Effect.promise(() => kitty.renderOnce());
-        expect(imageProtocols(kitty.renderer.root)).toEqual(["kitty"]);
+        const start = 1 + 1 + Follow.LEFT_COLS + 2;
+        const width = COLUMNS - Follow.LEFT_COLS - 6;
+        const pins = placeholderIds(kitty, width, Follow.PEEK_IMAGE_ROWS);
+        const columns = pinnedColumns(kitty, PEEK_TOP + 1, COLUMNS, pins);
+        expect(imageProtocols(kitty.renderer.root)).toEqual([]);
+        expect(columns[0]).toBe(start);
+        expect(columns[columns.length - 1]).toBe(start + width - 1);
+        expect(columns).toHaveLength(width);
+        expect(pinnedColumns(kitty, 0, COLUMNS, pins)).toEqual([]);
+        expect(pinnedColumns(kitty, PEEK_TOP, COLUMNS, pins)).toEqual([]);
+        for (const row of [PEEK_TOP + 1, PEEK_TOP + 2, PEEK_TOP + 3]) {
+          expect(pinnedColumns(kitty, row, COLUMNS, pins).every((column) => column >= start)).toBe(
+            true,
+          );
+        }
+        const frame = kitty.captureCharFrame();
+        expect(frame).toContain("send-key");
+        expect(placed.some((sequence) => sequence.includes("\x1b["))).toBe(false);
+        expect(placed.some((sequence) => sequence.includes("a=p,U=1,i=2,"))).toBe(true);
         kitty.renderer.destroy();
 
         const plain = yield* Effect.promise(() =>
@@ -1058,7 +1117,87 @@ describe("screen follow", () => {
         );
         expect(imageProtocols(plain.renderer.root)).toEqual(["auto"]);
         expect(BLOCKS.test(rows[PEEK_TOP + 1]?.slice(Follow.LEFT_COLS + 2) ?? "")).toBe(true);
+        expect(
+          pinnedColumns(
+            plain,
+            PEEK_TOP + 1,
+            COLUMNS,
+            placeholderIds(plain, width, Follow.PEEK_IMAGE_ROWS),
+          ),
+        ).toEqual([]);
         plain.renderer.destroy();
+      }),
+  );
+
+  it.effect("leaving the peek deletes that screenshot and takes its cells with it", () =>
+    Effect.gen(function* () {
+      const placed: Array<string> = [];
+      const [view, setView] = createSignal(peeking(peek));
+      const kitty = yield* Effect.promise(() =>
+        testRender(
+          () => (
+            <Screen.App
+              view={view}
+              now={() => QUERIED_AT_MS}
+              imageProtocol="kitty"
+              place={(sequence) => {
+                placed.push(sequence);
+              }}
+            />
+          ),
+          { width: COLUMNS, height: ROWS },
+        ),
+      );
+      yield* Effect.promise(() => kitty.renderOnce());
+      const pins = placeholderIds(kitty, COLUMNS - Follow.LEFT_COLS - 6, Follow.PEEK_IMAGE_ROWS);
+      expect(pinnedColumns(kitty, PEEK_TOP + 1, COLUMNS, pins).length).toBeGreaterThan(0);
+      const empty = Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none());
+      setView(peeking(empty));
+      yield* Effect.promise(() => kitty.renderOnce());
+      expect(pinnedColumns(kitty, PEEK_TOP + 1, COLUMNS, pins)).toEqual([]);
+      expect(placed.at(-1)).toBe(Placeholder.hide(Placeholder.PEEK));
+      expect(placed.some((sequence) => sequence.includes("\x1b["))).toBe(false);
+      kitty.renderer.destroy();
+    }),
+  );
+
+  it.effect(
+    "a terminal wider than the placeholder alphabet draws the screenshot as blocks in the layout",
+    () =>
+      Effect.gen(function* () {
+        const placed: Array<string> = [];
+        const wide = COLUMNS + Placeholder.MAX_SPAN;
+        const kitty = yield* Effect.promise(() =>
+          testRender(
+            () => (
+              <Screen.App
+                view={() => peeking(peek)}
+                now={() => QUERIED_AT_MS}
+                imageProtocol="kitty"
+                place={(sequence) => {
+                  placed.push(sequence);
+                }}
+              />
+            ),
+            { width: wide, height: ROWS },
+          ),
+        );
+        const rows = yield* Effect.promise(() => kitty.renderOnce()).pipe(
+          Effect.map(() => kitty.captureCharFrame().replace(/\n$/, "").split("\n")),
+        );
+        const top = ROWS - 1 - Follow.PEEK_FRAME_ROWS;
+        expect(imageProtocols(kitty.renderer.root)).toEqual(["blocks"]);
+        expect(BLOCKS.test(rows[top + 1]?.slice(Follow.LEFT_COLS + 2) ?? "")).toBe(true);
+        expect(
+          pinnedColumns(
+            kitty,
+            top + 1,
+            wide,
+            placeholderIds(kitty, wide - Follow.LEFT_COLS - 6, Follow.PEEK_IMAGE_ROWS),
+          ),
+        ).toEqual([]);
+        expect(placed).toEqual([]);
+        kitty.renderer.destroy();
       }),
   );
 
@@ -1116,6 +1255,46 @@ describe("screen follow", () => {
         );
         expect(styleOf(failedRows[4], "✗")).toEqual([LOVE, PLAIN]);
       }),
+  );
+
+  it.effect("a kitty host pins the full follow's screenshot to the right of the entries", () =>
+    Effect.gen(function* () {
+      const full = Follow.apply(
+        Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+        { type: "action", id: 9, name: "mouse-click", state: "running" },
+      );
+      const placed: Array<string> = [];
+      const kitty = yield* Effect.promise(() =>
+        testRender(
+          () => (
+            <Screen.App
+              view={() => peeking(full)}
+              now={() => QUERIED_AT_MS}
+              imageProtocol="kitty"
+              place={(sequence) => {
+                placed.push(sequence);
+              }}
+            />
+          ),
+          { width: COLUMNS, height: ROWS },
+        ),
+      );
+      yield* Effect.promise(() => kitty.renderOnce());
+      const start = Follow.LEFT_COLS + 1;
+      const width = COLUMNS - Follow.LEFT_COLS - 2;
+      const pins = placeholderIds(kitty, width, ROWS - 2);
+      const columns = pinnedColumns(kitty, 1, COLUMNS, pins);
+      expect(columns[0]).toBe(start);
+      expect(columns[columns.length - 1]).toBe(start + width - 1);
+      expect(columns).toHaveLength(width);
+      expect(pinnedColumns(kitty, 0, COLUMNS, pins)).toEqual([]);
+      expect(pinnedColumns(kitty, ROWS - 1, COLUMNS, pins)).toEqual([]);
+      expect(pinnedColumns(kitty, 20, COLUMNS, pins)[0]).toBe(start);
+      expect(kitty.captureCharFrame()).toContain("send-key");
+      expect(placed.some((sequence) => sequence.includes("a=p,U=1,i=3,"))).toBe(true);
+      expect(placed.some((sequence) => sequence.includes("\x1b["))).toBe(false);
+      kitty.renderer.destroy();
+    }),
   );
 
   it.effect(
@@ -1453,6 +1632,55 @@ describe("session pane", () => {
         const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
         expect(drawn.image).toEqual(Option.some({ png: TINY_PNG, top: 15, height: 20 }));
       }),
+  );
+
+  it.effect("a kitty host pins the session screenshot under the log, not in the corner", () =>
+    Effect.gen(function* () {
+      const full = Follow.expand(
+        Follow.peekFromActions(
+          "OLI-61",
+          SESSION_ID,
+          garage.url,
+          [{ request: sendKey, createdAt: ago(2) }],
+          Option.some(TINY_PNG),
+        ),
+        garage.url,
+      );
+      const view = sessionOf(full);
+      const placed: Array<string> = [];
+      const kitty = yield* Effect.promise(() =>
+        testRender(
+          () => (
+            <Screen.App
+              view={() => view}
+              now={() => READ_AT}
+              imageProtocol="kitty"
+              place={(sequence) => {
+                placed.push(sequence);
+              }}
+            />
+          ),
+          { width: COLUMNS, height: ROWS },
+        ),
+      );
+      yield* Effect.promise(() => kitty.renderOnce());
+      const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
+      const image = Option.getOrThrow(drawn.image);
+      const width = COLUMNS - View.SESSION_IMAGE_LEFT - 2;
+      const pins = placeholderIds(kitty, width, image.height);
+      const columns = pinnedColumns(kitty, image.top, COLUMNS, pins);
+      expect(columns[0]).toBe(View.SESSION_IMAGE_LEFT);
+      expect(columns[columns.length - 1]).toBe(View.SESSION_IMAGE_LEFT + width - 1);
+      expect(columns).toHaveLength(width);
+      expect(pinnedColumns(kitty, 0, COLUMNS, pins)).toEqual([]);
+      expect(pinnedColumns(kitty, image.top - 1, COLUMNS, pins)).toEqual([]);
+      expect(pinnedColumns(kitty, image.top + image.height - 1, COLUMNS, pins)[0]).toBe(
+        View.SESSION_IMAGE_LEFT,
+      );
+      expect(placed.some((sequence) => sequence.includes("a=p,U=1,i=1,"))).toBe(true);
+      expect(placed.some((sequence) => sequence.includes("\x1b["))).toBe(false);
+      kitty.renderer.destroy();
+    }),
   );
 
   it.effect(

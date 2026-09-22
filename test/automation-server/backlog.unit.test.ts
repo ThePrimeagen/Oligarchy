@@ -11,8 +11,31 @@ import * as Stores from "../support/stores.ts";
 
 const TICKET = "OLI-45";
 const OTHER = "OLI-46";
+const THIRD = "OLI-47";
+const FOURTH = "OLI-48";
 const RESULT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const OTHER_RESULT = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+const THIRD_RESULT = "cccccccc-dddd-4eee-8fff-111111111111";
+const FOURTH_RESULT = "dddddddd-eeee-4fff-8aaa-222222222222";
+const CLIENT_STATS = {
+  qemus: 0,
+  memory: { totalBytes: 1, usedBytes: 0 },
+  cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+};
+
+// One live automation client, unless `url` names another. The check's budget is this list.
+const announceClient = (servers: Stores.FakeServerStore, url?: string) => {
+  const announced = url ?? `http://127.0.0.1:${String(55333 + servers.servers.length)}`;
+  const id = crypto.randomUUID();
+  servers.servers.push({ id, url: announced, name: null, type: "automation-client" });
+  servers.heartbeats.push({
+    url: announced,
+    type: "automation-client",
+    name: "garage",
+    stats: CLIENT_STATS,
+  });
+  return id;
+};
 const RUN = "11111111-1111-4111-8111-111111111111";
 const SEEN = "2026-09-22T13:00:00.000Z";
 const EDITED = "2026-09-22T13:01:00.000Z";
@@ -71,6 +94,7 @@ const start = (
         moveIssue: moveIssue ?? recordMove,
       },
     });
+    announceClient(stores.servers);
     const scope = yield* Scope.make();
     yield* Backlog.watch().pipe(
       Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -165,6 +189,188 @@ describe("backlog watch happy path", () => {
       expect(moved).toEqual([automationNeeded(TICKET), automationNeeded(OTHER)]);
       expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
     }),
+  );
+
+  it.effect(
+    "kicks off one ripe backlog ticket per thirty-second check and leaves the next ticket for the next check",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const { stores, moved } = yield* start(board);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT]);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET), automationNeeded(OTHER)]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
+      }),
+  );
+
+  it.effect(
+    "a ripe backlog ticket is the one job, and a ripe Needs Review ticket waits for the next check",
+    () =>
+      Effect.gen(function* () {
+        const backlog = [ticket(TICKET, SEEN)];
+        const review = [ticket(OTHER, SEEN)];
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const moved: Array<Move> = [];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listBacklog: Effect.sync(() => [...backlog]),
+            listNeedsReview: Effect.sync(() => [...review]),
+            moveIssue: (issue, stateId) =>
+              Effect.sync(() => {
+                moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+                const index = backlog.findIndex((item) => item.identifier === issue.identifier);
+                if (index !== -1) {
+                  backlog.splice(index, 1);
+                }
+              }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        announceClient(stores.servers);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs.map((job) => job.action)).toEqual(["drive"]);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs.map((job) => job.action)).toEqual(["drive", "diagnose"]);
+      }),
+  );
+
+  it.effect(
+    "a ripe Automation Needed ticket is the one job, and a ripe Needs Review ticket waits for the next check",
+    () =>
+      Effect.gen(function* () {
+        const needed = [ticket(TICKET, SEEN)];
+        const review = [ticket(OTHER, SEEN)];
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listAutomationNeeded: Effect.sync(() => [...needed]),
+            listNeedsReview: Effect.sync(() => [...review]),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        announceClient(stores.servers);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs.map((job) => job.action)).toEqual(["drive"]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs.map((job) => job.action)).toEqual(["drive", "diagnose"]);
+      }),
+  );
+
+  it.effect(
+    "an already queued backlog ticket does not spend the check, so the next ripe ticket is the one new job",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const { stores, moved } = yield* start(board);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        stores.automation.jobs.push({
+          id: "00000000-0000-4000-8000-000000000001",
+          resultId: RESULT,
+          action: "drive",
+          status: "pending",
+          reason: null,
+          serverId: null,
+          createdAt: new Date(),
+          startedAt: null,
+          finishedAt: null,
+        });
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET), automationNeeded(OTHER)]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
+      }),
+  );
+
+  it.effect(
+    "kicks off one ripe ticket per live client and leaves the rest for the next check",
+    () =>
+      Effect.gen(function* () {
+        const board = [
+          ticket(TICKET, SEEN),
+          ticket(OTHER, SEEN),
+          ticket(THIRD, SEEN),
+          ticket(FOURTH, SEEN),
+        ];
+        const { stores, moved } = yield* start(board);
+        announceClient(stores.servers);
+        announceClient(stores.servers);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        seedResult(stores.tests, THIRD, THIRD_RESULT);
+        seedResult(stores.tests, FOURTH, FOURTH_RESULT);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved.map((item) => item.identifier)).toEqual([TICKET, OTHER, THIRD]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([
+          RESULT,
+          OTHER_RESULT,
+          THIRD_RESULT,
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved.map((item) => item.identifier)).toEqual([TICKET, OTHER, THIRD, FOURTH]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([
+          RESULT,
+          OTHER_RESULT,
+          THIRD_RESULT,
+          FOURTH_RESULT,
+        ]);
+      }),
+  );
+
+  it.effect(
+    "no live client kicks off nothing, and a client that appears is used on the next check",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const moved: Array<Move> = [];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listBacklog: Effect.sync(() => [...board]),
+            moveIssue: (issue, stateId) =>
+              Effect.sync(() => {
+                moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+                board.length = 0;
+              }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([]);
+        expect(stores.automation.jobs).toEqual([]);
+        announceClient(stores.servers);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+      }),
   );
 });
 
@@ -275,6 +481,7 @@ describe("backlog watch unhappy path", () => {
           },
         });
         seedResult(stores.tests, TICKET);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -369,6 +576,7 @@ describe("backlog watch unhappy path", () => {
           },
         });
         seedResult(stores.tests, TICKET);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -390,6 +598,145 @@ describe("backlog watch unhappy path", () => {
         yield* TestClock.adjust("30 seconds");
         expect(steps).toEqual(["ready", "move"]);
         expect(stores.automation.jobs).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "no result does not spend the check: the next ticket is the one job, and a third waits",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN), ticket(THIRD, SEEN)];
+        const { stores, moved, log } = yield* start(board);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        seedResult(stores.tests, THIRD, THIRD_RESULT);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([automationNeeded(OTHER)]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT]);
+        expect(FakeLog.texts(log)).toEqual([
+          "backlog watch left the ticket in Backlog; no result",
+          "backlog watch moved to Automation Needed; queued drive",
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(moved).toEqual([automationNeeded(OTHER), automationNeeded(THIRD)]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([
+          OTHER_RESULT,
+          THIRD_RESULT,
+        ]);
+        expect(board.map((item) => item.identifier)).toEqual([TICKET]);
+      }),
+  );
+
+  it.effect(
+    "a failed enqueue does not spend the check: the next ticket is the one job, and a third waits",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.DatabaseError.make({
+          operation: "findResultByLinearId",
+          message: "Failed query: select",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const tests = Stores.fakeTestStore(
+          {},
+          {
+            findResultByLinearId: (linearId) =>
+              Effect.suspend(() =>
+                linearId === TICKET
+                  ? Effect.fail(refused)
+                  : Effect.sync(() =>
+                      Option.fromUndefinedOr(
+                        tests.results.find(
+                          (row) => row.linearId !== null && row.linearId === linearId,
+                        ),
+                      ),
+                    ),
+              ),
+          },
+        );
+        const automation = Stores.fakeAutomationStore();
+        const servers = Stores.fakeServerStore();
+        const log = FakeLog.fakeLog();
+        announceClient(servers);
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN), ticket(THIRD, SEEN)];
+        const moved: Array<Move> = [];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listBacklog: Effect.sync(() => [...board]),
+            moveIssue: (issue, stateId) =>
+              Effect.sync(() => {
+                moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+                const index = board.findIndex((item) => item.identifier === issue.identifier);
+                if (index !== -1) {
+                  board.splice(index, 1);
+                }
+              }),
+          },
+        });
+        seedResult(tests, TICKET);
+        seedResult(tests, OTHER, OTHER_RESULT);
+        seedResult(tests, THIRD, THIRD_RESULT);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(
+            Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+          ),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT]);
+        expect(moved).toEqual([automationNeeded(OTHER)]);
+        expect(log.lines[0]).toMatchObject({
+          level: "error",
+          text: "backlog watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        });
+        yield* TestClock.adjust("30 seconds");
+        expect(automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT, THIRD_RESULT]);
+        expect(moved).toEqual([automationNeeded(OTHER), automationNeeded(THIRD)]);
+      }),
+  );
+
+  it.effect(
+    "a failed move spends the check, so a second ripe ticket is not queued until the next check",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "moveIssue",
+          message: `linear: moving ${TICKET} failed`,
+        });
+        let fail = true;
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const moved: Array<Move> = [];
+        const { stores, log } = yield* start(board, (issue, stateId) =>
+          Effect.suspend(() => {
+            if (fail && issue.identifier === TICKET) {
+              return Effect.fail(refused);
+            }
+            moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+            const index = board.findIndex((item) => item.identifier === issue.identifier);
+            if (index !== -1) {
+              board.splice(index, 1);
+            }
+            return Effect.void;
+          }),
+        );
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT]);
+        expect(moved).toEqual([]);
+        expect(log.lines[0]).toMatchObject({
+          level: "error",
+          text: `backlog watch failed: linear: moving ${TICKET} failed`,
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        });
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(moved.map((item) => item.identifier)).toEqual([TICKET, OTHER]);
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
       }),
   );
 
@@ -439,6 +786,7 @@ const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =
           }),
       },
     });
+    announceClient(stores.servers);
     const scope = yield* Scope.make();
     yield* Backlog.watch().pipe(
       Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -495,6 +843,55 @@ describe("automation needed watch happy path", () => {
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       expect(FakeLog.texts(log)).toEqual(["automation needed watch queued mint"]);
     }),
+  );
+
+  it.effect(
+    "queues one ripe Automation Needed ticket per thirty-second check and the next ticket on the next check",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const { stores } = yield* startColumn("listAutomationNeeded", board);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(2);
+      }),
+  );
+
+  it.effect(
+    "an already queued Automation Needed ticket does not spend the check, so the next ripe ticket is queued",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const { stores, log, linear } = yield* startColumn("listAutomationNeeded", board);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        stores.automation.jobs.push({
+          id: "00000000-0000-4000-8000-000000000001",
+          resultId: RESULT,
+          action: "drive",
+          status: "pending",
+          reason: null,
+          serverId: null,
+          createdAt: new Date(),
+          startedAt: null,
+          finishedAt: null,
+        });
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
+        expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([
+          ready(TICKET),
+          ready(OTHER),
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(2);
+        expect(log.lines).toHaveLength(1);
+      }),
   );
 
   it.effect(
@@ -757,6 +1154,7 @@ describe("automation needed and needs review watch unhappy path", () => {
           startedAt: null,
           finishedAt: null,
         });
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -795,6 +1193,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const automation = Stores.fakeAutomationStore({
           hasPending: () => (fail ? Effect.fail(refused) : Effect.succeed(false)),
         });
+        const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
         const linear = FakeLinear.fakeLinear({
           overrides: {
@@ -802,9 +1201,12 @@ describe("automation needed and needs review watch unhappy path", () => {
           },
         });
         seedResult(tests, TICKET);
+        announceClient(servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
-          Effect.provide(Layer.mergeAll(tests.layer, automation.layer, linear.layer, log.layer)),
+          Effect.provide(
+            Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+          ),
           Scope.provide(scope),
         );
         yield* TestClock.adjust("90 seconds");
@@ -851,6 +1253,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         });
         seedResult(stores.tests, TICKET);
         seedResult(stores.tests, OTHER, OTHER_RESULT);
+        announceClient(stores.servers);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
           Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
@@ -908,7 +1311,9 @@ describe("automation needed and needs review watch unhappy path", () => {
           },
         );
         const automation = Stores.fakeAutomationStore();
+        const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
+        announceClient(servers);
         const board = [ticket(TICKET, SEEN)];
         const linear = FakeLinear.fakeLinear({
           overrides: {
@@ -918,7 +1323,9 @@ describe("automation needed and needs review watch unhappy path", () => {
         seedResult(tests, TICKET);
         const scope = yield* Scope.make();
         yield* Backlog.watch().pipe(
-          Effect.provide(Layer.mergeAll(tests.layer, automation.layer, linear.layer, log.layer)),
+          Effect.provide(
+            Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+          ),
           Scope.provide(scope),
         );
         yield* TestClock.adjust("90 seconds");

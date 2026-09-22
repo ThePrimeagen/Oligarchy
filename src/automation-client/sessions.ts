@@ -1,4 +1,4 @@
-import { Cause, Clock, Context, Effect, Layer, Ref, Schedule, Semaphore } from "effect";
+import { Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Semaphore } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Cli from "../cli.ts";
 import * as Log from "../observability/log.ts";
@@ -61,8 +61,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         agentId: ticket,
       });
 
-    // One reserve at a time: two tickets must not both reserve QEMU when only one local
-    // slot remains.
+    // Held for the whole /reserve, including the QEMU call. A second /reserve on this
+    // server while that one has not answered is refused, not queued behind it.
     const reserveGate = yield* Semaphore.make(1);
 
     const reserve = Effect.fn("Sessions.reserve")(function* (
@@ -71,7 +71,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       resume?: string,
       server?: string,
     ) {
-      return yield* reserveGate.withPermits(1)(
+      const ran = yield* reserveGate.withPermitsIfAvailable(1)(
         Effect.gen(function* () {
           const held = yield* Ref.get(slots);
           if (held.reserved.has(ticket)) {
@@ -112,6 +112,13 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           return yield* Effect.void;
         }),
       );
+      if (Option.isNone(ran)) {
+        return yield* Errors.AtCapacity.make({
+          message: "a reserve is already in flight",
+          agentId: ticket,
+        });
+      }
+      return yield* Effect.void;
     });
 
     const consume = (ticket: string): Effect.Effect<void, Errors.BadRequest> =>
