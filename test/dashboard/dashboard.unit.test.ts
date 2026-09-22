@@ -23,9 +23,9 @@ const abort = (body: string | Record<string, unknown>) =>
 
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 
-const closeSuite = (run: string, headers: Record<string, string> = {}) =>
+const abortSuite = (run: string, headers: Record<string, string> = {}) =>
   app.request(
-    "/suites/close",
+    "/suites/abort",
     {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
@@ -39,24 +39,24 @@ const closeSuite = (run: string, headers: Record<string, string> = {}) =>
     },
   );
 
-describe("POST /suites/close happy path", () => {
+describe("POST /suites/abort happy path", () => {
   it("sends a form that names no suite back to the servers page", async () => {
-    const response = await closeSuite("");
+    const response = await abortSuite("");
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/servers");
   });
 });
 
-describe("POST /suites/close unhappy path", () => {
+describe("POST /suites/abort unhappy path", () => {
   it("sends a form whose run id is not a uuid back to the servers page", async () => {
-    const response = await closeSuite("not-a-suite");
+    const response = await abortSuite("not-a-suite");
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/servers");
     expect(await response.text()).not.toContain(SENTINEL_PASSWORD);
   });
 
-  it("says the close failed when the database cannot be read, and does not echo the password", async () => {
-    const response = await closeSuite("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", {
+  it("says the abort failed when the database cannot be read, and does not echo the password", async () => {
+    const response = await abortSuite("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", {
       "hx-request": "true",
     });
     expect(response.status).toBe(200);

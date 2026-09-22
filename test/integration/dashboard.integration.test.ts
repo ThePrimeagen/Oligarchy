@@ -2067,7 +2067,7 @@ console.log([queue.runningCount, queue.pendingCount, queue.suites.pending, queue
   });
 });
 
-const closeBindings = (databaseUrl: string) => ({
+const abortSuiteBindings = (databaseUrl: string) => ({
   HYPERDRIVE: { connectionString: databaseUrl },
   OLIGARCHY_TOKEN: "t",
   AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
@@ -2075,9 +2075,9 @@ const closeBindings = (databaseUrl: string) => ({
   LINEAR_API_TOKEN: "lin",
 });
 
-const postClose = async (databaseUrl: string, run: string): Promise<Page> => {
+const postAbortSuite = async (databaseUrl: string, run: string): Promise<Page> => {
   const response = await app.request(
-    "/suites/close",
+    "/suites/abort",
     {
       method: "POST",
       headers: {
@@ -2086,15 +2086,15 @@ const postClose = async (databaseUrl: string, run: string): Promise<Page> => {
       },
       body: new URLSearchParams({ run }).toString(),
     },
-    closeBindings(databaseUrl),
+    abortSuiteBindings(databaseUrl),
   );
   return { status: response.status, html: await response.text() };
 };
 
-// Closing is the operator's way off a suite whose results never reached a verdict. The
-// automation server and Linear are down here: a running job still closes in the database,
+// Aborting is the operator's way off a suite whose results never reached a verdict. The
+// automation server and Linear are down here: a running job still aborts in the database,
 // and the ticket stays on the board.
-describe.skipIf(dbUrl === "")("dashboard close a test suite", () => {
+describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
   it("aborts the results still open and their jobs, and leaves a result that already passed", async () => {
     const inserted = await seed(dbUrl, async (db) => {
       const [definition] = await db
@@ -2161,7 +2161,7 @@ describe.skipIf(dbUrl === "")("dashboard close a test suite", () => {
     try {
       const before = await getPage("/servers/queue", dbUrl);
       expect(before.html).toContain(`value="${inserted.runId}"`);
-      const page = await postClose(dbUrl, inserted.runId);
+      const page = await postAbortSuite(dbUrl, inserted.runId);
       expect(page.status).toBe(200);
       expect(page.html).not.toContain(`value="${inserted.runId}"`);
       expect(page.html).toContain(
@@ -2248,7 +2248,7 @@ describe.skipIf(dbUrl === "")("dashboard close a test suite", () => {
       return { runId: run.id, definitionId: definition.id, resultId: result.id };
     });
     try {
-      const page = await postClose(dbUrl, inserted.runId);
+      const page = await postAbortSuite(dbUrl, inserted.runId);
       expect(page.status).toBe(200);
       expect(page.html).not.toContain(`value="${inserted.runId}"`);
       const stored = await seed(dbUrl, async (db) => {

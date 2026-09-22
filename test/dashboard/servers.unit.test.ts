@@ -198,8 +198,8 @@ const ticketRow = (
 const abortForm = (ticket: string, action: AutomationJob["action"]): string =>
   `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><button type="submit" class="abort" aria-label="abort">`;
 
-const closeForm = (run: string): string =>
-  `<form method="post" action="/suites/close" hx-post="/suites/close" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="run" value="${run}"/><button type="submit">close</button></form>`;
+const abortSuiteForm = (run: string): string =>
+  `<form method="post" action="/suites/abort" hx-post="/suites/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="run" value="${run}"/><button type="submit">abort</button></form>`;
 
 const listItem = (page: string, text: string): string =>
   page.split("<li>").find((item) => item.includes(text)) ?? "";
@@ -333,19 +333,19 @@ describe("Queue happy path", () => {
     expect(passed).toContain("0 pending · 0 running · 8 passed · 0 failed");
     expect(passed).toContain('datetime="2026-09-09T15:00:00.000Z"');
     expect(passed).toContain(">1 h ago<");
-    expect(passed).not.toContain("close");
+    expect(passed).not.toContain(">abort</button>");
     expect(failedSuite).toContain('class="definition-pill definition-pill--failed"');
     expect(failedSuite).toContain(">failed<");
     expect(failedSuite).toContain("0 pending · 0 running · 1 passed · 2 failed");
-    expect(failedSuite).not.toContain(closeForm(FAILED_RUN));
+    expect(failedSuite).not.toContain(abortSuiteForm(FAILED_RUN));
     expect(runningSuite).toContain('class="definition-pill definition-pill--running"');
     expect(runningSuite).toContain(">running<");
     expect(runningSuite).toContain("0 pending · 1 running · 0 passed · 2 failed");
-    expect(runningSuite).toContain(closeForm(RUNNING_RUN));
+    expect(runningSuite).toContain(abortSuiteForm(RUNNING_RUN));
     expect(pendingSuite).toContain('class="definition-pill definition-pill--pending"');
     expect(pendingSuite).toContain(">pending<");
     expect(pendingSuite).toContain("3 pending · 0 running · 0 passed · 0 failed");
-    expect(pendingSuite).toContain(closeForm(PENDING_RUN));
+    expect(pendingSuite).toContain(abortSuiteForm(PENDING_RUN));
     expect(page.indexOf(PASSED_RUN.slice(0, 6))).toBeLessThan(page.indexOf(FAILED_RUN.slice(0, 6)));
     expect(page.indexOf(FAILED_RUN.slice(0, 6))).toBeLessThan(
       page.indexOf(RUNNING_RUN.slice(0, 6)),
@@ -448,7 +448,7 @@ describe("Queue unhappy path", () => {
     );
   });
 
-  it("names an aborted suite in the count and draws it with the finished pills, with no close", async () => {
+  it("names an aborted suite in the count and draws it with the finished pills, with no abort", async () => {
     const stopped = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee5";
     const page = await render(
       Queue({
@@ -467,7 +467,7 @@ describe("Queue unhappy path", () => {
     expect(item).toContain('class="definition-pill definition-pill--aborted"');
     expect(item).toContain(">aborted<");
     expect(item).toContain(">1 d ago<");
-    expect(item).not.toContain("close");
+    expect(item).not.toContain(">abort</button>");
   });
 
   it("says a suite started just now when its clock is ahead of the read", async () => {

@@ -326,7 +326,7 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
   );
 
 // Suite counts are suites, not the results inside the ones still open. Succeeded is a
-// passed suite. Aborted is omitted until one exists: a close, or a run whose results
+// passed suite. Aborted is omitted until one exists: an abort, or a run whose results
 // were only aborted or timed out.
 const suiteLine = (suites: AutomationQueue["suites"]): string => {
   const line = `pending ${String(suites.pending)} · running ${String(suites.running)} · succeeded ${String(suites.passed)} · failed ${String(suites.failed)}`;
@@ -347,7 +347,7 @@ const suiteWord = (status: AutomationQueue["suites"]["pills"][number]["status"])
 const shortRunId = (id: string): string => id.slice(0, 6);
 
 // The same chips a definition's runs use. Finished first, then running, then pending, in
-// the order the board already sorted. An open suite can be closed: that aborts the results
+// the order the board already sorted. An open suite can be aborted: that aborts the results
 // still pending or running, which is what drops it out of the running count.
 const SuitePills: FC<{ board: AutomationQueue["suites"] }> = ({ board }) =>
   board.pills.length === 0 ? null : (
@@ -367,14 +367,14 @@ const SuitePills: FC<{ board: AutomationQueue["suites"] }> = ({ board }) =>
             {open ? (
               <form
                 method="post"
-                action="/suites/close"
-                hx-post="/suites/close"
+                action="/suites/abort"
+                hx-post="/suites/abort"
                 hx-confirm="are you sure?"
                 hx-target="#queue"
                 hx-swap="innerHTML"
               >
                 <input type="hidden" name="run" value={pill.id} />
-                <button type="submit">close</button>
+                <button type="submit">abort</button>
               </form>
             ) : null}
           </li>

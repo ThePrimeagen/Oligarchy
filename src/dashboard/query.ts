@@ -1419,7 +1419,7 @@ export type OpenSuiteJob = {
   readonly action: (typeof automationJobs.$inferSelect)["action"];
 };
 
-// Pending jobs of results this suite has not closed. Closing them before the
+// Pending jobs of results this suite has not aborted. Aborting them before the
 // automation-server round trip is what keeps a claim from starting a guest during
 // that wait. A job whose result already passed or failed stays: its diagnose is
 // still the review.
@@ -1448,8 +1448,8 @@ export function abortPendingSuiteJobs(connectionString: string, runId: string): 
   });
 }
 
-// Running jobs of results this suite has not closed. A pending job has no client,
-// so it is closed before this read. The clock keeps the read out of Hyperdrive's
+// Running jobs of results this suite has not aborted. A pending job has no client,
+// so it is aborted before this read. The clock keeps the read out of Hyperdrive's
 // cache, so a job claimed since the last poll is still here to abort.
 export function listOpenSuiteJobs(
   connectionString: string,
@@ -1474,16 +1474,16 @@ export function listOpenSuiteJobs(
   );
 }
 
-export type ClosedSuite = {
-  readonly closed: boolean;
+export type AbortedSuite = {
+  readonly aborted: boolean;
   readonly tickets: ReadonlyArray<string>;
 };
 
-// Closes a suite that still has a result open. Those results, and the jobs still waiting
-// or running for them, become aborted, and the run row closes with them. A suite that has
-// already finished is left alone, so a second close does not rewrite a pass. The tickets
+// Aborts a suite that still has a result open. Those results, and the jobs still waiting
+// or running for them, become aborted, and the run row ends with them. A suite that has
+// already finished is left alone, so a second abort does not rewrite a pass. The tickets
 // are the ones the board should move; a result with none has nothing to move.
-export function closeTestSuite(connectionString: string, runId: string): Promise<ClosedSuite> {
+export function abortTestSuite(connectionString: string, runId: string): Promise<AbortedSuite> {
   return withDatabase(connectionString, (db) =>
     db.transaction(async (tx) => {
       const results = await tx
@@ -1494,7 +1494,7 @@ export function closeTestSuite(connectionString: string, runId: string): Promise
         )
         .returning({ id: testResults.id, ticket: testResults.linearId });
       if (results.length === 0) {
-        return { closed: false, tickets: [] };
+        return { aborted: false, tickets: [] };
       }
       await tx
         .update(automationJobs)
@@ -1513,7 +1513,7 @@ export function closeTestSuite(connectionString: string, runId: string): Promise
         .set({ status: "aborted", reason: "aborted", endedAt: sql`now()` })
         .where(eq(testRuns.id, runId));
       return {
-        closed: true,
+        aborted: true,
         tickets: results.flatMap((result) => (result.ticket === null ? [] : [result.ticket])),
       };
     }),
