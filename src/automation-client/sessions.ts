@@ -80,6 +80,14 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               agentId: ticket,
             });
           }
+          // One outstanding reservation. A run consumes it before OpenCode spawns, so another
+          // ticket may reserve while that run holds its slot. Refused before QEMU is asked.
+          if (held.reserved.size > 0) {
+            return yield* Errors.AtCapacity.make({
+              message: "a reservation is already outstanding",
+              agentId: ticket,
+            });
+          }
           // A drive boots a guest, so QEMU first: this client cannot hold a slot until the
           // guest host has one, and a full client still asks, then gives that slot back rather
           // than leak it. A diagnose reads the session back and boots nothing: a guest slot it

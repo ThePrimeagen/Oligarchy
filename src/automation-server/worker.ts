@@ -174,9 +174,10 @@ const closeJob = Effect.fn("closeJob")(function* (
 // Jobs launch one reservation at a time, round robin from where the last one stopped.
 // The next reservation is not sent until this one has answered, so two reservation
 // responses are never in flight. A success is what starts /run; /run does not hold the
-// next reservation. A 503 is a client with no room for this job, so the next client in
-// the rotation is asked; a 503 from every client puts the row back to pending. A mint's
-// own 503 does not end the tick. A tick with no live client does not claim. Claim is
+// next reservation. A 503 is a client with no room for this job, or one that already
+// holds an outstanding reservation, so the next client in the rotation is asked; a 503
+// from every client puts the row back to pending. A mint's own 503 does not end the tick.
+// A tick with no live client does not claim. Claim is
 // uninterruptible so a shutdown cannot leave a pending row half-taken; the HTTP wait
 // is restored so SIGTERM aborts an in-flight job; finish and unclaim are uninterruptible
 // so the write lands. A tick that fails is one error line; the next tick runs.
