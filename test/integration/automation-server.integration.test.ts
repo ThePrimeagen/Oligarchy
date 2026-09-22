@@ -21,8 +21,8 @@ import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
-// The backlog watch calls Linear as soon as the server listens. https_proxy does not cover
-// node:https under Bun, so a serving test reaches api.linear.app; the failure is one stdout line.
+// The board watch calls Linear as soon as the server listens, once per column. https_proxy does
+// not cover node:https under Bun, so a serving test reaches api.linear.app; each column logs one failure.
 const LINEAR_TOKEN = "lin_api_test";
 const TOKEN = "test-token";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";

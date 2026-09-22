@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Backlog from "../../src/automation-server/backlog.ts";
 import * as Linear from "../../src/ctrl/linear.ts";
@@ -353,5 +353,320 @@ describe("backlog watch unhappy path", () => {
       expect(polls).toBe(2);
       expect(log.lines).toEqual([]);
     }),
+  );
+});
+
+type Column = "listAutomationNeeded" | "listNeedsReview";
+
+// Same clock as the backlog watch. These columns stay listed after a successful enqueue: the
+// webhook does not move them, and neither does the watch.
+const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =>
+  Effect.gen(function* () {
+    const stores = Stores.fakeStores();
+    const log = FakeLog.fakeLog();
+    const moved: Array<Move> = [];
+    const linear = FakeLinear.fakeLinear({
+      overrides: {
+        [column]: Effect.sync(() => [...board]),
+        moveIssue: (issue, stateId) =>
+          Effect.sync(() => {
+            moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+          }),
+      },
+    });
+    const scope = yield* Scope.make();
+    yield* Backlog.watch().pipe(
+      Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+      Scope.provide(scope),
+    );
+    return { stores, log, moved, linear, scope };
+  });
+
+const mintDefinition = {
+  id: 1,
+  name: "mint",
+  description: "install",
+  instruction: "boot",
+  proof: "desktop",
+  createdAt: new Date(0),
+};
+
+describe("automation needed watch happy path", () => {
+  it.effect(
+    "queues a drive after three unchanged rounds and does not queue it again while the ticket stays",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, log, moved } = yield* startColumn("listAutomationNeeded", board);
+        seedResult(stores.tests, TICKET);
+        yield* TestClock.adjust("60 seconds");
+        expect(stores.automation.jobs).toEqual([]);
+        expect(moved).toEqual([]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(moved).toEqual([]);
+        expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        yield* TestClock.adjust("60 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+      }),
+  );
+
+  it.effect("queues mint when the Automation Needed ticket's result is the mint definition", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+      stores.tests.definitions.push(mintDefinition);
+      seedResult(stores.tests, TICKET);
+      yield* TestClock.adjust("90 seconds");
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
+      ]);
+      expect(moved).toEqual([]);
+      expect(FakeLog.texts(log)).toEqual(["automation needed watch queued mint"]);
+    }),
+  );
+});
+
+describe("needs review watch happy path", () => {
+  it.effect("queues a diagnose after three unchanged rounds and does not move the ticket", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, log, moved } = yield* startColumn("listNeedsReview", board);
+      seedResult(stores.tests, TICKET);
+      yield* TestClock.adjust("60 seconds");
+      expect(stores.automation.jobs).toEqual([]);
+      yield* TestClock.adjust("30 seconds");
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+      ]);
+      expect(moved).toEqual([]);
+      expect(FakeLog.texts(log)).toEqual(["needs review watch queued diagnose"]);
+      yield* TestClock.adjust("30 seconds");
+      expect(stores.automation.jobs).toHaveLength(1);
+      expect(log.lines).toHaveLength(1);
+    }),
+  );
+
+  it.effect(
+    "queues diagnose, not mint, when the Needs Review ticket's result is the mint definition",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, log } = yield* startColumn("listNeedsReview", board);
+        stores.tests.definitions.push(mintDefinition);
+        seedResult(stores.tests, TICKET);
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+        ]);
+        expect(FakeLog.texts(log)).toEqual(["needs review watch queued diagnose"]);
+      }),
+  );
+});
+
+describe("automation needed and needs review watch unhappy path", () => {
+  it.effect("an edit resets the Automation Needed rounds", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved } = yield* startColumn("listAutomationNeeded", board);
+      seedResult(stores.tests, TICKET);
+      yield* TestClock.adjust("59 seconds");
+      board[0] = ticket(TICKET, EDITED);
+      yield* TestClock.adjust("61 seconds");
+      expect(stores.automation.jobs).toEqual([]);
+      expect(moved).toEqual([]);
+      yield* TestClock.adjust("60 seconds");
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+      ]);
+    }),
+  );
+
+  it.effect("a ticket that leaves Needs Review is forgotten, and coming back starts over", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores } = yield* startColumn("listNeedsReview", board);
+      seedResult(stores.tests, TICKET);
+      yield* TestClock.adjust("59 seconds");
+      board.length = 0;
+      yield* TestClock.adjust("1 second");
+      board.push(ticket(TICKET, SEEN));
+      yield* TestClock.adjust("90 seconds");
+      expect(stores.automation.jobs).toEqual([]);
+      yield* TestClock.adjust("30 seconds");
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+      ]);
+    }),
+  );
+
+  it.effect(
+    "no result leaves the Automation Needed ticket, logs once, and a result that appears later is queued once",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([]);
+        expect(stores.automation.jobs).toEqual([]);
+        expect(FakeLog.texts(log)).toEqual([
+          "automation needed watch left the ticket in Automation Needed; no result",
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(FakeLog.texts(log)).toEqual([
+          "automation needed watch left the ticket in Automation Needed; no result",
+        ]);
+        seedResult(stores.tests, TICKET);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(FakeLog.texts(log)).toEqual([
+          "automation needed watch left the ticket in Automation Needed; no result",
+          "automation needed watch queued drive",
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(log.lines).toHaveLength(2);
+      }),
+  );
+
+  it.effect("a drive already queued is recorded once and left alone", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, moved, log } = yield* startColumn("listAutomationNeeded", board);
+      seedResult(stores.tests, TICKET);
+      stores.automation.jobs.push({
+        id: "00000000-0000-4000-8000-000000000001",
+        resultId: RESULT,
+        action: "drive",
+        status: "pending",
+        reason: null,
+        serverId: null,
+        createdAt: new Date(),
+        startedAt: null,
+        finishedAt: null,
+      });
+      yield* TestClock.adjust("90 seconds");
+      expect(stores.automation.jobs).toHaveLength(1);
+      expect(moved).toEqual([]);
+      expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already queued"]);
+      yield* TestClock.adjust("60 seconds");
+      expect(stores.automation.jobs).toHaveLength(1);
+      expect(log.lines).toHaveLength(1);
+    }),
+  );
+
+  it.effect(
+    "a failed Automation Needed poll keeps the rounds already saved, and Needs Review still queues",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "listAutomationNeeded",
+          message: "linear: request failed",
+        });
+        let fail = false;
+        const stores = Stores.fakeStores();
+        const log = FakeLog.fakeLog();
+        const automationBoard = [ticket(TICKET, SEEN)];
+        const reviewBoard = [ticket(OTHER, SEEN)];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listAutomationNeeded: Effect.suspend(() =>
+              fail ? Effect.fail(refused) : Effect.succeed([...automationBoard]),
+            ),
+            listNeedsReview: Effect.sync(() => [...reviewBoard]),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("30 seconds");
+        fail = true;
+        yield* TestClock.adjust("30 seconds");
+        expect(log.lines).toEqual([
+          {
+            level: "error",
+            text: "automation needed watch failed: linear: request failed",
+            location: "automation",
+            agentId: "automation",
+            skipSentry: false,
+            cause: refused,
+          },
+        ]);
+        fail = false;
+        // The failed poll did not reset Automation Needed, and it did not delay Needs Review:
+        // this next poll is review's third round and automation's second.
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs.map((job) => job.action)).toEqual(["diagnose"]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT, RESULT]);
+        expect(stores.automation.jobs.map((job) => job.action)).toEqual(["diagnose", "drive"]);
+      }),
+  );
+
+  it.effect(
+    "a failed enqueue keeps the ticket unsettled and retries the enqueue on the next poll",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.DatabaseError.make({
+          operation: "findResultByLinearId",
+          message: "Failed query: select",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        let fail = true;
+        const tests = Stores.fakeTestStore(
+          {},
+          {
+            findResultByLinearId: (linearId) =>
+              Effect.suspend(() =>
+                fail
+                  ? Effect.fail(refused)
+                  : Effect.sync(() =>
+                      Option.fromUndefinedOr(
+                        tests.results.find(
+                          (row) => row.linearId !== null && row.linearId === linearId,
+                        ),
+                      ),
+                    ),
+              ),
+          },
+        );
+        const automation = Stores.fakeAutomationStore();
+        const log = FakeLog.fakeLog();
+        const board = [ticket(TICKET, SEEN)];
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listAutomationNeeded: Effect.sync(() => [...board]),
+          },
+        });
+        seedResult(tests, TICKET);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(tests.layer, automation.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(automation.jobs).toEqual([]);
+        expect(log.lines[0]).toMatchObject({
+          level: "error",
+          text: "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        });
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(automation.jobs).toHaveLength(1);
+      }),
   );
 });
