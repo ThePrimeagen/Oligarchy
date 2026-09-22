@@ -844,11 +844,11 @@ export type Screen = {
 };
 
 // The main content starts past the border, the padding, the sidebar and the separator.
-export const MAIN_CONTENT_LEFT = 2 + 26 + 3;
+const MAIN_CONTENT_LEFT = 2 + 26 + 3;
 
 // The log keeps the top of the session area, at least three rows and about a third of it.
 // The image takes the rest, so the photo is not drawn on top of the calls.
-export const sessionLogRows = (sessionHeight: number): number =>
+const sessionLogRows = (sessionHeight: number): number =>
   Math.min(sessionHeight, Math.max(3, Math.floor(sessionHeight / 3)));
 
 const card = (

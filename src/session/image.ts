@@ -105,16 +105,42 @@ export type Placement = {
 };
 
 // One write: drop whatever was placed, then put each image above the text in the middle of
-// its box. Nothing to place still clears, so a screenshot that left does not stay up.
-export const overlayImages = (placements: ReadonlyArray<Placement>): string =>
-  placements.length === 0
-    ? clearImages
-    : clearImages +
-      placements
-        .map((placement) =>
-          placeImage(placement.png, placement.box, { id: placement.id, z: 1, center: true }),
-        )
-        .join("");
+// its box. The cursor is saved and restored because each placement moves it, and OpenTUI's
+// next frame continues from where it left the cursor. Nothing to place still clears, so a
+// screenshot that left does not stay up.
+export const overlayImages = (placements: ReadonlyArray<Placement>): string => {
+  const body =
+    placements.length === 0
+      ? clearImages
+      : clearImages +
+        placements
+          .map((placement) =>
+            placeImage(placement.png, placement.box, { id: placement.id, z: 1, center: true }),
+          )
+          .join("");
+  return `\x1b7${body}\x1b8`;
+};
+
+// allow-passthrough forwards only a DCS-wrapped sequence, and an ESC inside it must be doubled.
+// Cursor commands stay outside the wrapper so tmux rewrites them for the pane.
+export const tmuxPassthrough = (text: string): string => {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const start = text.indexOf("\x1b_G", i);
+    if (start < 0) {
+      return out + text.slice(i);
+    }
+    const end = text.indexOf("\x1b\\", start);
+    if (end < 0) {
+      return out + text.slice(i);
+    }
+    const apc = text.slice(start, end + 2);
+    out += `${text.slice(i, start)}\x1bPtmux;\x1b${apc.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+    i = end + 2;
+  }
+  return out;
+};
 
 export type Png = {
   readonly width: number;

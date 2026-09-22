@@ -1457,7 +1457,6 @@ describe("session pane", () => {
         const image = Option.getOrThrow(drawn.image);
         // Under the six-row log, across the main content, above the frame.
         expect(image).toEqual({ png: TINY_PNG, top: 21, height: 14, left: 31, width: 102 });
-        expect(image.left).toBe(View.MAIN_CONTENT_LEFT);
         const blockAt = rows.flatMap((row, index) => {
           const column = row.search(BLOCKS);
           return column < 0 ? [] : [[index, column] as const];
@@ -1473,7 +1472,8 @@ describe("session pane", () => {
         expect(rows.slice(15, image.top).join("\n")).toContain("lock the screen");
         // A kitty host gets a direct placement in that box, above the text. Anywhere else, nothing.
         const over = Screen.imageOverlay(view, READ_AT, COLUMNS, ROWS, true);
-        expect(over.startsWith("\x1b_Ga=d,d=A,q=2\x1b\\")).toBe(true);
+        expect(over.startsWith(`\x1b7\x1b_Ga=d,d=A,q=2\x1b\\`)).toBe(true);
+        expect(over.endsWith("\x1b8")).toBe(true);
         expect(over).toContain(",z=1,");
         const cursor = over.indexOf("\x1b[");
         const held = over.indexOf("H", cursor);
@@ -1485,6 +1485,12 @@ describe("session pane", () => {
         expect(col).toBeGreaterThanOrEqual(image.left + 1);
         expect(col).toBeLessThanOrEqual(image.left + image.width);
         expect(Screen.imageOverlay(view, READ_AT, COLUMNS, ROWS, false)).toBe("");
+        const quiet = `\x1b7\x1b_Ga=d,d=A,q=2\x1b\\\x1b8`;
+        const sheet: View.Sheet = { title: "definition", lines: ["one"], offset: 0 };
+        expect(
+          Screen.imageOverlay({ ...view, sheet: Option.some(sheet) }, READ_AT, COLUMNS, ROWS, true),
+        ).toBe(quiet);
+        expect(Screen.imageOverlay(view, READ_AT, 100, 24, true)).toBe(quiet);
         const covered = {
           ...view,
           follow: Option.some(
@@ -1638,7 +1644,7 @@ describe("session pane", () => {
       expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
       expect(View.screen(waiting, READ_AT, COLUMNS, ROWS).image).toEqual(Option.none());
       expect(Screen.imageOverlay(waiting, READ_AT, COLUMNS, ROWS, true)).toBe(
-        "\x1b_Ga=d,d=A,q=2\x1b\\",
+        "\x1b7\x1b_Ga=d,d=A,q=2\x1b\\\x1b8",
       );
       const bare = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
       expect(bare[15]).toContain("no session");

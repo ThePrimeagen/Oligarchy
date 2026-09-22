@@ -368,32 +368,35 @@ export const App = (props: Props) => {
   );
 };
 
-// A peek's image: inside its border and padding, to the right of the commands.
-const peekBox = (columns: number, rows: number): Image.ImageBox | undefined => {
+// A peek's image: inside its border and padding, to the right of the commands. The caller has
+// already refused a terminal below the minimum, where this width would not fit.
+const peekBox = (columns: number, rows: number): Image.ImageBox => {
   const top = rows - 1 - Follow.PEEK_FRAME_ROWS;
   const left = 1 + 1 + Follow.LEFT_COLS + 2;
-  const width = columns - left - 2;
-  if (width <= 0) {
-    return undefined;
-  }
-  return { col: left + 1, row: top + 2, cols: width, rows: Follow.PEEK_IMAGE_ROWS };
+  return {
+    col: left + 1,
+    row: top + 2,
+    cols: columns - left - 2,
+    rows: Follow.PEEK_IMAGE_ROWS,
+  };
 };
 
 // A full follow's image: under the header, to the right of the entries, above the last row.
-const fullBox = (columns: number, rows: number): Image.ImageBox | undefined => {
+const fullBox = (columns: number, rows: number): Image.ImageBox => {
   const left = 1 + (Follow.LEFT_COLS - 1) + 1;
-  const width = columns - left - 1;
-  const height = rows - 2;
-  if (width <= 0 || height <= 0) {
-    return undefined;
-  }
-  return { col: left + 1, row: 2, cols: width, rows: height };
+  return { col: left + 1, row: 2, cols: columns - left - 1, rows: rows - 2 };
 };
 
+// placeImage reads the PNG header. A short buffer would throw on the frame that writes it.
 const placeable = (png: Uint8Array): boolean => png.length >= 24;
 
+const imageCovers = (view: View.View): boolean =>
+  Option.isSome(view.sheet) || Option.isSome(view.confirm) || Option.isSome(view.popup);
+
 // The sharp screenshot, for a terminal that speaks kitty. The widgets draw blocks in the same
-// boxes; this placement sits on top of them (z = 1) instead of under the whole screen.
+// boxes; this placement sits on top of them (z = 1) instead of under the whole screen. A sheet,
+// a confirm, a pop-up, or a terminal too small to draw the board takes the photo down: z = 1
+// would sit on top of those.
 export const imageOverlay = (
   view: View.View,
   now: number,
@@ -404,13 +407,15 @@ export const imageOverlay = (
   if (!kitty) {
     return "";
   }
+  if (columns < View.MIN_COLUMNS || rows < View.MIN_ROWS || imageCovers(view)) {
+    return Image.overlayImages([]);
+  }
   const placements: Array<Image.Placement> = [];
   const follow = Option.getOrNull(view.follow);
   if (follow?._tag === "full") {
     const png = Option.getOrNull(follow.png);
-    const box = fullBox(columns, rows);
-    if (png !== null && placeable(png) && box !== undefined) {
-      placements.push({ png, box, id: 1 });
+    if (png !== null && placeable(png)) {
+      placements.push({ png, box: fullBox(columns, rows), id: 1 });
     }
   } else {
     const image = Option.getOrNull(View.screen(view, now, columns, rows).image);
@@ -428,9 +433,8 @@ export const imageOverlay = (
     }
     if (follow?._tag === "peek") {
       const png = Option.getOrNull(follow.png);
-      const box = peekBox(columns, rows);
-      if (png !== null && placeable(png) && box !== undefined) {
-        placements.push({ png, box, id: 2 });
+      if (png !== null && placeable(png)) {
+        placements.push({ png, box: peekBox(columns, rows), id: 2 });
       }
     }
   }
