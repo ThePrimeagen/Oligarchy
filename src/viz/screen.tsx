@@ -1,9 +1,19 @@
 /** @jsxImportSource @opentui/solid */
 import { BorderChars, type CliRenderer, RGBA } from "@opentui/core";
-import { render, useTerminalDimensions } from "@opentui/solid";
+import { render, useRenderer, useTerminalDimensions } from "@opentui/solid";
 import { Option } from "effect";
-import { type Accessor, createMemo, For, Index, type ParentProps, Show } from "solid-js";
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  For,
+  Index,
+  onCleanup,
+  type ParentProps,
+  Show,
+} from "solid-js";
 import * as Follow from "./follow.ts";
+import * as Placeholder from "./placeholder.ts";
 import * as Text from "./text.ts";
 import * as View from "./view.ts";
 
@@ -13,6 +23,8 @@ export type Props = {
   readonly view: Accessor<View.View>;
   readonly now: Accessor<number>;
   readonly imageProtocol?: "kitty" | "auto";
+  // Writes a graphics sequence. Omitted, a kitty host still lays the cells out and nothing is sent.
+  readonly place?: (sequence: string) => void;
 };
 
 const MUTED = Text.PALETTE.muted;
@@ -38,6 +50,68 @@ const Line = (props: { readonly row: Text.Row }) => (
   </text>
 );
 
+// OpenTUI's kitty placement moves the cursor and then tells the host to draw there. tmux consumes
+// the cursor move, so the host draws at its own cursor, the corner, and that graphic is not a
+// cell: it stays up when the pane is no longer the one on screen. A placeholder cell is text
+// OpenTUI lays out, and the host paints the image on it, so the picture sits in the pane and
+// leaves with it. A grid the diacritics cannot name falls back to blocks, which are cells too.
+const Shot = (props: {
+  readonly png: Uint8Array;
+  readonly columns: number;
+  readonly rows: number;
+  readonly id: number;
+  readonly protocol: "kitty" | "auto" | undefined;
+  readonly place: ((sequence: string) => void) | undefined;
+  readonly marginLeft?: number;
+}) => {
+  const renderer = useRenderer();
+  const pinned = () => props.protocol === "kitty" && Placeholder.fits(props.columns, props.rows);
+  createEffect(() => {
+    const place = props.place;
+    if (!pinned() || place === undefined) {
+      return;
+    }
+    place(Placeholder.show(props.png, props.id, props.columns, props.rows));
+    onCleanup(() => {
+      // destroy() is already restoring the terminal; a delete written into that would split it.
+      if (!renderer.isDestroyed) {
+        place(Placeholder.hide(props.id));
+      }
+    });
+  });
+  return (
+    <Show
+      when={pinned()}
+      fallback={
+        <image
+          source={props.png}
+          fit="fit"
+          protocol={props.protocol === "kitty" ? "blocks" : (props.protocol ?? "auto")}
+          flexGrow={1}
+          height={props.rows}
+          marginLeft={props.marginLeft ?? 0}
+        />
+      }
+    >
+      <box
+        marginLeft={props.marginLeft ?? 0}
+        width={props.columns}
+        height={props.rows}
+        flexShrink={0}
+        flexDirection="column"
+      >
+        <Index each={Placeholder.lines(props.columns, props.rows)}>
+          {(line) => (
+            <text wrapMode="none" fg={Placeholder.color(props.id)} width={props.columns} height={1}>
+              {line()}
+            </text>
+          )}
+        </Index>
+      </box>
+    </Show>
+  );
+};
+
 const Divider = () => (
   <box
     height={1}
@@ -55,7 +129,9 @@ const Divider = () => (
 const Peek = (props: {
   readonly follow: Follow.Peek;
   readonly now: number;
+  readonly columns: number;
   readonly imageProtocol: "kitty" | "auto" | undefined;
+  readonly place: ((sequence: string) => void) | undefined;
 }) => (
   <box
     position="absolute"
@@ -80,12 +156,13 @@ const Peek = (props: {
     </box>
     <Show when={Option.getOrUndefined(props.follow.png)}>
       {(png: Accessor<Uint8Array>) => (
-        <image
-          source={png()}
-          fit="fit"
-          protocol={props.imageProtocol ?? "auto"}
-          flexGrow={1}
-          height={Follow.PEEK_IMAGE_ROWS}
+        <Shot
+          png={png()}
+          columns={props.columns - Follow.LEFT_COLS - 6}
+          rows={Follow.PEEK_IMAGE_ROWS}
+          id={Placeholder.PEEK}
+          protocol={props.imageProtocol}
+          place={props.place}
           marginLeft={2}
         />
       )}
@@ -99,8 +176,10 @@ const Peek = (props: {
 const FullFollow = (props: {
   readonly follow: Follow.Full;
   readonly notice: Option.Option<string>;
+  readonly columns: number;
   readonly rows: number;
   readonly imageProtocol: "kitty" | "auto" | undefined;
+  readonly place: ((sequence: string) => void) | undefined;
 }) => (
   <box flexDirection="column" width="100%" height="100%" paddingLeft={1} paddingRight={1}>
     <Line row={Follow.fullHeader(props.follow)} />
@@ -112,11 +191,13 @@ const FullFollow = (props: {
       </box>
       <Show when={Option.getOrUndefined(props.follow.png)}>
         {(png: Accessor<Uint8Array>) => (
-          <image
-            source={png()}
-            fit="fit"
-            protocol={props.imageProtocol ?? "auto"}
-            flexGrow={1}
+          <Shot
+            png={png()}
+            columns={props.columns - Follow.LEFT_COLS - 2}
+            rows={props.rows - 2}
+            id={Placeholder.FULL}
+            protocol={props.imageProtocol}
+            place={props.place}
             marginLeft={1}
           />
         )}
@@ -346,19 +427,26 @@ export const App = (props: Props) => {
                   right={2}
                   height={found().height}
                 >
-                  <image
-                    source={found().png}
-                    fit="fit"
-                    protocol={props.imageProtocol ?? "auto"}
-                    flexGrow={1}
-                    height={found().height}
+                  <Shot
+                    png={found().png}
+                    columns={dimensions().width - View.SESSION_IMAGE_LEFT - 2}
+                    rows={found().height}
+                    id={Placeholder.SESSION}
+                    protocol={props.imageProtocol}
+                    place={props.place}
                   />
                 </box>
               )}
             </Show>
             <Show when={peek()}>
               {(found: Accessor<Follow.Peek>) => (
-                <Peek follow={found()} now={props.now()} imageProtocol={props.imageProtocol} />
+                <Peek
+                  follow={found()}
+                  now={props.now()}
+                  columns={dimensions().width}
+                  imageProtocol={props.imageProtocol}
+                  place={props.place}
+                />
               )}
             </Show>
           </box>
@@ -368,8 +456,10 @@ export const App = (props: Props) => {
           <FullFollow
             follow={found()}
             notice={props.view().notice}
+            columns={dimensions().width}
             rows={dimensions().height}
             imageProtocol={props.imageProtocol}
+            place={props.place}
           />
         )}
       </Show>

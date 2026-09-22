@@ -394,6 +394,7 @@ describe("run happy path", () => {
           Run.Renderer.of({
             open: Effect.andThen(Effect.sleep("3 seconds"), screen.open),
             imageProtocol: Effect.succeed("auto"),
+            writeTerminal: () => undefined,
           }),
         );
         const fiber = yield* Effect.forkChild(
@@ -653,6 +654,7 @@ describe("run unhappy path", () => {
       const failing = Layer.succeed(Run.Renderer)(
         Run.Renderer.of({
           imageProtocol: Effect.succeed("auto"),
+          writeTerminal: () => undefined,
           open: Effect.fail(
             Errors.CommandError.make({ message: "viz could not open the screen: no tty" }),
           ),
