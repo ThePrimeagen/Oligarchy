@@ -62,7 +62,15 @@ const kittyChunks = (data: string, first: string): string => {
   return out;
 };
 
-export const placeImage = (png: Uint8Array, box: ImageBox): string => {
+// id replaces that placement; z draws it above the text (kitty's default 0 does, a negative z
+// does not); center sits the fitted image in the middle of the box.
+export type PlaceImageOptions = {
+  readonly id?: number;
+  readonly z?: number;
+  readonly center?: boolean;
+};
+
+export const placeImage = (png: Uint8Array, box: ImageBox, options?: PlaceImageOptions): string => {
   const header = view(png);
   const width = header.getUint32(16);
   const height = header.getUint32(20);
@@ -72,15 +80,67 @@ export const placeImage = (png: Uint8Array, box: ImageBox): string => {
     rows = box.rows;
     cols = Math.max(1, Math.round((width / height) * rows * CELL_ASPECT));
   }
+  const id = options?.id ?? 1;
+  let col = box.col;
+  let row = box.row;
+  if (options?.center === true) {
+    col += Math.max(0, Math.floor((box.cols - cols) / 2));
+    row += Math.max(0, Math.floor((box.rows - rows) / 2));
+  }
+  const z = options?.z === undefined ? "" : `,z=${String(options.z)}`;
   // Same image id every time, so the previous placement goes before the new one lands;
   // q=2 keeps the terminal from answering on stdin, where a readline would read it.
-  return `\x1b_Ga=d,d=I,i=1,q=2\x1b\\\x1b[${String(box.row)};${String(box.col)}H${kittyChunks(
+  return `\x1b_Ga=d,d=I,i=${String(id)},q=2\x1b\\\x1b[${String(row)};${String(col)}H${kittyChunks(
     Encoding.encodeBase64(png),
-    `a=T,f=100,i=1,q=2,C=1,c=${String(cols)},r=${String(rows)},`,
+    `a=T,f=100,i=${String(id)},q=2,C=1,c=${String(cols)},r=${String(rows)}${z},`,
   )}`;
 };
 
 export const clearImages = "\x1b_Ga=d,d=A,q=2\x1b\\";
+
+export type Placement = {
+  readonly png: Uint8Array;
+  readonly box: ImageBox;
+  readonly id: number;
+};
+
+// One write: drop whatever was placed, then put each image above the text in the middle of
+// its box. The cursor is saved and restored because each placement moves it, and OpenTUI's
+// next frame continues from where it left the cursor. Nothing to place still clears, so a
+// screenshot that left does not stay up.
+export const overlayImages = (placements: ReadonlyArray<Placement>): string => {
+  const body =
+    placements.length === 0
+      ? clearImages
+      : clearImages +
+        placements
+          .map((placement) =>
+            placeImage(placement.png, placement.box, { id: placement.id, z: 1, center: true }),
+          )
+          .join("");
+  return `\x1b7${body}\x1b8`;
+};
+
+// allow-passthrough forwards only a DCS-wrapped sequence, and an ESC inside it must be doubled.
+// Cursor commands stay outside the wrapper so tmux rewrites them for the pane.
+export const tmuxPassthrough = (text: string): string => {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const start = text.indexOf("\x1b_G", i);
+    if (start < 0) {
+      return out + text.slice(i);
+    }
+    const end = text.indexOf("\x1b\\", start);
+    if (end < 0) {
+      return out + text.slice(i);
+    }
+    const apc = text.slice(start, end + 2);
+    out += `${text.slice(i, start)}\x1bPtmux;\x1b${apc.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+    i = end + 2;
+  }
+  return out;
+};
 
 export type Png = {
   readonly width: number;

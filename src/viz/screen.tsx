@@ -3,16 +3,20 @@ import { BorderChars, type CliRenderer, RGBA } from "@opentui/core";
 import { render, useTerminalDimensions } from "@opentui/solid";
 import { Option } from "effect";
 import { type Accessor, createMemo, For, Index, type ParentProps, Show } from "solid-js";
+import * as Image from "../session/image.ts";
 import * as Follow from "./follow.ts";
 import * as Text from "./text.ts";
 import * as View from "./view.ts";
 
 // What the runner hands the screen: the view as it changes, and the clock the ages tick on.
-// imageProtocol omitted leaves the choice to OpenTUI.
+// imageProtocol says whether a direct kitty placement may follow each frame. place writes it;
+// omitted, nothing is written. The widgets themselves draw blocks, so OpenTUI's own kitty
+// placement (which sits under the text) never goes out.
 export type Props = {
   readonly view: Accessor<View.View>;
   readonly now: Accessor<number>;
   readonly imageProtocol?: "kitty" | "auto";
+  readonly place?: (text: string) => void;
 };
 
 const MUTED = Text.PALETTE.muted;
@@ -52,11 +56,7 @@ const Divider = () => (
 // The peek sits over the bottom of the board, above the footer: its own background so the
 // rows beneath do not show through its blanks, the commands in their column and the last image
 // in what is left.
-const Peek = (props: {
-  readonly follow: Follow.Peek;
-  readonly now: number;
-  readonly imageProtocol: "kitty" | "auto" | undefined;
-}) => (
+const Peek = (props: { readonly follow: Follow.Peek; readonly now: number }) => (
   <box
     position="absolute"
     left={0}
@@ -83,7 +83,7 @@ const Peek = (props: {
         <image
           source={png()}
           fit="fit"
-          protocol={props.imageProtocol ?? "auto"}
+          protocol="blocks"
           flexGrow={1}
           height={Follow.PEEK_IMAGE_ROWS}
           marginLeft={2}
@@ -100,7 +100,6 @@ const FullFollow = (props: {
   readonly follow: Follow.Full;
   readonly notice: Option.Option<string>;
   readonly rows: number;
-  readonly imageProtocol: "kitty" | "auto" | undefined;
 }) => (
   <box flexDirection="column" width="100%" height="100%" paddingLeft={1} paddingRight={1}>
     <Line row={Follow.fullHeader(props.follow)} />
@@ -112,13 +111,7 @@ const FullFollow = (props: {
       </box>
       <Show when={Option.getOrUndefined(props.follow.png)}>
         {(png: Accessor<Uint8Array>) => (
-          <image
-            source={png()}
-            fit="fit"
-            protocol={props.imageProtocol ?? "auto"}
-            flexGrow={1}
-            marginLeft={1}
-          />
+          <image source={png()} fit="fit" protocol="blocks" flexGrow={1} marginLeft={1} />
         )}
       </Show>
     </box>
@@ -337,40 +330,35 @@ export const App = (props: Props) => {
                   readonly png: Uint8Array;
                   readonly top: number;
                   readonly height: number;
+                  readonly left: number;
+                  readonly width: number;
                 }>,
               ) => (
                 <box
                   position="absolute"
                   top={found().top}
-                  left={View.SESSION_IMAGE_LEFT}
-                  right={2}
+                  left={found().left}
+                  width={found().width}
                   height={found().height}
                 >
                   <image
                     source={found().png}
                     fit="fit"
-                    protocol={props.imageProtocol ?? "auto"}
-                    flexGrow={1}
+                    protocol="blocks"
+                    width={found().width}
                     height={found().height}
                   />
                 </box>
               )}
             </Show>
             <Show when={peek()}>
-              {(found: Accessor<Follow.Peek>) => (
-                <Peek follow={found()} now={props.now()} imageProtocol={props.imageProtocol} />
-              )}
+              {(found: Accessor<Follow.Peek>) => <Peek follow={found()} now={props.now()} />}
             </Show>
           </box>
         }
       >
         {(found: Accessor<Follow.Full>) => (
-          <FullFollow
-            follow={found()}
-            notice={props.view().notice}
-            rows={dimensions().height}
-            imageProtocol={props.imageProtocol}
-          />
+          <FullFollow follow={found()} notice={props.view().notice} rows={dimensions().height} />
         )}
       </Show>
       <Show when={sheet()}>{(found: Accessor<View.Sheet>) => <Sheet sheet={found()} />}</Show>
@@ -380,6 +368,99 @@ export const App = (props: Props) => {
   );
 };
 
-// Mounts the screen on an open renderer; the renderer's destroy disposes it.
-export const mount = (renderer: CliRenderer, props: Props): Promise<void> =>
-  render(() => <App {...props} />, renderer);
+// A peek's image: inside its border and padding, to the right of the commands. The caller has
+// already refused a terminal below the minimum, where this width would not fit.
+const peekBox = (columns: number, rows: number): Image.ImageBox => {
+  const top = rows - 1 - Follow.PEEK_FRAME_ROWS;
+  const left = 1 + 1 + Follow.LEFT_COLS + 2;
+  return {
+    col: left + 1,
+    row: top + 2,
+    cols: columns - left - 2,
+    rows: Follow.PEEK_IMAGE_ROWS,
+  };
+};
+
+// A full follow's image: under the header, to the right of the entries, above the last row.
+const fullBox = (columns: number, rows: number): Image.ImageBox => {
+  const left = 1 + (Follow.LEFT_COLS - 1) + 1;
+  return { col: left + 1, row: 2, cols: columns - left - 1, rows: rows - 2 };
+};
+
+// placeImage reads the PNG header. A short buffer would throw on the frame that writes it.
+const placeable = (png: Uint8Array): boolean => png.length >= 24;
+
+const imageCovers = (view: View.View): boolean =>
+  Option.isSome(view.sheet) || Option.isSome(view.confirm) || Option.isSome(view.popup);
+
+// The sharp screenshot, for a terminal that speaks kitty. The widgets draw blocks in the same
+// boxes; this placement sits on top of them (z = 1) instead of under the whole screen. A sheet,
+// a confirm, a pop-up, or a terminal too small to draw the board takes the photo down: z = 1
+// would sit on top of those.
+export const imageOverlay = (
+  view: View.View,
+  now: number,
+  columns: number,
+  rows: number,
+  kitty: boolean,
+): string => {
+  if (!kitty) {
+    return "";
+  }
+  if (columns < View.MIN_COLUMNS || rows < View.MIN_ROWS || imageCovers(view)) {
+    return Image.overlayImages([]);
+  }
+  const placements: Array<Image.Placement> = [];
+  const follow = Option.getOrNull(view.follow);
+  if (follow?._tag === "full") {
+    const png = Option.getOrNull(follow.png);
+    if (png !== null && placeable(png)) {
+      placements.push({ png, box: fullBox(columns, rows), id: 1 });
+    }
+  } else {
+    const image = Option.getOrNull(View.screen(view, now, columns, rows).image);
+    if (image !== null && placeable(image.png)) {
+      placements.push({
+        png: image.png,
+        id: 1,
+        box: {
+          col: image.left + 1,
+          row: image.top + 1,
+          cols: image.width,
+          rows: image.height,
+        },
+      });
+    }
+    if (follow?._tag === "peek") {
+      const png = Option.getOrNull(follow.png);
+      if (png !== null && placeable(png)) {
+        placements.push({ png, box: peekBox(columns, rows), id: 2 });
+      }
+    }
+  }
+  return Image.overlayImages(placements);
+};
+
+// Mounts the screen on an open renderer; the renderer's destroy disposes it. After each
+// flushed frame, a kitty host gets the direct placement. An unchanged photo is not sent again,
+// so the spinner's frames do not retransmit it.
+export const mount = (renderer: CliRenderer, props: Props): Promise<void> => {
+  let previous = "";
+  const place = props.place ?? (() => {});
+  const write = () => {
+    const kitty = props.imageProtocol === "kitty" || renderer.capabilities?.kitty_graphics === true;
+    const next = imageOverlay(props.view(), props.now(), renderer.width, renderer.height, kitty);
+    if (next === previous) {
+      return;
+    }
+    previous = next;
+    if (next.length > 0) {
+      place(next);
+    }
+  };
+  renderer.on("frame", write);
+  renderer.on("destroy", () => {
+    renderer.off("frame", write);
+  });
+  return render(() => <App {...props} />, renderer);
+};

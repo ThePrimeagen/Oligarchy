@@ -244,6 +244,52 @@ describe("placeImage and clearImages", () => {
   it("clearImages deletes every placement quietly", () => {
     expect(Image.clearImages).toBe("\x1b_Ga=d,d=A,q=2\x1b\\");
   });
+
+  it("centers the fitted image in the box and can pin it above the text", () => {
+    const png = tinyPng();
+    const out = Image.placeImage(
+      png,
+      { col: 42, row: 2, cols: 58, rows: 23 },
+      { center: true, z: 1, id: 3 },
+    );
+    // The fit is 46 by 23, so six columns of the box are spare and the cursor moves right by half.
+    expect(out.startsWith(`\x1b_Ga=d,d=I,i=3,q=2\x1b\\\x1b[2;48H`)).toBe(true);
+    expect(out).toContain("a=T,f=100,i=3,q=2,C=1,c=46,r=23,z=1,m=0;");
+  });
+
+  it("centers a short image vertically and leaves the default placement unmoved", () => {
+    const png = makePng(8, 2, gradient(8, 2));
+    const box = { col: 42, row: 2, cols: 58, rows: 23 };
+    const centered = Image.placeImage(png, box, { center: true });
+    expect(centered).toContain("\x1b[10;42H");
+    expect(centered).toContain(",c=58,r=7,");
+    expect(centered).not.toContain(",z=");
+    const plain = Image.placeImage(png, box);
+    expect(plain).toContain("\x1b[2;42H");
+    expect(plain).toContain("i=1,q=2");
+  });
+
+  it("clears first, then places each image above the text, and puts the cursor back", () => {
+    const png = tinyPng();
+    const out = Image.overlayImages([
+      { png, id: 1, box: { col: 32, row: 22, cols: 102, rows: 14 } },
+    ]);
+    expect(out.startsWith(`\x1b7${Image.clearImages}`)).toBe(true);
+    expect(out.endsWith("\x1b8")).toBe(true);
+    expect(out).toContain(",z=1,");
+    expect(out).toContain("i=1,");
+    expect(Image.overlayImages([])).toBe(`\x1b7${Image.clearImages}\x1b8`);
+  });
+
+  it("wraps each kitty command for tmux and leaves the cursor move outside", () => {
+    const apc = "\x1b_Ga=d,d=A,q=2\x1b\\";
+    const cup = "\x1b[2;42H";
+    const out = Image.tmuxPassthrough(`\x1b7${apc}${cup}${apc}\x1b8`);
+    const wrapped = `\x1bPtmux;\x1b${apc.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+    expect(out).toBe(`\x1b7${wrapped}${cup}${wrapped}\x1b8`);
+    const torn = Image.tmuxPassthrough(`\x1b7${apc.slice(0, 4)}`);
+    expect(torn).toBe(`\x1b7${apc.slice(0, 4)}`);
+  });
 });
 
 describe("decodePng", () => {

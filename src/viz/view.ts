@@ -832,16 +832,24 @@ export type Screen = {
     readonly place: Option.Option<string>;
   };
   readonly footer: { readonly left: Text.Row; readonly right: string };
-  // The selected ticket's last image, over the session pane. Absent when there is none.
+  // The selected ticket's last image, under the session log and centered in the main content.
+  // Absent when there is none, or when a peek would cover the whole rectangle.
   readonly image: Option.Option<{
     readonly png: Uint8Array;
     readonly top: number;
     readonly height: number;
+    readonly left: number;
+    readonly width: number;
   }>;
 };
 
-// Where the session image sits: past the border, the sidebar and the calls column.
-export const SESSION_IMAGE_LEFT = 2 + 26 + 3 + Follow.LEFT_COLS;
+// The main content starts past the border, the padding, the sidebar and the separator.
+const MAIN_CONTENT_LEFT = 2 + 26 + 3;
+
+// The log keeps the top of the session area, at least three rows and about a third of it.
+// The image takes the rest, so the photo is not drawn on top of the calls.
+const sessionLogRows = (sessionHeight: number): number =>
+  Math.min(sessionHeight, Math.max(3, Math.floor(sessionHeight / 3)));
 
 const card = (
   machine: Servers.Machine,
@@ -1277,6 +1285,9 @@ const automationRows = (
 
 const sessionPane = (view: View, height: number, now: number): ReadonlyArray<Text.Row> => {
   const follow = Option.getOrNull(view.session);
+  // A screenshot takes the lower part of the pane. Without one, the log uses every row.
+  const pictured = follow !== null && Option.isSome(follow.png);
+  const logRows = pictured ? sessionLogRows(height) : height;
   const lines = (): ReadonlyArray<Text.Row> => {
     if (follow === null) {
       return [[Text.muted(Option.getOrElse(view.sessionNote, () => "no session"))]];
@@ -1288,13 +1299,15 @@ const sessionPane = (view: View, height: number, now: number): ReadonlyArray<Tex
     if (job !== null && job.ticket === follow.ticket) {
       const steps = Steps.stepsOf(job.instruction);
       if (steps.length > 0) {
-        return Follow.ticketRows(follow, steps, height);
+        return Follow.ticketRows(follow, steps, logRows);
       }
     }
-    return [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, height - 1))];
+    return [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, logRows - 1))];
   };
   const drawn = lines();
-  return Array.from({ length: height }, (_, row) => drawn[row] ?? [Text.SPACE]);
+  return Array.from({ length: height }, (_, row) =>
+    row < logRows ? (drawn[row] ?? [Text.SPACE]) : [Text.SPACE],
+  );
 };
 
 const ticketRows = (
@@ -1361,17 +1374,27 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
           view.tab === "automation"
             ? Option.flatMap(view.session, (follow) => follow.png)
             : Option.none<Uint8Array>();
+        const sessionHeight = height - graphHeight;
+        const logRows = sessionLogRows(sessionHeight);
+        const top = 2 + PAGES.length + graphHeight + logRows;
+        let imageHeight = sessionHeight - logRows;
+        // A peek covers the bottom of the board. The photo stops above it.
+        if (Option.exists(view.follow, (follow) => follow._tag === "peek")) {
+          imageHeight = Math.min(imageHeight, Math.max(0, rows - 1 - Follow.PEEK_FRAME_ROWS - top));
+        }
+        const left = MAIN_CONTENT_LEFT;
+        const width = columns - left - 2;
         return {
           ...blank,
           body:
             view.tab === "automation"
               ? automationRows(view, snapshot, columns, height, now)
               : ticketRows(view, snapshot, now, height),
-          image: Option.map(png, (bytes) => ({
-            png: bytes,
-            top: 2 + PAGES.length + graphHeight,
-            height: height - graphHeight,
-          })),
+          image: Option.flatMap(png, (bytes) =>
+            imageHeight > 0 && width > 0
+              ? Option.some({ png: bytes, top, height: imageHeight, left, width })
+              : Option.none(),
+          ),
         };
       }
       const shown = machines(view, snapshot, now, columns, rows);

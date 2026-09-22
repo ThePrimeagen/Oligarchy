@@ -394,6 +394,7 @@ describe("run happy path", () => {
           Run.Renderer.of({
             open: Effect.andThen(Effect.sleep("3 seconds"), screen.open),
             imageProtocol: Effect.succeed("auto"),
+            place: () => {},
           }),
         );
         const fiber = yield* Effect.forkChild(
@@ -653,6 +654,7 @@ describe("run unhappy path", () => {
       const failing = Layer.succeed(Run.Renderer)(
         Run.Renderer.of({
           imageProtocol: Effect.succeed("auto"),
+          place: () => {},
           open: Effect.fail(
             Errors.CommandError.make({ message: "viz could not open the screen: no tty" }),
           ),
@@ -751,15 +753,15 @@ describe("run follow happy path", () => {
         setup.mockInput.pressKey("f");
         const full = yield* until(setup, shows("mouse-click"));
         expect(full[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
-        expect(full[1]?.startsWith(" ✓ send-key")).toBe(true);
-        expect(full[4]?.includes(" mouse-click")).toBe(true);
+        expect(full[1]?.includes(" mouse-click")).toBe(true);
+        expect(full.some((row) => row.includes("send-key"))).toBe(true);
         expect(full.some((row) => BLOCKS.test(row))).toBe(true);
         expect(full.join("\n")).not.toContain("qemu servers");
         // The spinner turns every 80 milliseconds while the follow is up.
-        const before = full[4]?.slice(1, 2);
+        const before = full[1]?.slice(1, 2);
         yield* TestClock.adjust("80 millis");
         yield* settle;
-        const after = (yield* rows(setup))[4]?.slice(1, 2);
+        const after = (yield* rows(setup))[1]?.slice(1, 2);
         expect(after).not.toBe(before);
         setup.mockInput.pressEscape();
         yield* settle;

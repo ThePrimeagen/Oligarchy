@@ -49,7 +49,12 @@ const MainLive = Layer.mergeAll(
   CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
   NodeHttpClient.layerNodeHttp,
   Config.providerLayer,
-  Run.Renderer.layer(imageProtocol),
+  // The placement is written here: screen and run are not boundaries, and stdout is.
+  // Inside tmux the graphics sequence has to be passthrough-wrapped or the outer terminal
+  // never sees it; the cursor commands in the same write must not be, or the pane is wrong.
+  Run.Renderer.layer(imageProtocol, (text) => {
+    process.stdout.write(process.env.TMUX === undefined ? text : Image.tmuxPassthrough(text));
+  }),
   tickets,
 ).pipe(Layer.provideMerge(NodeServices.layer));
 

@@ -69,13 +69,19 @@ type Opener = {
   readonly open: Effect.Effect<CliRenderer, Errors.CommandError, Scope.Scope>;
   // Read when the screen opens, after the command has accepted its flags.
   readonly imageProtocol: Effect.Effect<ImageDraw>;
+  // Writes a kitty placement after a frame. The boundary owns stdout.
+  readonly place: (text: string) => void;
 };
 
 export class Renderer extends Context.Service<Renderer, Opener>()("@oligarchy/viz/Renderer") {
-  static readonly layer = (imageProtocol: Effect.Effect<ImageDraw>): Layer.Layer<Renderer> =>
+  static readonly layer = (
+    imageProtocol: Effect.Effect<ImageDraw>,
+    place: (text: string) => void,
+  ): Layer.Layer<Renderer> =>
     Layer.succeed(this)(
       this.of({
         imageProtocol,
+        place,
         open: Effect.acquireRelease(
           Effect.tryPromise({
             try: () => createCliRenderer({ exitOnCtrlC: false, exitSignals: [], useMouse: false }),
@@ -349,7 +355,9 @@ export const run: Effect.Effect<
   yield* Effect.scoped(
     Effect.gen(function* () {
       const renderer = yield* screen.open;
-      yield* Effect.promise(() => Screen.mount(renderer, { view, now, imageProtocol }));
+      yield* Effect.promise(() =>
+        Screen.mount(renderer, { view, now, imageProtocol, place: screen.place }),
+      );
       const startFollow = <R>(work: Effect.Effect<void, never, R>) =>
         Effect.gen(function* () {
           yield* stopFollow;

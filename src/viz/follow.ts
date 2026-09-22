@@ -3,8 +3,8 @@ import type * as Domain from "../shared/domain.ts";
 import * as Steps from "./steps.ts";
 import * as Text from "./text.ts";
 
-// The commands or entries take the left column; the image takes every column to its right,
-// three rows in a peek and the rest of the screen when the follow is full.
+// The commands or entries take this many columns. A peek's image sits to their right; the
+// session image sits under the log, across the main content.
 export const LEFT_COLS = 40;
 export const PEEK_IMAGE_ROWS = 3;
 // A peek's box: its border rows around the image rows.
@@ -12,6 +12,8 @@ export const PEEK_FRAME_ROWS = PEEK_IMAGE_ROWS + 2;
 // A long session's entries are bounded: the newest two hundred are what is worth scrolling.
 export const MAX_ENTRIES = 200;
 export const SPINNER: ReadonlyArray<string> = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// A completed command is green. Pine is teal, and the rest of the board already uses it.
+export const SUCCESS = "#9ece6a";
 export const PEEK_HINT = "F full screen   esc close";
 export const FULL_FOOT = "esc closes";
 
@@ -182,11 +184,12 @@ const session8 = (sessionId: string): string => sessionId.slice(0, 8);
 
 export const title = (peek: Peek): string => `follow ${peek.ticket} · ${session8(peek.sessionId)}`;
 
-// The peek's three rows: each command with its age at the column's right edge, the column
-// blank where there are fewer, and one muted sentence when there are none.
-export const peekRows = (peek: Peek, now: number): ReadonlyArray<Text.Row> =>
-  Array.from({ length: PEEK_IMAGE_ROWS }, (_, index): Text.Row => {
-    const command = peek.commands[index];
+// The peek's three rows, newest command first: each with its age at the column's right edge,
+// the column blank where there are fewer, and one muted sentence when there are none.
+export const peekRows = (peek: Peek, now: number): ReadonlyArray<Text.Row> => {
+  const newest = peek.commands.toReversed();
+  return Array.from({ length: PEEK_IMAGE_ROWS }, (_, index): Text.Row => {
+    const command = newest[index];
     if (command === undefined) {
       return index === 0 && peek.commands.length === 0 ? [Text.muted("no commands yet")] : [];
     }
@@ -197,21 +200,32 @@ export const peekRows = (peek: Peek, now: number): ReadonlyArray<Text.Row> =>
       Text.label(ago),
     ];
   });
+};
 
 export const fullHeader = (view: Full): Text.Row => [
   Text.value(`following ${view.ticket} · ${session8(view.sessionId)} `),
   Text.paint(STATUS_COLOR[view.status], view.status),
 ];
 
-// A running entry turns the spinner, a completed one is a pine tick, a failed one a red cross.
+// A running entry turns a yellow spinner, a completed one is a green tick, a failed one a red cross.
 const mark = (state: Entry["state"], glyph: string): Text.Piece => {
   if (state === "running") {
-    return Text.muted(glyph);
+    return Text.paint(Text.PALETTE.gold, glyph);
   }
   if (state === "completed") {
-    return Text.paint(Text.PALETTE.pine, "✓");
+    return Text.paint(SUCCESS, "✓");
   }
   return Text.paint(Text.PALETTE.love, "✗");
+};
+
+const entryColor = (state: Entry["state"]): string => {
+  if (state === "completed") {
+    return SUCCESS;
+  }
+  if (state === "failed") {
+    return Text.PALETTE.love;
+  }
+  return Text.PALETTE.text;
 };
 
 const wrap = (text: string, width: number): ReadonlyArray<string> => {
@@ -233,9 +247,19 @@ const wrap = (text: string, width: number): ReadonlyArray<string> => {
   return lines;
 };
 
-const intentPiece = (text: string, failed: boolean): Text.Piece => ({
+const intentColor = (state: Entry["state"]): string => {
+  if (state === "completed") {
+    return SUCCESS;
+  }
+  if (state === "failed") {
+    return Text.PALETTE.love;
+  }
+  return Text.PALETTE.foam;
+};
+
+const intentPiece = (text: string, state: Entry["state"]): Text.Piece => ({
   text,
-  color: failed ? Text.PALETTE.love : Text.PALETTE.foam,
+  color: intentColor(state),
   bold: true,
 });
 
@@ -263,22 +287,24 @@ export const ticketRows = (
       ? [{ text: indexText, color: Text.PALETTE.gold, bold: true }]
       : [Text.muted(indexText)];
   const said = intent === undefined ? "no intent yet" : intent.name;
-  const failed = intent?.state === "failed";
   const lines = wrap(said, LEFT_COLS - 2);
   const intentRows: Array<Text.Row> =
     intent === undefined
       ? [[Text.muted(Text.cut(said, LEFT_COLS))]]
       : lines.map((line, index) =>
           index === 0
-            ? [mark(intent.state, glyph), Text.SPACE, intentPiece(line, failed)]
-            : [{ text: "  " }, intentPiece(line, failed)],
+            ? [mark(intent.state, glyph), Text.SPACE, intentPiece(line, intent.state)]
+            : [{ text: "  " }, intentPiece(line, intent.state)],
         );
-  const actionRows = actions.map((entry): Text.Row => [
-    { text: " ".repeat(entry.indent) },
-    mark(entry.state, glyph),
-    Text.SPACE,
-    Text.value(Text.cut(entry.name, LEFT_COLS - 3 - entry.indent)),
-  ]);
+  // Newest command directly under the intent; a short pane keeps that one and drops the older.
+  const actionRows = actions
+    .toReversed()
+    .map((entry): Text.Row => [
+      { text: " ".repeat(entry.indent) },
+      mark(entry.state, glyph),
+      Text.SPACE,
+      Text.paint(entryColor(entry.state), Text.cut(entry.name, LEFT_COLS - 3 - entry.indent)),
+    ]);
   const budget = Math.max(0, height - 2);
   // One row stays with the step, so a short pane still says which line this is.
   let actionBudget = Math.min(actionRows.length, budget);
@@ -290,19 +316,57 @@ export const ticketRows = (
     fullHeader(view),
     indexRow,
     ...intentRows.slice(0, intentBudget),
-    ...actionRows.slice(actionRows.length - actionBudget),
+    ...actionRows.slice(0, actionBudget),
   ].slice(0, Math.max(0, height));
 };
 
-// The newest entries that fit in `height` rows, each its mark and its name cut to the column.
+// An intent starts a group and the commands indented under it belong to it. A command at the
+// margin is its own group. Newest group first, and under an intent its newest command first.
+const newestFirst = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => {
+  const groups: Array<{ head: Entry | undefined; actions: Array<Entry> }> = [];
+  let current: { head: Entry | undefined; actions: Array<Entry> } | undefined;
+  for (const entry of entries) {
+    if (entry.id === "intent") {
+      current = { head: entry, actions: [] };
+      groups.push(current);
+      continue;
+    }
+    if (entry.indent === 2 && current !== undefined) {
+      current.actions.push(entry);
+      continue;
+    }
+    current = undefined;
+    groups.push({ head: undefined, actions: [entry] });
+  }
+  const ordered: Array<Entry> = [];
+  for (const group of groups.toReversed()) {
+    if (group.head !== undefined) {
+      ordered.push(group.head);
+    }
+    for (const action of group.actions.toReversed()) {
+      ordered.push(action);
+    }
+  }
+  return ordered;
+};
+
+const namePiece = (entry: Entry): Text.Piece => {
+  const text = Text.cut(entry.name, LEFT_COLS - 3 - entry.indent);
+  if (entry.id === "intent") {
+    return intentPiece(text, entry.state);
+  }
+  return Text.paint(entryColor(entry.state), text);
+};
+
+// The newest entries that fit in `height` rows, newest at the top, each its mark and its name.
 export const fullEntries = (view: Full, height: number): ReadonlyArray<Text.Row> => {
   const glyph = SPINNER[view.frame % SPINNER.length];
-  return view.entries
-    .slice(-height)
+  return newestFirst(view.entries)
+    .slice(0, height)
     .map((entry): Text.Row => [
       { text: " ".repeat(entry.indent) },
       mark(entry.state, glyph),
       Text.SPACE,
-      Text.value(Text.cut(entry.name, LEFT_COLS - 3 - entry.indent)),
+      namePiece(entry),
     ]);
 };

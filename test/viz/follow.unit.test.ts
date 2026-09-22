@@ -65,23 +65,23 @@ describe("peek happy path", () => {
     ]);
   });
 
-  it("titles itself with the ticket and the session's first eight characters, and lists each command with its age", () => {
+  it("titles itself with the ticket and the session's first eight characters, and lists each command with its age, newest first", () => {
     expect(Follow.title(peek)).toBe("follow OLI-61 · 7a2d0000");
     const rows = Follow.peekRows(peek, NOW);
     expect(rows).toHaveLength(Follow.PEEK_IMAGE_ROWS);
     expect(rows.map(textOf)).toEqual([
-      command("send-key", "20 s ago"),
-      command("input-send-event", "8 s ago"),
       command("screendump", "2 s ago"),
+      command("input-send-event", "8 s ago"),
+      command("send-key", "20 s ago"),
     ]);
     for (const row of rows.map(textOf)) {
       expect(row).toHaveLength(Follow.LEFT_COLS);
     }
-    expect(colorOf(rows[0] ?? [], "send-key")).toBe(TEXT);
-    expect(colorOf(rows[0] ?? [], "20 s ago")).toBe(SUBTLE);
+    expect(colorOf(rows[0] ?? [], "screendump")).toBe(TEXT);
+    expect(colorOf(rows[0] ?? [], "2 s ago")).toBe(SUBTLE);
     // The ages move with the clock.
     expect(Follow.peekRows(peek, NOW + 60_000).map(textOf)[0]).toBe(
-      command("send-key", "1 min ago"),
+      command("screendump", "1 min ago"),
     );
     expect(Follow.PEEK_HINT).toBe("F full screen   esc close");
   });
@@ -204,24 +204,27 @@ describe("full follow happy path", () => {
     expect(colorOf(Follow.fullHeader({ ...full, status: "succeeded" }), "succeeded")).toBe(PINE);
     const rows = Follow.fullEntries(full, 10);
     expect(rows.map(textOf)).toEqual([
-      "✓ send-key",
-      "✓ input-send-event",
-      "✓ screendump",
       `${Follow.SPINNER[0]} mouse-click`,
+      "✓ screendump",
+      "✓ input-send-event",
+      "✓ send-key",
     ]);
-    expect(colorOf(rows[0] ?? [], "✓")).toBe(PINE);
-    expect(colorOf(rows[3] ?? [], Follow.SPINNER[0] ?? "")).toBe(MUTED);
+    expect(colorOf(rows[1] ?? [], "✓")).toBe(Follow.SUCCESS);
+    expect(colorOf(rows[1] ?? [], "screendump")).toBe(Follow.SUCCESS);
+    expect(colorOf(rows[0] ?? [], Follow.SPINNER[0] ?? "")).toBe(GOLD);
+    expect(colorOf(rows[0] ?? [], "mouse-click")).toBe(TEXT);
     const ticked = Follow.tick(Follow.tick(full));
-    expect(textOf(Follow.fullEntries(ticked, 10)[3] ?? [])).toBe(
+    expect(textOf(Follow.fullEntries(ticked, 10)[0] ?? [])).toBe(
       `${Follow.SPINNER[2]} mouse-click`,
     );
-    // Two rows of room: the newest two.
+    // Two rows of room: the newest two, newest at the top.
     expect(Follow.fullEntries(full, 2).map(textOf)).toEqual([
-      "✓ screendump",
       `${Follow.SPINNER[0]} mouse-click`,
+      "✓ screendump",
     ]);
     const failed = Follow.apply(full, { type: "action", id: 9, state: "failed" });
-    expect(colorOf(Follow.fullEntries(failed, 10)[3] ?? [], "✗")).toBe(LOVE);
+    expect(colorOf(Follow.fullEntries(failed, 10)[0] ?? [], "✗")).toBe(LOVE);
+    expect(colorOf(Follow.fullEntries(failed, 10)[0] ?? [], "mouse-click")).toBe(LOVE);
     expect(Follow.FULL_FOOT).toBe("esc closes");
   });
 });
@@ -257,6 +260,40 @@ describe("ticket session happy path", () => {
     );
   });
 
+  it("puts the newest command directly under the intent, and an older intent below that", () => {
+    const older = Follow.apply(
+      Follow.apply(withIntent("log in"), { type: "action", id: 10, state: "completed" }),
+      { type: "intent", state: "completed" },
+    );
+    const newer = Follow.apply(
+      Follow.apply(older, { type: "intent", state: "started", message: "lock the screen" }),
+      { type: "action", id: 11, name: "mouse-click", state: "running" },
+    );
+    const rows = Follow.fullEntries(newer, 10);
+    expect(rows.map(textOf)).toEqual([
+      `${Follow.SPINNER[0]} lock the screen`,
+      `  ${Follow.SPINNER[0]} mouse-click`,
+      "✓ log in",
+      "  ✓ send-keys",
+      "✓ screendump",
+      "✓ input-send-event",
+      "✓ send-key",
+    ]);
+    expect(colorOf(rows[0] ?? [], "lock the screen")).toBe("#9ccfd8");
+    expect(colorOf(rows[2] ?? [], "✓")).toBe(Follow.SUCCESS);
+    expect(colorOf(rows[2] ?? [], "log in")).toBe(Follow.SUCCESS);
+    expect(colorOf(rows[3] ?? [], "send-keys")).toBe(Follow.SUCCESS);
+    // Two rows keep the open intent and its newest command; the older intent falls off.
+    expect(Follow.fullEntries(newer, 2).map(textOf)).toEqual([
+      `${Follow.SPINNER[0]} lock the screen`,
+      `  ${Follow.SPINNER[0]} mouse-click`,
+    ]);
+    const ticket = Follow.ticketRows(newer, ["lock the screen"], 8).map(textOf);
+    expect(ticket[2]).toBe(`${Follow.SPINNER[0]} lock the screen`);
+    expect(ticket[3]).toBe(`  ${Follow.SPINNER[0]} mouse-click`);
+    expect(ticket.join("\n")).not.toContain("log in");
+  });
+
   it("keeps the index and the start of a long line, and the newest action, when the pane is short", () => {
     const long = `${"word ".repeat(30)}end`;
     const rows = Follow.ticketRows(withIntent(long), [long], 4).map(textOf);
@@ -290,6 +327,23 @@ describe("ticket session unhappy path", () => {
 });
 
 describe("full follow unhappy path", () => {
+  it("still shows a command that is indented with no intent above it", () => {
+    const loose = {
+      ...Follow.expand(
+        Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+        garage.url,
+      ),
+      entries: [
+        { id: 1, indent: 2 as const, name: "orphan", state: "completed" as const },
+        { id: "intent" as const, indent: 0 as const, name: "now", state: "running" as const },
+      ],
+    };
+    expect(Follow.fullEntries(loose, 10).map(textOf)).toEqual([
+      `${Follow.SPINNER[0]} now`,
+      "  ✓ orphan",
+    ]);
+  });
+
   it("strips control characters from an intent so they cannot steer the terminal, and cuts a long one", () => {
     const dirty = Follow.apply(Follow.expand(peek, garage.url), {
       type: "intent",

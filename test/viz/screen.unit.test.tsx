@@ -997,11 +997,11 @@ describe("screen follow", () => {
         expect(rows[0]).toBe(machinesTop("read 0 s ago"));
         expect(rows[5]).toBe(box(header("▸ garage · http://127.0.0.1:55332", GARAGE_RIGHT)));
         expect(rows[PEEK_TOP]).toBe(queueTop(PEEK_TITLE));
-        expect(rows[PEEK_TOP + 1]?.startsWith(`│ ${command("send-key", "20 s ago")}`)).toBe(true);
+        expect(rows[PEEK_TOP + 1]?.startsWith(`│ ${command("screendump", "2 s ago")}`)).toBe(true);
         expect(rows[PEEK_TOP + 2]?.startsWith(`│ ${command("input-send-event", "8 s ago")}`)).toBe(
           true,
         );
-        expect(rows[PEEK_TOP + 3]?.startsWith(`│ ${command("screendump", "2 s ago")}`)).toBe(true);
+        expect(rows[PEEK_TOP + 3]?.startsWith(`│ ${command("send-key", "20 s ago")}`)).toBe(true);
         for (const row of rows.slice(PEEK_TOP + 1, PEEK_TOP + 4)) {
           expect(row.endsWith(" │")).toBe(true);
           // The image, drawn as blocks here, sits to the right of the commands.
@@ -1015,14 +1015,17 @@ describe("screen follow", () => {
         expect(styleOf(spans[PEEK_TOP], ` ${PEEK_TITLE} `)).toEqual([TEXT, PLAIN]);
         // The name is padded to where the age starts, so its run of cells carries the padding.
         expect(
-          styleOf(spans[PEEK_TOP + 1], "send-key".padEnd(Follow.LEFT_COLS - "20 s ago".length - 2)),
+          styleOf(
+            spans[PEEK_TOP + 1],
+            "screendump".padEnd(Follow.LEFT_COLS - "2 s ago".length - 2),
+          ),
         ).toEqual([TEXT, PLAIN]);
-        expect(styleOf(spans[PEEK_TOP + 1], "20 s ago")).toEqual([SUBTLE, PLAIN]);
+        expect(styleOf(spans[PEEK_TOP + 1], "2 s ago")).toEqual([SUBTLE, PLAIN]);
       }),
   );
 
   it.effect(
-    "a ghostty or kitty host asks for kitty graphics; anything else leaves the image on auto and draws blocks",
+    "a screenshot is drawn as blocks in its cell box, on a kitty host and on any other",
     () =>
       Effect.gen(function* () {
         const kitty = yield* Effect.promise(() =>
@@ -1038,7 +1041,7 @@ describe("screen follow", () => {
           ),
         );
         yield* Effect.promise(() => kitty.renderOnce());
-        expect(imageProtocols(kitty.renderer.root)).toEqual(["kitty"]);
+        expect(imageProtocols(kitty.renderer.root)).toEqual(["blocks"]);
         kitty.renderer.destroy();
 
         const plain = yield* Effect.promise(() =>
@@ -1056,7 +1059,7 @@ describe("screen follow", () => {
         const rows = yield* Effect.promise(() => plain.renderOnce()).pipe(
           Effect.map(() => plain.captureCharFrame().replace(/\n$/, "").split("\n")),
         );
-        expect(imageProtocols(plain.renderer.root)).toEqual(["auto"]);
+        expect(imageProtocols(plain.renderer.root)).toEqual(["blocks"]);
         expect(BLOCKS.test(rows[PEEK_TOP + 1]?.slice(Follow.LEFT_COLS + 2) ?? "")).toBe(true);
         plain.renderer.destroy();
       }),
@@ -1088,10 +1091,10 @@ describe("screen follow", () => {
         const rows = yield* draw(peeking(full));
         expect(rows).toHaveLength(ROWS);
         expect(rows[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
-        expect(rows[1]?.startsWith(" ✓ send-key")).toBe(true);
-        expect(rows[2]?.startsWith(" ✓ input-send-event")).toBe(true);
-        expect(rows[3]?.startsWith(" ✓ screendump")).toBe(true);
-        expect(rows[4]?.startsWith(` ${Follow.SPINNER[0]} mouse-click`)).toBe(true);
+        expect(rows[1]?.startsWith(` ${Follow.SPINNER[0]} mouse-click`)).toBe(true);
+        expect(rows[2]?.startsWith(" ✓ screendump")).toBe(true);
+        expect(rows[3]?.startsWith(" ✓ input-send-event")).toBe(true);
+        expect(rows[4]?.startsWith(" ✓ send-key")).toBe(true);
         expect(rows[5]?.slice(0, Follow.LEFT_COLS).trim()).toBe("");
         // The image fills the rows to the right of the entries.
         expect(BLOCKS.test(rows[1]?.slice(Follow.LEFT_COLS) ?? "")).toBe(true);
@@ -1105,16 +1108,17 @@ describe("screen follow", () => {
         expect(rows.join("\n")).not.toContain("automation ·");
         const spans = yield* styled(peeking(full));
         expect(styleOf(spans[0], "running")).toEqual([GOLD, PLAIN]);
-        expect(styleOf(spans[1], "✓")).toEqual([PINE, PLAIN]);
-        expect(styleOf(spans[4], Follow.SPINNER[0] ?? "")).toEqual([MUTED, PLAIN]);
+        expect(styleOf(spans[2], "✓")).toEqual([Follow.SUCCESS, PLAIN]);
+        expect(styleOf(spans[2], "screendump")).toEqual([Follow.SUCCESS, PLAIN]);
+        expect(styleOf(spans[1], Follow.SPINNER[0] ?? "")).toEqual([GOLD, PLAIN]);
         expect(styleOf(spans[ROWS - 1], "esc closes")).toEqual([MUTED, PLAIN]);
         // The spinner turns with the frame; a failed action gets a red cross.
         const later = yield* draw(peeking(Follow.tick(full)));
-        expect(later[4]?.startsWith(` ${Follow.SPINNER[1]} mouse-click`)).toBe(true);
+        expect(later[1]?.startsWith(` ${Follow.SPINNER[1]} mouse-click`)).toBe(true);
         const failedRows = yield* styled(
           peeking(Follow.apply(full, { type: "action", id: 9, state: "failed" })),
         );
-        expect(styleOf(failedRows[4], "✗")).toEqual([LOVE, PLAIN]);
+        expect(styleOf(failedRows[1], "✗")).toEqual([LOVE, PLAIN]);
       }),
   );
 
@@ -1449,9 +1453,54 @@ describe("session pane", () => {
         expect(rows.join("\n")).toContain("lock the screen");
         expect(rows.join("\n")).toContain("send-keys");
         expect(rows.join("\n")).toContain("send-key");
-        expect(rows.some((row) => BLOCKS.test(row))).toBe(true);
         const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
-        expect(drawn.image).toEqual(Option.some({ png: TINY_PNG, top: 15, height: 20 }));
+        const image = Option.getOrThrow(drawn.image);
+        // Under the six-row log, across the main content, above the frame.
+        expect(image).toEqual({ png: TINY_PNG, top: 21, height: 14, left: 31, width: 102 });
+        const blockAt = rows.flatMap((row, index) => {
+          const column = row.search(BLOCKS);
+          return column < 0 ? [] : [[index, column] as const];
+        });
+        expect(blockAt.length).toBeGreaterThan(0);
+        for (const [index, column] of blockAt) {
+          expect(index).toBeGreaterThanOrEqual(image.top);
+          expect(index).toBeLessThan(image.top + image.height);
+          expect(column).toBeGreaterThanOrEqual(image.left);
+          expect(column).toBeLessThan(image.left + image.width);
+        }
+        expect(rows.slice(0, image.top).some((row) => BLOCKS.test(row))).toBe(false);
+        expect(rows.slice(15, image.top).join("\n")).toContain("lock the screen");
+        // A kitty host gets a direct placement in that box, above the text. Anywhere else, nothing.
+        const over = Screen.imageOverlay(view, READ_AT, COLUMNS, ROWS, true);
+        expect(over.startsWith(`\x1b7\x1b_Ga=d,d=A,q=2\x1b\\`)).toBe(true);
+        expect(over.endsWith("\x1b8")).toBe(true);
+        expect(over).toContain(",z=1,");
+        const cursor = over.indexOf("\x1b[");
+        const held = over.indexOf("H", cursor);
+        const [rowText, colText] = over.slice(cursor + 2, held).split(";");
+        const row = Number(rowText);
+        const col = Number(colText);
+        expect(row).toBeGreaterThanOrEqual(image.top + 1);
+        expect(row).toBeLessThanOrEqual(image.top + image.height);
+        expect(col).toBeGreaterThanOrEqual(image.left + 1);
+        expect(col).toBeLessThanOrEqual(image.left + image.width);
+        expect(Screen.imageOverlay(view, READ_AT, COLUMNS, ROWS, false)).toBe("");
+        const quiet = `\x1b7\x1b_Ga=d,d=A,q=2\x1b\\\x1b8`;
+        const sheet: View.Sheet = { title: "definition", lines: ["one"], offset: 0 };
+        expect(
+          Screen.imageOverlay({ ...view, sheet: Option.some(sheet) }, READ_AT, COLUMNS, ROWS, true),
+        ).toBe(quiet);
+        expect(Screen.imageOverlay(view, READ_AT, 100, 24, true)).toBe(quiet);
+        const covered = {
+          ...view,
+          follow: Option.some(
+            Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+          ),
+        };
+        const inset = Option.getOrThrow(View.screen(covered, READ_AT, COLUMNS, ROWS).image);
+        expect(inset.top).toBe(image.top);
+        expect(inset.height).toBe(10);
+        expect(inset.top + inset.height).toBe(ROWS - 1 - Follow.PEEK_FRAME_ROWS);
       }),
   );
 
@@ -1594,6 +1643,9 @@ describe("session pane", () => {
       expect(rows[15]).toContain("waiting for OLI-61's session");
       expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
       expect(View.screen(waiting, READ_AT, COLUMNS, ROWS).image).toEqual(Option.none());
+      expect(Screen.imageOverlay(waiting, READ_AT, COLUMNS, ROWS, true)).toBe(
+        "\x1b7\x1b_Ga=d,d=A,q=2\x1b\\\x1b8",
+      );
       const bare = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
       expect(bare[15]).toContain("no session");
       expect(bare.some((row) => BLOCKS.test(row))).toBe(false);
