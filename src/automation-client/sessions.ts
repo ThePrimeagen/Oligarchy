@@ -189,10 +189,11 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     ) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          // Consumed and released in one uninterruptible step, so the local slot comes back
-          // however the run ends, and last: the child is reaped and the ticket forgotten first.
-          // A drive or a mint gives its guest slot back in that same step. The sweep no longer
-          // will, and a guest the driver already stopped answers as nothing to give back.
+          // Consumed and its release registered in one uninterruptible step, so the
+          // local slot comes back however the run ends, and last: the child is reaped
+          // and the ticket forgotten first. A drive or a mint gives its guest slot
+          // back in that same step. The sweep no longer will, and a guest the driver
+          // already stopped answers as nothing to give back.
           yield* Effect.acquireRelease(consume(ticket), (reservation) =>
             Effect.gen(function* () {
               yield* Ref.update(slots, (held) => ({ ...held, count: held.count - 1 }));
