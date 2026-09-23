@@ -1154,7 +1154,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       images: toggle("images", "Print the session's screenshots: id, action, url, when"),
       debugLogs: toggle(
         "debug-logs",
-        "Print the session's debug log (serial, proxy, qemu, actions), saved when it did not succeed",
+        "Print the session's debug log (serial, proxy, qemu, actions), saved when it ended",
       ),
       diagnosis: toggle("diagnosis", "Print the session's post-run diagnosis, written by diagnose"),
       all: toggle(

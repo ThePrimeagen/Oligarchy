@@ -1694,7 +1694,8 @@ describe("stop", () => {
       }),
   );
 
-  it.effect("a succeeded stop does not write a debug log; an aborted stop does", () =>
+  // A driver's succeeded is not the reviewer's: the evidence is kept for every verdict.
+  it.effect("a succeeded stop writes a debug log, as an aborted stop does", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
@@ -1702,11 +1703,14 @@ describe("stop", () => {
           const first = yield* start();
           h.files.set(serialPath(h, first.id), Effect.succeed(SERIAL));
           yield* first.sessions.stop(first.live, "succeeded", "installed");
-          expect(h.debugLogs.saves).toEqual([]);
+          expect(h.debugLogs.saves).toEqual([
+            { sessionId: first.id, serial: "boot log\n", qemu: "" },
+          ]);
           const second = yield* start(OTHER_AGENT);
           h.files.set(serialPath(h, second.id), Effect.succeed(SERIAL));
           yield* second.sessions.stop(second.live, undefined, "gave up");
           expect(h.debugLogs.saves).toEqual([
+            { sessionId: first.id, serial: "boot log\n", qemu: "" },
             { sessionId: second.id, serial: "boot log\n", qemu: "" },
           ]);
           expect(h.sessions.sessions.map((row) => row.status)).toEqual(["succeeded", "aborted"]);
@@ -1877,6 +1881,7 @@ describe("save", () => {
         yield* h.run(
           Effect.gen(function* () {
             const { sessions, id, live } = yield* start();
+            h.files.set(serialPath(h, id), Effect.succeed(SERIAL));
             const events = yield* sessions.follow(id);
             yield* sessions.save(live);
             expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
@@ -1884,7 +1889,8 @@ describe("save", () => {
             });
             expect(yield* qemus(sessions)).toBe(0);
             expect(yield* sessions.jobs).toBe(0);
-            expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stop"]);
+            // The console and the stderr tail are read before the kill takes the session dir.
+            expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
             expect(h.minted.saves).toEqual([
               {
                 iso: ISO,
@@ -1920,7 +1926,7 @@ describe("save", () => {
               { type: "session", status: "succeeded" },
             ]);
             expect(endedWith(spanNamed(h, AGENT))).toBe("ok");
-            expect(h.debugLogs.saves).toEqual([]);
+            expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "boot log\n", qemu: "" }]);
           }),
         );
       }),
@@ -1934,10 +1940,41 @@ describe("save", () => {
           const { sessions, id, live } = yield* start();
           yield* h.qemu.exit(id, 0);
           yield* sessions.save(live);
-          expect(tags(h)).toEqual(["prepare", "start", "stop"]);
+          expect(tags(h)).toEqual(["prepare", "start", "stderrTail", "stop"]);
           expect(h.actions.actions).toHaveLength(1);
           expect(h.minted.saves).toHaveLength(1);
           expect(h.sessions.sessions[0]).toMatchObject({ id, status: "succeeded" });
+        }),
+      );
+    }),
+  );
+
+  it.effect("a debug log that cannot be saved is logged and the save still succeeds", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        debugLogStore: {
+          saveDebugLog: () => Effect.fail(failure("saveDebugLog", "connect ECONNREFUSED")),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          yield* sessions.save(live);
+          expect(h.minted.saves).toHaveLength(1);
+          expect(h.sessions.sessions[0]).toMatchObject({
+            id,
+            status: "succeeded",
+            reason: `saved; minted ${ISO}`,
+          });
+          expect(line(h, "debug log save failed:")).toMatchObject({
+            level: "error",
+            text: "debug log save failed: connect ECONNREFUSED",
+            location: id,
+            agentId: AGENT,
+          });
+          expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+            _tag: "UnknownSession",
+          });
         }),
       );
     }),
@@ -2117,7 +2154,7 @@ describe("save", () => {
           const error = yield* Effect.flip(sessions.save(live));
           expect(error).toMatchObject({ _tag: "Internal", sessionId: id, agentId: AGENT });
           expect(h.minted.saves).toHaveLength(1);
-          expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stop"]);
+          expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
           expect(yield* Stream.runCollect(events)).toEqual([
             { type: "session", status: "running" },
             { type: "action", id: 1, name: "save", state: "running" },
