@@ -956,48 +956,52 @@ describeServing("automation server abort", () => {
     }),
   );
 
-  it.live("404 when the client does not know the session, and the job stays running", () =>
-    Effect.promise(async () => {
-      const client = await serveClient((req, res) => {
-        if (req.url === "/reserve") {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: "true" }));
-          return;
-        }
-        if (req.url === "/abort") {
-          res.writeHead(404, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: 'unknown session "OLI-x"' }));
-        }
-      });
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
-      const resultId = await seedResult(linearId);
-      await seedJob(resultId, "drive");
-      await seedLiveClient(client.url);
-      const port = await freePort();
-      const process = spawnAutomationServer(["--port", String(port)]);
-      try {
-        await process.waitFor(/automation server listening/);
-        await waitForJob(resultId, "running");
-        const response = await request(
-          port,
-          "POST",
-          "/abort",
-          { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-          JSON.stringify({ ticket: linearId, action: "drive" }),
-        );
-        expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({
-          error: `unknown session "${linearId}"`,
+  it.live(
+    "a running job its client holds nothing for is reported JobNotFound, closed aborted, and answered 200",
+    () =>
+      Effect.promise(async () => {
+        const client = await serveClient((req, res) => {
+          if (req.url === "/reserve") {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+            return;
+          }
+          if (req.url === "/abort") {
+            res.writeHead(404, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: 'unknown session "OLI-x"' }));
+          }
         });
-        const jobs = await jobsFor(resultId);
-        expect(jobs).toEqual([expect.objectContaining({ status: "running" })]);
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/automation server listening/);
+          await waitForJob(resultId, "running");
+          const response = await request(
+            port,
+            "POST",
+            "/abort",
+            { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+            JSON.stringify({ ticket: linearId, action: "drive" }),
+          );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ ok: "true" });
+        const job = await waitForJob(resultId, "aborted");
+        expect(job).toMatchObject({ status: "aborted", reason: "aborted" });
+        await process.waitFor(/JobNotFound: Job had "running" status but 404'd\./);
+        expect(lines(process.stdout())).toContain(
+          `[${linearId}] automation: error: JobNotFound: Job had "running" status but 404'd.`,
+        );
       } finally {
-        process.child.kill("SIGTERM");
-        await process.exited;
-        await removeServer(client.url);
-        await client.close();
-      }
-    }),
+          process.child.kill("SIGTERM");
+          await process.exited;
+          await removeServer(client.url);
+          await client.close();
+        }
+      }),
   );
 
   it.live("401 without a bearer", () =>

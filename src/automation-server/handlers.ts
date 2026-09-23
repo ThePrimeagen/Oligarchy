@@ -16,6 +16,7 @@ import * as Enqueue from "./enqueue.ts";
 import * as Ready from "./ready.ts";
 import * as Signature from "./signature.ts";
 import * as Webhook from "./webhook.ts";
+import * as Worker from "./worker.ts";
 
 const ok = Contract.Ok.make({});
 
@@ -92,7 +93,9 @@ const uninterruptible = { uninterruptible: true } as const;
 // client to stop, so closing its row is the whole abort; a placement that reserved after this
 // wins nothing, because running is written only while the row is still pending, and that
 // placement releases the reservation. A running job is stopped at the client that took it,
-// then its row is closed. A job that is over, or was never queued, is refused.
+// then its row is closed. A client that answers 404 holds nothing to stop: that is reported,
+// and the row is closed all the same, so every caller reads the same 200. A job that is over,
+// or was never queued, is refused.
 export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
   handlers.handle(
     "abort",
@@ -167,18 +170,19 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           });
         }
         const url = server.value.url;
+        const running = job.value;
         yield* AutomationClient.abort(url, payload.ticket).pipe(
           Effect.catchTag("AutomationClientError", (error) =>
-            Effect.fail(
-              error.status === 404
-                ? Errors.unknownSession(payload.ticket, payload.ticket)
-                : Errors.RunFailed.make(
+            error.status === 404
+              ? Worker.reportJobNotFound(running.id, url, payload.ticket, error)
+              : Effect.fail(
+                  Errors.RunFailed.make(
                     Object.assign(
                       { message: error.message },
                       error.cause === undefined ? undefined : { cause: error.cause },
                     ),
                   ),
-            ),
+                ),
           ),
         );
         const closed = yield* automation

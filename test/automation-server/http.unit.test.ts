@@ -428,6 +428,51 @@ describe("POST /abort", () => {
     }),
   );
 
+  it.effect(
+    "a running job its client holds nothing for is reported JobNotFound, closed aborted, and answered 200",
+    () =>
+      Effect.gen(function* () {
+        const outbound = FakeHttp.recordRequests(() =>
+          FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+        );
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        const id = fixed.stores.automation.jobs[0]?.id;
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http);
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+        }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+        expect(outbound.requests.map((request) => request.url)).toEqual([`${CLIENT_URL}/abort`]);
+        expect(fixed.stores.automation.jobs[0]).toMatchObject({
+          status: "aborted",
+          reason: "aborted",
+          finishedAt: expect.any(Date),
+        });
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: `JobNotFound: Job had "running" status but 404'd.`,
+            location: "automation",
+            agentId: TICKET,
+            skipSentry: false,
+            cause: expect.objectContaining({
+              _tag: "JobNotFound",
+              message: `Job had "running" status but 404'd.`,
+              jobId: id,
+              url: CLIENT_URL,
+            }),
+          },
+          expect.objectContaining({ level: "info", text: `aborted drive; ${CLIENT_URL}` }),
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+          { method: "clearReady", identifier: TICKET },
+        ]);
+      }),
+  );
+
   it.effect("closes a pending job as aborted; no client has it, so none is called", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -634,28 +679,6 @@ describe("POST /abort refusals", () => {
       }),
   );
 
-  it.effect("404 when the client does not know the session, and the job stays running", () =>
-    Effect.gen(function* () {
-      const outbound = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
-      );
-      const fixed = fixture();
-      seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* abort(http);
-        expect(response.status).toBe(404);
-        expect(yield* response.json).toEqual({
-          error: `unknown session "${TICKET}"`,
-        });
-      }).pipe(Effect.provide(serve(fixed, outbound.layer)));
-      expect(outbound.requests).toHaveLength(1);
-      expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
-      expect(fixed.stores.automation.jobs[0]?.finishedAt).toBeNull();
-    }),
-  );
-
   it.effect("500 when the server that claimed the job is gone", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -690,7 +713,13 @@ describe("POST /abort refusals", () => {
           error: `automation client: POST ${CLIENT_URL}/abort failed: opencode exited 1`,
         });
       }).pipe(Effect.provide(serve(fixed, outbound.layer)));
-      expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
+      expect(fixed.stores.automation.jobs[0]).toMatchObject({
+        status: "running",
+        finishedAt: null,
+      });
+      // A client that failed the stop still holds the job; that is no JobNotFound.
+      expect(FakeLog.texts(fixed.log).filter((text) => text.startsWith("JobNotFound"))).toEqual([]);
+      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
     }),
   );
 });

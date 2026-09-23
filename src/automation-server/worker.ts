@@ -44,6 +44,23 @@ const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
     ? aborted
     : { status: "failed", reason: Render.errorDetail(Cause.squash(cause)) };
 
+// The line, and the error Sentry groups on, for an automation client answering 404 about a job
+// the database has running: every one is reported, from dispatch and from POST /abort.
+export const reportJobNotFound = Effect.fn("reportJobNotFound")(function* (
+  jobId: string,
+  url: string,
+  ticket: string,
+  cause: Errors.AutomationClientError,
+) {
+  const log = yield* Log.Log;
+  const error = Errors.JobNotFound.make({ jobId, url, cause });
+  yield* log.error(`JobNotFound: ${error.message}`, {
+    location: Log.Locations.automation,
+    agentId: ticket,
+    cause: error,
+  });
+});
+
 type Placement = {
   readonly url: string;
   readonly serverId: string;
@@ -258,8 +275,8 @@ const abortAt = (url: string, ticket: string) =>
 // queued, so it says nothing about the diagnose. Every other row is stopped at the
 // automation client that took it, so opencode is killed or the reservation and its qemu slot
 // are given back, then failed, and its ticket moved to Failed. A 404 is an automation client
-// holding nothing for the ticket. One that does not answer is reported and the job is failed
-// anyway; nothing asks again. No ticket, no automation client recorded, or that client's row
+// holding nothing for the ticket, which is reported. One that does not answer is reported and
+// the job is failed anyway; nothing asks again. No ticket, no automation client recorded, or that client's row
 // gone: nothing to ask. Once the row is closed it is no longer found at the next startup, so
 // the close and the Linear move finish even when a shutdown lands between them.
 const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.AutomationJobRow) {
@@ -280,7 +297,7 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
       yield* abortAt(url, ticket).pipe(
         Effect.catchTag("AutomationClientError", (error) =>
           error.status === 404
-            ? Effect.void
+            ? reportJobNotFound(job.id, url, ticket, error)
             : log.error(`inherited abort failed; ${url}`, {
                 location: Log.Locations.automation,
                 agentId: ticket,

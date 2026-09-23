@@ -1832,6 +1832,7 @@ const moved = (linear: FakeLinear.FakeLinear) =>
   linear.calls.filter((call) => call.method === "moveToFailed");
 
 const RESTARTED = "automation server restarted";
+const JOB_NOT_FOUND = `JobNotFound: Job had "running" status but 404'd.`;
 
 describe("a running job left by the last automation server", () => {
   it.effect(
@@ -1991,24 +1992,38 @@ describe("a running job left by the last automation server", () => {
     },
   );
 
-  it.effect("an automation client that answers 404 holds nothing, and the job is failed", () =>
-    Effect.gen(function* () {
-      const fixed = harness();
-      seedResult(fixed.tests);
-      seedRunning(fixed.automation, seedLiveClient(fixed.servers));
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
-      );
-      yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "failed");
-      yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
-      expect(fixed.automation.jobs[0]?.reason).toBe(RESTARTED);
-      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
-      expect(moved(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
-      expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([
-        `drive failed; ${RESTARTED}`,
-      ]);
-    }),
+  it.effect(
+    "an automation client that answers 404 holds nothing: reported JobNotFound, and the job is failed",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+        const id = fixed.automation.jobs[0]?.id;
+        const http = FakeHttp.recordRequests(() =>
+          FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+        );
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "failed");
+        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
+        expect(fixed.automation.jobs[0]?.reason).toBe(RESTARTED);
+        expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
+        expect(moved(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: JOB_NOT_FOUND,
+            location: "automation",
+            agentId: TICKET,
+            cause: expect.objectContaining({
+              _tag: "JobNotFound",
+              message: `Job had "running" status but 404'd.`,
+              jobId: id,
+              url: URL,
+            }),
+          }),
+          expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+        ]);
+      }),
   );
 
   it.effect(
@@ -2507,9 +2522,14 @@ describe("an automation client with six jobs across an automation server restart
         expect(waiting[6]?.status).toBe("pending");
         expect(yield* livePrompts(client)).toEqual(WAITING.slice(0, 6).map(promptOf));
         expect(yield* client.sessions.jobs).toBe(MAX_JOBS);
-        expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual(
-          failed.map(() => `drive failed; ${RESTARTED}`),
-        );
+        // The 404 is reported: a row running that its automation client does not hold.
+        expect(sentryErrors(fixed.log).map((line) => [line.text, line.agentId])).toEqual([
+          [`drive failed; ${RESTARTED}`, undefined],
+          [`drive failed; ${RESTARTED}`, undefined],
+          [`drive failed; ${RESTARTED}`, undefined],
+          [JOB_NOT_FOUND, LEFT[5]],
+          [`drive failed; ${RESTARTED}`, undefined],
+        ]);
       });
     },
   );

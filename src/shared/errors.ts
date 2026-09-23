@@ -439,6 +439,19 @@ export class AutomationClientError extends Schema.TaggedError<AutomationClientEr
   cause: Schema.optionalKey(Schema.Defect()),
 }) {}
 
+// An automation client answering 404 for a job the database has running. No correct run leaves
+// the two disagreeing, so it is always reported.
+export class JobNotFound extends Schema.TaggedError<JobNotFound>(
+  "@oligarchy/shared/errors/JobNotFound",
+)("JobNotFound", {
+  message: Schema.String.pipe(
+    Schema.withConstructorDefault(Effect.succeed(`Job had "running" status but 404'd.`)),
+  ),
+  jobId: Schema.String,
+  url: Schema.String,
+  cause: Schema.Defect(),
+}) {}
+
 // A prompt template that cannot be read, or names a placeholder its renderer has no value for.
 export class PromptError extends Schema.TaggedError<PromptError>(
   "@oligarchy/shared/errors/PromptError",
