@@ -800,15 +800,15 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
           id: keptSession,
           config: { iso: "x" },
           status: "succeeded",
-          startedAt: new Date("2026-09-02T00:00:00Z"),
-          endedAt: new Date("2026-09-02T00:02:00Z"),
+          startedAt: secondsAgo(7_200),
+          endedAt: secondsAgo(7_080),
         },
         {
           id: failedSession,
           config: { iso: "x" },
           status: "failed",
-          startedAt: new Date("2026-09-03T00:00:00Z"),
-          endedAt: new Date("2026-09-03T00:04:00Z"),
+          startedAt: secondsAgo(3_600),
+          endedAt: secondsAgo(3_360),
         },
       ]);
       const runs = await db
@@ -3535,10 +3535,10 @@ const seedLinked = async (
 // The first test sweeps a database with no other row past the cutoff, so its counts are exact;
 // the ones after it match on the rows they seeded.
 describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => {
-  it("deletes every row older than thirty days with what hangs off it, keeps younger rows and the configuration, counts what went, and ends the connection", async () => {
+  it("deletes every row older than seven days with what hangs off it, keeps younger rows and the configuration, counts what went, and ends the connection", async () => {
     const { old, kept } = await seed(dbUrl, async (db) => ({
-      old: await seedAged(db, "old", 31),
-      kept: await seedAged(db, "kept", 29),
+      old: await seedAged(db, "old", 8),
+      kept: await seedAged(db, "kept", 6),
     }));
     const result = await runQuery(SWEEP, dbUrl);
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -3568,7 +3568,7 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
   });
 
   it("takes an old run's results and jobs with it and leaves the younger session one of them ran", async () => {
-    const linked = await seed(dbUrl, (db) => seedLinked(db, "late", 31, 1));
+    const linked = await seed(dbUrl, (db) => seedLinked(db, "late", 8, 1));
     const result = await runQuery(SWEEP, dbUrl);
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
     expect(result.stderr).toBe("");
@@ -3590,8 +3590,8 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
   it("runs as the Worker's scheduled handler: the old rows go and the cron resolves", async () => {
     await seed(dbUrl, async (db) => {
       await db.insert(logs).values([
-        { location: "server", agentId: "PRUNE-cron", text: "old", createdAt: daysAgo(31) },
-        { location: "server", agentId: "PRUNE-cron", text: "kept", createdAt: daysAgo(29) },
+        { location: "server", agentId: "PRUNE-cron", text: "old", createdAt: daysAgo(8) },
+        { location: "server", agentId: "PRUNE-cron", text: "kept", createdAt: daysAgo(6) },
       ]);
     });
     await expect(
@@ -3616,11 +3616,11 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows unhappy path", () =
     // A young run's result on an old session: nothing writes this, and the session's own delete
     // is refused by the foreign key. The whole sweep rolls back, the session's actions included.
     const held = await seed(dbUrl, async (db) => {
-      const linked = await seedLinked(db, "held", 1, 31);
+      const linked = await seedLinked(db, "held", 1, 8);
       await db.insert(actions).values({
         sessionId: linked.sessionId,
         request: { name: "click" },
-        createdAt: daysAgo(31),
+        createdAt: daysAgo(8),
       });
       return linked;
     });

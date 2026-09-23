@@ -118,9 +118,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
   that says Effect applies to it, except `POST /create-test-suite-run`, which runs `./ctrl test run testsuite` in process rather than a second ticket client. Its `scheduled` handler is the retention policy: on the cron in
-  `wrangler.jsonc` it deletes every row older than thirty days in one transaction, a row before
+  `wrangler.jsonc` it deletes every row older than seven days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
-  fleet) alone; a row is history for a month and then gone. What it calls beyond Postgres is the
+  fleet) alone; a row is history for a week and then gone. What it calls beyond Postgres is the
   automation server's `/abort` and, in `linear.ts`, Linear's GraphQL to move an aborted job's
   ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
   points them at stubs, and the tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
