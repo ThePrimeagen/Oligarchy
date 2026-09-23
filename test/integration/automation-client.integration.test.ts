@@ -630,7 +630,8 @@ describeWithDatabase("automation client POST /abort", () => {
         expect(aborted.status).toBe(200);
         expect(await aborted.json()).toEqual({ ok: "true" });
         const runResponse = await running;
-        expect(runResponse.status).toBe(500);
+        expect(runResponse.status).toBe(409);
+        expect(await runResponse.json()).toEqual({ error: "run aborted" });
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
@@ -680,7 +681,8 @@ describeWithDatabase("automation client POST /abort", () => {
         expect(aborted.status).toBe(200);
         expect(await aborted.json()).toEqual({ ok: "true" });
         const runResponse = await running;
-        expect(runResponse.status).toBe(500);
+        expect(runResponse.status).toBe(409);
+        expect(await runResponse.json()).toEqual({ error: "run aborted" });
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
