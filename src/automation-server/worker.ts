@@ -1,4 +1,5 @@
 import { Cause, Effect, Option, Result, Schedule, Schema, Scope } from "effect";
+import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
@@ -12,7 +13,7 @@ import * as Prompts from "./prompts.ts";
 import * as Ready from "./ready.ts";
 
 const DISPATCH_INTERVAL = "5 seconds";
-const RELEASE_TIMEOUT = "10 seconds";
+const ABORT_TIMEOUT = "10 seconds";
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 
@@ -29,6 +30,11 @@ type Outcome = {
 const aborted: Outcome = {
   status: "aborted",
   reason: "automation server shutting down",
+};
+
+const restarted: Outcome = {
+  status: "failed",
+  reason: "automation server restarted",
 };
 
 const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
@@ -190,28 +196,105 @@ const logOutcome = Effect.fn("logOutcome")(function* (
   yield* log.error(`${job.action} failed; ${outcome.reason}`, attr);
 });
 
+// True when this call closed the row. Three attempts at the write; a row that still will not
+// close stays running for an operator to mark, and the line names the status it should have.
 const closeJob = Effect.fn("closeJob")(function* (
   job: Automation.AutomationJobRow,
   outcome: Outcome,
 ) {
   const store = yield* Automation.AutomationStore;
-  const closed = yield* store.finish(job.id, outcome.status, outcome.reason);
+  const log = yield* Log.Log;
+  const written = yield* store
+    .finish(job.id, outcome.status, outcome.reason)
+    .pipe(Effect.retry(Schedule.recurs(2)), Effect.result);
+  if (Result.isFailure(written)) {
+    yield* log.error(`close write failed; ${job.id} should be ${outcome.status}`, {
+      location: Log.Locations.automation,
+      cause: written.failure,
+    });
+    return false;
+  }
   // abort may have closed the row first
-  if (!closed) {
-    return;
+  if (!written.success) {
+    return false;
   }
   yield* logOutcome(job, outcome);
   // Ready means a pending drive or mint. A diagnose was never labeled. A placement that
   // could not reserve does not close.
   if (job.action === "diagnose") {
-    return;
+    return true;
   }
   const tests = yield* Tests.TestStore;
   const result = yield* tests.findResult(job.resultId);
-  if (Option.isNone(result) || result.value.linearId === null) {
-    return;
+  if (Option.isSome(result) && result.value.linearId !== null) {
+    yield* Ready.release(result.value.linearId);
   }
-  yield* Ready.release(result.value.linearId);
+  return true;
+});
+
+// Ten seconds: an automation client that never answers must not hold dispatch. The timeout
+// races on its own fibers, so it lands inside the tick's uninterruptible region too.
+const abortAt = (url: string, ticket: string) =>
+  AutomationClient.abort(url, ticket).pipe(
+    Effect.timeoutOrElse({
+      duration: ABORT_TIMEOUT,
+      orElse: () =>
+        Errors.AutomationClientError.make({
+          message: `automation client: POST ${url}/abort failed: no answer within ${ABORT_TIMEOUT}`,
+        }),
+    }),
+  );
+
+// A running row at startup was taken by the automation server that died: the fiber that
+// would have closed it went with it. Stop it at the automation client that took it, so
+// opencode is killed or the reservation and its qemu slot are given back, then fail it and
+// move its ticket to Failed. A 404 is an automation client holding nothing for the ticket.
+// One that does not answer is reported and the job is failed anyway; nothing asks again.
+// No ticket, no automation client recorded, or that client's row gone: nothing to ask.
+// Once the row is closed it is no longer found at the next startup, so the close and the
+// Linear move finish even when a shutdown lands between them.
+const failInherited = Effect.fn("failInherited")(function* (job: Automation.AutomationJobRow) {
+  const tests = yield* Tests.TestStore;
+  const servers = yield* Servers.ServerStore;
+  const linear = yield* Linear.Linear;
+  const log = yield* Log.Log;
+  const result = yield* tests.findResult(job.resultId);
+  const ticket = Option.isSome(result) ? result.value.linearId : null;
+  if (ticket !== null && job.serverId !== null) {
+    const client = yield* servers.findServer(job.serverId);
+    if (Option.isSome(client)) {
+      const url = client.value.url;
+      yield* abortAt(url, ticket).pipe(
+        Effect.catchTag("AutomationClientError", (error) =>
+          error.status === 404
+            ? Effect.void
+            : log.error(`inherited abort failed; ${url}`, {
+                location: Log.Locations.automation,
+                agentId: ticket,
+                cause: error.cause ?? error,
+              }),
+        ),
+      );
+    }
+  }
+  yield* Effect.uninterruptible(
+    Effect.gen(function* () {
+      const closed = yield* closeJob(job, restarted);
+      if (!closed || ticket === null) {
+        return;
+      }
+      yield* linear.moveToFailed(ticket).pipe(
+        Effect.retry(Schedule.recurs(2)),
+        Effect.catchTag("LinearError", (error) =>
+          log.error(`move to Failed failed: ${detail(error)}`, {
+            location: Log.Locations.automation,
+            agentId: ticket,
+            cause: error,
+          }),
+        ),
+      );
+    }),
+  );
 });
 
 // Jobs launch one reservation at a time, round robin from where the last one stopped.
@@ -224,7 +307,9 @@ const closeJob = Effect.fn("closeJob")(function* (
 // does not end the tick. A tick with no live client does not select. The selection and
 // the running write are uninterruptible; the HTTP wait is restored so SIGTERM can
 // abandon a reserve that has not landed. A tick that fails is one error line; the next
-// tick runs.
+// tick runs. Before the first tick, every running row the last automation server left is
+// stopped and failed, one at a time; a row that fails is one error line and the next row is
+// tried, and a listing that fails is one error line. Dispatch starts either way.
 export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
@@ -286,26 +371,17 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             return yield* Effect.void;
           }
           if (placed._tag === "closed") {
-            yield* closeJob(job, placed.outcome);
-            // An interrupt is a shutdown: do not select the next pending row.
-            if (placed.outcome.status === "aborted") {
+            const closed = yield* closeJob(job, placed.outcome);
+            // An interrupt is a shutdown: do not select the next pending row. A row the
+            // close did not write is still pending, and selecting again would find it.
+            if (!closed || placed.outcome.status === "aborted") {
               return yield* Effect.void;
             }
             continue;
           }
-          // The tick is uninterruptible after reserve returns, and a timeout only lands
-          // on an interruptible wait. Ten seconds: a client that never answers must not
-          // hold the next pass.
           const releaseReservation = (url: string, ticket: string) =>
-            Effect.interruptible(AutomationClient.abort(url, ticket)).pipe(
-              Effect.timeoutOrElse({
-                duration: RELEASE_TIMEOUT,
-                orElse: () =>
-                  Errors.AutomationClientError.make({
-                    message: `automation client: POST ${url}/abort failed: no answer within ${RELEASE_TIMEOUT}`,
-                  }),
-              }),
-              Effect.catch((error) =>
+            abortAt(url, ticket).pipe(
+              Effect.catchTag("AutomationClientError", (error) =>
                 log.error(`reserve release failed; ${url}`, {
                   location: Log.Locations.automation,
                   agentId: ticket,
@@ -386,18 +462,32 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
     );
   });
 
-  yield* tick().pipe(
-    Effect.catchCause((cause) => {
+  // An interrupt is a shutdown and stays one. Anything else is one error line.
+  const reportFailure =
+    (line: string) =>
+    <E>(cause: Cause.Cause<E>) => {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.failCause(cause);
       }
       const error = Cause.squash(cause);
-      return log.error(`dispatch tick failed: ${detail(error)}`, {
+      return log.error(`${line}: ${detail(error)}`, {
         location: Log.Locations.automation,
         cause: error,
       });
-    }),
+    };
+
+  const inherited = Effect.gen(function* () {
+    for (const job of yield* store.listRunning()) {
+      yield* failInherited(job).pipe(
+        Effect.catchCause(reportFailure(`inherited job cleanup failed; ${job.id}`)),
+      );
+    }
+  }).pipe(Effect.catchCause(reportFailure("inherited jobs check failed")));
+
+  const ticks = tick().pipe(
+    Effect.catchCause(reportFailure("dispatch tick failed")),
     Effect.repeat(Schedule.spaced(DISPATCH_INTERVAL)),
-    Effect.forkScoped({ startImmediately: true }),
   );
+
+  yield* inherited.pipe(Effect.andThen(ticks), Effect.forkScoped({ startImmediately: true }));
 });

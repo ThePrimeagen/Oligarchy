@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Fiber, Layer, Redacted } from "effect";
+import { TestClock } from "effect/testing";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import * as Linear from "../../src/ctrl/linear.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
@@ -481,9 +482,60 @@ describe("Linear happy path", () => {
       ]);
     }),
   );
+
+  it.effect("moveToFailed finds the team's Failed state and moves the ticket by identifier", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      yield* Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies).toEqual([
+        { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+        {
+          query: expect.stringContaining("workflowStates"),
+          variables: { name: "Failed", teamId: "team-id" },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: "OLI-45", input: { stateId: stateId("Failed") } },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("an answer that takes nine seconds is kept", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.respondWith(() =>
+        Effect.sleep("9 seconds").pipe(Effect.as(teamResponse())),
+      );
+      const asked = yield* Effect.flatMap(Linear.Linear, (client) => client.teamId).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http))),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("9 seconds");
+      expect(yield* Fiber.join(asked)).toBe("team-id");
+    }),
+  );
 });
 
 describe("Linear unhappy path", () => {
+  it.effect("a request Linear never answers fails after ten seconds, naming the operation", () =>
+    Effect.gen(function* () {
+      const asked = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+      ).pipe(Effect.provide(FakeHttp.never), Effect.forkChild);
+      yield* TestClock.adjust("10 seconds");
+      expect(yield* Fiber.join(asked)).toMatchObject({
+        _tag: "LinearError",
+        operation: "teamId",
+        message: "linear: request failed: no answer within 10 seconds",
+      });
+    }),
+  );
+
   it.effect("reports an HTTP failure with the status and the body", () =>
     Effect.gen(function* () {
       const http = FakeHttp.recordRequests(() => new Response("unauthorized", { status: 401 }));
@@ -752,6 +804,44 @@ describe("Linear unhappy path", () => {
         _tag: "LinearError",
         operation: "moveIssue",
         message: "linear: moving OLI-45 failed",
+      });
+    }),
+  );
+
+  it.effect("moveToFailed refuses a board without a Failed state before any update", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("workflowStates") && body.variables?.name === "Failed"
+          ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "stateIds",
+        message: "linear: no state named Failed",
+      });
+      const queries = http.requests.map((request) => JSON.parse(request.body).query);
+      expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
+    }),
+  );
+
+  it.effect("moveToFailed reports an update that did not succeed by ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToFailed",
+        message: "linear: moving OLI-45 to Failed failed",
       });
     }),
   );

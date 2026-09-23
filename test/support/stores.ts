@@ -619,6 +619,16 @@ export const fakeAutomationStore = (
         }
         return job.status === "running" && job.serverId === serverId;
       }),
+    listRunning: () =>
+      Effect.sync(() =>
+        jobs
+          .filter((job) => job.status === "running")
+          .sort(
+            (left, right) =>
+              left.createdAt.getTime() - right.createdAt.getTime() ||
+              left.id.localeCompare(right.id),
+          ),
+      ),
     hasPending: (resultId, action) =>
       Effect.sync(() =>
         jobs.some(
@@ -657,7 +667,12 @@ export const fakeAutomationStore = (
           (row) => sameId(row.id, id) && (row.status === "running" || row.status === "pending"),
         );
         if (job === undefined) {
-          return false;
+          const closed = jobs.find((row) => sameId(row.id, id));
+          return (
+            closed !== undefined &&
+            closed.status === status &&
+            (reason === null || closed.reason === reason)
+          );
         }
         job.status = status;
         job.finishedAt = new Date();

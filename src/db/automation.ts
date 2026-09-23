@@ -203,6 +203,18 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return Arr.head(rows);
       });
 
+      // Every running row, oldest first. At startup these are the jobs the last automation
+      // server was waiting on: no fiber of this process will close them.
+      const listRunning = Effect.fn("db.listRunningAutomationJobs")(function* () {
+        return yield* database.run("listRunningAutomationJobs", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.status, "running"))
+            .orderBy(DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id),
+        );
+      });
+
       // A pending job has no client to stop: closing its row is its whole abort, and the next
       // selection no longer finds it. The status in the condition is what keeps a placement in
       // flight honest: markRunning only takes a row that is still pending, so an abort that
@@ -230,6 +242,9 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
 
       // A pending row closes when it can never be placed (no ticket, no pin, no prompt).
       // A running row closes when its run ends. reason is omitted when null so a previous value stays.
+      // An acknowledgement can be lost after the update commits: a retry finding the row already
+      // closed with this status and reason is that success, as is another closer that ended it
+      // the same way. Any other close changes nothing.
       const finish = Effect.fn("db.finishAutomationJob")(function* (
         id: string,
         status: FinishStatus,
@@ -252,7 +267,25 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
             )
             .returning({ id: DbSchema.automationJobs.id }),
         );
-        return rows.length > 0;
+        if (rows.length > 0) {
+          return true;
+        }
+        const current = yield* database.run("finishAutomationJob", (db) =>
+          db
+            .select({
+              status: DbSchema.automationJobs.status,
+              reason: DbSchema.automationJobs.reason,
+            })
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.id, id))
+            .limit(1),
+        );
+        const row = Arr.head(current);
+        return (
+          Option.isSome(row) &&
+          row.value.status === status &&
+          (reason === null || row.value.reason === reason)
+        );
       });
 
       // Running and pending are the whole live queue in queue order (mint, then diagnose, then
@@ -353,6 +386,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         hasPending,
         jobStatus,
         findRunning,
+        listRunning,
         abortPending,
         finish,
         listJobs,
