@@ -440,6 +440,10 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the package by `src/harness/config.ts`. `load` fails when the file is missing or malformed,
   and the message names the field. The OpenRouter token stays an environment variable, and a
   token key in the file is refused.
+- The harness loop's pure pieces live in `src/harness` and do no I/O: the message history, the
+  tool definitions for `./client`, `./ctrl` and `./session`, the command line a tool call becomes
+  and the tool result a command's output becomes, and the stop decision. A drive or mint is
+  finished when `./ctrl test-results` exits 0. The step limit counts tool calls.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 
