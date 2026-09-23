@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
-import type { AutomationJob, AutomationQueue, ProcessSeries, Server } from "./query.ts";
+import type { AutomationJob, AutomationQueue, ProcessSeries, Server, Suite } from "./query.ts";
 import { followHref, linearHref } from "./ticket.ts";
 
 // A server writes its row every thirty seconds. One heartbeat may be in flight and one lost to a
@@ -325,45 +325,28 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
     </table>
   );
 
-// Suite counts are suites, not the results inside the ones still open. Succeeded is a
-// passed suite. Aborted is omitted until one exists: an abort, or a run whose results
-// were only aborted or timed out.
-const suiteLine = (suites: AutomationQueue["suites"]): string => {
-  const line = `pending ${String(suites.pending)} · running ${String(suites.running)} · succeeded ${String(suites.passed)} · failed ${String(suites.failed)}`;
-  if (suites.aborted === 0) {
-    return line;
-  }
-  return `${line} · aborted ${String(suites.aborted)}`;
-};
-
-const resultLine = (pill: AutomationQueue["suites"]["pills"][number]): string =>
-  `${String(pill.pending)} pending · ${String(pill.running)} running · ${String(pill.passed)} passed · ${String(pill.failed)} failed`;
-
-// The word on the pill. A passed suite is a run that succeeded; the result tally beside
-// it still says passed, which is the result's own status.
-const suiteWord = (status: AutomationQueue["suites"]["pills"][number]["status"]): string =>
-  status === "passed" ? "succeeded" : status;
-
 const shortRunId = (id: string): string => id.slice(0, 6);
 
-// The same chips a definition's runs use. Finished first, then running, then pending, in
-// the order the board already sorted. An open suite can be aborted: that aborts the results
-// still pending or running, which is what drops it out of the running count.
-const SuitePills: FC<{ board: AutomationQueue["suites"] }> = ({ board }) =>
-  board.pills.length === 0 ? null : (
+// The last three suites, newest first, as the database sorted them. Runs share one name, so
+// the short id tells them apart. Passed and failed count the results with a verdict, and the
+// word at the end is completed once every result has run. An open suite can be aborted: that
+// aborts the results still pending or running.
+const Suites: FC<{ suites: ReadonlyArray<Suite> }> = ({ suites }) =>
+  suites.length === 0 ? (
+    <p>no test suites</p>
+  ) : (
     <ul class="definition-runs" aria-label="Test suites">
-      {board.pills.map((pill) => {
-        const open = pill.status === "pending" || pill.status === "running";
-        const elapsed = Math.max(0, board.queriedAt.getTime() - pill.startedAt.getTime());
+      {suites.map((suite) => {
+        const open = suite.status === "pending" || suite.status === "running";
+        const elapsed = Math.max(0, suite.queriedAt.getTime() - suite.startedAt.getTime());
         return (
           <li>
-            <span class={`definition-pill definition-pill--${pill.status}`}>
-              {shortRunId(pill.id)}
-            </span>
-            <span>{suiteWord(pill.status)}</span>
-            <span>{pill.name}</span>
-            <span>{resultLine(pill)}</span>
-            <time datetime={pill.startedAt.toISOString()}>{age(elapsed)} ago</time>
+            <span class="suite__id">{shortRunId(suite.id)}</span>
+            <span>{suite.name}</span>
+            <time datetime={suite.startedAt.toISOString()}>{age(elapsed)} ago</time>
+            <span class="suite__passed">{suite.passed} passed</span>
+            <span class="suite__failed">{suite.failed} failed</span>
+            <span>{suite.status}</span>
             {open ? (
               <form
                 method="post"
@@ -373,7 +356,7 @@ const SuitePills: FC<{ board: AutomationQueue["suites"] }> = ({ board }) =>
                 hx-target="#queue"
                 hx-swap="innerHTML"
               >
-                <input type="hidden" name="run" value={pill.id} />
+                <input type="hidden" name="run" value={suite.id} />
                 <button type="submit">abort</button>
               </form>
             ) : null}
@@ -384,14 +367,12 @@ const SuitePills: FC<{ board: AutomationQueue["suites"] }> = ({ board }) =>
   );
 
 // The automation queue in the order the database sorted it: what runs, what waits, what finished.
-// What the automation half polls for, every thirty seconds. The line above is every test suite,
-// and the chips under it are the latest finished ones, then the ones still running, then pending.
-// The numbers beside running and pending jobs are the totals, not the length of the fifty-row
-// lists. Completed has no number: that total only grows.
+// What the automation half polls for, every thirty seconds. The suites above it are the last
+// three started. The numbers beside running and pending jobs are the totals, not the length of
+// the fifty-row lists. Completed has no number: that total only grows.
 export const Queue: FC<{ queue: AutomationQueue }> = ({ queue }) => (
   <>
-    <p>{suiteLine(queue.suites)}</p>
-    <SuitePills board={queue.suites} />
+    <Suites suites={queue.suites} />
     <h3>running {queue.runningCount}</h3>
     <Jobs jobs={queue.running} />
     <h3>pending {queue.pendingCount}</h3>

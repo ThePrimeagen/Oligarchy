@@ -5,8 +5,7 @@ import type {
   AutomationQueue,
   ProcessSeries,
   Server,
-  SuiteBoard,
-  SuitePill,
+  Suite,
 } from "../../src/dashboard/query.ts";
 import { Fleet, Process, Queue, ServersPage } from "../../src/dashboard/servers.tsx";
 
@@ -85,51 +84,33 @@ const failed: AutomationJob = {
   queriedAt: QUERIED_AT,
 };
 
-const PASSED_RUN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
-const FAILED_RUN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
 const RUNNING_RUN = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+const MIXED_RUN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+const PASSED_RUN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const PENDING_RUN = "dddddddd-dddd-4ddd-8ddd-ddddddddddd4";
 
-const suitePill = (
+const suite = (
   id: string,
-  status: SuitePill["status"],
+  status: Suite["status"],
   startedAt: Date,
-  counts: Partial<Pick<SuitePill, "pending" | "running" | "passed" | "failed">> = {},
-): SuitePill => ({
+  counts: Partial<Pick<Suite, "passed" | "failed">> = {},
+): Suite => ({
   id,
   name: "Omarchy experiment",
   status,
   startedAt,
-  pending: 0,
-  running: 0,
   passed: 0,
   failed: 0,
+  queriedAt: QUERIED_AT,
   ...counts,
 });
 
-const SUITES: SuiteBoard = {
-  pending: 1,
-  running: 1,
-  passed: 4,
-  failed: 1,
-  aborted: 0,
-  queriedAt: QUERIED_AT,
-  pills: [
-    suitePill(PASSED_RUN, "passed", ago(3_600), { passed: 8 }),
-    suitePill(FAILED_RUN, "failed", ago(1_800), { passed: 1, failed: 2 }),
-    suitePill(RUNNING_RUN, "running", ago(900), { running: 1, failed: 2 }),
-    suitePill(PENDING_RUN, "pending", ago(30), { pending: 3 }),
-  ],
-};
-const SUITES_QUIET: SuiteBoard = {
-  pending: 0,
-  running: 0,
-  passed: 0,
-  failed: 0,
-  aborted: 0,
-  queriedAt: QUERIED_AT,
-  pills: [],
-};
+// Newest first, the way the database hands back the last three.
+const SUITES: ReadonlyArray<Suite> = [
+  suite(RUNNING_RUN, "running", ago(900), { passed: 3, failed: 2 }),
+  suite(MIXED_RUN, "completed", ago(1_800), { passed: 32, failed: 12 }),
+  suite(PASSED_RUN, "completed", ago(3_600), { passed: 8 }),
+];
 const QUEUE: AutomationQueue = {
   running: [running],
   pending: [pending],
@@ -144,7 +125,7 @@ const EMPTY_QUEUE: AutomationQueue = {
   completed: [],
   runningCount: 0,
   pendingCount: 0,
-  suites: SUITES_QUIET,
+  suites: [],
 };
 
 const processAlive: ProcessSeries = {
@@ -202,7 +183,10 @@ const abortSuiteForm = (run: string): string =>
   `<form method="post" action="/suites/abort" hx-post="/suites/abort" hx-confirm="are you sure?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="run" value="${run}"/><button type="submit">abort</button></form>`;
 
 const listItem = (page: string, text: string): string =>
-  page.split("<li>").find((item) => item.includes(text)) ?? "";
+  page
+    .split("<li>")
+    .map((item) => item.split("</li>")[0] ?? "")
+    .find((item) => item.includes(text)) ?? "";
 
 // The components are functions of their props; the string they render, through the same html
 // helper the routes serve them with, is the page. The helper hands back a String object, hence
@@ -320,35 +304,47 @@ describe("Queue happy path", () => {
     expect(page).not.toContain("<h3>completed ");
   });
 
-  it("lists how many suites are pending, running, succeeded and failed, and pills them finished then running then pending", async () => {
+  it("lists the suites it is given in that order, each with how many passed and failed, when it started, and completed once every result has run", async () => {
     const page = await render(Queue({ queue: QUEUE }));
-    expect(page).toContain("<p>pending 1 · running 1 · succeeded 4 · failed 1</p>");
     expect(page).toContain('aria-label="Test suites"');
+    const mixed = listItem(page, MIXED_RUN.slice(0, 6));
     const passed = listItem(page, PASSED_RUN.slice(0, 6));
-    const failedSuite = listItem(page, FAILED_RUN.slice(0, 6));
-    const runningSuite = listItem(page, RUNNING_RUN.slice(0, 6));
-    const pendingSuite = listItem(page, PENDING_RUN.slice(0, 6));
-    expect(passed).toContain(">succeeded<");
-    expect(passed).toContain("0 pending · 0 running · 8 passed · 0 failed");
+    expect(mixed).toContain(">Omarchy experiment<");
+    expect(mixed).toContain(">32 passed<");
+    expect(mixed).toContain(">12 failed<");
+    expect(mixed).toContain(">30 min ago<");
+    expect(mixed).toContain(">completed<");
+    expect(passed).toContain(">8 passed<");
+    expect(passed).toContain(">0 failed<");
     expect(passed).toContain('datetime="2026-09-09T15:00:00.000Z"');
     expect(passed).toContain(">1 h ago<");
-    expect(passed).not.toContain(">abort</button>");
-    expect(failedSuite).toContain(">failed<");
-    expect(failedSuite).toContain("0 pending · 0 running · 1 passed · 2 failed");
-    expect(failedSuite).not.toContain(abortSuiteForm(FAILED_RUN));
+    expect(passed).toContain(">completed<");
+    expect(page.indexOf(RUNNING_RUN.slice(0, 6))).toBeLessThan(page.indexOf(MIXED_RUN.slice(0, 6)));
+    expect(page.indexOf(MIXED_RUN.slice(0, 6))).toBeLessThan(page.indexOf(PASSED_RUN.slice(0, 6)));
+  });
+
+  it("says a suite with results still open is running or pending, not completed, and offers to abort it; a completed one offers none", async () => {
+    const page = await render(
+      Queue({
+        queue: {
+          ...QUEUE,
+          suites: [...SUITES, suite(PENDING_RUN, "pending", ago(30))],
+        },
+      }),
+    );
+    const runningSuite = listItem(page, RUNNING_RUN.slice(0, 6));
+    const pendingSuite = listItem(page, PENDING_RUN.slice(0, 6));
+    expect(runningSuite).toContain(">3 passed<");
+    expect(runningSuite).toContain(">2 failed<");
     expect(runningSuite).toContain(">running<");
-    expect(runningSuite).toContain("0 pending · 1 running · 0 passed · 2 failed");
+    expect(runningSuite).not.toContain(">completed<");
     expect(runningSuite).toContain(abortSuiteForm(RUNNING_RUN));
+    expect(pendingSuite).toContain(">0 passed<");
     expect(pendingSuite).toContain(">pending<");
-    expect(pendingSuite).toContain("3 pending · 0 running · 0 passed · 0 failed");
+    expect(pendingSuite).not.toContain(">completed<");
     expect(pendingSuite).toContain(abortSuiteForm(PENDING_RUN));
-    expect(page.indexOf(PASSED_RUN.slice(0, 6))).toBeLessThan(page.indexOf(FAILED_RUN.slice(0, 6)));
-    expect(page.indexOf(FAILED_RUN.slice(0, 6))).toBeLessThan(
-      page.indexOf(RUNNING_RUN.slice(0, 6)),
-    );
-    expect(page.indexOf(RUNNING_RUN.slice(0, 6))).toBeLessThan(
-      page.indexOf(PENDING_RUN.slice(0, 6)),
-    );
+    expect(listItem(page, MIXED_RUN.slice(0, 6))).not.toContain(">abort</button>");
+    expect(listItem(page, PASSED_RUN.slice(0, 6))).not.toContain(">abort</button>");
   });
 
   it("uses the totals, not how many rows the fifty-row lists still show", async () => {
@@ -359,13 +355,11 @@ describe("Queue happy path", () => {
           running: [running],
           runningCount: 60,
           pendingCount: 52,
-          suites: { ...SUITES_QUIET, pending: 4, running: 3, passed: 2, failed: 1 },
         },
       }),
     );
     expect(page).toContain("<h3>running 60</h3>");
     expect(page).toContain("<h3>pending 52</h3><p>none</p>");
-    expect(page).toContain("<p>pending 4 · running 3 · succeeded 2 · failed 1</p>");
   });
 
   it("shows a running job's ticket, test, action and status, how long ago it was queued and started, and no finish yet", async () => {
@@ -437,30 +431,28 @@ describe("Queue happy path", () => {
 });
 
 describe("Queue unhappy path", () => {
-  it("says none under a heading with nothing in its list, and draws no table for it", async () => {
+  it("says none under a heading with nothing in its list and no test suites when none has run, drawing no table or list", async () => {
     const page = await render(Queue({ queue: EMPTY_QUEUE }));
     expect(page).toBe(
-      "<p>pending 0 · running 0 · succeeded 0 · failed 0</p><h3>running 0</h3><p>none</p><h3>pending 0</h3><p>none</p><h3>completed</h3><p>none</p>",
+      "<p>no test suites</p><h3>running 0</h3><p>none</p><h3>pending 0</h3><p>none</p><h3>completed</h3><p>none</p>",
     );
   });
 
-  it("names an aborted suite in the count and draws it with the finished pills, with no abort", async () => {
+  it("says an aborted suite is aborted, not completed, with its counts and no abort", async () => {
     const stopped = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee5";
     const page = await render(
       Queue({
         queue: {
           ...EMPTY_QUEUE,
-          suites: {
-            ...SUITES_QUIET,
-            aborted: 1,
-            pills: [suitePill(stopped, "aborted", ago(86_400))],
-          },
+          suites: [suite(stopped, "aborted", ago(86_400), { passed: 1 })],
         },
       }),
     );
-    expect(page).toContain("<p>pending 0 · running 0 · succeeded 0 · failed 0 · aborted 1</p>");
     const item = listItem(page, stopped.slice(0, 6));
+    expect(item).toContain(">1 passed<");
+    expect(item).toContain(">0 failed<");
     expect(item).toContain(">aborted<");
+    expect(item).not.toContain(">completed<");
     expect(item).toContain(">1 d ago<");
     expect(item).not.toContain(">abort</button>");
   });
@@ -471,11 +463,7 @@ describe("Queue unhappy path", () => {
       Queue({
         queue: {
           ...EMPTY_QUEUE,
-          suites: {
-            ...SUITES_QUIET,
-            running: 1,
-            pills: [suitePill(ahead, "running", new Date(QUERIED_AT.getTime() + 5_000))],
-          },
+          suites: [suite(ahead, "running", new Date(QUERIED_AT.getTime() + 5_000))],
         },
       }),
     );
@@ -487,10 +475,7 @@ describe("Queue unhappy path", () => {
       Queue({
         queue: {
           ...EMPTY_QUEUE,
-          suites: {
-            ...SUITES,
-            pills: [{ ...SUITES.pills[0], name: 'a<"b' }],
-          },
+          suites: [{ ...suite(PASSED_RUN, "completed", ago(60)), name: 'a<"b' }],
         },
       }),
     );
@@ -655,7 +640,7 @@ describe("ServersPage happy path", () => {
     expect(page).toContain(
       '<h2>automation</h2><div id="queue" hx-get="/servers/queue" hx-trigger="every 30s">',
     );
-    expect(page).toContain("<p>pending 1 · running 1 · succeeded 4 · failed 1</p>");
+    expect(page).toContain(">32 passed<");
     expect(page).toContain("<h3>running 1</h3>");
     expect(page).toContain(linearLink("OLI-61"));
     expect(page).toContain(
