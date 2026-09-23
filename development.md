@@ -964,6 +964,10 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   `bun run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
   executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary.
+- Run every test before anything is pushed to master or merged into it: `bun run check:fast`,
+  then the whole integration lane with Docker up, `OLIGARCHY_REQUIRE_DATABASE=1 bun run
+  test:integration`, so a database test fails instead of skipping. Never only the tests that look
+  affected: a change breaks tests it never touched, and a lane nobody runs goes stale.
 - Two `it`s: a pure test (`test/repo/*`, pure modules, the black-box CLI process tests) imports
   `describe`, `expect` and `it` from `vitest`; an Effect test imports `it` from `@effect/vitest`
   (`describe` and `expect` still from `vitest`) and uses `it.effect` or `it.live`, and
@@ -1054,8 +1058,8 @@ it.effect("refuses a foreign agent", () =>
 Every enabled diagnostic is an error. Fix findings at their source; do not downgrade rules, add
 disable comments, or create broad file exclusions. Exceptions are narrow, centralised as root
 overrides in `.oxlintrc.json`, and covered by a focused test each. `bun run check:fast` runs lint,
-format, types and unit tests in that order; run it plus the affected integration tests before a
-change ships.
+format, types and unit tests in that order; run it plus the whole integration lane before a
+change ships (Tests, above).
 
 - oxlint with `typeAware: true`, plugins `effecttsgo` and `typescript`; categories `correctness`,
   `suspicious`, `perf` as `error`, `nursery`, `pedantic`, `restriction`, `style` off;
@@ -1153,4 +1157,5 @@ impossible failures, or strips the comments that carry design intent, gets that 
    document pins is unchanged, or the test and the document changed with it.
 7. Tests were written first, both paths are covered, fakes sit at the layer seam, and no test
    touches a third party, QEMU or a remote database.
-8. `bun run check:fast` and the affected integration tests are green.
+8. `bun run check:fast` and every integration test are green, run with Docker up and
+   `OLIGARCHY_REQUIRE_DATABASE=1`.
