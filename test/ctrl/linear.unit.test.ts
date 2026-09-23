@@ -106,6 +106,9 @@ const happyLinear = (body: GraphQl): Response => {
   if (body.query.includes("issueUpdate")) {
     return describeResponse();
   }
+  if (body.query.includes("commentCreate")) {
+    return FakeHttp.json({ data: { commentCreate: { success: true } } });
+  }
   return issueResponse("OLI-42");
 };
 
@@ -460,27 +463,33 @@ describe("Linear happy path", () => {
     }),
   );
 
-  it.effect("moveToFailed finds the team's Failed state and moves the ticket by identifier", () =>
-    Effect.gen(function* () {
-      const http = withHttp(happyLinear);
-      yield* Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")).pipe(
-        Effect.provide(linear().pipe(Layer.provide(http.layer))),
-      );
-      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
-        JSON.parse(request.body),
-      );
-      expect(bodies).toEqual([
-        { query: expect.stringContaining("teams("), variables: { name: TEAM } },
-        {
-          query: expect.stringContaining("workflowStates"),
-          variables: { name: "Failed", teamId: "team-id" },
-        },
-        {
-          query: expect.stringContaining("issueUpdate"),
-          variables: { id: "OLI-45", input: { stateId: stateId("Failed") } },
-        },
-      ]);
-    }),
+  it.effect(
+    "moveToErrored moves the ticket to the team's Errored state by identifier, then comments why",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp(happyLinear);
+        yield* Effect.flatMap(Linear.Linear, (client) =>
+          client.moveToErrored("OLI-45", "drive errored; qemu exited 137"),
+        ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+        const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+          JSON.parse(request.body),
+        );
+        expect(bodies).toEqual([
+          { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+          {
+            query: expect.stringContaining("workflowStates"),
+            variables: { name: "Errored", teamId: "team-id" },
+          },
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: "OLI-45", input: { stateId: stateId("Errored") } },
+          },
+          {
+            query: expect.stringContaining("commentCreate"),
+            variables: { input: { issueId: "OLI-45", body: "drive errored; qemu exited 137" } },
+          },
+        ]);
+      }),
   );
 
   it.effect("an answer that takes nine seconds is kept", () =>
@@ -502,7 +511,7 @@ describe("Linear unhappy path", () => {
   it.effect("a request Linear never answers fails after ten seconds, naming the operation", () =>
     Effect.gen(function* () {
       const asked = yield* failureOf(
-        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+        Effect.flatMap(Linear.Linear, (client) => client.moveToErrored("OLI-45", "why")),
       ).pipe(Effect.provide(FakeHttp.never), Effect.forkChild);
       yield* TestClock.adjust("10 seconds");
       expect(yield* Fiber.join(asked)).toMatchObject({
@@ -774,40 +783,64 @@ describe("Linear unhappy path", () => {
     }),
   );
 
-  it.effect("moveToFailed refuses a board without a Failed state before any update", () =>
+  const queried = (http: { readonly requests: ReadonlyArray<{ readonly body: string }> }) =>
+    http.requests.map((request): string => JSON.parse(request.body).query);
+
+  it.effect("moveToErrored refuses a board without an Errored state before any update", () =>
     Effect.gen(function* () {
       const http = withHttp((body) =>
-        body.query.includes("workflowStates") && body.variables?.name === "Failed"
+        body.query.includes("workflowStates") && body.variables?.name === "Errored"
           ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
           : happyLinear(body),
       );
       const error = yield* failureOf(
-        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+        Effect.flatMap(Linear.Linear, (client) => client.moveToErrored("OLI-45", "why")),
       ).pipe(Effect.provide(http.layer));
       expect(error).toMatchObject({
         _tag: "LinearError",
         operation: "stateIds",
-        message: "linear: no state named Failed",
+        message: "linear: no state named Errored",
       });
-      const queries = http.requests.map((request) => JSON.parse(request.body).query);
-      expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
+      expect(queried(http).some((query) => query.includes("issueUpdate"))).toBe(false);
+      expect(queried(http).some((query) => query.includes("commentCreate"))).toBe(false);
     }),
   );
 
-  it.effect("moveToFailed reports an update that did not succeed by ticket", () =>
+  it.effect(
+    "moveToErrored reports a move that did not succeed by ticket, and does not comment",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp((body) =>
+          body.query.includes("issueUpdate")
+            ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+            : happyLinear(body),
+        );
+        const error = yield* failureOf(
+          Effect.flatMap(Linear.Linear, (client) => client.moveToErrored("OLI-45", "why")),
+        ).pipe(Effect.provide(http.layer));
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "moveToErrored",
+          message: "linear: moving OLI-45 to Errored failed",
+        });
+        expect(queried(http).some((query) => query.includes("commentCreate"))).toBe(false);
+      }),
+  );
+
+  it.effect("moveToErrored reports a comment that did not succeed by ticket", () =>
     Effect.gen(function* () {
       const http = withHttp((body) =>
-        body.query.includes("issueUpdate")
-          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+        body.query.includes("commentCreate")
+          ? FakeHttp.json({ data: { commentCreate: { success: false } } })
           : happyLinear(body),
       );
       const error = yield* failureOf(
-        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+        Effect.flatMap(Linear.Linear, (client) => client.moveToErrored("OLI-45", "why")),
       ).pipe(Effect.provide(http.layer));
       expect(error).toMatchObject({
         _tag: "LinearError",
-        operation: "moveToFailed",
-        message: "linear: moving OLI-45 to Failed failed",
+        operation: "moveToErrored",
+        message: "linear: commenting on OLI-45 failed",
       });
     }),
   );

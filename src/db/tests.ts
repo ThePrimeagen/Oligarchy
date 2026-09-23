@@ -196,6 +196,21 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return rows.length > 0;
     });
 
+    // The system failed this result, so whatever verdict it has is not the test's. An operator
+    // abort still stands.
+    const errorResult = Effect.fn("db.errorResult")(function* (resultId: string, reason: string) {
+      const rows = yield* database.run("errorResult", (db) =>
+        db
+          .update(DbSchema.testResults)
+          .set({ status: "errored", reason, finishedAt: sql`now()` })
+          .where(
+            and(eq(DbSchema.testResults.id, resultId), ne(DbSchema.testResults.status, "aborted")),
+          )
+          .returning({ id: DbSchema.testResults.id }),
+      );
+      return rows.length > 0;
+    });
+
     // The result by its id, whether or not a session has run it yet.
     const findResult = Effect.fn("db.findResult")(function* (resultId: string) {
       const rows = yield* database.run("findResult", (db) =>
@@ -289,6 +304,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       failRun,
       startResult,
       closeResult,
+      errorResult,
       findResult,
       setLinearId,
       findResultByLinearId,

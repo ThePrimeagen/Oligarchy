@@ -493,6 +493,18 @@ export const fakeTestStore = (
         row.finishedAt = new Date();
         return true;
       }),
+    errorResult: (resultId, reason) =>
+      Effect.sync(() => {
+        const row = results.find((result) => sameId(result.id, resultId));
+        // Same predicate as TestStore.errorResult: an abort is the operator's close.
+        if (row === undefined || row.status === "aborted") {
+          return false;
+        }
+        row.status = "errored";
+        row.reason = reason;
+        row.finishedAt = new Date();
+        return true;
+      }),
     setLinearId: (resultId, linearId) =>
       Effect.gen(function* () {
         const row = results.find((result) => sameId(result.id, resultId));
