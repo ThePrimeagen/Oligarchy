@@ -207,7 +207,7 @@ describe("qemu reverse proxy startup refusals", () => {
     }),
   );
 
-  it.live.skipIf(dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
+  it.live.skipIf(dbUrl === "")("an occupied port exits 1 naming the port in use", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
@@ -218,8 +218,7 @@ describe("qemu reverse proxy startup refusals", () => {
           line.startsWith("[global] server: fatal: qemu reverse proxy: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
-        expect(fatal).toContain("EADDRINUSE");
-        expect(fatal).toContain(`127.0.0.1:${String(port)}`);
+        expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);
         expect(process.stdout()).not.toContain("listening");
       } finally {
         await release();

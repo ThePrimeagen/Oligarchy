@@ -324,7 +324,7 @@ describe("qemu server startup refusals", () => {
     }),
   );
 
-  it.live.skipIf(!hasQemu || dbUrl === "")("an occupied port exits 1 with EADDRINUSE", () =>
+  it.live.skipIf(!hasQemu || dbUrl === "")("an occupied port exits 1 naming the port in use", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
@@ -335,8 +335,7 @@ describe("qemu server startup refusals", () => {
           line.startsWith("[global] server: fatal: qemu server: "),
         );
         expect(fatal, server.stdout()).toBeDefined();
-        expect(fatal).toContain("EADDRINUSE");
-        expect(fatal).toContain(`127.0.0.1:${String(port)}`);
+        expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);
       } finally {
         await release();
       }
