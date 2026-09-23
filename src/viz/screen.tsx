@@ -66,16 +66,41 @@ const Shot = (props: {
 }) => {
   const renderer = useRenderer();
   const pinned = () => props.protocol === "kitty" && Placeholder.fits(props.columns, props.rows);
+  // A spinner tick rebuilds the screen around the same picture. The placement effect reads that
+  // screen, so it would delete the image and send it again, and the host paints the gap.
+  const placement = createMemo(
+    () => ({
+      png: props.png,
+      id: props.id,
+      columns: props.columns,
+      rows: props.rows,
+      pinned: pinned(),
+      place: props.place,
+    }),
+    undefined,
+    {
+      equals: (prev, next) =>
+        prev !== undefined &&
+        next !== undefined &&
+        prev.png === next.png &&
+        prev.id === next.id &&
+        prev.columns === next.columns &&
+        prev.rows === next.rows &&
+        prev.pinned === next.pinned &&
+        prev.place === next.place,
+    },
+  );
   createEffect(() => {
-    const place = props.place;
-    if (!pinned() || place === undefined) {
+    const next = placement();
+    const place = next.place;
+    if (!next.pinned || place === undefined) {
       return;
     }
-    place(Placeholder.show(props.png, props.id, props.columns, props.rows));
+    place(Placeholder.show(next.png, next.id, next.columns, next.rows));
     onCleanup(() => {
       // destroy() is already restoring the terminal; a delete written into that would split it.
       if (!renderer.isDestroyed) {
-        place(Placeholder.hide(props.id));
+        place(Placeholder.hide(next.id));
       }
     });
   });

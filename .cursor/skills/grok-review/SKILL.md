@@ -1,4 +1,4 @@
-Spawn the latest Grok Max Fast subagent on max mode and have it perform the following:
+Spawn the latest Grok extrahigh Fast subagent on max mode and have it perform the following:
 Consider the conversation and the specific request from the user and the git diff for what has been changed.
 
 - Is the change set the simplest way to achieve the goal?

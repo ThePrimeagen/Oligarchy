@@ -1683,6 +1683,70 @@ describe("session pane", () => {
     }),
   );
 
+  it.effect("a spinner tick keeps the session screenshot up, and a new picture replaces it", () =>
+    Effect.gen(function* () {
+      const picture = (png: Uint8Array) =>
+        Follow.expand(
+          Follow.peekFromActions(
+            "OLI-61",
+            SESSION_ID,
+            garage.url,
+            [{ request: sendKey, createdAt: ago(2) }],
+            Option.some(png),
+          ),
+          garage.url,
+        );
+      const placed: Array<string> = [];
+      const [view, setView] = createSignal(sessionOf(picture(TINY_PNG)));
+      const [now, setNow] = createSignal(READ_AT);
+      const kitty = yield* Effect.promise(() =>
+        testRender(
+          () => (
+            <Screen.App
+              view={view}
+              now={now}
+              imageProtocol="kitty"
+              place={(sequence) => {
+                placed.push(sequence);
+              }}
+            />
+          ),
+          { width: COLUMNS, height: ROWS },
+        ),
+      );
+      yield* Effect.promise(() => kitty.renderOnce());
+      const shownOnce = placed.length;
+      expect(shownOnce).toBeGreaterThan(0);
+      expect(placed.some((sequence) => sequence.includes("a=d,"))).toBe(false);
+      // The clock and the follow frame both move, which is what a running row does every spin.
+      setNow(READ_AT + View.SPIN_MS);
+      setView((current) => {
+        const follow = Option.getOrNull(current.session);
+        return follow?._tag === "full"
+          ? { ...current, session: Option.some(Follow.tick(follow)) }
+          : current;
+      });
+      yield* Effect.promise(() => kitty.renderOnce());
+      expect(placed).toHaveLength(shownOnce);
+      expect(placed.some((sequence) => sequence.includes("a=d,"))).toBe(false);
+      const next = Uint8Array.from([...TINY_PNG, 9]);
+      setView(sessionOf(picture(next)));
+      yield* Effect.promise(() => kitty.renderOnce());
+      expect(placed.some((sequence) => sequence === Placeholder.hide(Placeholder.SESSION))).toBe(
+        true,
+      );
+      expect(placed.at(-1)).toBe(
+        Placeholder.show(
+          next,
+          Placeholder.SESSION,
+          COLUMNS - View.SESSION_IMAGE_LEFT - 2,
+          Option.getOrThrow(View.screen(view(), now(), COLUMNS, ROWS).image).height,
+        ),
+      );
+      kitty.renderer.destroy();
+    }),
+  );
+
   it.effect(
     "on a ticket the pane shows the step, the exact line, and that intent's actions, not the history",
     () =>
