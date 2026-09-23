@@ -1235,7 +1235,9 @@ const automationRows = (
     const color = ACTION_COLOR[job.action];
     const follow = Option.getOrNull(view.session);
     // The open follow has every intent still on screen, so a repeated line is the copy
-    // those intents have reached. A follow with nothing still open keeps the elapsed time.
+    // those intents have reached. Only a newest intent that is still open counts: the
+    // server refuses a second start, and an older one left marked running is not the step.
+    // A follow with nothing still open keeps the elapsed time.
     let messages: ReadonlyArray<string> = job.intent === null ? [] : [job.intent];
     if (
       on &&
@@ -1245,17 +1247,15 @@ const automationRows = (
       follow.ticket === job.ticket
     ) {
       const said: Array<string> = [];
-      let lastRunning = -1;
+      let open = false;
       for (const found of follow.entries) {
         if (found.id !== "intent") {
           continue;
         }
-        if (found.state === "running") {
-          lastRunning = said.length;
-        }
         said.push(found.name);
+        open = found.state === "running";
       }
-      messages = lastRunning === -1 ? [] : said.slice(0, lastRunning + 1);
+      messages = open ? said : [];
     }
     const place = stepPlace(job, messages);
     return [

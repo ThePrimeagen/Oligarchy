@@ -271,8 +271,11 @@ describe("ticket session happy path", () => {
     const steps = ["Click Style.", "Click Theme.", "Click Style."];
     const full = Follow.apply(
       Follow.apply(
-        Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
-        { type: "intent", state: "started", message: "Click Theme." },
+        Follow.apply(
+          Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+          { type: "intent", state: "started", message: "Click Theme." },
+        ),
+        { type: "intent", state: "completed" },
       ),
       { type: "intent", state: "started", message: "Click Style." },
     );

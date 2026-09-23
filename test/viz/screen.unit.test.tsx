@@ -1778,13 +1778,16 @@ describe("session pane", () => {
       const full = Follow.apply(
         Follow.apply(
           Follow.apply(
-            Follow.expand(
-              Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
-              garage.url,
+            Follow.apply(
+              Follow.expand(
+                Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+                garage.url,
+              ),
+              { type: "session", status: "running" },
             ),
-            { type: "session", status: "running" },
+            { type: "intent", state: "started", message: "Click Theme." },
           ),
-          { type: "intent", state: "started", message: "Click Theme." },
+          { type: "intent", state: "completed" },
         ),
         { type: "intent", state: "started", message: "Click Style." },
       );
@@ -1801,6 +1804,48 @@ describe("session pane", () => {
       const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
       expect(side(drawn[6])).toContain("3/3");
       expect(side(drawn[6])).not.toContain("1/3");
+    }),
+  );
+
+  it.effect("a finished newest intent does not revive an older one still marked running", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
+* Click Style.
+* Click Theme.
+* Click Style.
+* any crashes or erroneous behavior must be reported.
+* always take a screen shot of every step
+</ActionList>`;
+      const stepped = { ...running, instruction, intent: "Click Style." };
+      const full = Follow.apply(
+        Follow.apply(
+          Follow.apply(
+            Follow.apply(
+              Follow.expand(
+                Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
+                garage.url,
+              ),
+              { type: "session", status: "running" },
+            ),
+            { type: "intent", state: "started", message: "Click Theme." },
+          ),
+          { type: "intent", state: "started", message: "Click Style." },
+        ),
+        { type: "intent", state: "completed" },
+      );
+      const drawn = yield* draw(
+        shown(
+          { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } },
+          {
+            tab: "automation",
+            session: Option.some(full),
+            cursor: { servers: 0, clients: 1, queue: 0 },
+          },
+        ),
+      );
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
+      expect(side(drawn[6])).toContain("45 s ago");
+      expect(side(drawn[6])).not.toContain("/3");
     }),
   );
 
