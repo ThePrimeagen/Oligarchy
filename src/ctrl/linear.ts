@@ -22,6 +22,8 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
+// Where the automation server puts a ticket whose job it failed without a run to judge.
+export const FAILED_STATE = "Failed";
 // A ticket in Automation Needed that already has its pending job. The watch's list leaves
 // these out, so a restart does not keep a map of tickets that are waiting to run.
 export const READY_LABEL = "ready";
@@ -188,6 +190,7 @@ export type LinearService = {
   readonly markReady: (ticket: LinearTicket) => Effect.Effect<void, Errors.LinearError>;
   // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -364,6 +367,27 @@ const makeLinear = (
       );
     });
 
+    // Looked up on its own, not in stateIds: `test run` and `mint` must not need a Failed column.
+    const moveToFailed = Effect.fn("Linear.moveToFailed")(function* (identifier: string) {
+      const team = yield* teamId;
+      const stateId = yield* stateNamed(team, FAILED_STATE);
+      yield* request(
+        "moveToFailed",
+        ISSUE_UPDATE_MUTATION,
+        { id: identifier, input: { stateId } },
+        IssueUpdate,
+      ).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveToFailed",
+              message: `linear: moving ${identifier} to Failed failed`,
+            }),
+        ),
+      );
+    });
+
     // Linear assigns the identifier on create, and the description names it as the driver's agent
     // id, so the body can only land in a second call. The move to `stateId` rides in that same
     // update: the ticket is never in Automation Needed without its body.
@@ -499,6 +523,7 @@ const makeLinear = (
       moveIssue,
       markReady,
       clearReady,
+      moveToFailed,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,
