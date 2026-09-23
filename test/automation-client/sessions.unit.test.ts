@@ -11,6 +11,8 @@ import * as FakeSpawner from "../support/fake-spawner.ts";
 
 const TICKET = "OLI-42";
 const OTHER = "OLI-99";
+const ISO = "https://example.com/omarchy.iso";
+const PIN = "http://127.0.0.1:55332";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
 // Room for the two runs the tests above capacity start at once; the capacity tests pass 1.
 const MAX_JOBS = 2;
@@ -711,7 +713,7 @@ describe("QEMU-first reserve", () => {
   });
 
   it.effect(
-    "a second reserve of the same ticket and action is ok and does not ask QEMU again",
+    "a second reserve of the same ticket, action, iso and pin is ok and does not ask QEMU again",
     () => {
       const qemu: Array<string> = [];
       const reserveQemu: Sessions.ReserveQemu = (agent) =>
@@ -721,10 +723,38 @@ describe("QEMU-first reserve", () => {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
       return Effect.gen(function* () {
         const sessions = yield* Sessions.Sessions;
-        yield* sessions.reserve(TICKET, "drive");
-        yield* sessions.reserve(TICKET, "drive");
-        expect(qemu).toEqual([TICKET]);
-      }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
+        yield* sessions.reserve(TICKET, "drive", ISO);
+        yield* sessions.reserve(TICKET, "drive", ISO);
+        yield* sessions.reserve(OTHER, "mint", undefined, PIN);
+        yield* sessions.reserve(OTHER, "mint", undefined, PIN);
+        expect(qemu).toEqual([TICKET, OTHER]);
+        expect(yield* sessions.jobs).toBe(2);
+      }).pipe(Effect.provide(layer(spawner, 2, reserveQemu)));
+    },
+  );
+
+  it.effect(
+    "a second reserve of the same ticket and action with another iso or pin is already reserved and does not ask QEMU",
+    () => {
+      const qemu: Array<string> = [];
+      const reserveQemu: Sessions.ReserveQemu = (agent) =>
+        Effect.sync(() => {
+          qemu.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive", ISO);
+        yield* sessions.reserve(OTHER, "mint", undefined, PIN);
+        expect(
+          yield* Effect.flip(sessions.reserve(TICKET, "drive", "https://example.com/other.iso")),
+        ).toMatchObject({ _tag: "BadRequest", message: "already reserved", agentId: TICKET });
+        expect(
+          yield* Effect.flip(sessions.reserve(OTHER, "mint", undefined, "http://127.0.0.1:55333")),
+        ).toMatchObject({ _tag: "BadRequest", message: "already reserved", agentId: OTHER });
+        expect(qemu).toEqual([TICKET, OTHER]);
+        expect(yield* sessions.jobs).toBe(2);
+      }).pipe(Effect.provide(layer(spawner, 2, reserveQemu)));
     },
   );
 });
