@@ -444,9 +444,7 @@ export class AutomationClientError extends Schema.TaggedError<AutomationClientEr
 export class JobNotFound extends Schema.TaggedError<JobNotFound>(
   "@oligarchy/shared/errors/JobNotFound",
 )("JobNotFound", {
-  message: Schema.String.pipe(
-    Schema.withConstructorDefault(Effect.succeed(`Job had "running" status but 404'd.`)),
-  ),
+  message: fixedMessage(`Job had "running" status but 404'd.`),
   jobId: Schema.String,
   url: Schema.String,
   cause: Schema.Defect(),
