@@ -408,20 +408,23 @@ describe("capacity", () => {
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
 
-  it.effect("a second reserve for the same ticket is already reserved", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET, "drive");
-      const error = yield* Effect.flip(sessions.reserve(TICKET, "drive"));
-      expect(error).toMatchObject({
-        _tag: "BadRequest",
-        message: "already reserved",
-        agentId: TICKET,
-      });
-      expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
-    }).pipe(Effect.provide(layer(spawner, 1)));
-  });
+  it.effect(
+    "a second reserve of the same ticket and action is ok and takes no second slot; one run consumes it",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* sessions.reserve(TICKET, "drive");
+        expect(yield* sessions.jobs).toBe(1);
+        expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
+        yield* sessions.run(TICKET, "do the work", MODEL);
+        expect(yield* sessions.jobs).toBe(0);
+        expect(spawner.spawned).toHaveLength(1);
+        expect((yield* Effect.flip(sessions.run(TICKET, "again", MODEL)))._tag).toBe("BadRequest");
+      }).pipe(Effect.provide(layer(spawner, 1)));
+    },
+  );
 
   it.effect("run after reserve does not take a second slot", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
@@ -707,20 +710,23 @@ describe("QEMU-first reserve", () => {
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
 
-  it.effect("a second reserve for the same ticket does not ask QEMU again", () => {
-    let qemu = 0;
-    const reserveQemu: Sessions.ReserveQemu = () =>
-      Effect.sync(() => {
-        qemu += 1;
-      });
-    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET, "drive");
-      expect((yield* Effect.flip(sessions.reserve(TICKET, "drive")))._tag).toBe("BadRequest");
-      expect(qemu).toBe(1);
-    }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
-  });
+  it.effect(
+    "a second reserve of the same ticket and action is ok and does not ask QEMU again",
+    () => {
+      const qemu: Array<string> = [];
+      const reserveQemu: Sessions.ReserveQemu = (agent) =>
+        Effect.sync(() => {
+          qemu.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* sessions.reserve(TICKET, "drive");
+        expect(qemu).toEqual([TICKET]);
+      }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
+    },
+  );
 });
 
 // A diagnose reads the database and boots nothing: it takes a slot on this client only. A
@@ -967,6 +973,30 @@ describe("reservation expiry", () => {
           ["error", "relinquish failed: internal error: proxy unreachable", TICKET],
         ]);
         expect(log.lines[1]?.cause).toBeDefined();
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
+    },
+  );
+
+  it.effect(
+    "a repeated reserve keeps the first deadline: it expires ten minutes after the first reserve, the guest slot given back once",
+    () => {
+      const givenBack: Array<string> = [];
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Effect.sync(() => {
+          givenBack.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      const log = FakeLog.fakeLog();
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* TestClock.adjust("5 minutes");
+        yield* sessions.reserve(TICKET, "drive");
+        yield* TestClock.adjust("5 minutes");
+        expect(yield* sessions.jobs).toBe(0);
+        expect(givenBack).toEqual([TICKET]);
+        expect(FakeLog.texts(log)).toEqual(["reservation expired; unused for 10 minutes"]);
+        expect((yield* Effect.flip(sessions.run(TICKET, "late", MODEL)))._tag).toBe("BadRequest");
       }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
     },
   );
