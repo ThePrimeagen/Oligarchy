@@ -832,10 +832,17 @@ describeServing("automation server dispatch", () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
         // Another test's pending job can be dispatched to this stub too; only ours is counted.
         const seen: Array<string> = [];
+        let running: () => void = () => undefined;
+        const ran = new Promise<void>((resolve) => {
+          running = resolve;
+        });
         const client = await serveClient((req, res) => {
           void readBody(req).then((body) => {
             if (ticketOf(body) === linearId) {
               seen.push(`${req.method} ${req.url ?? ""}`);
+              if (req.url === "/run") {
+                running();
+              }
             }
             if (req.url === "/reserve" || req.url === "/abort") {
               res.writeHead(200, { "content-type": "application/json" });
@@ -850,7 +857,7 @@ describeServing("automation server dispatch", () => {
         const process = spawnAutomationServer(["--port", String(port)]);
         try {
           await process.waitFor(/automation server listening/);
-          await waitForJob(resultId, "running");
+          await ran;
           process.child.kill("SIGTERM");
           const { code } = await process.exited;
           expect(code).toBe(0);
