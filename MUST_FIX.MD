@@ -220,7 +220,8 @@ flowchart TB
 - [x] Add a unit test for a transient database failure in `AutomationStore.finish`.
 - [x] Add a test for exhaustion of the terminal-write retry policy.
 - [x] Retry terminal writes with a bounded backoff while the worker still owns the job locally.
-      Three immediate attempts, like the running write.
+      Three immediate attempts, like the running write. A retry that finds the row already closed
+      with the same status and reason counts as success.
 - [ ] ~~Leave the job and client execution information available to the reconciliation pass when
       retries are exhausted.~~ Replaced: user decision. A Sentry line names the job and the status
       it should have; the row stays running for an operator to mark.
