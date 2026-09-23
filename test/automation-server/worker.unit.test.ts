@@ -742,34 +742,6 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
-  it.effect("closing the scope mid-request aborts the job", () =>
-    Effect.gen(function* () {
-      const fixed = harness();
-      seedResult(fixed.tests);
-      seedJob(fixed.automation);
-      seedLiveClient(fixed.servers);
-      const started = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests(
-        reserving(() =>
-          Effect.gen(function* () {
-            yield* Deferred.succeed(started, undefined);
-            return yield* Effect.never;
-          }),
-        ),
-      );
-      const scope = yield* start(fixed, http.layer);
-      yield* Deferred.await(started);
-      expect(fixed.automation.jobs[0]?.status).toBe("running");
-      yield* Scope.close(scope, Exit.void);
-      yield* settle(fixed.automation.jobs, "aborted");
-      expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "aborted",
-        reason: "automation server shutting down",
-      });
-      expect(FakeLog.texts(fixed.log)).toContain("drive aborted");
-    }),
-  );
-
   it.effect("no live automation-client does not claim and does not POST", () =>
     Effect.gen(function* () {
       const fixed = harness();
@@ -1832,7 +1804,12 @@ const moved = (linear: FakeLinear.FakeLinear) =>
   linear.calls.filter((call) => call.method === "moveToFailed");
 
 const RESTARTED = "automation server restarted";
+const SHUTTING_DOWN = "automation server shutting down";
 const JOB_NOT_FOUND = `JobNotFound: Job had "running" status but 404'd.`;
+
+// The urls of the requests sent to one path, in the order they were sent.
+const sentTo = (http: FakeHttp.Recorder, path: string) =>
+  http.requests.map((request) => request.url).filter((url) => url.endsWith(path));
 
 describe("a running job left by the last automation server", () => {
   it.effect(
@@ -2315,6 +2292,212 @@ describe("a running job left by the last automation server", () => {
       expect(landed).toEqual([TICKET]);
       expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
     }),
+  );
+});
+
+// Two drives on two automation clients, each parked on /run, which a shutdown does not end:
+// OpenCode outlives a dropped /run.
+const twoRunning = (fixed: Harness, http: FakeHttp.Recorder) =>
+  Effect.gen(function* () {
+    seedPair(fixed);
+    seedLiveClient(fixed.servers);
+    seedLiveClient(fixed.servers, OTHER_URL);
+    const scope = yield* start(fixed, http.layer);
+    yield* eventually(() => sentTo(http, "/run").length === 2, "both drives running");
+    return scope;
+  });
+
+describe("a shutdown with drives running", () => {
+  it.effect(
+    "stops every drive at its automation client at once, and closes each aborted only once it answers",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const stopped = yield* Deferred.make<void>();
+        const http = FakeHttp.recordRequests(
+          reserving((_request, url) =>
+            url.pathname === "/abort"
+              ? Deferred.await(stopped).pipe(Effect.as(FakeHttp.json({ ok: "true" })))
+              : Effect.never,
+          ),
+        );
+        const scope = yield* twoRunning(fixed, http);
+        let closed = false;
+        const shutdown = yield* Scope.close(scope, Exit.void).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              closed = true;
+            }),
+          ),
+          Effect.forkChild,
+        );
+        yield* eventually(() => sentTo(http, "/abort").length === 2, "both asked to stop");
+        expect(sentTo(http, "/abort").sort()).toEqual([`${URL}/abort`, `${OTHER_URL}/abort`]);
+        expect(
+          http.requests
+            .filter((request) => request.url.endsWith("/abort"))
+            .map((request) => JSON.parse(request.body))
+            .sort((left, right) => String(left.ticket).localeCompare(String(right.ticket))),
+        ).toEqual([{ ticket: TICKET }, { ticket: TICKET_B }]);
+        for (let i = 0; i < 100; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(closed).toBe(false);
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "running"]);
+        yield* Deferred.succeed(stopped, undefined);
+        yield* Fiber.join(shutdown);
+        expect(fixed.automation.jobs.map((job) => [job.status, job.reason])).toEqual([
+          ["aborted", SHUTTING_DOWN],
+          ["aborted", SHUTTING_DOWN],
+        ]);
+        expect(FakeLog.texts(fixed.log).filter((text) => text === "drive aborted")).toHaveLength(2);
+        expect(
+          fixed.linear.calls
+            .filter((call) => call.method === "clearReady")
+            .map((call) => call.identifier)
+            .sort(),
+        ).toEqual([TICKET, TICKET_B]);
+        expect(sentryErrors(fixed.log)).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "an automation client that fails the stop, or does not answer it in ten seconds, is reported, and its job stays running for the next startup",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const http = FakeHttp.recordRequests(
+          reserving((_request, url) => {
+            if (url.pathname !== "/abort") {
+              return Effect.never;
+            }
+            return url.href.startsWith(URL)
+              ? FakeHttp.json({ error: "kill EPERM" }, 500)
+              : Effect.never;
+          }),
+        );
+        const scope = yield* twoRunning(fixed, http);
+        let closed = false;
+        const shutdown = yield* Scope.close(scope, Exit.void).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              closed = true;
+            }),
+          ),
+          Effect.forkChild,
+        );
+        yield* eventually(() => sentTo(http, "/abort").length === 2, "both asked to stop");
+        yield* TestClock.adjust("9 seconds");
+        expect(closed).toBe(false);
+        yield* TestClock.adjust("1 second");
+        yield* Fiber.join(shutdown);
+        expect(fixed.automation.jobs.map((job) => [job.status, job.finishedAt])).toEqual([
+          ["running", null],
+          ["running", null],
+        ]);
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `shutdown abort failed; ${URL}`,
+            location: "automation",
+            agentId: TICKET,
+          }),
+          expect.objectContaining({
+            text: `shutdown abort failed; ${OTHER_URL}`,
+            location: "automation",
+            agentId: TICKET_B,
+            cause: expect.objectContaining({
+              message: `automation client: POST ${OTHER_URL}/abort failed: no answer within 10 seconds`,
+            }),
+          }),
+        ]);
+        expect(FakeLog.texts(fixed.log)).not.toContain("drive aborted");
+        expect(fixed.linear.calls).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "an automation client that holds nothing for a drive it was running is reported JobNotFound, and the job closes aborted",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const id = fixed.automation.jobs[0]?.id;
+        const http = FakeHttp.recordRequests(
+          reserving((_request, url) =>
+            url.pathname === "/abort"
+              ? FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404)
+              : Effect.never,
+          ),
+        );
+        const scope = yield* start(fixed, http.layer);
+        yield* eventually(() => sentTo(http, "/run").length === 1, "the drive running");
+        yield* Scope.close(scope, Exit.void);
+        expect(sentTo(http, "/abort")).toEqual([`${URL}/abort`]);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "aborted",
+          reason: SHUTTING_DOWN,
+        });
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: JOB_NOT_FOUND,
+            location: "automation",
+            agentId: TICKET,
+            cause: expect.objectContaining({
+              _tag: "JobNotFound",
+              message: `Job had "running" status but 404'd.`,
+              jobId: id,
+              url: URL,
+            }),
+          }),
+        ]);
+        expect(FakeLog.texts(fixed.log)).toContain("drive aborted");
+      }),
+  );
+
+  it.effect(
+    "a drive whose /run already answered is not stopped: it is judged by its result and closed succeeded",
+    () => {
+      const judging = Deferred.makeUnsafe<void>();
+      const judged = Deferred.makeUnsafe<void>();
+      const held: { tests: Stores.FakeTestStore | undefined } = { tests: undefined };
+      // The driver closed the result, so the read after /run is the one that waits.
+      const tests = Stores.fakeTestStore(
+        {},
+        {
+          findResult: (resultId) =>
+            Effect.gen(function* () {
+              const row = held.tests?.results.find((candidate) => candidate.id === resultId);
+              if (row?.status === "passed" && !(yield* Deferred.isDone(judged))) {
+                yield* Deferred.succeed(judging, undefined);
+                yield* Deferred.await(judged);
+              }
+              return Option.fromUndefinedOr(row);
+            }),
+        },
+      );
+      held.tests = tests;
+      return Effect.gen(function* () {
+        const fixed = { ...harness(), tests };
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        const scope = yield* start(fixed, http.layer);
+        yield* Deferred.await(judging);
+        const shutdown = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
+        for (let i = 0; i < 100; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(fixed.automation.jobs[0]?.status).toBe("running");
+        yield* Deferred.succeed(judged, undefined);
+        yield* Fiber.join(shutdown);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", reason: null });
+        expect(sentTo(http, "/abort")).toEqual([]);
+        expect(FakeLog.texts(fixed.log)).toContain("drive succeeded");
+      });
+    },
   );
 });
 

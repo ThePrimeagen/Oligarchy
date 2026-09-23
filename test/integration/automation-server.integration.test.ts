@@ -814,42 +814,47 @@ describeServing("automation server dispatch", () => {
     }),
   );
 
-  it.live("SIGTERM while the client is still running aborts the job and exits 0", () =>
-    Effect.promise(async () => {
-      const client = await serveClient((req, res) => {
-        if (req.url === "/reserve") {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: "true" }));
+  it.live(
+    "SIGTERM while the client is still running stops the drive at the client, aborts the job and exits 0",
+    () =>
+      Effect.promise(async () => {
+        const seen: Array<string> = [];
+        const client = await serveClient((req, res) => {
+          seen.push(`${req.method} ${req.url ?? ""}`);
+          if (req.url === "/reserve" || req.url === "/abort") {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+          }
+        });
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/automation server listening/);
+          await waitForJob(resultId, "running");
+          process.child.kill("SIGTERM");
+          const { code } = await process.exited;
+          expect(code).toBe(0);
+          expect(seen).toEqual(["POST /reserve", "POST /run", "POST /abort"]);
+          const jobs = await jobsFor(resultId);
+          expect(jobs).toEqual([
+            expect.objectContaining({
+              status: "aborted",
+              reason: "automation server shutting down",
+            }),
+          ]);
+        } finally {
+          if (process.child.exitCode === null && process.child.signalCode === null) {
+            process.child.kill("SIGKILL");
+            await process.exited;
+          }
+          await removeServer(client.url);
+          await client.close();
         }
-      });
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
-      const resultId = await seedResult(linearId);
-      await seedJob(resultId, "drive");
-      await seedLiveClient(client.url);
-      const port = await freePort();
-      const process = spawnAutomationServer(["--port", String(port)]);
-      try {
-        await process.waitFor(/automation server listening/);
-        await waitForJob(resultId, "running");
-        process.child.kill("SIGTERM");
-        const { code } = await process.exited;
-        expect(code).toBe(0);
-        const jobs = await jobsFor(resultId);
-        expect(jobs).toEqual([
-          expect.objectContaining({
-            status: "aborted",
-            reason: "automation server shutting down",
-          }),
-        ]);
-      } finally {
-        if (process.child.exitCode === null && process.child.signalCode === null) {
-          process.child.kill("SIGKILL");
-          await process.exited;
-        }
-        await removeServer(client.url);
-        await client.close();
-      }
-    }),
+      }),
   );
 });
 
@@ -987,15 +992,15 @@ describeServing("automation server abort", () => {
             { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
             JSON.stringify({ ticket: linearId, action: "drive" }),
           );
-        expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ ok: "true" });
-        const job = await waitForJob(resultId, "aborted");
-        expect(job).toMatchObject({ status: "aborted", reason: "aborted" });
-        await process.waitFor(/JobNotFound: Job had "running" status but 404'd\./);
-        expect(lines(process.stdout())).toContain(
-          `[${linearId}] automation: error: JobNotFound: Job had "running" status but 404'd.`,
-        );
-      } finally {
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({ ok: "true" });
+          const job = await waitForJob(resultId, "aborted");
+          expect(job).toMatchObject({ status: "aborted", reason: "aborted" });
+          await process.waitFor(/JobNotFound: Job had "running" status but 404'd\./);
+          expect(lines(process.stdout())).toContain(
+            `[${linearId}] automation: error: JobNotFound: Job had "running" status but 404'd.`,
+          );
+        } finally {
           process.child.kill("SIGTERM");
           await process.exited;
           await removeServer(client.url);

@@ -603,6 +603,27 @@ describe("interruption", () => {
       }).pipe(Effect.provide(serve(fixed)));
     }),
   );
+
+  // The automation server's shutdown relies on this: dropping /run stops nothing, /abort does.
+  it.effect("a dropped POST /run leaves OpenCode running until POST /abort stops it", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => ({}));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
+        const pending = yield* Effect.forkChild(run(http));
+        const spawned = yield* fixed.spawner.nextSpawn;
+        yield* Fiber.interrupt(pending);
+        expect(yield* spawned.isRunning).toBe(true);
+        expect(spawned.kills).toEqual([]);
+        const response = yield* abort(http);
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+        expect(spawned.kills).toEqual(["SIGTERM"]);
+        expect(yield* spawned.isRunning).toBe(false);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
 });
 
 describe("POST /abort happy path", () => {
