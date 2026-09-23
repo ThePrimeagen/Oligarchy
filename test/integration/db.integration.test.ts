@@ -459,8 +459,8 @@ Postgres.describeWithDatabase("database", () => {
         expect(rows[0]).toMatchObject({ level: "info", location: sessionId, agentId: "OLI-1" });
         expect(rows[1]).toMatchObject({ level: "error", agentId: null });
         expect(yield* logs.listLogs(uuid())).toEqual([]);
-        // `server` and `automation` are the buckets every process in this lane writes to; the row
-        // is listed under its bucket, whatever else another file's processes put there.
+        // `server` and `automation` are buckets other tests write to as well; the row is listed
+        // under its bucket, whatever else is there.
         expect((yield* logs.listLogs("server")).map((row) => row.text)).toContain("global");
         expect((yield* logs.listLogs("automation")).map((row) => row.text)).toContain(
           "queue claimed",

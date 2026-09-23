@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
-import { describe, expect, inject, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { app, scheduled } from "../../src/dashboard/dashboard.tsx";
 import {
   actions,
@@ -25,6 +25,7 @@ import {
   testResults,
   testRuns,
 } from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
@@ -34,7 +35,7 @@ const REFUSED_URL = `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`
 const SEEDED_SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const EXIT_WITHIN_MS = 15_000;
 
-const dbUrl = inject("dbUrl");
+const dbUrl = Postgres.getDbUrl();
 
 type QueryRun = {
   readonly code: number | null;

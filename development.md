@@ -1000,11 +1000,16 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   and for a server its readiness, its signals, the pid gone and the port refusing, with stdout and
   stderr opened on `/dev/full`. Spawn helpers may be plain functions inside the test file.
 - Postgres tests run against Testcontainers with the real migrations and the seed in
-  `vitest.global-setup.ts` and read `inject("dbUrl")` (`Postgres.describeWithDatabase` skips when
-  it is empty). The setup replaces `DATABASE_URL` with that container's url before any test runs
-  (a local port nothing listens on without Docker), so no test or spawned process ever sees the
-  machine's own; they skip locally without Docker and fail in CI (`CI` or
-  `OLIGARCHY_REQUIRE_DATABASE=1`). Unit tests never touch a database. No test connects to the
+  `vitest.global-setup.ts`. That database is a template that refuses connections: each
+  integration file works in its own copy, made when it loads `test/support/postgres.ts`, and
+  reads it from `Postgres.getDbUrl()`
+  (`Postgres.describeWithDatabase` skips when it is empty). So no file sees rows another file
+  wrote, and the order vitest runs files in cannot change a result. A test still asserts only
+  on rows it wrote or the seed: a server url, name or ticket of its own (a fresh uuid), since
+  earlier tests in the same file share its copy. The setup replaces `DATABASE_URL` before any
+  test runs with a local port nothing listens on, and the file's copy replaces that, so no test
+  or spawned process ever sees the machine's own; they skip locally without Docker and fail in
+  CI (`CI` or `OLIGARCHY_REQUIRE_DATABASE=1`). Unit tests never touch a database. No test connects to the
   production database, calls a third party, boots QEMU, or migrates a remote database.
 - Encode repository invariants oxlint cannot express as source-scanning tests in `test/repo/`: the
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked

@@ -4,7 +4,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, inject } from "vitest";
+import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { sql } from "drizzle-orm";
 import { Effect } from "effect";
@@ -17,7 +17,7 @@ const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
 
-const dbUrl = inject("dbUrl");
+const dbUrl = Postgres.getDbUrl();
 
 type Process = {
   readonly child: ChildProcess;
