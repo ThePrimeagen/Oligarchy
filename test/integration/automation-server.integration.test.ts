@@ -703,6 +703,17 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on("end", () => resolve(text));
   });
 
+const ticketOf = (body: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null && "ticket" in parsed
+      ? String(parsed.ticket)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 describeServing("automation server dispatch", () => {
   it.live(
     "a live client that closes the result and answers 200 marks the drive succeeded; the body carries --model",
@@ -818,15 +829,20 @@ describeServing("automation server dispatch", () => {
     "SIGTERM while the client is still running stops the drive at the client, aborts the job and exits 0",
     () =>
       Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        // Another test's pending job can be dispatched to this stub too; only ours is counted.
         const seen: Array<string> = [];
         const client = await serveClient((req, res) => {
-          seen.push(`${req.method} ${req.url ?? ""}`);
-          if (req.url === "/reserve" || req.url === "/abort") {
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: "true" }));
-          }
+          void readBody(req).then((body) => {
+            if (ticketOf(body) === linearId) {
+              seen.push(`${req.method} ${req.url ?? ""}`);
+            }
+            if (req.url === "/reserve" || req.url === "/abort") {
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end(JSON.stringify({ ok: "true" }));
+            }
+          });
         });
-        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
         const resultId = await seedResult(linearId);
         await seedJob(resultId, "drive");
         await seedLiveClient(client.url);
@@ -1039,17 +1055,6 @@ const stop = async (process: Process) => {
     process.child.kill("SIGKILL");
   }
   await process.exited;
-};
-
-const ticketOf = (body: string): string | undefined => {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    return typeof parsed === "object" && parsed !== null && "ticket" in parsed
-      ? String(parsed.ticket)
-      : undefined;
-  } catch {
-    return undefined;
-  }
 };
 
 describeServing("automation server restart", () => {
