@@ -753,11 +753,14 @@ describe("dispatch unhappy path", () => {
         const http = FakeHttp.recordRequests(
           reserving(() => FakeHttp.json({ error: "run aborted" }, 409)),
         );
-        yield* start(fixed, http.layer);
+        const scope = yield* start(fixed, http.layer);
         yield* eventually(() => sentTo(http, "/run").length === 1, "the drive running");
         for (let i = 0; i < 100; i++) {
           yield* Effect.yieldNow;
         }
+        // A shutdown stops only a /run still waiting, so none is sent for this one.
+        yield* Scope.close(scope, Exit.void);
+        expect(sentTo(http, "/abort")).toEqual([]);
         expect(fixed.automation.jobs[0]).toMatchObject({ status: "running", finishedAt: null });
         expect(FakeLog.texts(fixed.log)).toEqual([`dispatching drive; ${URL}; ${MODEL}`]);
         expect(sentryErrors(fixed.log)).toEqual([]);
