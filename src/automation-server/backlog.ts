@@ -130,8 +130,10 @@ const processBacklog = Effect.fn("processBacklog")(function* (
 
 // The ticket stays in Automation Needed while the drive runs, so the caller settles a landed
 // enqueue until the snapshot changes. A pending job is that wait already: the row holds the
-// fulfilled work until claim, and another insert would only rediscover it. A missing result
-// is retried every poll and logged once.
+// fulfilled work until claim, and another insert would only rediscover it. A drive that is
+// running or has run is settled unlabeled and without a line: the unique index allows no
+// second drive, and the worker logs how each drive ends. A missing result is retried every
+// poll and logged once.
 const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   ticket: Linear.LinearBacklogTicket,
   rounds: number,
@@ -153,13 +155,16 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   const definition = yield* tests.definitionName(found.value.definitionId);
   // Same action enqueue would insert. A pending diagnose is a different job.
   const action = Enqueue.queuedAction("drive", definition);
-  if (yield* automation.hasPending(found.value.id, action)) {
-    yield* log.info(
-      `automation needed watch processing out of bounds ticket; ${pings(rounds)}; ${action} already pending, labeling it ready`,
-      { location: Log.Locations.automation, agentId: ticket.identifier },
-    );
-    yield* linear.markReady(labeled(ticket));
-    // Already waiting. Settled, and it does not spend this check's one new job.
+  const status = yield* automation.jobStatus(found.value.id, action);
+  if (Option.isSome(status)) {
+    if (status.value === "pending") {
+      yield* log.info(
+        `automation needed watch processing out of bounds ticket; ${pings(rounds)}; ${action} already pending, labeling it ready`,
+        { location: Log.Locations.automation, agentId: ticket.identifier },
+      );
+      yield* linear.markReady(labeled(ticket));
+    }
+    // Settled, and it does not spend this check's one new job.
     return "duplicate";
   }
   yield* log.info(
@@ -194,14 +199,17 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
 
 // Needs Review stays a diagnose, including for the mint definition. The ticket stays in the
 // column while that job runs, so the caller settles a landed enqueue until the snapshot changes.
-// The result is looked up first for the same reason as the backlog's.
+// The result is looked up first for the same reason as the backlog's. A diagnose already queued
+// or run is settled without a line, as a drive is in Automation Needed.
 const processNeedsReview = Effect.fn("processNeedsReview")(function* (
   ticket: Linear.LinearBacklogTicket,
   rounds: number,
 ) {
   const log = yield* Log.Log;
   const tests = yield* Tests.TestStore;
-  if (Option.isNone(yield* tests.findResultByLinearId(ticket.identifier))) {
+  const automation = yield* Automation.AutomationStore;
+  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  if (Option.isNone(found)) {
     if (rounds === ROUNDS_BEFORE_MOVE) {
       yield* log.info("needs review watch left the ticket in Needs Review; no result", {
         location: Log.Locations.automation,
@@ -209,6 +217,9 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
       });
     }
     return "missing";
+  }
+  if (Option.isSome(yield* automation.jobStatus(found.value.id, "diagnose"))) {
+    return "duplicate";
   }
   yield* log.info(
     `needs review watch processing out of bounds ticket; ${pings(rounds)}; queueing diagnose`,

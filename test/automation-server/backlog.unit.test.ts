@@ -4,6 +4,7 @@ import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Backlog from "../../src/automation-server/backlog.ts";
 import * as Linear from "../../src/ctrl/linear.ts";
+import type * as Automation from "../../src/db/automation.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
@@ -65,6 +66,25 @@ const seedResult = (tests: Stores.FakeTestStore, linearId: string, resultId = RE
     status: "pending",
     reason: null,
     createdAt: new Date(),
+    finishedAt: null,
+  });
+};
+
+const seedJob = (
+  automation: Stores.FakeAutomationStore,
+  resultId: string,
+  action: Automation.AutomationAction,
+  status: Automation.AutomationJobRow["status"],
+) => {
+  automation.jobs.push({
+    id: crypto.randomUUID(),
+    resultId,
+    action,
+    status,
+    reason: null,
+    serverId: null,
+    createdAt: new Date(),
+    startedAt: null,
     finishedAt: null,
   });
 };
@@ -1153,6 +1173,69 @@ describe("needs review watch happy path", () => {
         ]);
       }),
   );
+
+  it.effect(
+    "a diagnose that already ran leaves the Needs Review ticket alone, with no line, even after an edit",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, log, moved } = yield* startColumn("listNeedsReview", board);
+        seedResult(stores.tests, TICKET);
+        seedJob(stores.automation, RESULT, "diagnose", "failed");
+        yield* TestClock.adjust("120 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "failed" }),
+        ]);
+        expect(moved).toEqual([]);
+        expect(acted(log)).toEqual([]);
+        expect(tracked(log).at(-1)).toBe(
+          "needs review watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
+        );
+        board[0] = ticket(TICKET, EDITED);
+        yield* TestClock.adjust("150 seconds");
+        expect(tracked(log).at(-1)).toBe(
+          "needs review watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
+        );
+        expect(tracked(log).at(-5)).toBe(
+          "needs review watch tracking out of bounds tickets; OLI-45 0/3 pings",
+        );
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(acted(log)).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a diagnose already pending is left alone and does not spend the check, so the next ripe ticket is queued",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const { stores, log } = yield* startColumn("listNeedsReview", board);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        seedJob(stores.automation, RESULT, "diagnose", "pending");
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs.map((job) => [job.resultId, job.action])).toEqual([
+          [RESULT, "diagnose"],
+          [OTHER_RESULT, "diagnose"],
+        ]);
+        expect(
+          log.lines
+            .filter((line) => !line.text.includes(TRACKING))
+            .map((line) => [line.agentId, line.text]),
+        ).toEqual([
+          [
+            OTHER,
+            "needs review watch processing out of bounds ticket; 3/3 pings; queueing diagnose",
+          ],
+          [OTHER, "needs review watch queued diagnose"],
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(2);
+        expect(tracked(log).at(-1)).toBe(
+          "needs review watch tracking out of bounds tickets; OLI-45 4/3 pings (handled), OLI-46 4/3 pings (handled)",
+        );
+      }),
+  );
 });
 
 describe("automation needed and needs review watch unhappy path", () => {
@@ -1256,38 +1339,82 @@ describe("automation needed and needs review watch unhappy path", () => {
   );
 
   it.effect(
-    "a failed drive is not waiting, so the watch records the duplicate and does not insert",
+    "a drive that already failed is left alone and unlabeled, with no line, even after an edit",
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
         const { stores, moved, log, linear } = yield* startColumn("listAutomationNeeded", board);
         seedResult(stores.tests, TICKET);
-        stores.automation.jobs.push({
-          id: "00000000-0000-4000-8000-000000000001",
-          resultId: RESULT,
-          action: "drive",
-          status: "failed",
-          reason: "drive failed",
-          serverId: null,
-          createdAt: new Date(),
-          startedAt: new Date(),
-          finishedAt: new Date(),
-        });
+        seedJob(stores.automation, RESULT, "drive", "failed");
         yield* TestClock.adjust("90 seconds");
         expect(stores.automation.jobs).toEqual([
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "failed" }),
         ]);
         expect(moved).toEqual([]);
-        const lines = [
-          "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
-          "automation needed watch; drive already failed",
-        ];
-        expect(acted(log)).toEqual(lines);
+        expect(acted(log)).toEqual([]);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
-        yield* TestClock.adjust("60 seconds");
+        yield* TestClock.adjust("30 seconds");
+        expect(tracked(log).at(-1)).toBe(
+          "automation needed watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
+        );
+        // An edit starts a new snapshot, so the watch checks again and still has nothing to say.
+        board[0] = ticket(TICKET, EDITED);
+        yield* TestClock.adjust("150 seconds");
+        expect(tracked(log).slice(-5)).toEqual([
+          "automation needed watch tracking out of bounds tickets; OLI-45 0/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 1/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 2/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 3/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
+        ]);
         expect(stores.automation.jobs).toHaveLength(1);
-        expect(acted(log)).toEqual(lines);
+        expect(acted(log)).toEqual([]);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a drive that is running or already ran is left alone and does not spend the check, so a ticket with no drive is queued",
+    () =>
+      Effect.gen(function* () {
+        const board = [
+          ticket(TICKET, SEEN),
+          ticket(OTHER, SEEN),
+          ticket(THIRD, SEEN),
+          ticket(FOURTH, SEEN),
+        ];
+        const { stores, log, linear } = yield* startColumn("listAutomationNeeded", board);
+        seedResult(stores.tests, TICKET);
+        seedResult(stores.tests, OTHER, OTHER_RESULT);
+        seedResult(stores.tests, THIRD, THIRD_RESULT);
+        seedResult(stores.tests, FOURTH, FOURTH_RESULT);
+        seedJob(stores.automation, RESULT, "drive", "running");
+        seedJob(stores.automation, OTHER_RESULT, "drive", "succeeded");
+        seedJob(stores.automation, THIRD_RESULT, "drive", "aborted");
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs.map((job) => [job.resultId, job.status])).toEqual([
+          [RESULT, "running"],
+          [OTHER_RESULT, "succeeded"],
+          [THIRD_RESULT, "aborted"],
+          [FOURTH_RESULT, "pending"],
+        ]);
+        expect(
+          log.lines
+            .filter((line) => !line.text.includes(TRACKING))
+            .map((line) => [line.agentId, line.text]),
+        ).toEqual([
+          [
+            FOURTH,
+            "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+          ],
+          [FOURTH, "automation needed watch queued drive"],
+        ]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(FOURTH)]);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(4);
+        expect(tracked(log).at(-1)).toBe(
+          "automation needed watch tracking out of bounds tickets; OLI-45 4/3 pings (handled), OLI-46 4/3 pings (handled), OLI-47 4/3 pings (handled), OLI-48 4/3 pings (handled)",
+        );
       }),
   );
 
@@ -1389,18 +1516,18 @@ describe("automation needed and needs review watch unhappy path", () => {
   );
 
   it.effect(
-    "a pending-job lookup that fails is one error line, and the next poll still queues",
+    "a drive status lookup that fails is one error line, and the next poll still queues",
     () =>
       Effect.gen(function* () {
         const refused = Errors.DatabaseError.make({
-          operation: "hasPendingAutomationJob",
+          operation: "automationJobStatus",
           message: "Failed query: select from automation_jobs",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
         let fail = true;
         const tests = Stores.fakeTestStore();
         const automation = Stores.fakeAutomationStore({
-          hasPending: () => (fail ? Effect.fail(refused) : Effect.succeed(false)),
+          jobStatus: () => (fail ? Effect.fail(refused) : Effect.succeed(Option.none())),
         });
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
@@ -1566,6 +1693,62 @@ describe("automation needed and needs review watch unhappy path", () => {
         yield* TestClock.adjust("30 seconds");
         expect(automation.jobs).toEqual([
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(automation.jobs).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "a diagnose status lookup that fails is one error line, and the next poll still queues",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.DatabaseError.make({
+          operation: "automationJobStatus",
+          message: "Failed query: select from automation_jobs",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        let fail = true;
+        const tests = Stores.fakeTestStore();
+        const automation = Stores.fakeAutomationStore({
+          jobStatus: () => (fail ? Effect.fail(refused) : Effect.succeed(Option.none())),
+        });
+        const servers = Stores.fakeServerStore();
+        const log = FakeLog.fakeLog();
+        const linear = FakeLinear.fakeLinear({
+          overrides: {
+            listNeedsReview: Effect.sync(() => [ticket(TICKET, SEEN)]),
+          },
+        });
+        seedResult(tests, TICKET);
+        announceClient(servers);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(
+            Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+          ),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(automation.jobs).toEqual([]);
+        expect(errors(log)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: "needs review watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+        ]);
+        expect(acted(log)).toEqual([
+          "needs review watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+          "needs review watch processing out of bounds ticket; 4/3 pings; queueing diagnose",
+          "needs review watch queued diagnose",
         ]);
         yield* TestClock.adjust("30 seconds");
         expect(automation.jobs).toHaveLength(1);
