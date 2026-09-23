@@ -152,6 +152,118 @@ describe("Sessions.run ceiling", () => {
   });
 });
 
+describe("Sessions.run gives a guest slot back", () => {
+  it.effect(
+    "a finished drive or mint relinquishes its guest slot, and a finished diagnose does not",
+    () => {
+      const givenBack: Array<string> = [];
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Effect.sync(() => {
+          givenBack.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      const mint = "OLI-7";
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* sessions.run(TICKET, "drive it", MODEL);
+        yield* sessions.reserve(mint, "mint");
+        yield* sessions.run(mint, "install", MODEL);
+        yield* sessions.reserve(OTHER, "diagnose");
+        yield* sessions.run(OTHER, "read it", MODEL);
+        expect(givenBack).toEqual([TICKET, mint]);
+        expect(yield* sessions.jobs).toBe(0);
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
+    },
+  );
+
+  it.effect(
+    "a mint whose opencode cannot be spawned relinquishes the guest slot and still fails as RunFailed",
+    () => {
+      const givenBack: Array<string> = [];
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Effect.sync(() => {
+          givenBack.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        spawnError: "spawn opencode ENOENT",
+      }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "mint");
+        const error = yield* Effect.flip(sessions.run(TICKET, "install", MODEL));
+        expect(error).toMatchObject({
+          _tag: "RunFailed",
+          message: "spawn opencode ENOENT",
+        });
+        expect(givenBack).toEqual([TICKET]);
+        expect(yield* sessions.jobs).toBe(0);
+        yield* sessions.reserve(OTHER, "mint");
+        expect(yield* sessions.jobs).toBe(1);
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
+    },
+  );
+
+  it.effect(
+    "a second run of a ticket already running does not relinquish the guest the first is driving",
+    () => {
+      const givenBack: Array<string> = [];
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Effect.sync(() => {
+          givenBack.push(agent);
+        });
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const first = yield* Effect.forkChild(sessions.run(TICKET, "first", MODEL));
+        for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        yield* sessions.reserve(TICKET, "drive");
+        const second = yield* Effect.forkChild(sessions.run(TICKET, "second", MODEL));
+        for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
+          yield* Effect.yieldNow;
+        }
+        const exit = yield* Fiber.await(second);
+        expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+        expect(givenBack).toEqual([]);
+        yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+        yield* Fiber.join(first);
+        expect(givenBack).toEqual([TICKET]);
+      }).pipe(Effect.provide(layer(spawner, MAX_JOBS, qemuOk(), relinquishQemu)));
+    },
+  );
+
+  it.effect(
+    "a relinquish that fails after a failed drive is one error line and the RunFailed stands",
+    () => {
+      const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
+        Errors.Internal.make({ cause: new Error("proxy unreachable"), agentId: agent });
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        exitCode: 1,
+        stderr: "out of token credits\n",
+      }));
+      const log = FakeLog.fakeLog();
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const error = yield* Effect.flip(sessions.run(TICKET, "do the work", MODEL));
+        expect(error).toMatchObject({
+          _tag: "RunFailed",
+          message: "out of token credits",
+        });
+        expect(yield* sessions.jobs).toBe(0);
+        yield* sessions.reserve(OTHER, "drive");
+        expect(log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          ["error", "relinquish failed: internal error: proxy unreachable", TICKET],
+        ]);
+        expect(log.lines[0]?.cause).toBeDefined();
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
+    },
+  );
+});
+
 describe("Sessions.run unhappy path", () => {
   it.effect("forwards a spawn failure as RunFailed", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({
