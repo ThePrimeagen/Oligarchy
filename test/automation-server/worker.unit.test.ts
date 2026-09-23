@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, FileSystem, Layer, Option, Redacted, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Option, Redacted, Scope } from "effect";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import { TestClock } from "effect/testing";
@@ -2090,6 +2090,83 @@ describe("a running job left by the last automation server", () => {
       ]);
     });
   });
+
+  it.effect("a job whose lookup fails is reported by id, and the next job is still failed", () => {
+    const failure = Errors.DatabaseError.make({
+      operation: "findResult",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    const held: { tests: Stores.FakeTestStore | undefined } = { tests: undefined };
+    const tests = Stores.fakeTestStore(
+      {},
+      {
+        findResult: (resultId) =>
+          resultId === RESULT_ID
+            ? Effect.fail(failure)
+            : Effect.sync(() =>
+                Option.fromUndefinedOr(held.tests?.results.find((row) => row.id === resultId)),
+              ),
+      },
+    );
+    held.tests = tests;
+    return Effect.gen(function* () {
+      const fixed = { ...harness(), tests };
+      seedResult(fixed.tests);
+      seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
+      seedRunning(fixed.automation, null, RESULT_ID);
+      seedRunning(fixed.automation, null, RESULT_B);
+      const id = fixed.automation.jobs[0]?.id;
+      yield* start(fixed, FakeHttp.die);
+      yield* settle(fixed.automation.jobs, "failed");
+      yield* eventually(() => moved(fixed.linear).length > 0, "the next job moved");
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "failed"]);
+      expect(moved(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET_B }]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `inherited job cleanup failed; ${id}: connection reset`,
+          cause: failure,
+        }),
+        expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+      ]);
+    });
+  });
+
+  it.effect("a shutdown during the Linear move waits for the move to land", () =>
+    Effect.gen(function* () {
+      const moving = yield* Deferred.make<void>();
+      const answer = yield* Deferred.make<void>();
+      const landed: Array<string> = [];
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToFailed: (identifier) =>
+              Deferred.succeed(moving, undefined).pipe(
+                Effect.andThen(Deferred.await(answer)),
+                Effect.andThen(
+                  Effect.sync(() => {
+                    landed.push(identifier);
+                  }),
+                ),
+              ),
+          },
+        }),
+      );
+      seedResult(fixed.tests);
+      seedRunning(fixed.automation, null);
+      const scope = yield* start(fixed, FakeHttp.die);
+      yield* Deferred.await(moving);
+      const shutdown = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
+      for (let i = 0; i < 100; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(landed).toEqual([]);
+      yield* Deferred.succeed(answer, undefined);
+      yield* Fiber.join(shutdown);
+      expect(landed).toEqual([TICKET]);
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
+    }),
+  );
 });
 
 describe("the write that closes a finished job", () => {

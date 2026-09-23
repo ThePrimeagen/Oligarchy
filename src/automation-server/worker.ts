@@ -232,10 +232,10 @@ const closeJob = Effect.fn("closeJob")(function* (
   return true;
 });
 
-// The abort wait is interruptible so the timeout lands inside the tick's uninterruptible
-// region. Ten seconds: an automation client that never answers must not hold dispatch.
+// Ten seconds: an automation client that never answers must not hold dispatch. The timeout
+// races on its own fibers, so it lands inside the tick's uninterruptible region too.
 const abortAt = (url: string, ticket: string) =>
-  Effect.interruptible(AutomationClient.abort(url, ticket)).pipe(
+  AutomationClient.abort(url, ticket).pipe(
     Effect.timeoutOrElse({
       duration: ABORT_TIMEOUT,
       orElse: () =>
@@ -251,6 +251,8 @@ const abortAt = (url: string, ticket: string) =>
 // move its ticket to Failed. A 404 is an automation client holding nothing for the ticket.
 // One that does not answer is reported and the job is failed anyway; nothing asks again.
 // No ticket, no automation client recorded, or that client's row gone: nothing to ask.
+// Once the row is closed it is no longer found at the next startup, so the close and the
+// Linear move finish even when a shutdown lands between them.
 const failInherited = Effect.fn("failInherited")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
   const servers = yield* Servers.ServerStore;
@@ -258,34 +260,40 @@ const failInherited = Effect.fn("failInherited")(function* (job: Automation.Auto
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
   const ticket = Option.isSome(result) ? result.value.linearId : null;
-  const client = job.serverId === null ? Option.none() : yield* servers.findServer(job.serverId);
-  if (ticket !== null && Option.isSome(client)) {
-    const url = client.value.url;
-    yield* abortAt(url, ticket).pipe(
-      Effect.catch((error) =>
-        error.status === 404
-          ? Effect.void
-          : log.error(`inherited abort failed; ${url}`, {
-              location: Log.Locations.automation,
-              agentId: ticket,
-              cause: error.cause ?? error,
-            }),
-      ),
-    );
+  if (ticket !== null && job.serverId !== null) {
+    const client = yield* servers.findServer(job.serverId);
+    if (Option.isSome(client)) {
+      const url = client.value.url;
+      yield* abortAt(url, ticket).pipe(
+        Effect.catchTag("AutomationClientError", (error) =>
+          error.status === 404
+            ? Effect.void
+            : log.error(`inherited abort failed; ${url}`, {
+                location: Log.Locations.automation,
+                agentId: ticket,
+                cause: error.cause ?? error,
+              }),
+        ),
+      );
+    }
   }
-  const closed = yield* closeJob(job, restarted);
-  if (!closed || ticket === null) {
-    return;
-  }
-  yield* linear.moveToFailed(ticket).pipe(
-    Effect.retry(Schedule.recurs(2)),
-    Effect.catch((error) =>
-      log.error(`move to Failed failed: ${detail(error)}`, {
-        location: Log.Locations.automation,
-        agentId: ticket,
-        cause: error,
-      }),
-    ),
+  yield* Effect.uninterruptible(
+    Effect.gen(function* () {
+      const closed = yield* closeJob(job, restarted);
+      if (!closed || ticket === null) {
+        return;
+      }
+      yield* linear.moveToFailed(ticket).pipe(
+        Effect.retry(Schedule.recurs(2)),
+        Effect.catchTag("LinearError", (error) =>
+          log.error(`move to Failed failed: ${detail(error)}`, {
+            location: Log.Locations.automation,
+            agentId: ticket,
+            cause: error,
+          }),
+        ),
+      );
+    }),
   );
 });
 
@@ -300,8 +308,8 @@ const failInherited = Effect.fn("failInherited")(function* (job: Automation.Auto
 // the running write are uninterruptible; the HTTP wait is restored so SIGTERM can
 // abandon a reserve that has not landed. A tick that fails is one error line; the next
 // tick runs. Before the first tick, every running row the last automation server left is
-// stopped and failed, one at a time; a check that fails is one error line and dispatch
-// starts anyway.
+// stopped and failed, one at a time; a row that fails is one error line and the next row is
+// tried, and a listing that fails is one error line. Dispatch starts either way.
 export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
@@ -373,7 +381,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           }
           const releaseReservation = (url: string, ticket: string) =>
             abortAt(url, ticket).pipe(
-              Effect.catch((error) =>
+              Effect.catchTag("AutomationClientError", (error) =>
                 log.error(`reserve release failed; ${url}`, {
                   location: Log.Locations.automation,
                   agentId: ticket,
@@ -470,7 +478,9 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
 
   const inherited = Effect.gen(function* () {
     for (const job of yield* store.listRunning()) {
-      yield* failInherited(job);
+      yield* failInherited(job).pipe(
+        Effect.catchCause(reportFailure(`inherited job cleanup failed; ${job.id}`)),
+      );
     }
   }).pipe(Effect.catchCause(reportFailure("inherited jobs check failed")));
 
