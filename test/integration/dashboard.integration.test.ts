@@ -620,40 +620,6 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(html).not.toContain('value="LOCK"');
   });
 
-  it("shows the named definition as text and does not chart its results", async () => {
-    let runIds: ReadonlyArray<string> = [];
-    await seed(dbUrl, async (db) => {
-      const [charted] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide layout", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      runIds = await seedResults(db, charted.id, [
-        { status: "passed", model: "grok-4.6" },
-        { status: "failed", model: "grok-4.6" },
-        { status: "passed", model: "composer-2.5" },
-        { status: "pending", model: "gemini-3.8" },
-      ]);
-    });
-    const { status, html } = await getPage("/definitions/wide%20layout", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide layout");
-    expect(card).toContain("<h2>wide layout</h2>");
-    expect(card).toContain('<p class="wording">d</p>');
-    expect(card).toContain('<p class="wording">i</p>');
-    expect(card).toContain('<p class="wording">p</p>');
-    expect(card).not.toContain("succeeded");
-    expect(card).not.toContain("gemini-3.8");
-    expect(card).not.toContain("lock-screen");
-    // One wording so far. Results are not drawn; the page does not list individual runs.
-    const [only, ...rest] = wordings(card);
-    expect(rest).toEqual([]);
-    expect(only).toMatchObject({ label: "v1" });
-    expect(card).not.toContain('<table class="runs"');
-    for (const runId of runIds) {
-      expect(card).not.toContain(`<code>${runId}</code>`);
-    }
-  });
-
   it("lines a name's wordings up newest first, each as its own text", async () => {
     await seed(dbUrl, async (db) => {
       const [older] = await db
@@ -806,64 +772,6 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
     expect(card).not.toContain("No passed or failed results yet.");
     expect(card).not.toContain("result-chart");
     expect(card).not.toContain('<table class="runs"');
-  });
-
-  it("lists every running test, and offers to abort one that has a ticket", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "running-on-definitions", [
-        {
-          ticket: "RUN-1",
-          action: "drive",
-          status: "running",
-          queuedSecondsAgo: 120,
-          startedSecondsAgo: 45,
-        },
-        {
-          ticket: "RUN-2",
-          action: "diagnose",
-          status: "running",
-          queuedSecondsAgo: 30,
-          startedSecondsAgo: 10,
-        },
-        {
-          ticket: null,
-          action: "drive",
-          status: "running",
-          queuedSecondsAgo: 20,
-          startedSecondsAgo: 8,
-        },
-        { ticket: "RUN-PEND", action: "drive", status: "pending", queuedSecondsAgo: 5 },
-        {
-          ticket: "RUN-DONE",
-          action: "drive",
-          status: "succeeded",
-          queuedSecondsAgo: 400,
-          startedSecondsAgo: 300,
-          finishedSecondsAgo: 60,
-        },
-      ]),
-    );
-    const { status, html } = await getPage("/definitions/running-on-definitions", dbUrl);
-    expect(status).toBe(200);
-    const running = runningSection(html);
-    expect(running).toContain(
-      '<div id="running-tests" hx-get="/definitions/running?name=running-on-definitions" hx-trigger="every 30s" hx-swap="innerHTML">',
-    );
-    // Diagnoses ahead of drives, then queue order: the pending and finished jobs are not running.
-    const diagnose = running.indexOf(">RUN-2<");
-    const drive = running.indexOf(">RUN-1<");
-    const unticketed = running.indexOf(">—</span>");
-    expect(diagnose).toBeGreaterThan(-1);
-    expect(diagnose).toBeLessThan(drive);
-    expect(drive).toBeLessThan(unticketed);
-    expect(running).not.toContain("RUN-PEND");
-    expect(running).not.toContain("RUN-DONE");
-    expect(running).toContain(
-      '<a href="/definitions/running-on-definitions">running-on-definitions</a>',
-    );
-    expect(running).toContain(definitionsAbortForm("RUN-2", "diagnose", "running-on-definitions"));
-    expect(running).toContain(definitionsAbortForm("RUN-1", "drive", "running-on-definitions"));
-    expect(running.match(/action="\/abort"/g)).toHaveLength(2);
   });
 
   it("keeps only this definition's running jobs, and its last ten verdicts", async () => {

@@ -6,18 +6,12 @@ import type { TestProject } from "vitest/node";
 
 let container: StartedPostgreSqlContainer | undefined;
 
-const PRODUCTION_HOST = "psdb.cloud";
+// Tests never see production data: DATABASE_URL is replaced before any test runs, and the test
+// workers and everything they spawn inherit it. Without Docker it names a port nothing listens on.
+const NO_DATABASE = "postgres://test:test@127.0.0.1:1/oligarchy";
 
 export const setup = async (project: TestProject) => {
-  const ambient = process.env.DATABASE_URL;
-  if (
-    ambient !== undefined &&
-    ambient.includes(PRODUCTION_HOST) &&
-    process.env.OLIGARCHY_ALLOW_PROD_DB !== "1"
-  ) {
-    // Tests never read the production database; the container below is the only database they see.
-    delete process.env.DATABASE_URL;
-  }
+  process.env.DATABASE_URL = NO_DATABASE;
   try {
     container = await new PostgreSqlContainer("postgres:17-alpine").start();
   } catch (failure) {
@@ -31,6 +25,7 @@ export const setup = async (project: TestProject) => {
     return;
   }
   const url = container.getConnectionUri();
+  process.env.DATABASE_URL = url;
   const client = new Client({ connectionString: url });
   await client.connect();
   try {

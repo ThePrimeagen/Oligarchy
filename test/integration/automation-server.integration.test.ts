@@ -328,7 +328,7 @@ describe("automation server startup refusals", () => {
 const describeWithDatabase = dbUrl === "" ? describe.skip : describe;
 
 describeWithDatabase("automation server startup refusals with a database", () => {
-  it.live("an occupied port exits 1 with EADDRINUSE", () =>
+  it.live("an occupied port exits 1 naming the port in use", () =>
     Effect.promise(async () => {
       const { port, release } = await occupy();
       try {
@@ -339,8 +339,7 @@ describeWithDatabase("automation server startup refusals with a database", () =>
           line.startsWith("[automation] automation: fatal: automation server: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
-        expect(fatal).toContain("EADDRINUSE");
-        expect(fatal).toContain(`127.0.0.1:${String(port)}`);
+        expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);
         expect(process.stdout()).not.toContain("listening");
       } finally {
         await release();
