@@ -22,6 +22,8 @@ const BOUNDARY_FILES = new Set([
   "src/session/readline.ts",
   "src/qemu/stats.ts",
   "src/qemu/qemu.ts",
+  // This process's own cpu and pid, and which host it is on: macOS has no /proc to read them.
+  "src/shared/process-usage.ts",
   "src/observability/instrument.ts",
   "src/observability/render.ts",
   "src/db/client.ts",
