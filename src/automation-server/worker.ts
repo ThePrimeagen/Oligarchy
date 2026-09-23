@@ -12,10 +12,9 @@ import * as Prompts from "./prompts.ts";
 import * as Ready from "./ready.ts";
 
 const DISPATCH_INTERVAL = "5 seconds";
+const RELEASE_TIMEOUT = "10 seconds";
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
-const isAtCapacity = Schema.is(Errors.AtCapacity);
-const isSetupNeeded = Schema.is(Errors.SetupNeeded);
 
 const detail = (error: unknown): string =>
   isDatabaseError(error)
@@ -39,20 +38,31 @@ const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
 
 type Placement = {
   readonly url: string;
+  readonly serverId: string;
   readonly prompt: string;
   readonly ticket: string;
 };
 
+type PlaceResult =
+  | { readonly _tag: "placed"; readonly placement: Placement }
+  | {
+      readonly _tag: "deferred";
+      readonly continueTick: boolean;
+      readonly line: string;
+      readonly agentId: string;
+    }
+  | { readonly _tag: "unavailable"; readonly continueTick: boolean };
+
 // Build the prompt and take a client slot, the client reserving a guest too when the job is a
-// drive. /run is not waited here: a reserved job starts in its own fiber so the next pending
-// row can reserve on this tick.
+// drive. The row stays pending. /run is not waited here: a reserved job starts in its own fiber
+// so the next pending row can reserve on this tick. A full client or one whose guest is not
+// minted is the fleet's ordinary answer; anything else is logged and the next client is asked.
 const place = Effect.fn("place")(function* (
   job: Automation.AutomationJobRow,
   clients: ReadonlyArray<Servers.LiveServer>,
   model: string,
 ) {
   const tests = yield* Tests.TestStore;
-  const store = yield* Automation.AutomationStore;
   const setups = yield* SetupRequests.SetupRequestStore;
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
@@ -76,7 +86,9 @@ const place = Effect.fn("place")(function* (
       message: `mint ${ticket} has no pinned server`,
     });
   }
-  let lastCapacity: string | undefined;
+  let sawCapacity = false;
+  let sawSetup = false;
+  let sawUnexpected = false;
   for (const client of clients) {
     const reserved = yield* Effect.result(
       AutomationClient.reserve(
@@ -88,32 +100,50 @@ const place = Effect.fn("place")(function* (
       ),
     );
     if (Result.isSuccess(reserved)) {
-      if (client.id !== job.serverId) {
-        yield* store.assign(job.id, client.id);
-      }
-      yield* log.info(`dispatching ${job.action}; ${client.url}; ${model}`, {
-        location: Log.Locations.automation,
-        agentId: ticket,
-      });
-      const placement: Placement = { url: client.url, prompt, ticket };
-      return placement;
+      const placed: PlaceResult = {
+        _tag: "placed",
+        placement: { url: client.url, serverId: client.id, prompt, ticket },
+      };
+      return placed;
     }
     if (reserved.failure.status === 409) {
-      return yield* Errors.SetupNeeded.make({
-        message: reserved.failure.message,
-        agentId: ticket,
-      });
-    }
-    if (reserved.failure.status === 503) {
-      lastCapacity = reserved.failure.message;
+      sawSetup = true;
       continue;
     }
-    return yield* Effect.fail(reserved.failure);
+    if (reserved.failure.status === 503) {
+      sawCapacity = true;
+      continue;
+    }
+    sawUnexpected = true;
+    yield* log.error(`reserve failed; ${client.url}`, {
+      location: Log.Locations.automation,
+      agentId: ticket,
+      cause: reserved.failure.cause ?? reserved.failure,
+    });
   }
-  return yield* Errors.AtCapacity.make({
-    message: lastCapacity ?? "at capacity",
+  // A mint stays first in the queue. Its own refusal must not end the tick, or a drive
+  // behind it never gets a turn. Setup needed stops the tick: the guest is not ready.
+  const continueTick = job.action === "mint";
+  if (sawUnexpected) {
+    const unavailable: PlaceResult = { _tag: "unavailable", continueTick };
+    return unavailable;
+  }
+  if (sawSetup) {
+    const deferred: PlaceResult = {
+      _tag: "deferred",
+      continueTick: false,
+      line: "deferred; setup needed",
+      agentId: ticket,
+    };
+    return deferred;
+  }
+  const deferred: PlaceResult = {
+    _tag: "deferred",
+    continueTick: sawCapacity && continueTick,
+    line: continueTick ? "deferred; mint at capacity" : "deferred; at capacity",
     agentId: ticket,
-  });
+  };
+  return deferred;
 });
 
 const perform = Effect.fn("perform")(function* (
@@ -171,7 +201,8 @@ const closeJob = Effect.fn("closeJob")(function* (
     return;
   }
   yield* logOutcome(job, outcome);
-  // Ready means a pending drive or mint. A diagnose was never labeled. A 503 unclaim does not close.
+  // Ready means a pending drive or mint. A diagnose was never labeled. A placement that
+  // could not reserve does not close.
   if (job.action === "diagnose") {
     return;
   }
@@ -185,13 +216,15 @@ const closeJob = Effect.fn("closeJob")(function* (
 
 // Jobs launch one reservation at a time, round robin from where the last one stopped.
 // The next reservation is not sent until this one has answered, so two reservation
-// responses are never in flight. A success is what starts /run; /run does not hold the
-// next reservation. A 503 is a client with no room for this job, so the next client in
-// the rotation is asked; a 503 from every client puts the row back to pending. A mint's
-// own 503 does not end the tick. A tick with no live client does not claim. Claim is
-// uninterruptible so a shutdown cannot leave a pending row half-taken; the HTTP wait
-// is restored so SIGTERM aborts an in-flight job; finish and unclaim are uninterruptible
-// so the write lands. A tick that fails is one error line; the next tick runs.
+// responses are never in flight. The row stays pending until a client has reserved;
+// pending -> running names that client, and only then does /run start. /run does not
+// hold the next reservation. A 503 or 409 from a client is ordinary and the next client
+// is asked; when none can take the job the row stays pending for a later pass. Any
+// other reserve failure is logged and the next client is asked. A mint's own refusal
+// does not end the tick. A tick with no live client does not select. The selection and
+// the running write are uninterruptible; the HTTP wait is restored so SIGTERM can
+// abandon a reserve that has not landed. A tick that fails is one error line; the next
+// tick runs.
 export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
@@ -208,13 +241,13 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
     }
     yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        // Mint jobs whose own reserve was 503. They stay pending and first, but this tick
-        // does not claim them again; the other jobs still get a turn.
+        // Mint jobs this tick already refused. They stay pending and first, but this tick
+        // does not select them again; the other jobs still get a turn.
         const skipped: Array<string> = [];
         for (;;) {
-          const maybe = yield* store.claim(chosen.id, skipped);
+          const maybe = yield* store.nextPending(skipped);
           if (Option.isNone(maybe)) {
-            return;
+            return yield* Effect.void;
           }
           const job = maybe.value;
           const start =
@@ -224,61 +257,99 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           const candidates = live.slice(at).concat(live.slice(0, at));
           const placed = yield* restore(place(job, candidates, model)).pipe(
             Effect.matchCause({
-              onSuccess: (placement) => ({ _tag: "placed" as const, placement }),
-              onFailure: (cause) => {
-                const error = Cause.squash(cause);
-                if (isAtCapacity(error)) {
-                  return Object.assign(
-                    {
-                      _tag: "deferred" as const,
-                      // A mint's own 503 does not end the tick. Every other 503 does.
-                      continueTick: job.action === "mint",
-                      line:
-                        job.action === "mint"
-                          ? "deferred; mint at capacity"
-                          : "deferred; at capacity",
-                    },
-                    error.agentId === undefined ? undefined : { agentId: error.agentId },
-                  );
-                }
-                if (isSetupNeeded(error)) {
-                  return Object.assign(
-                    {
-                      _tag: "deferred" as const,
-                      continueTick: false,
-                      line: "deferred; setup needed",
-                    },
-                    error.agentId === undefined ? undefined : { agentId: error.agentId },
-                  );
-                }
-                return { _tag: "closed" as const, outcome: outcomeFrom(cause) };
-              },
+              onSuccess: (result) => result,
+              onFailure: (cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? { _tag: "interrupted" as const }
+                  : { _tag: "closed" as const, outcome: outcomeFrom(cause) },
             }),
           );
+          if (placed._tag === "interrupted") {
+            return yield* Effect.interrupt;
+          }
           if (placed._tag === "deferred") {
-            const restored = yield* store.unclaim(job.id);
-            if (restored) {
-              yield* log.info(
-                placed.line,
-                placed.agentId === undefined
-                  ? { location: Log.Locations.automation }
-                  : { location: Log.Locations.automation, agentId: placed.agentId },
-              );
-            }
+            yield* log.info(placed.line, {
+              location: Log.Locations.automation,
+              agentId: placed.agentId,
+            });
             if (placed.continueTick) {
               skipped.push(job.id);
               continue;
             }
-            return;
+            return yield* Effect.void;
+          }
+          if (placed._tag === "unavailable") {
+            if (placed.continueTick) {
+              skipped.push(job.id);
+              continue;
+            }
+            return yield* Effect.void;
           }
           if (placed._tag === "closed") {
             yield* closeJob(job, placed.outcome);
-            // An interrupt is a shutdown: do not claim the next pending row.
+            // An interrupt is a shutdown: do not select the next pending row.
             if (placed.outcome.status === "aborted") {
-              return;
+              return yield* Effect.void;
             }
             continue;
           }
+          // The tick is uninterruptible after reserve returns, and a timeout only lands
+          // on an interruptible wait. Ten seconds: a client that never answers must not
+          // hold the next pass.
+          const releaseReservation = (url: string, ticket: string) =>
+            Effect.interruptible(AutomationClient.abort(url, ticket)).pipe(
+              Effect.timeoutOrElse({
+                duration: RELEASE_TIMEOUT,
+                orElse: () =>
+                  Errors.AutomationClientError.make({
+                    message: `automation client: POST ${url}/abort failed: no answer within ${RELEASE_TIMEOUT}`,
+                  }),
+              }),
+              Effect.catch((error) =>
+                log.error(`reserve release failed; ${url}`, {
+                  location: Log.Locations.automation,
+                  agentId: ticket,
+                  cause: error,
+                }),
+              ),
+            );
+          // Two immediate retries: three attempts, then the reservation is given back.
+          // A lost compare-and-swap is not a database failure and is not retried.
+          const written = yield* store
+            .markRunning(job.id, placed.placement.serverId)
+            .pipe(Effect.retry(Schedule.recurs(2)), Effect.result);
+          if (Result.isFailure(written)) {
+            yield* log.error(`running write failed; ${placed.placement.url}`, {
+              location: Log.Locations.automation,
+              agentId: placed.placement.ticket,
+              cause: written.failure,
+            });
+            yield* releaseReservation(placed.placement.url, placed.placement.ticket);
+            // The reservation is gone. Record the database failure on the row, three
+            // attempts. A successful write is not logged again.
+            yield* store.finish(job.id, "failed", "DATABASE FAILURE").pipe(
+              Effect.tapError((error) =>
+                log.error(`failure write failed; ${placed.placement.url}`, {
+                  location: Log.Locations.automation,
+                  agentId: placed.placement.ticket,
+                  cause: error,
+                }),
+              ),
+              Effect.retry(Schedule.recurs(2)),
+              Effect.catch(() => Effect.void),
+            );
+            return yield* Effect.void;
+          }
+          if (!written.success) {
+            // The row left pending while the client held the reservation, usually an
+            // operator abort. Release it so the slot does not sit until it expires.
+            yield* releaseReservation(placed.placement.url, placed.placement.ticket);
+            continue;
+          }
+          yield* log.info(`dispatching ${job.action}; ${placed.placement.url}; ${model}`, {
+            location: Log.Locations.automation,
+            agentId: placed.placement.ticket,
+          });
           const taken = live.findIndex((server) => server.url === placed.placement.url);
           const following = taken < 0 ? undefined : live[(taken + 1) % live.length];
           if (following !== undefined) {

@@ -756,7 +756,7 @@ describeServing("automation server dispatch", () => {
       }),
   );
 
-  it.live("a live client that answers 500 marks the job failed", () =>
+  it.live("a live client that answers 500 on reserve leaves the job pending", () =>
     Effect.promise(async () => {
       const client = await serveClient((_req, res) => {
         res.writeHead(500, { "content-type": "application/json" });
@@ -770,9 +770,17 @@ describeServing("automation server dispatch", () => {
       const process = spawnAutomationServer(["--port", String(port)]);
       try {
         await process.waitFor(/automation server listening/);
-        const job = await waitForJob(resultId, "failed");
-        expect(job.status).toBe("failed");
-        expect(job.reason).toContain("opencode exited 1");
+        await process.waitFor(new RegExp(`reserve failed; ${client.url.replaceAll(".", "\\.")}`));
+        const job = (await jobsFor(resultId))[0];
+        expect(job).toMatchObject({
+          status: "pending",
+          serverId: null,
+          startedAt: null,
+          finishedAt: null,
+          reason: null,
+        });
+        expect(process.stdout()).toContain(linearId);
+        expect(process.stdout()).not.toContain("drive failed");
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
@@ -784,7 +792,12 @@ describeServing("automation server dispatch", () => {
 
   it.live("SIGTERM while the client is still running aborts the job and exits 0", () =>
     Effect.promise(async () => {
-      const client = await serveClient(() => {});
+      const client = await serveClient((req, res) => {
+        if (req.url === "/reserve") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: "true" }));
+        }
+      });
       const linearId = `OLI-${randomUUID().slice(0, 8)}`;
       const resultId = await seedResult(linearId);
       await seedJob(resultId, "drive");
@@ -822,10 +835,9 @@ describeServing("automation server abort", () => {
       const seen: Array<string> = [];
       const client = await serveClient((req, res) => {
         seen.push(`${req.method} ${req.url ?? ""}`);
-        if (req.url === "/abort") {
+        if (req.url === "/reserve" || req.url === "/abort") {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: "true" }));
-          return;
         }
       });
       const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -923,10 +935,14 @@ describeServing("automation server abort", () => {
   it.live("404 when the client does not know the session, and the job stays running", () =>
     Effect.promise(async () => {
       const client = await serveClient((req, res) => {
+        if (req.url === "/reserve") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: "true" }));
+          return;
+        }
         if (req.url === "/abort") {
           res.writeHead(404, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: 'unknown session "OLI-x"' }));
-          return;
         }
       });
       const linearId = `OLI-${randomUUID().slice(0, 8)}`;

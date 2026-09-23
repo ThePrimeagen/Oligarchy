@@ -6,6 +6,7 @@ import * as FakeLinear from "../support/fake-linear.ts";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
 import * as AutomationClient from "../../src/automation-server/client.ts";
+import * as Automation from "../../src/db/automation.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as FakeFs from "../support/fake-fs.ts";
@@ -126,8 +127,11 @@ type Harness = {
   readonly pins: Map<string, string>;
 };
 
-const harness = (linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear()): Harness => ({
-  automation: Stores.fakeAutomationStore(),
+const harness = (
+  linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear(),
+  automation: Stores.FakeAutomationStore = Stores.fakeAutomationStore(),
+): Harness => ({
+  automation,
   servers: Stores.fakeServerStore(),
   tests: Stores.fakeTestStore(),
   log: FakeLog.fakeLog(),
@@ -209,6 +213,10 @@ const settleAll = (jobs: Array<{ status: string }>, status: string) =>
     return yield* Effect.die(`jobs did not all become ${status}: ${JSON.stringify(jobs)}`);
   });
 
+// log.error without skipSentry is what the Log service hands to Sentry.
+const sentryErrors = (log: FakeLog.FakeLog) =>
+  log.lines.filter((line) => line.level === "error" && !line.skipSentry);
+
 const seedPair = (fixed: Harness) => {
   seedResult(fixed.tests);
   seedResult(fixed.tests, TICKET_B, "pending", RESULT_B);
@@ -216,33 +224,124 @@ const seedPair = (fixed: Harness) => {
   seedJob(fixed.automation, "drive", RESULT_B);
 };
 
+describe("markRunning acknowledgement", () => {
+  it.effect("a row already running for the same client is success, and another client is not", () =>
+    Effect.gen(function* () {
+      const automation = Stores.fakeAutomationStore();
+      const serverId = "11111111-1111-4111-8111-111111111111";
+      const other = "22222222-2222-4222-8222-222222222222";
+      yield* Effect.gen(function* () {
+        const store = yield* Automation.AutomationStore;
+        const job = yield* store.enqueue({ resultId: RESULT_ID, action: "drive" });
+        const row = automation.jobs.find((candidate) => candidate.id === job.id);
+        if (row !== undefined) {
+          row.status = "running";
+          row.serverId = serverId;
+          row.startedAt = new Date();
+        }
+        expect(yield* store.markRunning(job.id, serverId)).toBe(true);
+        expect(yield* store.markRunning(job.id, other)).toBe(false);
+        if (row !== undefined) {
+          row.status = "aborted";
+        }
+        expect(yield* store.markRunning(job.id, serverId)).toBe(false);
+      }).pipe(Effect.provide(automation.layer));
+    }),
+  );
+});
+
 describe("dispatch happy path", () => {
-  it.effect("claims the job before POST /run", () =>
+  it.effect("a pending row stays pending while /reserve is in flight", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation);
-      const clientId = seedLiveClient(fixed.servers);
-      const started = yield* Deferred.make<void>();
+      seedLiveClient(fixed.servers);
+      const reserved = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests(
-        reserving(() =>
-          Effect.gen(function* () {
-            yield* Deferred.succeed(started, undefined);
+      const http = FakeHttp.recordRequests((request, url) => {
+        if (url.pathname === "/reserve") {
+          return Effect.gen(function* () {
+            yield* Deferred.succeed(reserved, undefined);
             yield* Deferred.await(release);
-            return yield* closing(fixed.tests);
-          }),
-        ),
-      );
+            return FakeHttp.json({ ok: "true" });
+          });
+        }
+        return closing(fixed.tests);
+      });
       yield* start(fixed, http.layer);
-      yield* Deferred.await(started);
-      expect(fixed.automation.jobs[0]?.status).toBe("running");
-      expect(fixed.automation.jobs[0]?.serverId).toBe(clientId);
-      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
+      yield* Deferred.await(reserved);
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "pending",
+        serverId: null,
+        startedAt: null,
+        finishedAt: null,
+        reason: null,
+      });
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`]);
       yield* Deferred.succeed(release, undefined);
       yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
     }),
+  );
+
+  it.effect(
+    "a successful reserve moves the job to running on the accepting client and starts /run",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        const first = seedLiveClient(fixed.servers);
+        const second = seedLiveClient(fixed.servers, OTHER_URL);
+        const reserved = yield* Deferred.make<void>();
+        const releaseReserve = yield* Deferred.make<void>();
+        const started = yield* Deferred.make<void>();
+        const releaseRun = yield* Deferred.make<void>();
+        const http = FakeHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve") {
+            if (url.href.startsWith(URL)) {
+              return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+            }
+            return Effect.gen(function* () {
+              yield* Deferred.succeed(reserved, undefined);
+              yield* Deferred.await(releaseReserve);
+              return FakeHttp.json({ ok: "true" });
+            });
+          }
+          return Effect.gen(function* () {
+            yield* Deferred.succeed(started, undefined);
+            yield* Deferred.await(releaseRun);
+            return yield* closing(fixed.tests);
+          });
+        });
+        yield* start(fixed, http.layer);
+        yield* Deferred.await(reserved);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "pending",
+          serverId: null,
+          startedAt: null,
+        });
+        expect(http.requests.map((request) => request.url)).toEqual([
+          `${URL}/reserve`,
+          `${OTHER_URL}/reserve`,
+        ]);
+        yield* Deferred.succeed(releaseReserve, undefined);
+        yield* Deferred.await(started);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "running",
+          serverId: second,
+          startedAt: expect.any(Date),
+        });
+        expect(fixed.automation.jobs[0]?.serverId).not.toBe(first);
+        expect(http.requests.map((request) => request.url)).toEqual([
+          `${URL}/reserve`,
+          `${OTHER_URL}/reserve`,
+          `${OTHER_URL}/run`,
+        ]);
+        yield* Deferred.succeed(releaseRun, undefined);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        expect(fixed.linear.calls.filter((call) => call.method === "moveIssue")).toEqual([]);
+      }),
   );
 
   it.effect(
@@ -690,28 +789,45 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
-  it.effect("an unreachable client marks the job failed", () =>
+  it.effect("an unreachable client leaves the job pending and reports the cause", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation);
+      const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
       seedLiveClient(fixed.servers);
       const http = FakeHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
-            reason: new HttpClientError.TransportError({
-              request,
-              cause: new Error("connect ECONNREFUSED 127.0.0.1:55333"),
-            }),
+            reason: new HttpClientError.TransportError({ request, cause }),
           }),
         ),
       );
       yield* start(fixed, http);
-      yield* settle(fixed.automation.jobs, "failed");
+      for (let i = 0; i < 200; i++) {
+        if (sentryErrors(fixed.log).length > 0) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
       expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "failed",
-        reason: `automation client: POST ${URL}/reserve failed`,
+        status: "pending",
+        serverId: null,
+        startedAt: null,
+        finishedAt: null,
+        reason: null,
       });
+      expect(fixed.linear.calls).toEqual([]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          level: "error",
+          text: `reserve failed; ${URL}`,
+          agentId: TICKET,
+          location: "automation",
+          skipSentry: false,
+          cause,
+        }),
+      ]);
     }),
   );
 
@@ -913,6 +1029,7 @@ describe("dispatch unhappy path", () => {
         `${OTHER_URL}/reserve`,
       ]);
       expect(FakeLog.texts(fixed.log)).toEqual(["deferred; at capacity"]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
       expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
       expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       expect(first).toBeDefined();
@@ -950,13 +1067,18 @@ describe("dispatch unhappy path", () => {
           yield* Effect.yieldNow;
         }
         expect(http.requests).toHaveLength(1);
-        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "pending"]);
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["pending", "pending"]);
         yield* Deferred.succeed(release, undefined);
-        yield* settle(fixed.automation.jobs, "failed");
-        yield* settle(fixed.automation.jobs, "succeeded");
-        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["failed", "succeeded"]);
-        expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(1);
-        expect(http.requests[0]?.url).toBe(`${URL}/reserve`);
+        for (let i = 0; i < 50; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["pending", "pending"]);
+        expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(0);
+        expect(http.requests.filter((request) => request.url.endsWith("/reserve"))).toHaveLength(1);
+        expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([
+          `reserve failed; ${URL}`,
+        ]);
+        expect(fixed.linear.calls).toEqual([]);
       }),
   );
 
@@ -1112,8 +1234,504 @@ describe("dispatch unhappy path", () => {
       expect(fixed.automation.jobs[0]?.status).toBe("pending");
       expect(http.requests).toHaveLength(1);
       expect(FakeLog.texts(fixed.log)).toEqual(["deferred; setup needed"]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
     }),
   );
+
+  it.effect("a 409 from every client leaves the job pending and does not report to Sentry", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      seedLiveClient(fixed.servers, OTHER_URL);
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
+      );
+      yield* start(fixed, http.layer);
+      for (let i = 0; i < 200; i++) {
+        if (FakeLog.texts(fixed.log).includes("deferred; setup needed")) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "pending",
+        serverId: null,
+        startedAt: null,
+        finishedAt: null,
+        reason: null,
+      });
+      expect(http.requests.map((request) => request.url)).toEqual([
+        `${URL}/reserve`,
+        `${OTHER_URL}/reserve`,
+      ]);
+      expect(FakeLog.texts(fixed.log)).toEqual(["deferred; setup needed"]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
+      expect(fixed.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("an unexpected failure on one client is logged and the next client can accept", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      const first = seedLiveClient(fixed.servers);
+      const second = seedLiveClient(fixed.servers, OTHER_URL);
+      const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
+      const http = FakeHttp.recordRequests((request, url) => {
+        if (url.href.startsWith(URL)) {
+          return Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({ request, cause }),
+            }),
+          );
+        }
+        return reserving(() => closing(fixed.tests))(request, url);
+      });
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: second });
+      expect(fixed.automation.jobs[0]?.serverId).not.toBe(first);
+      expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${URL}/reserve`,
+        `POST ${OTHER_URL}/reserve`,
+        `POST ${OTHER_URL}/run`,
+      ]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `reserve failed; ${URL}`,
+          agentId: TICKET,
+          location: "automation",
+          skipSentry: false,
+          cause,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("an unexpected failure on every client is logged and the job stays pending", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      seedLiveClient(fixed.servers, OTHER_URL);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ nope: true }));
+      yield* start(fixed, http.layer);
+      for (let i = 0; i < 200; i++) {
+        if (sentryErrors(fixed.log).length >= 2) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "pending",
+        serverId: null,
+        startedAt: null,
+        finishedAt: null,
+        reason: null,
+      });
+      expect(http.requests.map((request) => request.url)).toEqual([
+        `${URL}/reserve`,
+        `${OTHER_URL}/reserve`,
+      ]);
+      expect(http.requests.some((request) => request.url.endsWith("/run"))).toBe(false);
+      expect(sentryErrors(fixed.log).map((line) => [line.text, line.agentId])).toEqual([
+        [`reserve failed; ${URL}`, TICKET],
+        [`reserve failed; ${OTHER_URL}`, TICKET],
+      ]);
+      expect(sentryErrors(fixed.log).every((line) => line.cause !== undefined)).toBe(true);
+      expect(fixed.linear.calls).toEqual([]);
+      expect(FakeLog.texts(fixed.log).some((text) => text.includes("drive failed"))).toBe(false);
+    }),
+  );
+
+  it.effect("a pending abort that wins the race releases the accepted reservation", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const reserved = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const http = FakeHttp.recordRequests((request, url) => {
+        if (url.pathname === "/reserve") {
+          return Effect.gen(function* () {
+            yield* Deferred.succeed(reserved, undefined);
+            yield* Deferred.await(release);
+            return FakeHttp.json({ ok: "true" });
+          });
+        }
+        if (url.pathname === "/abort") {
+          return FakeHttp.json({ ok: "true" });
+        }
+        return closing(fixed.tests);
+      });
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(reserved);
+      const job = fixed.automation.jobs[0];
+      expect(job?.status).toBe("pending");
+      if (job !== undefined) {
+        job.status = "aborted";
+        job.reason = "aborted";
+        job.finishedAt = new Date();
+      }
+      yield* Deferred.succeed(release, undefined);
+      for (let i = 0; i < 200; i++) {
+        if (http.requests.some((request) => request.url.endsWith("/abort"))) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "aborted",
+        reason: "aborted",
+        serverId: null,
+        startedAt: null,
+      });
+      expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        `POST ${URL}/reserve`,
+        `POST ${URL}/abort`,
+      ]);
+      expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({ ticket: TICKET });
+      expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+    }),
+  );
+
+  it.effect("a running write that fails twice then succeeds starts /run", () => {
+    const failure = Errors.DatabaseError.make({
+      operation: "markAutomationJobRunning",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    let attempts = 0;
+    const held: { automation: Stores.FakeAutomationStore | undefined } = { automation: undefined };
+    const automation = Stores.fakeAutomationStore({
+      markRunning: (id, serverId) =>
+        Effect.gen(function* () {
+          attempts += 1;
+          if (attempts < 3) {
+            return yield* Effect.fail(failure);
+          }
+          const job = held.automation?.jobs.find(
+            (row) => row.id === id && row.status === "pending",
+          );
+          if (job === undefined) {
+            return false;
+          }
+          job.status = "running";
+          job.serverId = serverId;
+          job.startedAt = new Date();
+          return true;
+        }),
+    });
+    held.automation = automation;
+    return Effect.gen(function* () {
+      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      const clientId = seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(attempts).toBe(3);
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: clientId });
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
+      expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([]);
+    });
+  });
+
+  it.effect(
+    "a running write that commits and then fails keeps the reservation and starts /run",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "markAutomationJobRunning",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      let attempts = 0;
+      const held: { automation: Stores.FakeAutomationStore | undefined } = {
+        automation: undefined,
+      };
+      const automation = Stores.fakeAutomationStore({
+        markRunning: (id, serverId) =>
+          Effect.gen(function* () {
+            attempts += 1;
+            const job = held.automation?.jobs.find((row) => row.id === id);
+            if (attempts === 1) {
+              if (job !== undefined && job.status === "pending") {
+                job.status = "running";
+                job.serverId = serverId;
+                job.startedAt = new Date();
+              }
+              return yield* Effect.fail(failure);
+            }
+            if (job?.status === "running" && job.serverId === serverId) {
+              return true;
+            }
+            if (job === undefined || job.status !== "pending") {
+              return false;
+            }
+            job.status = "running";
+            job.serverId = serverId;
+            job.startedAt = new Date();
+            return true;
+          }),
+      });
+      held.automation = automation;
+      return Effect.gen(function* () {
+        const fixed = harness(FakeLinear.fakeLinear(), automation);
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        const clientId = seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        expect(attempts).toBeGreaterThan(1);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: clientId });
+        expect(http.requests.map((request) => request.url)).toEqual([
+          `${URL}/reserve`,
+          `${URL}/run`,
+        ]);
+      });
+    },
+  );
+
+  it.effect("a release that never answers is reported after ten seconds and does not hang", () => {
+    const failure = Errors.DatabaseError.make({
+      operation: "markAutomationJobRunning",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    const automation = Stores.fakeAutomationStore({
+      markRunning: () => Effect.fail(failure),
+    });
+    return Effect.gen(function* () {
+      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const aborting = yield* Deferred.make<void>();
+      const http = FakeHttp.recordRequests((request, url) => {
+        if (url.pathname === "/reserve") {
+          return FakeHttp.json({ ok: "true" });
+        }
+        return Deferred.succeed(aborting, undefined).pipe(Effect.andThen(Effect.never));
+      });
+      yield* start(fixed, http.layer);
+      yield* Deferred.await(aborting);
+      yield* TestClock.adjust("10 seconds");
+      expect(
+        sentryErrors(fixed.log).some((line) => line.text === `reserve release failed; ${URL}`),
+      ).toBe(true);
+      for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "failed"; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "failed",
+        reason: "DATABASE FAILURE",
+      });
+      expect(http.requests.some((request) => request.url.endsWith("/run"))).toBe(false);
+    });
+  });
+
+  it.effect(
+    "a running write that fails three times releases the reservation and fails the job",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "markAutomationJobRunning",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      let attempts = 0;
+      const automation = Stores.fakeAutomationStore({
+        markRunning: () =>
+          Effect.sync(() => {
+            attempts += 1;
+          }).pipe(Effect.andThen(Effect.fail(failure))),
+      });
+      return Effect.gen(function* () {
+        const fixed = harness(FakeLinear.fakeLinear(), automation);
+        seedPair(fixed);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve") {
+            return FakeHttp.json({ ok: "true" });
+          }
+          if (url.pathname === "/abort") {
+            return FakeHttp.json({ ok: "true" });
+          }
+          return closing(fixed.tests);
+        });
+        yield* start(fixed, http.layer);
+        for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "failed"; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["failed", "pending"]);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          serverId: null,
+          startedAt: null,
+          reason: "DATABASE FAILURE",
+        });
+        expect(fixed.automation.jobs[0]?.finishedAt).toBeInstanceOf(Date);
+        expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+          `POST ${URL}/reserve`,
+          `POST ${URL}/abort`,
+        ]);
+        expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({ ticket: TICKET });
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `running write failed; ${URL}`,
+            agentId: TICKET,
+            location: "automation",
+            skipSentry: false,
+            cause: failure,
+          }),
+        ]);
+        expect(fixed.linear.calls).toEqual([]);
+      });
+    },
+  );
+
+  it.effect("a failure write retries twice and then closes the job", () => {
+    const markFailure = Errors.DatabaseError.make({
+      operation: "markAutomationJobRunning",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    const finishFailure = Errors.DatabaseError.make({
+      operation: "finishAutomationJob",
+      message: "finish reset",
+      cause: new Error("finish reset"),
+    });
+    let finishes = 0;
+    const held: { automation: Stores.FakeAutomationStore | undefined } = { automation: undefined };
+    const automation = Stores.fakeAutomationStore({
+      markRunning: () => Effect.fail(markFailure),
+      finish: (id, status, reason) =>
+        Effect.gen(function* () {
+          finishes += 1;
+          if (finishes < 3) {
+            return yield* Effect.fail(finishFailure);
+          }
+          const job = held.automation?.jobs.find((row) => row.id === id);
+          if (job === undefined) {
+            return false;
+          }
+          job.status = status;
+          job.finishedAt = new Date();
+          if (reason !== null) {
+            job.reason = reason;
+          }
+          return true;
+        }),
+    });
+    held.automation = automation;
+    return Effect.gen(function* () {
+      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      seedPair(fixed);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests((request, url) =>
+        url.pathname === "/abort" || url.pathname === "/reserve"
+          ? FakeHttp.json({ ok: "true" })
+          : closing(fixed.tests),
+      );
+      yield* start(fixed, http.layer);
+      for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "failed"; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(finishes).toBe(3);
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "failed",
+        reason: "DATABASE FAILURE",
+      });
+      expect(fixed.automation.jobs[1]?.status).toBe("pending");
+      expect(http.requests.some((request) => request.url.endsWith("/run"))).toBe(false);
+      expect(sentryErrors(fixed.log).map((line) => [line.text, line.cause])).toEqual([
+        [`running write failed; ${URL}`, markFailure],
+        [`failure write failed; ${URL}`, finishFailure],
+        [`failure write failed; ${URL}`, finishFailure],
+      ]);
+      expect(fixed.linear.calls).toEqual([]);
+    });
+  });
+
+  it.effect("an exhausted failure write is reported and the job stays pending", () => {
+    const markFailure = Errors.DatabaseError.make({
+      operation: "markAutomationJobRunning",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    const finishFailure = Errors.DatabaseError.make({
+      operation: "finishAutomationJob",
+      message: "finish reset",
+      cause: new Error("finish reset"),
+    });
+    let finishes = 0;
+    const automation = Stores.fakeAutomationStore({
+      markRunning: () => Effect.fail(markFailure),
+      finish: () =>
+        Effect.sync(() => {
+          finishes += 1;
+        }).pipe(Effect.andThen(Effect.fail(finishFailure))),
+    });
+    return Effect.gen(function* () {
+      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      seedPair(fixed);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests((request, url) =>
+        url.pathname === "/abort" || url.pathname === "/reserve"
+          ? FakeHttp.json({ ok: "true" })
+          : closing(fixed.tests),
+      );
+      yield* start(fixed, http.layer);
+      for (let i = 0; i < 200; i++) {
+        const recorded = sentryErrors(fixed.log).filter((line) =>
+          line.text.startsWith("failure write failed"),
+        ).length;
+        if (recorded >= 3) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(finishes).toBe(3);
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["pending", "pending"]);
+      expect(http.requests.map((request) => request.url)).toEqual([
+        `${URL}/reserve`,
+        `${URL}/abort`,
+      ]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `running write failed; ${URL}`,
+          agentId: TICKET,
+          skipSentry: false,
+          cause: markFailure,
+        }),
+        expect.objectContaining({
+          text: `failure write failed; ${URL}`,
+          agentId: TICKET,
+          skipSentry: false,
+          cause: finishFailure,
+        }),
+        expect.objectContaining({
+          text: `failure write failed; ${URL}`,
+          agentId: TICKET,
+          skipSentry: false,
+          cause: finishFailure,
+        }),
+        expect.objectContaining({
+          text: `failure write failed; ${URL}`,
+          agentId: TICKET,
+          skipSentry: false,
+          cause: finishFailure,
+        }),
+      ]);
+      expect(fixed.linear.calls).toEqual([]);
+    });
+  });
 
   it.effect("a mint's 503 does not end the tick, and the next drive's 503 does", () =>
     Effect.gen(function* () {

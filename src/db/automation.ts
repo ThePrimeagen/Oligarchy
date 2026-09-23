@@ -72,55 +72,76 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
       // drive is done, so it never waits behind the drives queued before it.
       const queueRank = sql`case ${DbSchema.automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
 
-      // First in queue order whose result is not already running, locked for the
-      // transaction so a second claimer waits. One running job per result: drive
-      // and diagnose share a ticket, and the client will not reserve it twice.
-      // serverId is the client that took it: /abort looks that server up for its url.
-      const claim = Effect.fn("db.claimAutomationJob")(function* (
-        serverId: string,
+      // First in queue order whose result is not already running. One running job per
+      // result: drive and diagnose share a ticket, and the client will not reserve it
+      // twice. The row stays pending. One dispatcher reads it; pending -> running is the
+      // compare-and-swap that decides who kept it.
+      const nextPending = Effect.fn("db.nextPendingAutomationJob")(function* (
         except: ReadonlyArray<string> = [],
       ) {
-        return yield* database.transaction("claimAutomationJob", (tx) =>
-          Effect.gen(function* () {
-            const running = yield* Client.attempt("claimAutomationJob", () =>
-              tx
-                .select({ resultId: DbSchema.automationJobs.resultId })
-                .from(DbSchema.automationJobs)
-                .where(eq(DbSchema.automationJobs.status, "running")),
-            );
-            const busy = running.map((row) => row.resultId);
-            const waiting = eq(DbSchema.automationJobs.status, "pending");
-            const notBusy =
-              busy.length === 0
-                ? waiting
-                : and(waiting, notInArray(DbSchema.automationJobs.resultId, busy));
-            const skipped = [...except];
-            const where =
-              skipped.length === 0
-                ? notBusy
-                : and(notBusy, notInArray(DbSchema.automationJobs.id, skipped));
-            const pending = yield* Client.attempt("claimAutomationJob", () =>
-              tx
-                .select()
-                .from(DbSchema.automationJobs)
-                .where(where)
-                .orderBy(queueRank, DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id)
-                .limit(1)
-                .for("update"),
-            );
-            const row = Arr.head(pending);
-            if (Option.isNone(row)) {
-              return Option.none();
-            }
-            const updated = yield* Client.attempt("claimAutomationJob", () =>
-              tx
-                .update(DbSchema.automationJobs)
-                .set({ status: "running", startedAt: sql`now()`, serverId })
-                .where(eq(DbSchema.automationJobs.id, row.value.id))
-                .returning(),
-            );
-            return Arr.head(updated);
-          }),
+        const running = yield* database.run("nextPendingAutomationJob", (db) =>
+          db
+            .select({ resultId: DbSchema.automationJobs.resultId })
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.status, "running")),
+        );
+        const busy = running.map((row) => row.resultId);
+        const waiting = eq(DbSchema.automationJobs.status, "pending");
+        const notBusy =
+          busy.length === 0
+            ? waiting
+            : and(waiting, notInArray(DbSchema.automationJobs.resultId, busy));
+        const skipped = [...except];
+        const where =
+          skipped.length === 0
+            ? notBusy
+            : and(notBusy, notInArray(DbSchema.automationJobs.id, skipped));
+        const pending = yield* database.run("nextPendingAutomationJob", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(where)
+            .orderBy(queueRank, DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id)
+            .limit(1),
+        );
+        return Arr.head(pending);
+      });
+
+      // pending -> running, only if the row is still pending. An acknowledgement can be
+      // lost after the update commits: the same client already running is that success.
+      // An abort, or a different client, changes nothing.
+      const markRunning = Effect.fn("db.markAutomationJobRunning")(function* (
+        id: string,
+        serverId: string,
+      ) {
+        const rows = yield* database.run("markAutomationJobRunning", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ status: "running", startedAt: sql`now()`, serverId })
+            .where(
+              and(
+                eq(DbSchema.automationJobs.id, id),
+                eq(DbSchema.automationJobs.status, "pending"),
+              ),
+            )
+            .returning({ id: DbSchema.automationJobs.id }),
+        );
+        if (rows.length > 0) {
+          return true;
+        }
+        const current = yield* database.run("markAutomationJobRunning", (db) =>
+          db
+            .select({
+              status: DbSchema.automationJobs.status,
+              serverId: DbSchema.automationJobs.serverId,
+            })
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.id, id))
+            .limit(1),
+        );
+        const row = Arr.head(current);
+        return (
+          Option.isSome(row) && row.value.status === "running" && row.value.serverId === serverId
         );
       });
 
@@ -183,10 +204,10 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
       });
 
       // A pending job has no client to stop: closing its row is its whole abort, and the next
-      // claim no longer finds it. The status in the condition is what keeps a claim in flight
-      // honest: the claim locks the pending row it takes, so this update waits and then finds
-      // it running, or lands first and the claim never sees it. A row that is running or over
-      // is left alone, and the false says so. (result_id, action) is unique, so one row at most.
+      // selection no longer finds it. The status in the condition is what keeps a placement in
+      // flight honest: markRunning only takes a row that is still pending, so an abort that
+      // lands first stays aborted. A row that is running or over is left alone, and the false
+      // says so. (result_id, action) is unique, so one row at most.
       const abortPending = Effect.fn("db.abortPendingAutomationJob")(function* (
         resultId: string,
         action: AutomationAction,
@@ -207,39 +228,8 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return rows.length > 0;
       });
 
-      // Only a running row closes. reason is omitted when null so a previous value stays.
-      // A running row the fleet could not take: back to pending, as it was, so its place in
-      // the queue (created_at) is unchanged and the next tick can try again.
-      const unclaim = Effect.fn("db.unclaimAutomationJob")(function* (id: string) {
-        const rows = yield* database.run("unclaimAutomationJob", (db) =>
-          db
-            .update(DbSchema.automationJobs)
-            .set({ status: "pending", startedAt: null, serverId: null })
-            .where(
-              and(
-                eq(DbSchema.automationJobs.id, id),
-                eq(DbSchema.automationJobs.status, "running"),
-              ),
-            )
-            .returning({ id: DbSchema.automationJobs.id }),
-        );
-        return rows.length > 0;
-      });
-
-      const assign = Effect.fn("db.assignAutomationJob")(function* (id: string, serverId: string) {
-        yield* database.run("assignAutomationJob", (db) =>
-          db
-            .update(DbSchema.automationJobs)
-            .set({ serverId })
-            .where(
-              and(
-                eq(DbSchema.automationJobs.id, id),
-                eq(DbSchema.automationJobs.status, "running"),
-              ),
-            ),
-        );
-      });
-
+      // A pending row closes when it can never be placed (no ticket, no pin, no prompt).
+      // A running row closes when its run ends. reason is omitted when null so a previous value stays.
       const finish = Effect.fn("db.finishAutomationJob")(function* (
         id: string,
         status: FinishStatus,
@@ -257,7 +247,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
             .where(
               and(
                 eq(DbSchema.automationJobs.id, id),
-                eq(DbSchema.automationJobs.status, "running"),
+                inArray(DbSchema.automationJobs.status, ["pending", "running"]),
               ),
             )
             .returning({ id: DbSchema.automationJobs.id }),
@@ -358,13 +348,12 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
 
       return {
         enqueue,
-        claim,
+        nextPending,
+        markRunning,
         hasPending,
         jobStatus,
         findRunning,
         abortPending,
-        unclaim,
-        assign,
         finish,
         listJobs,
       };

@@ -5,6 +5,7 @@ import { TestClock } from "effect/testing";
 import { HttpClientError } from "effect/unstable/http";
 import * as Qemu from "../../src/automation-client/qemu.ts";
 import * as ProxyClient from "../../src/client/proxy-client.ts";
+import * as ExternalFailure from "../../src/external-failure.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 
@@ -106,6 +107,9 @@ describe("Qemu.reserve unhappy path", () => {
       const error = yield* Effect.flip(Qemu.reserve(proxy)(AGENT));
       expect(error).toMatchObject({ _tag: "Internal", agentId: AGENT });
       expect(Render.headline(error)).toBe(`internal error: POST ${SERVER}/reserve failed`);
+      expect(Render.errorDetail(ExternalFailure.causeOf(error.cause))).toContain(
+        "connect ECONNREFUSED 127.0.0.1:55555",
+      );
     }),
   );
 });

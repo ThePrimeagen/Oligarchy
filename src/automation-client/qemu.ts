@@ -6,9 +6,10 @@ import type * as Sessions from "./sessions.ts";
 
 // The guest host, reached through the reverse proxy, as Sessions sees it: a 503 is the fleet
 // being full, which the dispatcher places elsewhere; every other failure is this client's to
-// report.
+// report. The cause is the proxy failure itself, so a network error under it is not replaced
+// by a fresh error that only keeps the message.
 const internal = (agent: string, error: ProxyClient.Failure): Errors.Internal =>
-  Errors.Internal.make({ cause: new Error(error.message), agentId: agent });
+  Errors.Internal.make({ cause: error, agentId: agent });
 
 const refused = (
   agent: string,

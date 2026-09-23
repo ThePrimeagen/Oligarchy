@@ -574,12 +574,12 @@ export const fakeAutomationStore = (
         jobs.push(row);
         return row;
       }),
-    claim: (serverId, except = []) =>
+    nextPending: (except = []) =>
       Effect.sync(() => {
         const busy = new Set(
           jobs.filter((job) => job.status === "running").map((job) => job.resultId),
         );
-        // Queue order as the real store claims: mint, then diagnose, then drive; then created_at, id.
+        // Queue order as the real store selects: mint, then diagnose, then drive; then created_at, id.
         const rank = (job: FakeAutomationJob): number => {
           if (job.action === "mint") {
             return 0;
@@ -603,13 +603,21 @@ export const fakeAutomationStore = (
               left.id.localeCompare(right.id),
           );
         const job = pending[0];
+        return job === undefined ? Option.none() : Option.some(job);
+      }),
+    markRunning: (id, serverId) =>
+      Effect.sync(() => {
+        const job = jobs.find((row) => sameId(row.id, id));
         if (job === undefined) {
-          return Option.none();
+          return false;
         }
-        job.status = "running";
-        job.startedAt = new Date();
-        job.serverId = serverId;
-        return Option.some(job);
+        if (job.status === "pending") {
+          job.status = "running";
+          job.startedAt = new Date();
+          job.serverId = serverId;
+          return true;
+        }
+        return job.status === "running" && job.serverId === serverId;
       }),
     hasPending: (resultId, action) =>
       Effect.sync(() =>
@@ -643,27 +651,11 @@ export const fakeAutomationStore = (
         job.finishedAt = new Date();
         return true;
       }),
-    unclaim: (id) =>
-      Effect.sync(() => {
-        const job = jobs.find((row) => row.id === id && row.status === "running");
-        if (job === undefined) {
-          return false;
-        }
-        job.status = "pending";
-        job.startedAt = null;
-        job.serverId = null;
-        return true;
-      }),
-    assign: (id, serverId) =>
-      Effect.sync(() => {
-        const job = jobs.find((row) => row.id === id && row.status === "running");
-        if (job !== undefined) {
-          job.serverId = serverId;
-        }
-      }),
     finish: (id, status, reason) =>
       Effect.sync(() => {
-        const job = jobs.find((row) => row.id === id && row.status === "running");
+        const job = jobs.find(
+          (row) => sameId(row.id, id) && (row.status === "running" || row.status === "pending"),
+        );
         if (job === undefined) {
           return false;
         }
