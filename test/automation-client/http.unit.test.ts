@@ -615,22 +615,25 @@ describe("interruption", () => {
 });
 
 describe("POST /abort happy path", () => {
-  it.effect("kills the matching opencode and answers ok", () =>
-    Effect.gen(function* () {
-      const fixed = fixture(() => ({}));
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        expect((yield* reserve(http)).status).toBe(200);
-        const pending = yield* Effect.forkChild(run(http));
-        const spawned = yield* fixed.spawner.nextSpawn;
-        const response = yield* abort(http);
-        expect(response.status).toBe(200);
-        expect(yield* response.json).toEqual({ ok: "true" });
-        expect(spawned.kills).toEqual(["SIGTERM"]);
-        const runResponse = yield* Fiber.join(pending);
-        expect(runResponse.status).toBe(500);
-      }).pipe(Effect.provide(serve(fixed)));
-    }),
+  it.effect(
+    "kills the matching opencode and answers ok, and its /run answers 409 run aborted",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(() => ({}));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          expect((yield* reserve(http)).status).toBe(200);
+          const pending = yield* Effect.forkChild(run(http));
+          const spawned = yield* fixed.spawner.nextSpawn;
+          const response = yield* abort(http);
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+          expect(spawned.kills).toEqual(["SIGTERM"]);
+          const runResponse = yield* Fiber.join(pending);
+          expect(runResponse.status).toBe(409);
+          expect(yield* runResponse.json).toEqual({ error: "run aborted" });
+        }).pipe(Effect.provide(serve(fixed)));
+      }),
   );
 });
 

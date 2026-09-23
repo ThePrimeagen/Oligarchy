@@ -487,7 +487,8 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           // lives on the runs scope so a shutdown interrupts it. It starts uninterruptible: a
           // shutdown that lands before it runs is held until the /run wait, the one
           // interruptible part, so the job is still stopped at its automation client. Once
-          // /run answered, a shutdown waits for the result to judge the job.
+          // /run answered, a shutdown waits for the result to judge the job. A 409 is a run
+          // POST /abort ended: that abort closes the row once the automation client answers it.
           const placement = placed.placement;
           yield* Effect.forkIn(
             Effect.interruptible(
@@ -496,10 +497,17 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               Effect.andThen(judge(job)),
               Effect.matchCauseEffect({
                 onSuccess: () => closeJob(job, succeeded),
-                onFailure: (cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? stopAtShutdown(job, placement)
-                    : closeJob(job, failedFrom(cause)),
+                onFailure: (cause) => {
+                  if (Cause.hasInterruptsOnly(cause)) {
+                    return stopAtShutdown(job, placement);
+                  }
+                  const error = Cause.findErrorOption(cause);
+                  return Option.isSome(error) &&
+                    error.value._tag === "AutomationClientError" &&
+                    error.value.status === 409
+                    ? Effect.void
+                    : closeJob(job, failedFrom(cause));
+                },
               }),
               Effect.catchCause((cause) => {
                 const error = Cause.squash(cause);

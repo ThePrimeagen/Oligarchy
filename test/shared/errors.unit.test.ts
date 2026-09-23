@@ -129,6 +129,12 @@ const cases: ReadonlyArray<WireCase> = [
     status: 500,
   },
   {
+    name: "RunAborted",
+    wire: Errors.RunAbortedWire,
+    error: Errors.RunAborted.make({ agentId: AGENT_ID }),
+    status: 409,
+  },
+  {
     name: "AtCapacity",
     wire: Errors.AtCapacityWire,
     error: Errors.AtCapacity.make({ message: "at capacity: max-jobs is 2", agentId: AGENT_ID }),
@@ -284,6 +290,7 @@ describe("domain error messages", () => {
     expect(Errors.LogLine.make({ text: "x", level: "error" })._tag).toBe("LogLine");
     expect(Errors.CliFailed.make({ command: "tool", message: "x" })._tag).toBe("CliFailed");
     expect(Errors.RunFailed.make({ message: "x" })._tag).toBe("RunFailed");
+    expect(Errors.RunAborted.make({})._tag).toBe("RunAborted");
     expect(Errors.AtCapacity.make({ message: "x" })._tag).toBe("AtCapacity");
     expect(Errors.SetupNeeded.make({ message: "x" })._tag).toBe("SetupNeeded");
   });

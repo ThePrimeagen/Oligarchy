@@ -573,7 +573,7 @@ describeWithDatabase("automation client POST /run", () => {
           JSON.stringify({ ticket: "OLI-42" }),
         );
         expect(aborted.status).toBe(200);
-        expect((await running).status).toBe(500);
+        expect((await running).status).toBe(409);
         expect(
           lines(process.stdout()).some((line) =>
             line.includes("POST /reserve failed: at capacity: max-jobs is 1"),
@@ -591,7 +591,7 @@ describeWithDatabase("automation client POST /run", () => {
 });
 
 describeWithDatabase("automation client POST /abort", () => {
-  it.live("kills a running opencode and answers 200", () =>
+  it.live("kills a running opencode and answers 200, and its /run answers 409 run aborted", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));

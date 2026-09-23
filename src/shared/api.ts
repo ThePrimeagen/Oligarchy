@@ -276,7 +276,8 @@ export const reserveRun = HttpApiEndpoint.post("reserve", "/reserve", {
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.Ok,
-  error: [Errors.RunFailedWire],
+  // 409: POST /abort ended the run. 500: opencode failed.
+  error: [Errors.RunAbortedWire, Errors.RunFailedWire],
 });
 
 export const abort = HttpApiEndpoint.post("abort", "/abort", {

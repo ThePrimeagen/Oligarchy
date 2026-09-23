@@ -742,6 +742,28 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
+  it.effect(
+    "a 409 is a run POST /abort ended: the row is left running for that abort to close, and nothing is reported",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(
+          reserving(() => FakeHttp.json({ error: "run aborted" }, 409)),
+        );
+        yield* start(fixed, http.layer);
+        yield* eventually(() => sentTo(http, "/run").length === 1, "the drive running");
+        for (let i = 0; i < 100; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "running", finishedAt: null });
+        expect(FakeLog.texts(fixed.log)).toEqual([`dispatching drive; ${URL}; ${MODEL}`]);
+        expect(sentryErrors(fixed.log)).toEqual([]);
+      }),
+  );
+
   it.effect("no live automation-client does not claim and does not POST", () =>
     Effect.gen(function* () {
       const fixed = harness();

@@ -178,6 +178,18 @@ export class RunFailed extends Schema.TaggedError<RunFailed>("@oligarchy/shared/
   override readonly [ErrorReporter.ignore] = true;
 }
 
+// A run POST /abort ended. 409, not RunFailed's 500: the run did not fail, and the job is closed
+// by the abort that stopped it, not by whoever waited on /run.
+export class RunAborted extends Schema.TaggedError<RunAborted>(
+  "@oligarchy/shared/errors/RunAborted",
+)(
+  "RunAborted",
+  { message: fixedMessage("run aborted"), agentId: Schema.optionalKey(Schema.String) },
+  { httpApiStatus: 409 },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
+
 // A reserve refused because the process already holds --max-jobs jobs. 503: the server is
 // temporarily unable to take the work (RFC 9110 §15.6.4), not the caller's mistake; the caller
 // places it elsewhere or retries later. Start and run do not answer this: they consume a
@@ -220,6 +232,7 @@ export type ApiError =
   | ServerFailed
   | NoServer
   | RunFailed
+  | RunAborted
   | AtCapacity
   | SetupNeeded;
 
@@ -246,6 +259,7 @@ const apiErrorClasses = {
   ServerFailed,
   NoServer,
   RunFailed,
+  RunAborted,
   AtCapacity,
   SetupNeeded,
 } satisfies Record<ApiError["_tag"], Schema.Top>;
@@ -322,6 +336,10 @@ export const NoServerWire = wireError(
 export const RunFailedWire = wireError(
   RunFailed,
   (message) => ({ _tag: "RunFailed", message }) as const,
+);
+export const RunAbortedWire = wireError(
+  RunAborted,
+  () => ({ _tag: "RunAborted", message: "run aborted" }) as const,
 );
 export const AtCapacityWire = wireError(
   AtCapacity,
