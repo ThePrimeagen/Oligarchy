@@ -24,8 +24,8 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
-// Where the automation server puts a ticket whose job it failed without a run to judge.
-export const FAILED_STATE = "Failed";
+// Where the automation server puts a ticket the system failed, with a comment saying how.
+export const ERRORED_STATE = "Errored";
 // A ticket in Automation Needed that already has its pending job. The watch's list leaves
 // these out, so a restart does not keep a map of tickets that are waiting to run.
 export const READY_LABEL = "ready";
@@ -102,6 +102,12 @@ const ISSUE_UPDATE_MUTATION = `mutation ExperimentIssueUpdate($id: String!, $inp
   }
 }`;
 
+const COMMENT_CREATE_MUTATION = `mutation ExperimentCommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+  }
+}`;
+
 const ISSUES_QUERY = `query ExperimentIssues($filter: IssueFilter!, $after: String) {
   issues(first: 100, after: $after, filter: $filter) {
     nodes {
@@ -146,6 +152,9 @@ const IssueCreate = Schema.Struct({
   issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.NullOr(LinearTicket) }),
 });
 const IssueUpdate = Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean }) });
+const CommentCreate = Schema.Struct({
+  commentCreate: Schema.Struct({ success: Schema.Boolean }),
+});
 const Backlog = Schema.Struct({
   issues: Schema.Struct({
     nodes: Schema.Array(LinearBacklogTicket),
@@ -192,7 +201,11 @@ export type LinearService = {
   // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
   readonly markReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
-  readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  // The move lands before the comment, so a retry after a refused comment moves nothing new.
+  readonly moveToErrored: (
+    identifier: string,
+    message: string,
+  ) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -378,12 +391,16 @@ const makeLinear = (
       );
     });
 
-    // Looked up on its own, not in stateIds: `test run` and `mint` must not need a Failed column.
-    const moveToFailed = Effect.fn("Linear.moveToFailed")(function* (identifier: string) {
+    // Looked up on its own, not in stateIds: `test run` and `mint` must not need an Errored
+    // column.
+    const moveToErrored = Effect.fn("Linear.moveToErrored")(function* (
+      identifier: string,
+      message: string,
+    ) {
       const team = yield* teamId;
-      const stateId = yield* stateNamed(team, FAILED_STATE);
+      const stateId = yield* stateNamed(team, ERRORED_STATE);
       yield* request(
-        "moveToFailed",
+        "moveToErrored",
         ISSUE_UPDATE_MUTATION,
         { id: identifier, input: { stateId } },
         IssueUpdate,
@@ -392,8 +409,23 @@ const makeLinear = (
           (updated) => updated.issueUpdate.success,
           () =>
             Errors.LinearError.make({
-              operation: "moveToFailed",
-              message: `linear: moving ${identifier} to Failed failed`,
+              operation: "moveToErrored",
+              message: `linear: moving ${identifier} to Errored failed`,
+            }),
+        ),
+      );
+      yield* request(
+        "moveToErrored",
+        COMMENT_CREATE_MUTATION,
+        { input: { issueId: identifier, body: message } },
+        CommentCreate,
+      ).pipe(
+        Effect.filterOrFail(
+          (created) => created.commentCreate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveToErrored",
+              message: `linear: commenting on ${identifier} failed`,
             }),
         ),
       );
@@ -535,7 +567,7 @@ const makeLinear = (
       moveIssue,
       markReady,
       clearReady,
-      moveToFailed,
+      moveToErrored,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,
