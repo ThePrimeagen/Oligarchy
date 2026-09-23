@@ -106,6 +106,8 @@ const statusExits: Record<Domain.SessionEndStatus, Exit.Exit<void, string>> = {
   timed_out: Exit.fail("deadline_exceeded"),
   aborted: Exit.fail("aborted"),
   failed: Exit.fail("internal_error"),
+  completed: Exit.void,
+  errored: Exit.fail("internal_error"),
 };
 
 export const statusExit = (status: Domain.SessionEndStatus): Exit.Exit<void, string> =>

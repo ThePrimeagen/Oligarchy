@@ -57,7 +57,7 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
     });
 
     // A qemu server that died left its sessions downloading or running, with nothing to end
-    // them. The one that comes back on its url fails every such row routed to it, and the agent
+    // them. The one that comes back on its url errors every such row routed to it, and the agent
     // runs on them, in one transaction, and gets back their ids.
     const failRoutedSessions = Effect.fn("db.failRoutedSessions")(function* (
       serverUrl: string,
@@ -69,7 +69,7 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
           const failed = yield* Client.attempt("failRoutedSessions", () =>
             tx
               .update(DbSchema.sessions)
-              .set({ status: "failed", reason, endedAt })
+              .set({ status: "errored", reason, endedAt })
               .where(
                 and(
                   inArray(DbSchema.sessions.status, ["downloading", "running"]),

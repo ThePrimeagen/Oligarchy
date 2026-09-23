@@ -484,6 +484,7 @@ describe("client requests", () => {
         http: recorder.layer,
       });
       yield* run(base, { http: recorder.layer });
+      yield* run([...base, "--status", "completed"], { http: recorder.layer });
       expect(recorder.requests[0]?.url).toBe(`${SERVER}/stop`);
       expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({
         id: SESSION,
@@ -492,6 +493,11 @@ describe("client requests", () => {
         reason: "installer hung",
       });
       expect(parsed(recorder.requests[1]?.body ?? "")).toEqual({ id: SESSION, agent: AGENT });
+      expect(parsed(recorder.requests[2]?.body ?? "")).toEqual({
+        id: SESSION,
+        agent: AGENT,
+        status: "completed",
+      });
     }),
   );
 
@@ -577,17 +583,21 @@ describe("client requests", () => {
     }),
   );
 
-  it.effect("stop rejects a verdict outside succeeded|failed|aborted", () =>
-    Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
-      const error = yield* Effect.flip(
-        run(["stop", ...shared, "--session-id", SESSION, "--status", "done"], {
-          http: recorder.layer,
-        }),
-      );
-      expect(showHelp(error).errors.length).toBeGreaterThan(0);
-      expect(recorder.requests).toEqual([]);
-    }),
+  it.effect(
+    "stop rejects a verdict outside succeeded|failed|aborted|completed, errored included",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(ok);
+        for (const status of ["done", "errored"]) {
+          const error = yield* Effect.flip(
+            run(["stop", ...shared, "--session-id", SESSION, "--status", status], {
+              http: recorder.layer,
+            }),
+          );
+          expect(showHelp(error).errors.length).toBeGreaterThan(0);
+        }
+        expect(recorder.requests).toEqual([]);
+      }),
   );
 });
 

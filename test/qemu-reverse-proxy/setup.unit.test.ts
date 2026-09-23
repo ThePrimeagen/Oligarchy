@@ -141,10 +141,13 @@ describe("decide", () => {
     expect(Setup.decide(row({ resultStatus: "passed" }))).toBe("done");
   });
 
-  it("a failed, aborted, or timed out result releases the lock (unhappy)", () => {
+  it("a failed, errored, aborted, timed out or unjudged result releases the lock (unhappy)", () => {
     expect(Setup.decide(row({ resultStatus: "failed" }))).toBe("release");
+    expect(Setup.decide(row({ resultStatus: "errored" }))).toBe("release");
     expect(Setup.decide(row({ resultStatus: "aborted" }))).toBe("release");
     expect(Setup.decide(row({ resultStatus: "timed_out" }))).toBe("release");
+    // Only a pass says the disk was minted; a completed install nobody judged may not have saved.
+    expect(Setup.decide(row({ resultStatus: "completed" }))).toBe("release");
   });
 
   it("an open result whose drive already ended releases the lock (unhappy)", () => {
@@ -152,6 +155,10 @@ describe("decide", () => {
       "release",
     );
     expect(Setup.decide(row({ resultStatus: "pending", driveStatus: "failed" }))).toBe("release");
+    expect(Setup.decide(row({ resultStatus: "running", driveStatus: "completed" }))).toBe(
+      "release",
+    );
+    expect(Setup.decide(row({ resultStatus: "running", driveStatus: "errored" }))).toBe("release");
   });
 
   it("a pending result with no finished drive is still in flight", () => {

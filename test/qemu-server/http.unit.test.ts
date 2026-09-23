@@ -346,6 +346,27 @@ describe("Sessions endpoints happy path", () => {
     }),
   );
 
+  it.effect("POST /stop forwards completed, and refuses errored: only the server errors", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* client;
+        yield* api.Sessions.stop({
+          payload: Contract.StopBody.make({ id: SESSION_ID, agent: AGENT_ID, status: "completed" }),
+        });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/stop", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ id: SESSION_ID, agent: AGENT_ID, status: "errored" }),
+        });
+        expect(raw.status).toBe(400);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.sessions.calls.filter((call) => call.method === "stop")).toEqual([
+        { method: "stop", args: [SESSION_ID, "completed", undefined] },
+      ]);
+    }),
+  );
+
   it.effect("POST /stop without a verdict forwards undefined status and reason", () =>
     Effect.gen(function* () {
       const fixed = fixture();

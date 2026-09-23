@@ -26,6 +26,8 @@ export const sessionStatus = pgEnum("session_status", [
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]);
 export const testRunStatus = pgEnum("test_run_status", [
   "pending",
@@ -42,6 +44,8 @@ export const testResultStatus = pgEnum("test_result_status", [
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]);
 // Declared in ascending severity: Postgres orders enums by declaration, so
 // "WHERE level >= 'error'" reads the scary lines.
@@ -62,6 +66,8 @@ export const automationJobStatus = pgEnum("automation_job_status", [
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]);
 
 // mode is the twin of Domain.SessionMode, maintained by hand with it; absent means fresh.

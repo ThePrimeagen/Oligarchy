@@ -149,7 +149,7 @@ export type SessionsService = {
   ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
   // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
   // powered down, its disk and firmware copy are kept, the row closes succeeded. A guest that
-  // will not power off, or a disk that cannot be kept, ends the session failed instead. A
+  // will not power off, or a disk that cannot be kept, ends the session errored instead. A
   // resumed session is refused BadRequest and runs on: its disk is an overlay whose base another
   // save may replace, so flattening it could keep the wrong machine.
   readonly save: (
@@ -494,7 +494,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
           Effect.gen(function* () {
             // Best effort: the row and the caller's error are what matter once boot has failed.
             yield* Effect.ignore(kill(live));
-            yield* sessionStore.endSession(live.id, "failed", detail(error)).pipe(
+            yield* sessionStore.endSession(live.id, "errored", detail(error)).pipe(
               Effect.catch((failure) =>
                 log.error(`db: recording a failed start failed too: ${failure.message}`, {
                   location: live.id,
@@ -586,7 +586,10 @@ const make = (maxJobs: number, selfUrl?: string) =>
         held.reserved.has(live.agent)
           ? held
           : { count: held.count + 1, reserved: mapWith(held.reserved, live.agent, since) },
-      ).pipe(Effect.andThen(finishLiveSession(live, "failed")), Effect.andThen(Effect.fail(error)));
+      ).pipe(
+        Effect.andThen(finishLiveSession(live, "errored")),
+        Effect.andThen(Effect.fail(error)),
+      );
 
     const start = Effect.fn("Sessions.start")(function* (
       body: Contract.StartBody,
@@ -790,7 +793,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         );
         return { png, imageId };
       });
-      return yield* followed(live, "get-image", work);
+      return yield* followed(live, "get-image", work).pipe(Effect.tapError(() => endIfGone(live)));
     });
 
     const serial = Effect.fn("Sessions.serial")(function* (live: LiveSession) {
@@ -829,7 +832,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         live.qemu
           .sendKeys(chords, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
-      );
+      ).pipe(Effect.tapError(() => endIfGone(live)));
       return yield* log.info(
         `sent ${String(chords.length)} chords in ${yield* elapsed(started)}ms`,
         {
@@ -868,7 +871,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         live.qemu
           .mouse(gesture, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
-      );
+      ).pipe(Effect.tapError(() => endIfGone(live)));
       return yield* log.info(
         `mouse ${gesture._tag} ${describeGesture(gesture)} in ${yield* elapsed(started)}ms`,
         { location: live.id, agentId: live.agent },
@@ -938,6 +941,38 @@ const make = (maxJobs: number, selfUrl?: string) =>
             }),
           ),
         );
+      });
+
+    // A dead QEMU is noticed by the next exchange failing. That is the system failing, not the
+    // driver's verdict, so the session ends errored here and its driver's next request is 404.
+    // The caller still gets the exchange's own failure.
+    const endIfGone = (live: LiveSession): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (yield* live.qemu.running) {
+          return;
+        }
+        const owned = yield* Ref.modify(sessions, (map) =>
+          map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
+        );
+        if (!owned) {
+          return;
+        }
+        const code = yield* live.qemu.exited;
+        const reason = `qemu exited ${code === null ? "on a signal" : String(code)}`;
+        const captured = yield* captureDebugLog(live);
+        yield* killLogged(live, "errored cleanup failed", live.agent);
+        yield* sessionStore.endSession(live.id, "errored", reason).pipe(
+          Effect.catch((failure) =>
+            log.error(`db: recording an errored session failed too: ${failure.message}`, {
+              location: live.id,
+              agentId: live.agent,
+              cause: failure,
+            }),
+          ),
+        );
+        yield* log.info(`stopped; errored; ${reason}`, attribution(live.id, live.agent));
+        yield* saveDebugLog(live, captured);
+        yield* finishLiveSession(live, "errored");
       });
 
     const stop = Effect.fn("Sessions.stop")(function* (
@@ -1085,7 +1120,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         const captured = yield* captureDebugLog(live);
         yield* killLogged(live, "save cleanup failed", live.agent);
         // Best effort: the caller's error is what matters once the save has failed.
-        yield* sessionStore.endSession(live.id, "failed", error.message).pipe(
+        yield* sessionStore.endSession(live.id, "errored", error.message).pipe(
           Effect.catch((failure) =>
             log.error(`db: recording a failed save failed too: ${failure.message}`, {
               location: live.id,
@@ -1094,9 +1129,9 @@ const make = (maxJobs: number, selfUrl?: string) =>
             }),
           ),
         );
-        yield* log.info(`stopped; failed; ${error.message}`, attribution(live.id, live.agent));
+        yield* log.info(`stopped; errored; ${error.message}`, attribution(live.id, live.agent));
         yield* saveDebugLog(live, captured);
-        yield* finishLiveSession(live, "failed");
+        yield* finishLiveSession(live, "errored");
         return yield* Effect.fail(error);
       }
       const captured = yield* captureDebugLog(live);
@@ -1278,14 +1313,18 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // -------------------------------------------------------------------------
 
     // This process holds no session yet, so a row still downloading or running that the qemu
-    // reverse proxy routed to this url was left by one that died. It is failed before the first
+    // reverse proxy routed to this url was left by one that died. It is errored before the first
     // request, so a driver reads a finished session rather than a live one. A qemu server with
     // no url of its own has none routed to it. A cleanup that cannot write fails the startup.
     if (selfUrl !== undefined) {
       const ids = yield* sessionStore.failRoutedSessions(selfUrl, RESTART_REASON);
-      yield* Effect.forEach(ids, (id) => log.error(`failed; ${RESTART_REASON}`, { location: id }), {
-        discard: true,
-      });
+      yield* Effect.forEach(
+        ids,
+        (id) => log.error(`errored; ${RESTART_REASON}`, { location: id }),
+        {
+          discard: true,
+        },
+      );
     }
 
     // -------------------------------------------------------------------------
@@ -1297,7 +1336,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
       reason: string,
     ): Effect.Effect<void, Errors.DatabaseError> =>
       Effect.gen(function* () {
-        const status = yield* Ref.make<Domain.SessionEndStatus>("failed");
+        const status = yield* Ref.make<Domain.SessionEndStatus>("errored");
         yield* Effect.gen(function* () {
           const captured = yield* captureDebugLog(live);
           yield* kill(live);

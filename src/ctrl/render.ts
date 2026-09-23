@@ -17,13 +17,23 @@ export const STATUS_COLOR: Readonly<Record<Domain.SessionStatus, string>> = {
   failed: "\x1b[31m",
   aborted: "\x1b[91m",
   timed_out: "\x1b[35m",
+  completed: "\x1b[36m",
+  errored: "\x1b[1;31m",
 };
 
 export type AutomationJobRow = {
   readonly ticket: string | null;
   readonly test: string;
   readonly action: "drive" | "diagnose" | "mint";
-  readonly status: "pending" | "running" | "succeeded" | "failed" | "aborted" | "timed_out";
+  readonly status:
+    | "pending"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "aborted"
+    | "timed_out"
+    | "completed"
+    | "errored";
   readonly createdAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -42,6 +52,8 @@ export const JOB_STATUS_COLOR: Readonly<Record<AutomationJobRow["status"], strin
   failed: "\x1b[31m",
   aborted: "\x1b[91m",
   timed_out: "\x1b[35m",
+  completed: "\x1b[36m",
+  errored: "\x1b[1;31m",
 };
 
 const RESET = "\x1b[0m";

@@ -17,8 +17,9 @@ export const CHECK_INTERVAL = "30 seconds";
 export type Decision = "gone" | "keep" | "release" | "done";
 
 // The row was read just now. gone: it is not there (a server that came back deleted it).
-// done: the result passed; the row stays and we stop watching it. release: the setup failed
-// or never got a result, so the row goes and a later 409 may try again. keep: still in flight.
+// done: the result passed; the row stays and we stop watching it. release: the setup ended
+// without a pass (a completed install nobody judged may not have saved) or never got a result,
+// so the row goes and a later 409 may try again. keep: still in flight.
 export const decide = (fresh: Option.Option<SetupRequests.Situation>): Decision => {
   if (Option.isNone(fresh)) {
     return "gone";
@@ -36,8 +37,10 @@ export const decide = (fresh: Option.Option<SetupRequests.Situation>): Decision 
     case "passed":
       return "done";
     case "failed":
+    case "errored":
     case "aborted":
     case "timed_out":
+    case "completed":
       return "release";
     case "pending":
     case "running":
@@ -52,6 +55,8 @@ export const decide = (fresh: Option.Option<SetupRequests.Situation>): Decision 
     case "failed":
     case "aborted":
     case "timed_out":
+    case "completed":
+    case "errored":
       return "release";
   }
   return "keep";

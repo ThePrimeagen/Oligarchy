@@ -6,7 +6,7 @@ import * as DbSchema from "./schema.ts";
 
 export type AutomationJobRow = typeof DbSchema.automationJobs.$inferSelect;
 export type AutomationAction = AutomationJobRow["action"];
-export type FinishStatus = "succeeded" | "failed" | "aborted";
+export type FinishStatus = "succeeded" | "failed" | "aborted" | "completed" | "errored";
 
 // One job with the ticket and test it is for, its three stamps, the reason it closed with, where
 // it runs, and the database's clock at the read, so an age is measured against the clock that
@@ -42,7 +42,7 @@ export type AutomationQueue = {
   readonly completed: ReadonlyArray<AutomationJobListRow>;
 };
 
-const COMPLETED = ["succeeded", "failed", "aborted", "timed_out"] as const;
+const COMPLETED = ["succeeded", "failed", "aborted", "timed_out", "completed", "errored"] as const;
 
 export type EnqueueInput = {
   readonly resultId: string;

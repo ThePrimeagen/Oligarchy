@@ -106,6 +106,13 @@
       "when": 1790008738640,
       "tag": "0015_mint_action",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790200103875,
+      "tag": "0016_outstanding_bishop",
+      "breakpoints": true
     }
   ]
 }
