@@ -30,6 +30,9 @@ type Fixture = {
   readonly qemu: Array<string>;
   // When set, each QEMU reserve waits on it, so a test can hold one /reserve in flight.
   readonly holdQemu?: Deferred.Deferred<void>;
+  // Completed once a QEMU reserve is asked. The request crosses a real socket, so yielding
+  // is no promise it has arrived.
+  readonly reachedQemu?: Deferred.Deferred<void>;
 };
 
 // Room for the two runs some tests hold at once; the capacity test passes 1.
@@ -51,6 +54,9 @@ const qemuRecording =
   (agent, _resume, server) =>
     Effect.gen(function* () {
       fixed.qemu.push(server === undefined ? agent : `${agent} ${server}`);
+      if (fixed.reachedQemu !== undefined) {
+        yield* Deferred.succeed(fixed.reachedQemu, undefined);
+      }
       if (fixed.holdQemu !== undefined) {
         yield* Deferred.await(fixed.holdQemu);
       }
@@ -453,13 +459,12 @@ describe("POST /run unhappy path", () => {
     () =>
       Effect.gen(function* () {
         const holdQemu = yield* Deferred.make<void>();
-        const fixed = { ...fixture(() => ({}), 2), holdQemu };
+        const reachedQemu = yield* Deferred.make<void>();
+        const fixed = { ...fixture(() => ({}), 2), holdQemu, reachedQemu };
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
           const pending = yield* Effect.forkChild(reserve(http));
-          for (let i = 0; i < 100 && fixed.qemu.length < 1; i++) {
-            yield* Effect.yieldNow;
-          }
+          yield* Deferred.await(reachedQemu);
           expect(fixed.qemu).toEqual([TICKET]);
           const refused = yield* reserve(http, "OLI-99");
           expect(refused.status).toBe(503);
