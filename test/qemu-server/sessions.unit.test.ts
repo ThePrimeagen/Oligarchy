@@ -1266,6 +1266,35 @@ describe("sendKeys", () => {
       }),
   );
 
+  it.effect("a screenshot or a click that fails with QEMU gone ends the session errored too", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        script: {
+          screendump: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          mouse: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const shot = yield* start();
+          yield* h.qemu.exit(shot.id, 1);
+          expect((yield* Effect.flip(shot.sessions.image(shot.live)))._tag).toBe("ExchangeFailed");
+          const click = yield* start(OTHER_AGENT);
+          yield* h.qemu.exit(click.id, 1);
+          const clicked = yield* Effect.flip(
+            click.sessions.mouse(click.live, { _tag: "click", x: 0.5, y: 0.5, button: "left" }),
+          );
+          expect(clicked._tag).toBe("ExchangeFailed");
+          expect(h.sessions.sessions.map((row) => [row.id, row.status, row.reason])).toEqual([
+            [shot.id, "errored", "qemu exited 1"],
+            [click.id, "errored", "qemu exited 1"],
+          ]);
+          expect(h.debugLogs.saves).toHaveLength(2);
+        }),
+      );
+    }),
+  );
+
   it.effect(
     "a gone QEMU whose row cannot be closed still answers the exchange failure and logs why",
     () =>

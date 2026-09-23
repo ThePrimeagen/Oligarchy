@@ -149,7 +149,7 @@ export type SessionsService = {
   ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
   // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
   // powered down, its disk and firmware copy are kept, the row closes succeeded. A guest that
-  // will not power off, or a disk that cannot be kept, ends the session failed instead. A
+  // will not power off, or a disk that cannot be kept, ends the session errored instead. A
   // resumed session is refused BadRequest and runs on: its disk is an overlay whose base another
   // save may replace, so flattening it could keep the wrong machine.
   readonly save: (
