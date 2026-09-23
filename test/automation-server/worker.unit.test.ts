@@ -1,16 +1,33 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Option, Redacted, Scope } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Redacted,
+  Scope,
+} from "effect";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import { TestClock } from "effect/testing";
-import { HttpClient, HttpClientError } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpRouter } from "effect/unstable/http";
+import { NodeHttpServer } from "@effect/platform-node";
+import * as Handlers from "../../src/automation-client/handlers.ts";
+import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as AutomationClient from "../../src/automation-server/client.ts";
+import * as Config from "../../src/config.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
+import * as Log from "../../src/observability/log.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
+import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -1789,8 +1806,9 @@ const seedRunning = (
   automation: Stores.FakeAutomationStore,
   serverId: string | null,
   resultId = RESULT_ID,
+  action: "drive" | "diagnose" | "mint" = "drive",
 ) => {
-  seedJob(automation, "drive", resultId);
+  seedJob(automation, action, resultId);
   const job = automation.jobs.at(-1);
   if (job !== undefined) {
     job.status = "running";
@@ -1855,6 +1873,122 @@ describe("a running job left by the last automation server", () => {
         ]);
         expect(FakeLog.texts(fixed.log)).toContain(`drive failed; ${RESTARTED}`);
       }),
+  );
+
+  it.effect(
+    "a drive or mint whose result the driver closed has finished: it is closed succeeded, and nothing is sent, moved, or reported",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const mintResult = "44444444-4444-4444-8444-444444444444";
+        const waitingResult = "55555555-5555-4555-8555-555555555555";
+        const clientId = seedLiveClient(fixed.servers);
+        seedResult(fixed.tests, TICKET, "passed", RESULT_ID);
+        seedResult(fixed.tests, TICKET_B, "failed", RESULT_B);
+        seedResult(fixed.tests, "OLI-44", "passed", mintResult);
+        seedResult(fixed.tests, "OLI-45", "pending", waitingResult);
+        seedRunning(fixed.automation, clientId, RESULT_ID);
+        seedRunning(fixed.automation, clientId, RESULT_B);
+        seedRunning(fixed.automation, clientId, mintResult, "mint");
+        seedJob(fixed.automation, "drive", waitingResult);
+        const http = FakeHttp.recordRequests((_, url) =>
+          url.pathname === "/run"
+            ? Effect.sync(() => {
+                const waiting = fixed.tests.results.find((row) => row.id === waitingResult);
+                if (waiting !== undefined) {
+                  waiting.status = "passed";
+                }
+                return FakeHttp.json({ ok: "true" });
+              })
+            : FakeHttp.json({ ok: "true" }),
+        );
+        yield* start(fixed, http.layer);
+        yield* eventually(
+          () => fixed.automation.jobs[3]?.status === "succeeded",
+          "the pending job ran",
+        );
+        expect(fixed.automation.jobs.slice(0, 3)).toEqual(
+          [0, 1, 2].map(() =>
+            expect.objectContaining({
+              status: "succeeded",
+              reason: null,
+              serverId: clientId,
+              finishedAt: expect.any(Date),
+            }),
+          ),
+        );
+        expect(
+          http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
+        ).toEqual([
+          `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", model: MODEL })}`,
+        ]);
+        expect(fixed.linear.calls).toEqual([
+          cleared(TICKET),
+          cleared(TICKET_B),
+          cleared("OLI-44"),
+          cleared("OLI-45"),
+        ]);
+        expect(sentryErrors(fixed.log)).toEqual([]);
+        expect(FakeLog.texts(fixed.log)).toEqual(
+          expect.arrayContaining(["drive succeeded", "mint succeeded"]),
+        );
+      }),
+  );
+
+  it.effect(
+    "a diagnose left running is stopped, failed, and moved to Failed, though its result was closed before it was queued",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests, TICKET, "failed");
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers), RESULT_ID, "diagnose");
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
+        expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
+        expect(fixed.linear.calls).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+        expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([
+          `diagnose failed; ${RESTARTED}`,
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a finished drive whose close write fails three times is reported as should be succeeded, left running, and not moved",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "finishAutomationJob",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      let finishes = 0;
+      const automation = Stores.fakeAutomationStore({
+        finish: () =>
+          Effect.sync(() => {
+            finishes += 1;
+          }).pipe(Effect.andThen(Effect.fail(failure))),
+      });
+      return Effect.gen(function* () {
+        const fixed = harness(FakeLinear.fakeLinear(), automation);
+        seedResult(fixed.tests, TICKET, "passed");
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+        const id = fixed.automation.jobs[0]?.id;
+        yield* start(fixed, FakeHttp.die);
+        yield* eventually(() => sentryErrors(fixed.log).length > 0, "the close was reported");
+        expect(finishes).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("running");
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `close write failed; ${id} should be succeeded`,
+            location: "automation",
+            cause: failure,
+          }),
+        ]);
+        expect(fixed.linear.calls).toEqual([]);
+      });
+    },
   );
 
   it.effect("an automation client that answers 404 holds nothing, and the job is failed", () =>
@@ -2166,6 +2300,250 @@ describe("a running job left by the last automation server", () => {
       expect(landed).toEqual([TICKET]);
       expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
     }),
+  );
+});
+
+// An automation client with --max-jobs 6 across an automation server restart. The automation
+// client is its real routes and Sessions, answered in this fiber. The automation server that
+// died is only what it left behind: six running rows, and the six drives the automation client
+// still holds for it.
+const MAX_JOBS = 6;
+
+const tickets = (first: number, count: number) =>
+  Array.from({ length: count }, (_, index) => `OLI-${String(first + index)}`);
+
+const LEFT = tickets(101, MAX_JOBS);
+const WAITING = tickets(201, MAX_JOBS + 1);
+
+const resultOf = (ticket: string) =>
+  `44444444-4444-4444-8444-${ticket.slice("OLI-".length).padStart(12, "0")}`;
+
+const promptOf = (ticket: string) => `drive ${ticket} as ${MODEL}`;
+
+type SixJobClient = {
+  readonly spawner: FakeSpawner.FakeSpawner;
+  readonly sessions: Sessions.Sessions["Service"];
+  readonly http: Layer.Layer<HttpClient.HttpClient>;
+};
+
+// Every OpenCode it starts runs until the test ends it, unless the script says otherwise.
+const sixJobClient = (script: FakeSpawner.Script = () => ({})) =>
+  Effect.gen(function* () {
+    const spawner = FakeSpawner.fakeSpawner(script);
+    const services = Layer.mergeAll(
+      spawner.layer,
+      FakeLog.fakeLog().layer,
+      Layer.succeed(Config.ProxyConfig)({
+        token: Redacted.make(TOKEN),
+        databaseUrl: Redacted.make("postgres://unused"),
+      }),
+      Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution),
+    );
+    const held = yield* Layer.build(
+      Sessions.Sessions.layer(
+        MAX_JOBS,
+        () => Effect.void,
+        () => Effect.void,
+      ).pipe(Layer.provide(services)),
+    );
+    const sessions = Context.get(held, Sessions.Sessions);
+    const app = yield* HttpRouter.toHttpEffect(
+      Handlers.routes.pipe(
+        Layer.provide(services),
+        Layer.provide(NodeHttpServer.layerHttpServices),
+      ),
+    );
+    const client: SixJobClient = {
+      spawner,
+      sessions,
+      http: FakeHttp.serving(Effect.provideService(app, Sessions.Sessions, sessions)),
+    };
+    return client;
+  });
+
+// What the automation server that died did first: /reserve and /run for each ticket. The runs'
+// connections dropped with it; /run is uninterruptible, so each OpenCode keeps running.
+const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const connections: Array<Fiber.Fiber<void, Errors.AutomationClientError>> = [];
+    for (const ticket of left) {
+      yield* AutomationClient.reserve(URL, ticket, "drive");
+      connections.push(
+        yield* Effect.forkChild(AutomationClient.run(URL, promptOf(ticket), ticket, MODEL)),
+      );
+    }
+    const children = yield* Effect.all(left.map(() => client.spawner.nextSpawn));
+    yield* Fiber.interruptAll(connections);
+    return children;
+  }).pipe(Effect.provide(Layer.mergeAll(client.http, token)));
+
+// `finished` are the drives whose driver closed its result before OpenCode exited.
+const seedRestart = (fixed: Harness, clientId: string, finished: ReadonlyArray<string> = []) => {
+  for (const ticket of LEFT) {
+    const result = finished.includes(ticket) ? "passed" : "pending";
+    seedResult(fixed.tests, ticket, result, resultOf(ticket));
+    seedRunning(fixed.automation, clientId, resultOf(ticket));
+  }
+  for (const ticket of WAITING) {
+    seedResult(fixed.tests, ticket, "pending", resultOf(ticket));
+    seedJob(fixed.automation, "drive", resultOf(ticket));
+  }
+};
+
+const runningRows = (automation: Stores.FakeAutomationStore) =>
+  automation.jobs.filter((job) => job.status === "running");
+
+// A row becomes running only through markRunning. After each one, how many rows are running:
+// the largest is the most the database ever held at once.
+const countingRunning = (automation = Stores.fakeAutomationStore()) => {
+  const afterEachWrite: Array<number> = [];
+  const layer = Layer.effect(Automation.AutomationStore)(
+    Effect.gen(function* () {
+      const store = yield* Automation.AutomationStore;
+      return Automation.AutomationStore.of({
+        ...store,
+        markRunning: (id, serverId) =>
+          store.markRunning(id, serverId).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                afterEachWrite.push(runningRows(automation).length);
+              }),
+            ),
+          ),
+      });
+    }),
+  ).pipe(Layer.provide(automation.layer));
+  const counted: Stores.FakeAutomationStore = { jobs: automation.jobs, layer };
+  return { afterEachWrite, automation: counted };
+};
+
+const ticketsOf = (fixed: Harness, jobs: ReadonlyArray<{ readonly resultId: string }>) =>
+  jobs.map((job) => fixed.tests.results.find((row) => row.id === job.resultId)?.linearId);
+
+// The prompt of each OpenCode still running, in the order they started.
+const livePrompts = (client: SixJobClient) =>
+  Effect.map(
+    Effect.filter(client.spawner.spawned, (child) => child.isRunning),
+    (children) => children.map((child) => child.args.at(-1)),
+  );
+
+// Every tick here ends turning a drive away for want of room. The clock moves to the next tick
+// only once this one has, so each of the twelve ticks after the first is known to have run.
+const aMinuteOfTicks = (fixed: Harness) =>
+  Effect.gen(function* () {
+    const turnedAway = () =>
+      FakeLog.texts(fixed.log).filter((text) => text === "deferred; at capacity").length;
+    yield* eventually(() => turnedAway() === 1, "the first tick turned a drive away");
+    for (let tick = 2; tick <= 13; tick++) {
+      yield* TestClock.adjust("5 seconds");
+      yield* eventually(() => turnedAway() === tick, `tick ${String(tick)} turned a drive away`);
+    }
+  });
+
+const until = (check: Effect.Effect<boolean>, what: string) =>
+  Effect.gen(function* () {
+    for (let i = 0; i < 1_000; i++) {
+      if (yield* check) {
+        return yield* Effect.void;
+      }
+      yield* Effect.yieldNow;
+    }
+    return yield* Effect.die(`never: ${what}`);
+  });
+
+describe("an automation client with six jobs across an automation server restart", () => {
+  it.effect(
+    "the six drives left running are closed, six waiting drives take their place, and no more than six are ever running",
+    () => {
+      const counted = countingRunning();
+      const fixed = harness(FakeLinear.fakeLinear(), counted.automation);
+      return Effect.gen(function* () {
+        const client = yield* sixJobClient();
+        const children = yield* leftBehind(client, LEFT);
+        // After the automation server died, three OpenCode runs exited and nobody closed their
+        // rows: two drivers closed their results first, and one quit with its result open.
+        const driving = children.slice(0, 3);
+        const exited = children.slice(3);
+        for (const child of exited) {
+          yield* child.exit(0);
+        }
+        yield* until(
+          Effect.map(client.sessions.jobs, (held) => held === 3),
+          "three slots given back",
+        );
+        const clientId = seedLiveClient(fixed.servers);
+        seedRestart(fixed, clientId, LEFT.slice(3, 5));
+        yield* start(fixed, client.http);
+        yield* aMinuteOfTicks(fixed);
+        yield* eventually(
+          () => client.spawner.spawned.length === LEFT.length + counted.afterEachWrite.length,
+          "every drive written running started its OpenCode",
+        );
+        // Every row left running was closed before the first new one was written running.
+        expect(counted.afterEachWrite).toEqual([1, 2, 3, 4, 5, 6]);
+        const [left, waiting] = [fixed.automation.jobs.slice(0, 6), fixed.automation.jobs.slice(6)];
+        expect(left.map((job) => [job.status, job.reason])).toEqual([
+          ["failed", RESTARTED],
+          ["failed", RESTARTED],
+          ["failed", RESTARTED],
+          ["succeeded", null],
+          ["succeeded", null],
+          ["failed", RESTARTED],
+        ]);
+        const failed = [...LEFT.slice(0, 3), LEFT[5]];
+        expect(moved(fixed.linear).map((call) => call.identifier)).toEqual(failed);
+        // The automation client stopped the three still driving. The one that quit it no
+        // longer held, and answered 404.
+        expect(driving.map((child) => child.kills)).toEqual([
+          ["SIGTERM"],
+          ["SIGTERM"],
+          ["SIGTERM"],
+        ]);
+        expect(exited.map((child) => child.kills)).toEqual([[], [], []]);
+        expect(ticketsOf(fixed, runningRows(fixed.automation))).toEqual(WAITING.slice(0, 6));
+        expect(runningRows(fixed.automation).map((job) => job.serverId)).toEqual(
+          WAITING.slice(0, 6).map(() => clientId),
+        );
+        expect(waiting[6]?.status).toBe("pending");
+        expect(yield* livePrompts(client)).toEqual(WAITING.slice(0, 6).map(promptOf));
+        expect(yield* client.sessions.jobs).toBe(MAX_JOBS);
+        expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual(
+          failed.map(() => `drive failed; ${RESTARTED}`),
+        );
+      });
+    },
+  );
+
+  it.effect(
+    "an automation client that cannot stop its OpenCode keeps its six runs: the rows are failed and reported, and every waiting drive is turned away",
+    () => {
+      const counted = countingRunning();
+      const fixed = harness(FakeLinear.fakeLinear(), counted.automation);
+      return Effect.gen(function* () {
+        const client = yield* sixJobClient(() => ({ killError: "kill EPERM" }));
+        yield* leftBehind(client, LEFT);
+        const clientId = seedLiveClient(fixed.servers);
+        seedRestart(fixed, clientId);
+        yield* start(fixed, client.http);
+        yield* aMinuteOfTicks(fixed);
+        expect(fixed.automation.jobs.slice(0, 6).map((job) => [job.status, job.reason])).toEqual(
+          LEFT.map(() => ["failed", RESTARTED]),
+        );
+        expect(sentryErrors(fixed.log)).toEqual(
+          LEFT.flatMap((ticket) => [
+            expect.objectContaining({ text: `inherited abort failed; ${URL}`, agentId: ticket }),
+            expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+          ]),
+        );
+        expect(fixed.automation.jobs.slice(6).map((job) => job.status)).toEqual(
+          WAITING.map(() => "pending"),
+        );
+        expect(moved(fixed.linear).map((call) => call.identifier)).toEqual(LEFT);
+        expect(counted.afterEachWrite).toEqual([]);
+        expect(yield* livePrompts(client)).toEqual(LEFT.map(promptOf));
+        expect(yield* client.sessions.jobs).toBe(MAX_JOBS);
+      });
+    },
   );
 });
 

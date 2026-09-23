@@ -1,9 +1,12 @@
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer, type Scope } from "effect";
 import {
   HttpClient,
   HttpClientError,
   HttpClientRequest,
   HttpClientResponse,
+  HttpEffect,
+  HttpServerRequest,
+  HttpServerResponse,
 } from "effect/unstable/http";
 
 export type Recorded = {
@@ -76,6 +79,34 @@ export const recordRequests = (
     ),
   };
 };
+
+// An HttpClient answered by an app as `HttpRouter.serve` answers it, with no socket: the app's own
+// routes, middleware and error bodies, in the test's fibers and on its clock. Each request is
+// handled on its own fiber, as a server's are, so a caller interrupted mid-request is a client
+// that hung up, and an uninterruptible route still runs to its end.
+export const serving = <E>(
+  app: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    E,
+    HttpServerRequest.HttpServerRequest | Scope.Scope
+  >,
+): Layer.Layer<HttpClient.HttpClient> =>
+  respondWith((request) =>
+    Effect.gen(function* () {
+      const web = yield* Effect.orDie(HttpClientRequest.toWeb(request));
+      const answered = yield* Deferred.make<HttpServerResponse.HttpServerResponse>();
+      const handling = yield* HttpEffect.toHandled(app, (_, response) =>
+        Deferred.succeed(answered, response),
+      ).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(web)),
+        Effect.forkDetach,
+      );
+      const response = yield* Deferred.await(answered).pipe(
+        Effect.onInterrupt(() => Effect.forkDetach(Fiber.interrupt(handling))),
+      );
+      return HttpServerResponse.toWeb(response);
+    }),
+  );
 
 // A client whose requests never complete, for timeout tests driven by the TestClock.
 export const never: Layer.Layer<HttpClient.HttpClient> = toLayer(() => Effect.never);
