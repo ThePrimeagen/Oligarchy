@@ -28,7 +28,7 @@ Prints everything stored for the session as one JSON object, keyed `session`, `l
 - `--logs` — the qemu server's log lines, oldest first: `starting`, `intent start; <message>` before every group of actions, `image; ... ; <url>` for every screenshot, `stopped; <status>; <reason>` at the end.
 - `--actions` — every QMP exchange, oldest first: the keys and mouse events sent, and QEMU's reply.
 - `--images` — every screenshot, oldest first, as `{ id, actionId, url, createdAt }`. The last one is what the driver saw when it delivered its verdict. Look at it with [session image](#session-image), and at any image around a step you suspect.
-- `--debug-logs` — saved when the session ended any way but `succeeded`, else `null`: `sources.serial` is the guest's console, `sources.qemu` QEMU's stderr, `sources.proxy` and `sources.actions` the lines above as text.
+- `--debug-logs` — saved when the session ended, whatever the driver's verdict, a `succeeded` included; `null` only when that save failed: `sources.serial` is the guest's console, `sources.qemu` QEMU's stderr, `sources.proxy` and `sources.actions` the lines above as text.
 - `--diagnosis` — a diagnosis already recorded, or `null`. If it is not `null`, stop: the session has been reviewed.
 
 ```bash
