@@ -43,6 +43,27 @@ describe("steps happy path", () => {
     expect(Steps.indexOf(STEPS, "* the desktop must return exactly as left.")).toBe(3);
     expect(Steps.indexOf(STEPS, "  Press Super+Escape. The System menu opens.  ")).toBe(1);
   });
+
+  it("places a repeated line at the copy still ahead of the ones already said", () => {
+    const repeated = [
+      "Press Super+Space. The menu opens.",
+      "Click Style.",
+      "Click Theme.",
+      "Press Super+Space. The menu opens.",
+      "Click Style.",
+    ];
+    expect(Steps.placeOf(repeated, ["Click Style."])).toBe(2);
+    expect(
+      Steps.placeOf(repeated, [
+        "Click Theme.",
+        "Press Super+Space. The menu opens.",
+        "Click Style.",
+      ]),
+    ).toBe(5);
+    expect(
+      Steps.placeOf(repeated, ["* Click Style.", "Click Theme.", "not a step", "Click Style."]),
+    ).toBe(5);
+  });
 });
 
 describe("steps unhappy path", () => {
@@ -58,5 +79,13 @@ describe("steps unhappy path", () => {
     expect(Steps.indexOf(STEPS, "always take a screen shot of every step")).toBe(0);
     expect(Steps.indexOf(STEPS, "any crashes or erroneous behavior must be reported.")).toBe(0);
     expect(Steps.indexOf(STEPS, "Super+Escape is <M-ESC>.")).toBe(0);
+  });
+
+  it("does not place a repeated line that has no copy left, or a paraphrase said last", () => {
+    const repeated = ["Click Style.", "Click Theme."];
+    expect(Steps.placeOf(repeated, [])).toBe(0);
+    expect(Steps.placeOf(repeated, ["Click Style.", "Click Style."])).toBe(0);
+    expect(Steps.placeOf(repeated, ["Click Style.", "lock the screen"])).toBe(0);
+    expect(Steps.placeOf([], ["Click Style."])).toBe(0);
   });
 });

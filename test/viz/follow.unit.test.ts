@@ -266,6 +266,24 @@ describe("ticket session happy path", () => {
     expect(rows[3]).toBe(`  ${Follow.SPINNER[0]} send-keys`);
     expect(rows.every((row) => row.length <= Follow.LEFT_COLS)).toBe(true);
   });
+
+  it("places a repeated line at the copy still ahead, and still shows only that intent", () => {
+    const steps = ["Click Style.", "Click Theme.", "Click Style."];
+    const full = Follow.apply(
+      Follow.apply(
+        Follow.apply(
+          Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+          { type: "intent", state: "started", message: "Click Theme." },
+        ),
+        { type: "intent", state: "completed" },
+      ),
+      { type: "intent", state: "started", message: "Click Style." },
+    );
+    const rows = Follow.ticketRows(full, steps, 8).map(textOf);
+    expect(rows[1]).toBe("3/3");
+    expect(rows.join("\n")).toContain("Click Style.");
+    expect(rows.join("\n")).not.toContain("Click Theme.");
+  });
 });
 
 describe("ticket session unhappy path", () => {
