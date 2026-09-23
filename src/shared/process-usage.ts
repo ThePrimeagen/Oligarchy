@@ -1,6 +1,11 @@
-import { Clock, Context, Effect, FileSystem, Layer, Option, Ref } from "effect";
+import { Clock, Context, Effect, FileSystem, Layer, Option, Ref, Stream } from "effect";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ExternalFailure from "../external-failure.ts";
+import * as Errors from "./errors.ts";
 
-// USER_HZ on Linux, and this process only runs there. /proc/self/stat counts in these ticks.
+// USER_HZ on Linux: /proc/self/stat counts in these ticks, and macOS's microseconds are read as
+// them so both hosts share one window.
 const CLK_TCK = 100;
 
 export type Reading = {
@@ -13,10 +18,10 @@ export type ProcessSample = {
   readonly cpuPercent: number;
 };
 
-export type Source = () => Effect.Effect<Reading>;
+export type Source = () => Effect.Effect<Reading, Errors.CliFailed>;
 
 export type ProcessUsageService = {
-  readonly collect: Effect.Effect<ProcessSample>;
+  readonly collect: Effect.Effect<ProcessSample, Errors.CliFailed>;
 };
 
 // After the last `)` of comm, fields are 3-indexed from state. utime is 14, stime is 15.
@@ -103,27 +108,124 @@ const descendantsMemory = (fs: FileSystem.FileSystem, root: string): Effect.Effe
     return total;
   });
 
-const procSource =
-  (fs: FileSystem.FileSystem): Source =>
-  () =>
-    Effect.gen(function* () {
-      const statPath = "/proc/self/stat";
-      const statusPath = "/proc/self/status";
-      const stat = yield* fs.readFileString(statPath).pipe(Effect.orDie);
-      const status = yield* fs.readFileString(statusPath).pipe(Effect.orDie);
-      const cpuTicks = Option.getOrUndefined(parseCpuTicks(stat));
-      const memoryBytes = Option.getOrUndefined(parseVmRssBytes(status));
-      if (cpuTicks === undefined) {
-        return yield* Effect.die(missing(statPath));
-      }
-      if (memoryBytes === undefined) {
-        return yield* Effect.die(missing(statusPath));
-      }
-      // cpu stays this pid: children appear and vanish with each job, and lost ticks would
-      // report 0. Memory is the tree, so a qemu or opencode the dashboard cannot see is counted.
-      const childrenBytes = yield* descendantsMemory(fs, "self");
-      return { cpuTicks, memoryBytes: memoryBytes + childrenBytes };
-    });
+export const procSource: Effect.Effect<Source, never, FileSystem.FileSystem> = Effect.gen(
+  function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return () =>
+      Effect.gen(function* () {
+        const statPath = "/proc/self/stat";
+        const statusPath = "/proc/self/status";
+        const stat = yield* fs.readFileString(statPath).pipe(Effect.orDie);
+        const status = yield* fs.readFileString(statusPath).pipe(Effect.orDie);
+        const cpuTicks = Option.getOrUndefined(parseCpuTicks(stat));
+        const memoryBytes = Option.getOrUndefined(parseVmRssBytes(status));
+        if (cpuTicks === undefined) {
+          return yield* Effect.die(missing(statPath));
+        }
+        if (memoryBytes === undefined) {
+          return yield* Effect.die(missing(statusPath));
+        }
+        // cpu stays this pid: children appear and vanish with each job, and lost ticks would
+        // report 0. Memory is the tree, so a qemu or opencode the dashboard cannot see is counted.
+        const childrenBytes = yield* descendantsMemory(fs, "self");
+        return { cpuTicks, memoryBytes: memoryBytes + childrenBytes };
+      });
+  },
+);
+
+// macOS has no /proc. ps reads each pid's resident size, the counter VmRSS is on Linux, in KiB as
+// VmRSS is; an empty header on every column prints no header line.
+const PS = "/bin/ps";
+const PS_ARGS = ["-A", "-o", "pid=", "-o", "ppid=", "-o", "rss="];
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm;
+// ps answers in milliseconds; one that wedges must not hold every later heartbeat with it, and
+// it has nothing to flush, so SIGTERM gets a second before SIGKILL.
+const PS_TIMEOUT = "10 seconds";
+const PS_FORCE_KILL_AFTER = "1 second";
+
+// The rss of `root` and every descendant, as the /proc walk sums them. The ps that printed the
+// listing is root's child for its moment and is left out: /proc is read without one.
+const treeRssBytes = (listing: string, root: number, ps: number): Option.Option<number> => {
+  const rss = new Map<number, number>();
+  const children = new Map<number, Array<number>>();
+  for (const [, pid, ppid, kb] of listing.matchAll(PS_ROW)) {
+    if (Number(pid) === ps) {
+      continue;
+    }
+    rss.set(Number(pid), Number(kb) * 1024);
+    children.set(Number(ppid), [...(children.get(Number(ppid)) ?? []), Number(pid)]);
+  }
+  if (!rss.has(root)) {
+    return Option.none();
+  }
+  // The listing is not one snapshot: a pid reused while ps ran could close a loop.
+  const seen = new Set<number>();
+  let total = 0;
+  const visit = (pid: number): void => {
+    if (seen.has(pid)) {
+      return;
+    }
+    seen.add(pid);
+    total += rss.get(pid) ?? 0;
+    for (const child of children.get(pid) ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return Option.some(total);
+};
+
+const psFailed = (message: string, cause?: unknown): Errors.CliFailed =>
+  cause === undefined
+    ? Errors.CliFailed.make({ command: PS, message })
+    : Errors.CliFailed.make({ command: PS, message, cause });
+
+// `cpuUsage` is getrusage's user and system microseconds for this pid, what utime and stime
+// count in /proc/self/stat, so the cpu stays this pid as it does on Linux.
+export const psSource = (
+  pid: number,
+  cpuUsage: () => { readonly user: number; readonly system: number },
+): Effect.Effect<Source, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const list = Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make(PS, PS_ARGS, {
+            stdin: "ignore",
+            stderr: "ignore",
+            detached: false,
+            killSignal: "SIGTERM",
+            forceKillAfter: PS_FORCE_KILL_AFTER,
+          }),
+        );
+        const text = yield* Stream.mkString(Stream.decodeText(handle.stdout));
+        return { text, ps: handle.pid };
+      }),
+    ).pipe(
+      // Node's own reason (`spawn /bin/ps EAGAIN`), not the PlatformError wrapper's.
+      Effect.mapError((error) =>
+        psFailed(
+          ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message),
+          error,
+        ),
+      ),
+      Effect.timeoutOrElse({
+        duration: PS_TIMEOUT,
+        orElse: () => Effect.fail(psFailed(`ps did not answer within ${PS_TIMEOUT}`)),
+      }),
+    );
+    return () =>
+      Effect.gen(function* () {
+        const { user, system } = cpuUsage();
+        const listed = yield* list;
+        const memoryBytes = Option.getOrUndefined(treeRssBytes(listed.text, pid, listed.ps));
+        if (memoryBytes === undefined) {
+          return yield* psFailed(`ps did not list this process (pid ${String(pid)})`);
+        }
+        return { cpuTicks: ((user + system) * CLK_TCK) / 1_000_000, memoryBytes };
+      });
+  });
 
 const make = (source: Source): Effect.Effect<ProcessUsageService> =>
   Effect.gen(function* () {
@@ -159,12 +261,17 @@ export class ProcessUsage extends Context.Service<ProcessUsage>()(
   "@oligarchy/shared/ProcessUsage",
   { make },
 ) {
-  static readonly layer: Layer.Layer<ProcessUsage, never, FileSystem.FileSystem> = Layer.effect(
-    this,
-  )(
+  static readonly layer: Layer.Layer<
+    ProcessUsage,
+    never,
+    FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
+  > = Layer.effect(this)(
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      return yield* make(procSource(fs));
+      const source =
+        process.platform === "darwin"
+          ? yield* psSource(process.pid, () => process.cpuUsage())
+          : yield* procSource;
+      return yield* make(source);
     }),
   );
 }

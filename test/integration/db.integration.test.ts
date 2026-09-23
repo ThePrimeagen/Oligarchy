@@ -45,6 +45,10 @@ const uuid = (): string => crypto.randomUUID();
 // A fresh snake_case key per test: the container's tables outlive each test body.
 const errorKey = (stem: string): string => `${stem}_${uuid().replaceAll("-", "_")}`;
 
+// A server of the test's own: removeServer clears every setup row under a url, so a url another
+// test wrote under would be counted too.
+const setupServer = (): string => `http://10.0.0.5:${uuid().slice(0, 8)}`;
+
 const SEEDED_SUCCEEDED = "11111111-1111-4111-8111-111111111111";
 const SEEDED_RUNNING = "22222222-2222-4222-8222-222222222222";
 
@@ -455,8 +459,8 @@ Postgres.describeWithDatabase("database", () => {
         expect(rows[0]).toMatchObject({ level: "info", location: sessionId, agentId: "OLI-1" });
         expect(rows[1]).toMatchObject({ level: "error", agentId: null });
         expect(yield* logs.listLogs(uuid())).toEqual([]);
-        // `server` and `automation` are the buckets every process in this lane writes to; the row
-        // is listed under its bucket, whatever else another file's processes put there.
+        // `server` and `automation` are buckets other tests write to as well; the row is listed
+        // under its bucket, whatever else is there.
         expect((yield* logs.listLogs("server")).map((row) => row.text)).toContain("global");
         expect((yield* logs.listLogs("automation")).map((row) => row.text)).toContain(
           "queue claimed",
@@ -2268,6 +2272,10 @@ Postgres.describeWithDatabase("database", () => {
           const unclaimed = `http://10.0.0.32:${uuid().slice(0, 8)}`;
           const alive = `http://10.0.0.33:${uuid().slice(0, 8)}`;
           const justAdded = `http://10.0.0.34:${uuid().slice(0, 8)}`;
+          // The sweep answers every stale row of a kind, so whatever an earlier test left stale
+          // goes first and the counts below are this test's rows alone.
+          yield* store.removeStaleServers("qemu");
+          yield* store.removeStaleServers("automation-client");
           yield* store.heartbeat(dead, "qemu", `dead-${dead.slice(-8)}`, stats);
           yield* store.heartbeat(
             deadClient,
@@ -2598,7 +2606,7 @@ Postgres.describeWithDatabase("database", () => {
       Effect.gen(function* () {
         const database = yield* Client.Database;
         const iso = `https://example.com/${uuid()}.iso`;
-        const serverUrl = "http://10.0.0.5:42069";
+        const serverUrl = setupServer();
         const [row] = yield* database.run("insert", (db) =>
           db.insert(DbSchema.setupRequests).values({ iso, serverUrl }).returning(),
         );
@@ -2606,7 +2614,7 @@ Postgres.describeWithDatabase("database", () => {
         expect(row?.createdAt).toBeInstanceOf(Date);
         // The same iso on another server, and another iso on the same server, are other setups.
         yield* database.run("insert", (db) =>
-          db.insert(DbSchema.setupRequests).values({ iso, serverUrl: "http://10.0.0.6:42069" }),
+          db.insert(DbSchema.setupRequests).values({ iso, serverUrl: setupServer() }),
         );
         const resultId = uuid();
         const [claimed] = yield* database.run("insert", (db) =>
@@ -2631,7 +2639,7 @@ Postgres.describeWithDatabase("database", () => {
         Effect.gen(function* () {
           const database = yield* Client.Database;
           const iso = `https://example.com/${uuid()}.iso`;
-          const serverUrl = "http://10.0.0.5:42069";
+          const serverUrl = setupServer();
           yield* database.run("insert", (db) =>
             db.insert(DbSchema.setupRequests).values({ iso, serverUrl }),
           );
@@ -2652,7 +2660,7 @@ Postgres.describeWithDatabase("database", () => {
             database.run("insert", (db) =>
               db.insert(DbSchema.setupRequests).values({
                 iso: `https://example.com/${uuid()}.iso`,
-                serverUrl: "http://10.0.0.6:42069",
+                serverUrl: setupServer(),
                 resultId,
               }),
             ),
@@ -2677,8 +2685,8 @@ Postgres.describeWithDatabase("database", () => {
           });
           const resultId = created.results[0].id;
           const iso = `https://example.com/${uuid()}.iso`;
-          const serverUrl = "http://10.0.0.5:42069";
-          const other = "http://10.0.0.6:42069";
+          const serverUrl = setupServer();
+          const other = setupServer();
           expect(yield* setups.insert(iso, serverUrl)).toBe(true);
           expect(yield* setups.insert(iso, serverUrl)).toBe(false);
           expect(yield* setups.insert(iso, other)).toBe(true);

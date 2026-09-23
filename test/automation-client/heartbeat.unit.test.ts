@@ -9,6 +9,7 @@ import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as ProcessUsage from "../../src/shared/process-usage.ts";
 import * as FakeQemu from "../support/fake-qemu.ts";
+import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -109,6 +110,44 @@ describe("automation-client heartbeat happy path", () => {
       expect(
         process.reports.every((row) => row.name === NAME && row.type === "automation-client"),
       ).toBe(true);
+      expect(log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("on macOS the row carries the jobs, ps's memory of the process tree and the cpu", () =>
+    Effect.gen(function* () {
+      let micros = 0;
+      // Synthetic: this pid and one child, as macOS `ps -A -o pid= -o ppid= -o rss=` prints them.
+      const ps = FakeSpawner.fakeSpawner(
+        FakeSpawner.byCommand({
+          "/bin/ps": { exitCode: 0, stdout: "  500     1   8000\n  600   500   2000\n" },
+        }),
+      );
+      const usage = Layer.effect(ProcessUsage.ProcessUsage)(
+        Effect.flatMap(
+          ProcessUsage.psSource(500, () => ({ user: micros, system: 0 })),
+          ProcessUsage.ProcessUsage.make,
+        ),
+      ).pipe(Layer.provide(ps.layer));
+      const process = Stores.fakeProcessStatsStore();
+      const { log } = yield* start(
+        Stores.fakeServerStore(),
+        fakeStats(),
+        FakeLog.fakeLog(),
+        process,
+        usage,
+        fakeSessions(Effect.succeed(1)),
+      );
+      const row = { name: NAME, type: "automation-client" };
+      expect(process.reports).toEqual([
+        { ...row, stats: { jobs: 1, memoryBytes: 10_000 * 1024, cpuPercent: 0 } },
+      ]);
+      micros = 15_000_000;
+      yield* TestClock.adjust("30 seconds");
+      expect(process.reports[1]).toEqual({
+        ...row,
+        stats: { jobs: 1, memoryBytes: 10_000 * 1024, cpuPercent: 50 },
+      });
       expect(log.lines).toEqual([]);
     }),
   );
@@ -310,6 +349,49 @@ describe("automation-client heartbeat unhappy path", () => {
             cause: refusedProcess,
           },
         ]);
+      }),
+  );
+
+  it.effect(
+    "a process usage read that fails is one error line, the servers row still writes, and the next tick reports",
+    () =>
+      Effect.gen(function* () {
+        const unlisted = Errors.CliFailed.make({
+          command: "/bin/ps",
+          message: "ps did not list this process (pid 500)",
+        });
+        let reads = 0;
+        const usage = Layer.succeed(ProcessUsage.ProcessUsage)(
+          ProcessUsage.ProcessUsage.of({
+            collect: Effect.suspend(() => {
+              reads += 1;
+              return reads === 1 ? Effect.fail(unlisted) : Effect.succeed(SAMPLE);
+            }),
+          }),
+        );
+        const store = Stores.fakeServerStore();
+        const { log, process } = yield* start(
+          store,
+          fakeStats(),
+          FakeLog.fakeLog(),
+          Stores.fakeProcessStatsStore(),
+          usage,
+        );
+        expect(store.heartbeats).toEqual([ANNOUNCED]);
+        expect(process.reports).toEqual([]);
+        expect(log.lines).toEqual([
+          {
+            level: "error",
+            text: "process stats failed: ps did not list this process (pid 500)",
+            location: "automation-client",
+            agentId: undefined,
+            skipSentry: false,
+            cause: unlisted,
+          },
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(process.reports).toEqual([PROCESS]);
+        expect(log.lines).toHaveLength(1);
       }),
   );
 
