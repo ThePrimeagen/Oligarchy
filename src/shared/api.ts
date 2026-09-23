@@ -286,7 +286,8 @@ export const abort = HttpApiEndpoint.post("abort", "/abort", {
 });
 
 // The same path on the automation server takes the job's action too (Contract.AbortJobBody). A
-// client's 404 is no failure of it: the row closes and the answer is 200.
+// client's 404 is no failure of it: the row closes and the answer is 200. A job that finished
+// while its client was being asked is over, and is refused as one.
 export const abortJob = HttpApiEndpoint.post("abort", "/abort", {
   payload: Contract.AbortJobBody,
   success: Contract.Ok,

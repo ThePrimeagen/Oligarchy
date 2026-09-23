@@ -529,7 +529,85 @@ describe("POST /abort", () => {
   );
 });
 
+// An automation client whose answer to /abort comes after the drive finished on its own: the
+// worker closed the row succeeded while the stop was in flight.
+const finishedDuringAbort = (fixed: Fixture, answer: () => Response) =>
+  FakeHttp.recordRequests(() =>
+    Effect.sync(() => {
+      const job = fixed.stores.automation.jobs[0];
+      if (job !== undefined) {
+        job.status = "succeeded";
+        job.finishedAt = new Date();
+      }
+      return answer();
+    }),
+  );
+
 describe("POST /abort refusals", () => {
+  it.effect(
+    "400 when the drive finished on its own while its client was stopping it, and the row stays succeeded",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        const outbound = finishedDuringAbort(fixed, () => FakeHttp.json({ ok: "true" }));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http);
+          expect(response.status).toBe(400);
+          expect(yield* response.json).toEqual({
+            error: `ticket "${TICKET}" has no drive to abort`,
+          });
+        }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+        expect(outbound.requests.map((request) => request.url)).toEqual([`${CLIENT_URL}/abort`]);
+        expect(fixed.stores.automation.jobs[0]).toMatchObject({
+          status: "succeeded",
+          reason: null,
+        });
+        expect(FakeLog.texts(fixed.log)).toEqual([
+          `POST /abort failed: ticket "${TICKET}" has no drive to abort`,
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "400 and no JobNotFound when the client 404s because the drive finished on its own",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        const outbound = finishedDuringAbort(fixed, () =>
+          FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+        );
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http);
+          expect(response.status).toBe(400);
+          expect(yield* response.json).toEqual({
+            error: `ticket "${TICKET}" has no drive to abort`,
+          });
+        }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+        expect(fixed.stores.automation.jobs[0]).toMatchObject({
+          status: "succeeded",
+          reason: null,
+        });
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: `POST /abort failed: ticket "${TICKET}" has no drive to abort`,
+            location: "automation",
+            agentId: TICKET,
+            skipSentry: true,
+            cause: undefined,
+          },
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
+      }),
+  );
+
   it.effect("400 when the ticket already finished, and the client is not called", () =>
     Effect.gen(function* () {
       const fixed = fixture();

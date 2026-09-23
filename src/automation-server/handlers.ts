@@ -95,7 +95,7 @@ const uninterruptible = { uninterruptible: true } as const;
 // placement releases the reservation. A running job is stopped at the client that took it,
 // then its row is closed. A client that answers 404 holds nothing to stop: that is reported,
 // and the row is closed all the same, so every caller reads the same 200. A job that is over,
-// or was never queued, is refused.
+// or was never queued, is refused, and so is one that finished while its client was asked.
 export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
   handlers.handle(
     "abort",
@@ -170,11 +170,11 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           });
         }
         const url = server.value.url;
-        const running = job.value;
-        yield* AutomationClient.abort(url, payload.ticket).pipe(
+        const notFound = yield* AutomationClient.abort(url, payload.ticket).pipe(
+          Effect.as(Option.none<Errors.AutomationClientError>()),
           Effect.catchTag("AutomationClientError", (error) =>
             error.status === 404
-              ? Worker.reportJobNotFound(running.id, url, payload.ticket, error)
+              ? Effect.succeed(Option.some(error))
               : Effect.fail(
                   Errors.RunFailed.make(
                     Object.assign(
@@ -192,16 +192,21 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
               Errors.Internal.make({ cause: error, agentId: payload.ticket }),
             ),
           );
-        if (closed) {
-          yield* log.info(`aborted ${job.value.action}; ${url}`, {
-            location: Log.Locations.automation,
-            agentId: payload.ticket,
-          });
-          if (job.value.action !== "diagnose") {
-            yield* Ready.release(payload.ticket);
-          }
+        // The row closed some other way while its client was asked: the job finished, and a
+        // finished job has nothing to abort. Its client's 404 was that ending, not JobNotFound.
+        if (!closed) {
+          return yield* nothingToAbort;
         }
-        // The client already stopped; a lost finish race is another closer.
+        if (Option.isSome(notFound)) {
+          yield* Worker.reportJobNotFound(job.value.id, url, payload.ticket, notFound.value);
+        }
+        yield* log.info(`aborted ${job.value.action}; ${url}`, {
+          location: Log.Locations.automation,
+          agentId: payload.ticket,
+        });
+        if (job.value.action !== "diagnose") {
+          yield* Ready.release(payload.ticket);
+        }
         return ok;
       }),
     uninterruptible,
