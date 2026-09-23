@@ -55,6 +55,7 @@ describe("requiredRedacted", () => {
       expect(Redacted.value(yield* Config.databaseUrl)).toBe("b");
       expect(Redacted.value(yield* Config.databaseMigrationUrl)).toBe("g");
       expect(Redacted.value(yield* Config.linearApiToken)).toBe("c");
+      expect(yield* Config.linearTeam).toBe("h");
       expect(Redacted.value(yield* Config.linearWebhookSecret)).toBe("f");
       expect(yield* Config.serverUrl).toBe("d");
       expect(yield* Config.sessionId).toBe("e");
@@ -65,6 +66,7 @@ describe("requiredRedacted", () => {
           DATABASE_URL: "b",
           DATABASE_MIGRATION_URL: "g",
           LINEAR_API_TOKEN: "c",
+          LINEAR_TEAM: "h",
           LINEAR_WEBHOOK_SECRET: "f",
           SERVER_URL: "d",
           SESSION_ID: "e",
@@ -154,6 +156,57 @@ describe("providerLayer", () => {
       Effect.provide(
         Config.providerLayer.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_TEST_OTHER=1\n"))),
       ),
+    ),
+  );
+});
+
+describe("linearTeam", () => {
+  it.effect("returns the team name when set", () =>
+    Effect.gen(function* () {
+      expect(yield* Config.linearTeam).toBe("Local Board");
+    }).pipe(Effect.provide(Support.withEnv({ LINEAR_TEAM: "Local Board" }))),
+  );
+
+  it.effect("fails MissingVariable rendered LINEAR_TEAM is not set when missing", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.linearTeam);
+      expect(error).toMatchObject({
+        _tag: "MissingVariable",
+        name: "LINEAR_TEAM",
+        message: "LINEAR_TEAM is not set",
+      });
+    }).pipe(Effect.provide(Support.withEnv({}))),
+  );
+
+  it.effect("treats an empty value as missing", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.linearTeam);
+      expect(error).toMatchObject({ _tag: "MissingVariable", name: "LINEAR_TEAM" });
+    }).pipe(Effect.provide(Support.withEnv({ LINEAR_TEAM: "" }))),
+  );
+
+  // The token is the credential; the team is which board that credential files on.
+  it.effect("reports LINEAR_API_TOKEN before LINEAR_TEAM when both are missing", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.linearAccess);
+      expect(error.message).toBe("LINEAR_API_TOKEN is not set");
+    }).pipe(Effect.provide(Support.withEnv({}))),
+  );
+
+  it.effect("reports LINEAR_TEAM when the token is set and the team is not", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Config.linearAccess);
+      expect(error.message).toBe("LINEAR_TEAM is not set");
+    }).pipe(Effect.provide(Support.withEnv({ LINEAR_API_TOKEN: "lin" }))),
+  );
+
+  it.effect("holds the token and the team name", () =>
+    Effect.gen(function* () {
+      const access = yield* Config.linearAccess;
+      expect(Redacted.value(access.token)).toBe("lin");
+      expect(access.team).toBe("Local Board");
+    }).pipe(
+      Effect.provide(Support.withEnv({ LINEAR_API_TOKEN: "lin", LINEAR_TEAM: "Local Board" })),
     ),
   );
 });

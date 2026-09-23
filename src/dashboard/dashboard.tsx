@@ -62,6 +62,8 @@ type Bindings = LinearEnv & {
   OLIGARCHY_TOKEN: string;
   // The automation server's base url, set as a Cloudflare var.
   AUTOMATION_SERVER_URL: string;
+  // The Linear team POST /create-test-suite-run files tickets on. A wrangler secret, no default.
+  LINEAR_TEAM: string;
 };
 
 type SessionListProps = {

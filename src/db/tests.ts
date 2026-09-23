@@ -204,7 +204,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return Arr.head(rows);
     });
 
-    // Persist the Linear identifier (OLI-n) created for this result so webhooks can find it.
+    // Persist the Linear identifier created for this result so webhooks can find it.
     // A missing result after createRun is a broken invariant, not a caller mistake.
     const setLinearId = Effect.fn("db.setLinearId")(function* (resultId: string, linearId: string) {
       const rows = yield* database.run("setLinearId", (db) =>

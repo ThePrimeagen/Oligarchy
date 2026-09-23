@@ -2073,6 +2073,7 @@ const abortSuiteBindings = (databaseUrl: string) => ({
   AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
   LINEAR_API_URL: "http://127.0.0.1:1/graphql",
   LINEAR_API_TOKEN: "lin",
+  LINEAR_TEAM: "Local Board",
 });
 
 const postAbortSuite = async (databaseUrl: string, run: string): Promise<Page> => {
@@ -2508,6 +2509,7 @@ const abortBindings = (env: AbortEnv) => ({
   AUTOMATION_SERVER_URL: env.automationUrl,
   LINEAR_API_URL: `${env.linearUrl}/graphql`,
   LINEAR_API_TOKEN: LINEAR_TOKEN,
+  LINEAR_TEAM: "Local Board",
 });
 
 // The body names the row the way the page's form does: the ticket and the row's action.

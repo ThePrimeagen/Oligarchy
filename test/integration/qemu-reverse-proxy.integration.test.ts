@@ -34,6 +34,7 @@ const environment = (overrides: Record<string, string>): NodeJS.ProcessEnv => {
     ...process.env,
     OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
+    LINEAR_TEAM: "Fixture Team",
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",
@@ -176,6 +177,16 @@ describe("qemu reverse proxy startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       expect(process.stderr()).toContain("OLIGARCHY_TOKEN is not set");
+      expect(process.stderr()).not.toContain("sentinel-pw");
+    }),
+  );
+
+  it.live("a missing LINEAR_TEAM exits 1 with LINEAR_TEAM is not set", () =>
+    Effect.promise(async () => {
+      const process = spawnQemuReverseProxy([], { LINEAR_TEAM: "" });
+      const { code } = await process.exited;
+      expect(code).toBe(1);
+      expect(process.stderr()).toContain("LINEAR_TEAM is not set");
       expect(process.stderr()).not.toContain("sentinel-pw");
     }),
   );

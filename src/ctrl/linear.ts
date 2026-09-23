@@ -14,7 +14,6 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Errors from "../shared/errors.ts";
 
 export const LINEAR_API_URL = "https://api.linear.app/graphql";
-export const LINEAR_TEAM = "Oligarchy";
 export const AGENT_TEST_LABEL = "agent test";
 export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 // The two board states a ticket is handed through: born in Backlog, where the automation server
@@ -115,11 +114,6 @@ const ISSUES_QUERY = `query ExperimentIssues($filter: IssueFilter!, $after: Stri
   }
 }`;
 
-const BACKLOG_FILTER = {
-  team: { name: { eq: LINEAR_TEAM } },
-  state: { type: { eq: "backlog" } },
-};
-
 type IssueFilter = {
   readonly team: { readonly name: { readonly eq: string } };
   readonly state:
@@ -204,6 +198,7 @@ export type LinearService = {
 
 const makeLinear = (
   token: Redacted.Redacted,
+  teamName: string,
 ): Effect.Effect<LinearService, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
@@ -259,14 +254,14 @@ const makeLinear = (
       });
 
     const teamId: Effect.Effect<string, Errors.LinearError> = Effect.gen(function* () {
-      const teams = yield* request("teamId", TEAM_QUERY, { name: LINEAR_TEAM }, Teams);
+      const teams = yield* request("teamId", TEAM_QUERY, { name: teamName }, Teams);
       return yield* Option.match(Arr.head(teams.teams.nodes), {
         onNone: () =>
           Errors.LinearError.make({
             operation: "teamId",
-            message: `linear: no team named ${LINEAR_TEAM}`,
+            message: `linear: no team named ${teamName}`,
           }),
-        onSome: (team) => Effect.succeed(team.id),
+        onSome: (found) => Effect.succeed(found.id),
       });
     });
 
@@ -415,8 +410,13 @@ const makeLinear = (
         }
       });
 
-    const stateFilter = (name: string) => ({
-      team: { name: { eq: LINEAR_TEAM } },
+    const backlogFilter: IssueFilter = {
+      team: { name: { eq: teamName } },
+      state: { type: { eq: "backlog" } },
+    };
+
+    const stateFilter = (name: string): IssueFilter => ({
+      team: { name: { eq: teamName } },
       state: { name: { eq: name } },
     });
 
@@ -472,14 +472,22 @@ const makeLinear = (
       );
     });
 
-    const listBacklog = listIssues("listBacklog", BACKLOG_FILTER);
-    const listAutomationNeeded = listIssues("listAutomationNeeded", {
+    // A name Linear does not have is an empty list, not an error. Resolve the team first so
+    // that mistake is the same refusal as creating a ticket: `linear: no team named <name>`.
+    const listOnTeam = (
+      operation: "listBacklog" | "listAutomationNeeded" | "listNeedsReview",
+      filter: IssueFilter,
+    ): Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError> =>
+      teamId.pipe(Effect.flatMap(() => listIssues(operation, filter)));
+
+    const listBacklog = listOnTeam("listBacklog", backlogFilter);
+    const listAutomationNeeded = listOnTeam("listAutomationNeeded", {
       ...stateFilter(AUTOMATION_NEEDED_STATE),
       labels: {
         or: [{ null: true }, { every: { name: { neq: READY_LABEL } } }],
       },
     });
-    const listNeedsReview = listIssues("listNeedsReview", stateFilter(NEEDS_REVIEW_STATE));
+    const listNeedsReview = listOnTeam("listNeedsReview", stateFilter(NEEDS_REVIEW_STATE));
 
     return {
       teamId,
@@ -502,5 +510,7 @@ export class Linear extends Context.Service<Linear>()("@oligarchy/ctrl/Linear", 
 }) {
   static readonly layer = (
     token: Redacted.Redacted,
-  ): Layer.Layer<Linear, never, HttpClient.HttpClient> => Layer.effect(this)(this.make(token));
+    teamName: string,
+  ): Layer.Layer<Linear, never, HttpClient.HttpClient> =>
+    Layer.effect(this)(this.make(token, teamName));
 }

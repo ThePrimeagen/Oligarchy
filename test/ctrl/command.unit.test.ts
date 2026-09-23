@@ -118,6 +118,7 @@ const harness = (
   const log = FakeLog.fakeLog();
   const linear = options.linear ?? FakeLinear.fakeLinear();
   const touched: Array<string> = [];
+  const teams: Array<string> = [];
   const command = CtrlCommand.makeCtrlCommand({
     database: () => {
       touched.push("database");
@@ -126,8 +127,9 @@ const harness = (
         options.reporter === undefined ? log.layer : Log.Log.layerStdout,
       );
     },
-    linear: () => {
+    linear: (token, team) => {
       touched.push("linear");
+      teams.push(team);
       return linear.layer;
     },
   });
@@ -150,7 +152,7 @@ const harness = (
   // The failure itself, for a command refused after parsing.
   const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
     Effect.flip(program(args, env));
-  return { stores, log, linear, touched, program, run, fail };
+  return { stores, log, linear, touched, teams, program, run, fail };
 };
 
 const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
@@ -464,7 +466,7 @@ const NEW = [
   "--version",
   "1.2.3",
 ];
-const WITH_LINEAR = { ...WITH_DB, LINEAR_API_TOKEN: "linear-token" };
+const WITH_LINEAR = { ...WITH_DB, LINEAR_API_TOKEN: "linear-token", LINEAR_TEAM: "Fixture Team" };
 
 describe("test run", () => {
   it.effect(
@@ -570,6 +572,21 @@ describe("test run", () => {
         ]);
         expect(h.touched).toEqual(["database", "linear"]);
       }),
+  );
+
+  it.effect("files the ticket on the team LINEAR_TEAM names (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install);
+      const exit = yield* h.run([...NEW, "--server-url", SERVER], {
+        ...WITH_DB,
+        LINEAR_API_TOKEN: "linear-token",
+        LINEAR_TEAM: "Local Board",
+      });
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.teams).toEqual(["Local Board"]);
+      expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
+    }),
   );
 
   it.effect("creates one result and one ticket for a named definition (happy)", () =>
@@ -3372,7 +3389,7 @@ describe("session --search", () => {
 
 describe("environment order", () => {
   it.effect(
-    "reports DATABASE_URL before LINEAR_API_TOKEN, and both only after parsing (unhappy)",
+    "reports DATABASE_URL, then LINEAR_API_TOKEN, then LINEAR_TEAM, and only after parsing (unhappy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
@@ -3384,8 +3401,16 @@ describe("environment order", () => {
         const noLinear = yield* h.run([...NEW, "--server-url", SERVER], {
           ...WITH_DB,
           LINEAR_API_TOKEN: "",
+          LINEAR_TEAM: "",
         });
         expect(failure(noLinear)).toMatchObject({ message: "LINEAR_API_TOKEN is not set" });
+        const noTeam = yield* h.run([...NEW, "--server-url", SERVER], {
+          ...WITH_DB,
+          LINEAR_API_TOKEN: "linear-token",
+          LINEAR_TEAM: "",
+        });
+        expect(failure(noTeam)).toMatchObject({ message: "LINEAR_TEAM is not set" });
+        expect(h.touched).toEqual([]);
         const parseFirst = yield* h.run(
           [
             "test",

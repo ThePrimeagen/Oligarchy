@@ -50,7 +50,7 @@ export const work = (event: IssueWebhook): Work => ({
   stateChanged: event.action === "create" || event.updatedFrom?.stateId !== undefined,
 });
 
-// Status names on the Oligarchy board: Automation Needed starts a drive, Needs Review a diagnose.
+// Status names on the team's board: Automation Needed starts a drive, Needs Review a diagnose.
 export const queuedAction = (event: Work): Option.Option<Automation.AutomationAction> => {
   if (!event.stateChanged) {
     return Option.none();

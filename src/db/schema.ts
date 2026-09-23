@@ -370,7 +370,7 @@ export const testResults = pgTable(
     sessionId: uuid("session_id").references(() => sessions.id),
     // Null until test start writes the Cursor model id that is running this result.
     model: text("model"),
-    // Null until ctrl writes the Linear issue identifier (OLI-n) created for this result.
+    // Null until ctrl writes the Linear issue identifier created for this result.
     // The human-readable id is what webhooks carry; it is the reverse lookup key.
     linearId: text("linear_id"),
     status: testResultStatus("status").notNull().default("pending"),
