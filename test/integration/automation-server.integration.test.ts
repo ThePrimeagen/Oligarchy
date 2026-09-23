@@ -1298,6 +1298,73 @@ describeServing("automation server restart", () => {
   );
 
   it.live(
+    "a drive left running before its /run started: the next automation server gives back the reservation a real automation client holds, its guest slot with it, and fails the drive",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        const qemuCalls: Array<string> = [];
+        const qemu = await serveClient((req, res) => {
+          void readBody(req).then((body) => {
+            if (Option.exists(qemuBody(body), (parsed) => parsed.agent === linearId)) {
+              qemuCalls.push(req.url ?? "");
+            }
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+          });
+        });
+        const bin = installOpencode("exit 0");
+        const clientPort = await freePort();
+        const url = `http://127.0.0.1:${String(clientPort)}`;
+        const client = spawnAutomationClient(
+          ["--max-jobs", "4", "--name", `inherited-${linearId}`, "--port", String(clientPort)],
+          { SERVER_URL: qemu.url, PATH: `${bin}:${process.env.PATH ?? ""}` },
+        );
+        const bearer = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
+        let automationServer: Process | undefined;
+        try {
+          await client.waitFor(/automation client listening/);
+          // What the dead automation server did before its /run: reserved at the automation
+          // client, then wrote the row running on it.
+          const reserved = await request(
+            clientPort,
+            "POST",
+            "/reserve",
+            bearer,
+            JSON.stringify({ ticket: linearId, action: "drive" }),
+          );
+          expect(reserved.status).toBe(200);
+          const serverId = await seedLiveClient(url);
+          await seedRunningJob(resultId, serverId);
+
+          automationServer = spawnAutomationServer(["--port", String(await freePort())]);
+          const job = await waitForJob(resultId, "failed", 30_000);
+          expect(job).toMatchObject({ status: "failed", reason: RESTARTED, serverId });
+          expect(qemuCalls).toEqual(["/reserve", "/relinquish"]);
+          const refused = await request(
+            clientPort,
+            "POST",
+            "/run",
+            bearer,
+            JSON.stringify({ prompt: "do the work", ticket: linearId, model: MODEL }),
+          );
+          expect(refused.status).toBe(400);
+          expect(await refused.json()).toEqual({ error: "no reservation" });
+        } finally {
+          if (automationServer !== undefined) {
+            await stop(automationServer);
+          }
+          await stop(client);
+          await removeJobs(resultId);
+          await removeServer(url);
+          await qemu.close();
+          rmSync(bin, { recursive: true, force: true });
+        }
+      }),
+    120_000,
+  );
+
+  it.live(
     "a drive left running on an automation client that refuses connections is reported and failed, and the automation server keeps serving",
     () =>
       Effect.promise(async () => {
