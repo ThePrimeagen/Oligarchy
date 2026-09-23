@@ -39,6 +39,7 @@ const runCtrl = (args: ReadonlyArray<string>, env: Record<string, string> = {}):
         OLIGARCHY_TOKEN: "",
         SERVER_URL: "",
         LINEAR_API_TOKEN: "",
+        LINEAR_TEAM: "",
         // The session comes from the flag unless a test names it here.
         SESSION_ID: "",
         ...env,
@@ -327,6 +328,28 @@ describe("./ctrl without a database", () => {
     );
     expect(token.code).toBe(1);
     expect(firstLine(token.stderr)).toBe("LINEAR_API_TOKEN is not set");
+  });
+
+  it("test run without LINEAR_TEAM exits 1 after the token is set, and writes nothing", async () => {
+    const result = await runCtrl(
+      [
+        "test",
+        "run",
+        "--name",
+        DEFINITION,
+        "--iso",
+        "https://example.com/omarchy.iso",
+        "--version",
+        "1.2.3",
+        "--server-url",
+        SERVER,
+      ],
+      { DATABASE_URL: UNUSED_DB, LINEAR_API_TOKEN: "l", LINEAR_TEAM: "" },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(firstLine(result.stderr)).toBe("LINEAR_TEAM is not set");
+    expect(result.stderr).not.toMatch(/ECONNREFUSED/);
   });
 
   it("test run --ticket is a stray flag, and diagnose run is unknown; neither spawns an agent", async () => {

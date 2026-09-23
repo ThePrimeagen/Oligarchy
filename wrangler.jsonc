@@ -30,7 +30,9 @@
   "placement": {
     "region": "aws:us-east-1"
   },
-  // LINEAR_API_TOKEN, the key POST /abort moves a ticket with, is a wrangler secret beside these.
+  // LINEAR_API_TOKEN, the key POST /abort moves a ticket with, and LINEAR_TEAM, the team
+  // POST /create-test-suite-run files tickets on, are wrangler secrets beside these. A var set
+  // in the dashboard is deleted on the next deploy, and LINEAR_TEAM has no default.
   "vars": {
     "AUTOMATION_SERVER_URL": "https://oligarchy-automation.trm.sh",
     "LINEAR_API_URL": "https://api.linear.app/graphql"

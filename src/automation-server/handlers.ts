@@ -27,7 +27,7 @@ export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
 }
 
 // HMAC is over the raw bytes. After verifying, parse identifier + state and enqueue drive or
-// diagnose when the Oligarchy board moves into Automation Needed or Needs Review.
+// diagnose when the configured team's board moves into Automation Needed or Needs Review.
 export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear", (handlers) =>
   handlers.handle("linear", () =>
     Effect.gen(function* () {

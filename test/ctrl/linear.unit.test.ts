@@ -10,6 +10,7 @@ import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 
 const TOKEN = "linear-token-s3ntinel";
+const TEAM = "Fixture Team";
 
 const experiment = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -110,7 +111,7 @@ const happyLinear = (body: GraphQl): Response => {
 const withHttp = (respond: (body: GraphQl) => Response) =>
   FakeHttp.recordRequests((request) => respond(graphql(request)));
 
-const linear = (token = TOKEN) => Linear.Linear.layer(Redacted.make(token));
+const linear = (token = TOKEN, team = TEAM) => Linear.Linear.layer(Redacted.make(token), team);
 
 // The ticket body is the prompt module's; a broken checkout is a defect here, not a Linear failure.
 const describedAs = (ticket: string) =>
@@ -150,12 +151,12 @@ const createTicket = Effect.gen(function* () {
   return ticket;
 });
 
-const failureOf = <A, R>(self: Effect.Effect<A, Errors.LinearError, R>) =>
-  Effect.flip(self).pipe(Effect.provide(linear()));
+const failureOf = <A, R>(self: Effect.Effect<A, Errors.LinearError, R>, team = TEAM) =>
+  Effect.flip(self).pipe(Effect.provide(linear(TOKEN, team)));
 
 describe("Linear happy path", () => {
   it.effect(
-    "resolves the Oligarchy team by name, existing labels, and creates an issue for one definition",
+    "resolves the given team by name, existing labels, and creates an issue for one definition",
     () =>
       Effect.gen(function* () {
         const http = withHttp(happyLinear);
@@ -179,7 +180,7 @@ describe("Linear happy path", () => {
           expect(request.headers["content-type"]).toBe("application/json");
         }
         expect(bodies[0]?.query).toMatch(/teams\(filter: \{ name: \{ eq: \$name \} \}, first: 1\)/);
-        expect(bodies[0]?.variables).toEqual({ name: "Oligarchy" });
+        expect(bodies[0]?.variables).toEqual({ name: TEAM });
         expect(bodies[1]?.query).toMatch(/\$teamId: ID!/);
         expect(bodies[1]?.variables).toEqual({ name: "agent test", teamId: "team-id" });
         expect(bodies[2]?.variables).toEqual({ name: experiment.version, teamId: "team-id" });
@@ -286,26 +287,30 @@ describe("Linear happy path", () => {
         },
       ];
       let page = 0;
-      const http = withHttp(() => {
+      const http = withHttp((body) => {
+        if (body.query.includes("teams(")) {
+          return teamResponse();
+        }
         const current = pages[page];
         page++;
         return FakeHttp.json({ data: { issues: current } });
       });
       const tickets = yield* Effect.flatMap(Linear.Linear, (client) => client.listBacklog).pipe(
-        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+        Effect.provide(linear(TOKEN, "Other Board").pipe(Layer.provide(http.layer))),
       );
       expect(tickets).toEqual([...(pages[0]?.nodes ?? []), ...(pages[1]?.nodes ?? [])]);
       const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
         JSON.parse(request.body),
       );
-      expect(bodies).toHaveLength(2);
-      expect(bodies[0]?.query).toMatch(/issues\(first: 100, after: \$after, filter: \$filter\)/);
-      expect(bodies[0]?.query).toMatch(/updatedAt/);
-      expect(bodies[0]?.variables).toEqual({
-        filter: { team: { name: { eq: "Oligarchy" } }, state: { type: { eq: "backlog" } } },
-      });
+      expect(bodies).toHaveLength(3);
+      expect(bodies[0]?.variables).toEqual({ name: "Other Board" });
+      expect(bodies[1]?.query).toMatch(/issues\(first: 100, after: \$after, filter: \$filter\)/);
+      expect(bodies[1]?.query).toMatch(/updatedAt/);
       expect(bodies[1]?.variables).toEqual({
-        filter: { team: { name: { eq: "Oligarchy" } }, state: { type: { eq: "backlog" } } },
+        filter: { team: { name: { eq: "Other Board" } }, state: { type: { eq: "backlog" } } },
+      });
+      expect(bodies[2]?.variables).toEqual({
+        filter: { team: { name: { eq: "Other Board" } }, state: { type: { eq: "backlog" } } },
         after: "cursor-1",
       });
     }),
@@ -313,18 +318,21 @@ describe("Linear happy path", () => {
 
   it.effect("listAutomationNeeded asks for the Automation Needed state by name", () =>
     Effect.gen(function* () {
-      const http = withHttp(() =>
-        FakeHttp.json({
-          data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
-        }),
+      const http = withHttp((body) =>
+        body.query.includes("teams(")
+          ? teamResponse()
+          : FakeHttp.json({
+              data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+            }),
       );
       yield* Effect.flatMap(Linear.Linear, (client) => client.listAutomationNeeded).pipe(
         Effect.provide(linear().pipe(Layer.provide(http.layer))),
       );
-      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      const listed = http.requests.find((request) => request.body.includes("issues("));
+      const body: GraphQl = JSON.parse(listed?.body ?? "");
       expect(body.variables).toEqual({
         filter: {
-          team: { name: { eq: "Oligarchy" } },
+          team: { name: { eq: TEAM } },
           state: { name: { eq: "Automation Needed" } },
           labels: {
             or: [{ null: true }, { every: { name: { neq: "ready" } } }],
@@ -337,18 +345,21 @@ describe("Linear happy path", () => {
 
   it.effect("listNeedsReview asks for the Needs Review state by name", () =>
     Effect.gen(function* () {
-      const http = withHttp(() =>
-        FakeHttp.json({
-          data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
-        }),
+      const http = withHttp((body) =>
+        body.query.includes("teams(")
+          ? teamResponse()
+          : FakeHttp.json({
+              data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+            }),
       );
       yield* Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview).pipe(
         Effect.provide(linear().pipe(Layer.provide(http.layer))),
       );
-      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      const listed = http.requests.find((request) => request.body.includes("issues("));
+      const body: GraphQl = JSON.parse(listed?.body ?? "");
       expect(body.variables).toEqual({
         filter: {
-          team: { name: { eq: "Oligarchy" } },
+          team: { name: { eq: TEAM } },
           state: { name: { eq: "Needs Review" } },
         },
       });
@@ -504,23 +515,21 @@ describe("Linear unhappy path", () => {
     }),
   );
 
-  it.effect(
-    "rejects a token that cannot see a team named Oligarchy, even when it sees others",
-    () =>
-      Effect.gen(function* () {
-        const http = withHttp((body) =>
-          FakeHttp.json({
-            data: {
-              teams: { nodes: body.variables?.name === "Oligarchy" ? [] : [{ id: "some-other" }] },
-            },
-          }),
-        );
-        const error = yield* failureOf(createTicket).pipe(Effect.provide(http.layer));
-        expect(error.message).toBe("linear: no team named Oligarchy");
-        expect(http.requests).toHaveLength(1);
-        const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
-        expect(body.variables).toEqual({ name: "Oligarchy" });
-      }),
+  it.effect("rejects a token that cannot see the given team, even when it sees others", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        FakeHttp.json({
+          data: {
+            teams: { nodes: body.variables?.name === "Other Board" ? [] : [{ id: "some-other" }] },
+          },
+        }),
+      );
+      const error = yield* failureOf(createTicket, "Other Board").pipe(Effect.provide(http.layer));
+      expect(error.message).toBe("linear: no team named Other Board");
+      expect(http.requests).toHaveLength(1);
+      const body: GraphQl = JSON.parse(http.requests[0]?.body ?? "");
+      expect(body.variables).toEqual({ name: "Other Board" });
+    }),
   );
 
   it.effect("rejects when prime@terminal.shop is not a workspace user", () =>
@@ -669,7 +678,7 @@ describe("Linear unhappy path", () => {
         const run = Effect.gen(function* () {
           const client = yield* Linear.Linear;
           const error = yield* Effect.flip(client.markReady(issue));
-          expect(error.message).toBe("linear: no team named Oligarchy");
+          expect(error.message).toBe(`linear: no team named ${TEAM}`);
           yield* client.markReady(issue);
         });
         yield* run.pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
@@ -784,12 +793,29 @@ describe("Linear unhappy path", () => {
     }),
   );
 
+  it.effect("listBacklog refuses a team Linear does not have before it lists issues", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() => FakeHttp.json({ data: { teams: { nodes: [] } } }));
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.listBacklog),
+        "Other Board",
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        operation: "teamId",
+        message: "linear: no team named Other Board",
+      });
+      expect(http.requests).toHaveLength(1);
+    }),
+  );
+
   it.effect("listBacklog fails as an invalid response when a further page has no cursor", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({
-          data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } },
-        }),
+      const http = withHttp((body) =>
+        body.query.includes("teams(")
+          ? teamResponse()
+          : FakeHttp.json({
+              data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } },
+            }),
       );
       const error = yield* failureOf(
         Effect.flatMap(Linear.Linear, (client) => client.listBacklog),
@@ -798,16 +824,18 @@ describe("Linear unhappy path", () => {
         operation: "listBacklog",
         message: "linear: invalid response",
       });
-      expect(http.requests).toHaveLength(1);
+      expect(http.requests).toHaveLength(2);
     }),
   );
 
   it.effect("listNeedsReview fails as an invalid response when a further page has no cursor", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({
-          data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } },
-        }),
+      const http = withHttp((body) =>
+        body.query.includes("teams(")
+          ? teamResponse()
+          : FakeHttp.json({
+              data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } },
+            }),
       );
       const error = yield* failureOf(
         Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview),
