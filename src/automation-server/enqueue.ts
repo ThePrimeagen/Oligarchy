@@ -15,32 +15,40 @@ export const queuedAction = (
 ): Automation.AutomationAction =>
   action === "drive" && Option.isSome(definition) && definition.value === "mint" ? "mint" : action;
 
-// A missing result is not a job.
-export const enqueueTicket = Effect.fn("enqueueTicket")(function* (
-  ticket: string,
+// The (result, action) unique index keeps one row, so a second insert is a duplicate, named by
+// the status of the row it hit.
+export const enqueueResult = Effect.fn("enqueueResult")(function* (
+  resultId: string,
   action: Automation.AutomationAction,
 ) {
-  const tests = yield* Tests.TestStore;
   const automation = yield* Automation.AutomationStore;
-  const found = yield* tests.findResultByLinearId(ticket);
-  if (Option.isNone(found)) {
-    return { result: "missing" as const };
-  }
-  const definition = yield* tests.definitionName(found.value.definitionId);
-  const queued = queuedAction(action, definition);
-  const outcome = yield* automation.enqueue({ resultId: found.value.id, action: queued }).pipe(
+  const outcome = yield* automation.enqueue({ resultId, action }).pipe(
     Effect.as("queued" as const),
     Effect.catchTag("DatabaseError", (error) =>
       isDuplicateJob(error) ? Effect.succeed("duplicate" as const) : Effect.fail(error),
     ),
   );
   if (outcome === "duplicate") {
-    const status = yield* automation.jobStatus(found.value.id, queued);
+    const status = yield* automation.jobStatus(resultId, action);
     return {
       result: outcome,
-      action: queued,
+      action,
       status: Option.getOrElse(status, () => "pending" as const),
     };
   }
-  return { result: outcome, action: queued };
+  return { result: outcome, action };
+});
+
+// A missing result is not a job.
+export const enqueueTicket = Effect.fn("enqueueTicket")(function* (
+  ticket: string,
+  action: Automation.AutomationAction,
+) {
+  const tests = yield* Tests.TestStore;
+  const found = yield* tests.findResultByLinearId(ticket);
+  if (Option.isNone(found)) {
+    return { result: "missing" as const };
+  }
+  const definition = yield* tests.definitionName(found.value.definitionId);
+  return yield* enqueueResult(found.value.id, queuedAction(action, definition));
 });

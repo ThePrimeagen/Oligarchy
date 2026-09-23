@@ -367,43 +367,35 @@ describe("Linear happy path", () => {
     }),
   );
 
-  it.effect("markReady adds the ready label, and a second ticket reuses that label id", () =>
-    Effect.gen(function* () {
-      const http = withHttp(happyLinear);
-      const issue = {
-        id: "issue-OLI-45",
-        identifier: "OLI-45",
-        url: "https://linear.app/issue/OLI-45",
-      };
-      const other = {
-        id: "issue-OLI-46",
-        identifier: "OLI-46",
-        url: "https://linear.app/issue/OLI-46",
-      };
-      yield* Effect.flatMap(Linear.Linear, (client) =>
-        client.markReady(issue).pipe(Effect.andThen(client.markReady(other))),
-      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
-      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
-        JSON.parse(request.body),
-      );
-      expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
-      expect(bodies.filter((body) => body.query.includes("issueLabels"))).toEqual([
-        {
-          query: expect.stringContaining("issueLabels"),
-          variables: { name: "ready", teamId: "team-id" },
-        },
-      ]);
-      expect(bodies.filter((body) => body.query.includes("issueUpdate"))).toEqual([
-        {
-          query: expect.stringContaining("issueUpdate"),
-          variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
-        },
-        {
-          query: expect.stringContaining("issueUpdate"),
-          variables: { id: other.id, input: { addedLabelIds: [labelId("ready")] } },
-        },
-      ]);
-    }),
+  it.effect(
+    "markReady adds the ready label by identifier, and a second ticket reuses that label id",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp(happyLinear);
+        yield* Effect.flatMap(Linear.Linear, (client) =>
+          client.markReady("OLI-45").pipe(Effect.andThen(client.markReady("OLI-46"))),
+        ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+        const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+          JSON.parse(request.body),
+        );
+        expect(bodies.filter((body) => body.query.includes("teams("))).toHaveLength(1);
+        expect(bodies.filter((body) => body.query.includes("issueLabels"))).toEqual([
+          {
+            query: expect.stringContaining("issueLabels"),
+            variables: { name: "ready", teamId: "team-id" },
+          },
+        ]);
+        expect(bodies.filter((body) => body.query.includes("issueUpdate"))).toEqual([
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: "OLI-45", input: { addedLabelIds: [labelId("ready")] } },
+          },
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: "OLI-46", input: { addedLabelIds: [labelId("ready")] } },
+          },
+        ]);
+      }),
   );
 
   it.effect("two simultaneous markReady calls look the ready label up once", () =>
@@ -421,18 +413,8 @@ describe("Linear happy path", () => {
           return happyLinear(body);
         }),
       );
-      const issue = {
-        id: "issue-OLI-45",
-        identifier: "OLI-45",
-        url: "https://linear.app/issue/OLI-45",
-      };
-      const other = {
-        id: "issue-OLI-46",
-        identifier: "OLI-46",
-        url: "https://linear.app/issue/OLI-46",
-      };
       const fiber = yield* Effect.flatMap(Linear.Linear, (client) =>
-        Effect.all([client.markReady(issue), client.markReady(other)], { concurrency: 2 }),
+        Effect.all([client.markReady("OLI-45"), client.markReady("OLI-46")], { concurrency: 2 }),
       ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))), Effect.forkChild);
       for (let i = 0; i < 100; i++) {
         if (lookups > 0) {
@@ -457,13 +439,8 @@ describe("Linear happy path", () => {
   it.effect("clearReady removes the ready label and reuses the id markReady looked up", () =>
     Effect.gen(function* () {
       const http = withHttp(happyLinear);
-      const issue = {
-        id: "issue-OLI-45",
-        identifier: "OLI-45",
-        url: "https://linear.app/issue/OLI-45",
-      };
       yield* Effect.flatMap(Linear.Linear, (client) =>
-        client.markReady(issue).pipe(Effect.andThen(client.clearReady(issue.identifier))),
+        client.markReady("OLI-45").pipe(Effect.andThen(client.clearReady("OLI-45"))),
       ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
       const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
         JSON.parse(request.body),
@@ -473,11 +450,11 @@ describe("Linear happy path", () => {
       expect(bodies.filter((body) => body.query.includes("issueUpdate"))).toEqual([
         {
           query: expect.stringContaining("issueUpdate"),
-          variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
+          variables: { id: "OLI-45", input: { addedLabelIds: [labelId("ready")] } },
         },
         {
           query: expect.stringContaining("issueUpdate"),
-          variables: { id: issue.identifier, input: { removedLabelIds: [labelId("ready")] } },
+          variables: { id: "OLI-45", input: { removedLabelIds: [labelId("ready")] } },
         },
       ]);
     }),
@@ -676,13 +653,7 @@ describe("Linear unhappy path", () => {
           : happyLinear(body),
       );
       const error = yield* failureOf(
-        Effect.flatMap(Linear.Linear, (client) =>
-          client.markReady({
-            id: "issue-OLI-45",
-            identifier: "OLI-45",
-            url: "https://linear.app/issue/OLI-45",
-          }),
-        ),
+        Effect.flatMap(Linear.Linear, (client) => client.markReady("OLI-45")),
       ).pipe(Effect.provide(http.layer));
       expect(error).toMatchObject({
         _tag: "LinearError",
@@ -722,16 +693,11 @@ describe("Linear unhappy path", () => {
           }
           return happyLinear(body);
         });
-        const issue = {
-          id: "issue-OLI-45",
-          identifier: "OLI-45",
-          url: "https://linear.app/issue/OLI-45",
-        };
         const run = Effect.gen(function* () {
           const client = yield* Linear.Linear;
-          const error = yield* Effect.flip(client.markReady(issue));
+          const error = yield* Effect.flip(client.markReady("OLI-45"));
           expect(error.message).toBe(`linear: no team named ${TEAM}`);
-          yield* client.markReady(issue);
+          yield* client.markReady("OLI-45");
         });
         yield* run.pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
         const updates = http.requests
@@ -747,7 +713,7 @@ describe("Linear unhappy path", () => {
         expect(updates).toEqual([
           {
             query: expect.stringContaining("issueUpdate"),
-            variables: { id: issue.id, input: { addedLabelIds: [labelId("ready")] } },
+            variables: { id: "OLI-45", input: { addedLabelIds: [labelId("ready")] } },
           },
         ]);
       }),

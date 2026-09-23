@@ -28,7 +28,8 @@ export class LinearWebhookSecret extends Context.Service<LinearWebhookSecret>()(
 }
 
 // HMAC is over the raw bytes. After verifying, parse identifier + state and enqueue drive or
-// diagnose when the configured team's board moves into Automation Needed or Needs Review.
+// diagnose when the configured team's board moves into Automation Needed or Needs Review. A new
+// drive or mint labels its ticket ready.
 export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear", (handlers) =>
   handlers.handle("linear", () =>
     Effect.gen(function* () {
@@ -81,6 +82,10 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         location: Log.Locations.automation,
         agentId: event.ticket,
       });
+      // Ready is a pending drive or mint; a diagnose is never labeled.
+      if (placed.action !== "diagnose") {
+        yield* Ready.mark(event.ticket);
+      }
       return ok;
     }),
   ),

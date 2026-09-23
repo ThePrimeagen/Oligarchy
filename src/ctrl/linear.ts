@@ -189,8 +189,8 @@ export type LinearService = {
     ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
-  readonly markReady: (ticket: LinearTicket) => Effect.Effect<void, Errors.LinearError>;
   // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
+  readonly markReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
@@ -455,8 +455,9 @@ const makeLinear = (
       state: { name: { eq: name } },
     });
 
-    // The id does not change for the life of the process. The two watches can label at once, so
-    // the lookup runs one at a time and a failed lookup is not stored. The next ticket tries again.
+    // The id does not change for the life of the process. The watches and POST /linear can label
+    // at once, so the lookup runs one at a time and a failed lookup is not stored. The next ticket
+    // tries again.
     const readyLabel = yield* SynchronizedRef.make<Option.Option<string>>(Option.none());
 
     const readyLabelId = Effect.fn("Linear.readyLabelId")(function* () {
@@ -487,13 +488,13 @@ const makeLinear = (
         ),
       );
 
-    const markReady = Effect.fn("Linear.markReady")(function* (ticket: LinearTicket) {
+    const markReady = Effect.fn("Linear.markReady")(function* (identifier: string) {
       const id = yield* readyLabelId();
       yield* setReady(
         "markReady",
-        ticket.id,
+        identifier,
         { addedLabelIds: [id] },
-        `linear: labeling ${ticket.identifier} ready failed`,
+        `linear: labeling ${identifier} ready failed`,
       );
     });
 
