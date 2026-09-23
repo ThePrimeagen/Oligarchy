@@ -100,6 +100,8 @@ describe("renderLinearIssue happy path", () => {
         expect(text).toContain("always take a screen shot of every step");
         expect(text).toContain('--message "Press Super+Escape. The System menu opens."');
         expect(text).not.toContain("boot to the desktop");
+        expect(text).not.toContain("In Progress");
+        expect(text).toContain('move it to "Needs Review"');
       }),
   );
 });
@@ -196,6 +198,19 @@ describe("renderMintIssue happy path", () => {
         );
         // Its own template, then the one guide it names; the test ticket's template is never read.
         expect(fileNames(fs.reads)).toEqual(["mint-issue.html", "client.md"]);
+      }),
+  );
+
+  it.effect(
+    "mint-issue.html leaves In Progress to the server and still closes in Needs Review",
+    () =>
+      Effect.gen(function* () {
+        const text = yield* Prompts.renderMintIssue(mint).pipe(
+          Effect.provide(NodeFileSystem.layer),
+        );
+        expect(text).not.toContain("In Progress");
+        expect(text).toContain('move it to "Needs Review"');
+        expect(text).toContain('move the ticket to "Needs Review"');
       }),
   );
 });

@@ -28,7 +28,6 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 </install>
 
 <rules>
-  <rule>On starting {{LINEAR_TICKET}}, move it to "In Progress".</rule>
   <rule>On completing {{LINEAR_TICKET}}, move it to "Needs Review".</rule>
   <rule>Do not read files in this repository. Do not write, edit, or commit code. Do not open a pull request.</rule>
   <rule>Run only ./client, ./client-with-image, ./ctrl, and sleep. You may open only the screenshots and serial dumps the client writes. Do not upload images to Linear.</rule>
@@ -39,7 +38,7 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 </rules>
 
 <procedure>
-  <step>Move the ticket to "In Progress". Give back the placed reservation with ./client relinquish — `no reservation` is fine, you held nothing — then take the pinned one: ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}.</step>
+  <step>Give back the placed reservation with ./client relinquish — `no reservation` is fine, you held nothing — then take the pinned one: ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}.</step>
   <step>Start fresh. The server fetches the ISO if it does not have it; a first start can take a while, and the command waits. Comment the session id on the ticket, then tie the result to the session with ./ctrl test start.</step>
   <step>Inside intents, drive the installer with images: the boot menu, then the installer, with the user name, password and disk passphrase exactly as the install's instruction says and the defaults everywhere else.</step>
   <step>The installer reboots the machine when it is done. Image through the reboot: the disk normally comes up on its own; should the ISO's boot menu show, choose the entry that boots the installed disk, not the installer. Type the disk passphrase when asked and reach the desktop; if a login screen stands in the way, log in with the instruction's user and password.</step>
@@ -80,7 +79,6 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 
 <example-session>
 ```
-# Use Linear MCP to move the ticket to "In Progress"
 $ ./client relinquish --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}}
 # `no reservation` here is fine
 $ ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}
