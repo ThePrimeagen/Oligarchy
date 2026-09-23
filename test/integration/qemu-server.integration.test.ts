@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { describe, expect, inject } from "vitest";
+import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Schedule } from "effect";
 import * as Client from "../../src/db/client.ts";
@@ -30,7 +30,7 @@ const MAX_JOBS: ReadonlyArray<string> = ["--max-jobs", "1"];
 const NAME: ReadonlyArray<string> = ["--name", "garage"];
 const REQUIRED: ReadonlyArray<string> = [...MAX_JOBS, ...NAME];
 
-const dbUrl = inject("dbUrl");
+const dbUrl = Postgres.getDbUrl();
 
 const onPath = (binary: string): boolean =>
   (process.env.PATH ?? "").split(delimiter).some((dir) => {

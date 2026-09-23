@@ -25,12 +25,12 @@ const detail = (error: unknown): string =>
 // as an automation-client, with the host's stats and qemus 0 — this process boots no guests —
 // and the row's generation counts the writes, so a number that stops moving is a client that
 // stopped without a chance to leave. The same tick inserts a `process_stats` row: current jobs,
-// VmRSS of this process and every child that still answers, and the cpu busy over the last
-// thirty seconds. A write that fails is one error line; the other write and the next tick still
-// run. A shutdown deletes the servers row only: the readings stay so they can be graphed later.
-// Registered before the loop so the fiber is interrupted first; a write in flight finishes
-// (the write is uninterruptible). A delete that fails is one `unannounce failed` line; the
-// process still exits.
+// the resident memory of this process and every child that still answers (VmRSS, or ps's rss on
+// macOS), and the cpu busy over the last thirty seconds. A write or a reading that fails is one
+// error line; the other write and the next tick still run. A shutdown deletes the servers row
+// only: the readings stay so they can be graphed later. Registered before the loop so the fiber
+// is interrupted first; a write in flight finishes (the write is uninterruptible). A delete that
+// fails is one `unannounce failed` line; the process still exits.
 export const announce = (
   url: string,
   name: string,

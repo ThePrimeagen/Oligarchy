@@ -967,7 +967,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
       reason: string | undefined,
     ): Effect.Effect<void, Errors.Internal> =>
       Effect.gen(function* () {
-        const captured = finalStatus === "succeeded" ? undefined : yield* captureDebugLog(live);
+        const captured = yield* captureDebugLog(live);
         // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
         // failure still leaves a dead machine: log it, but close the record.
         yield* killLogged(live, "stop cleanup failed", live.agent);
@@ -985,9 +985,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
           location: live.id,
           agentId: live.agent,
         });
-        if (captured !== undefined) {
-          yield* saveDebugLog(live, captured);
-        }
+        yield* saveDebugLog(live, captured);
         return yield* finishLiveSession(live, finalStatus);
       });
 
@@ -1101,6 +1099,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         yield* finishLiveSession(live, "failed");
         return yield* Effect.fail(error);
       }
+      const captured = yield* captureDebugLog(live);
       yield* killLogged(live, "save cleanup failed", live.agent);
       const reason = `saved; minted ${live.iso}`;
       yield* sessionStore
@@ -1114,6 +1113,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         );
       // Colour is released in finishLiveSession; log first so the saved line keeps it.
       yield* log.info(reason, attribution(live.id, live.agent));
+      yield* saveDebugLog(live, captured);
       return yield* finishLiveSession(live, "succeeded");
     });
 

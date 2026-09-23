@@ -1531,9 +1531,9 @@ export function removeServer(connectionString: string, url: string): Promise<boo
   });
 }
 
-// Thirty days: the pages read the last fifty of anything and the last thirty minutes of process
-// stats, so a month back is history nobody opens, and the images are the bytes that grow.
-export const RETENTION_DAYS = 30;
+// Seven days: the pages read the last fifty of anything and the last thirty minutes of process
+// stats, so a week back is history nobody opens, and the images are the bytes that grow.
+export const RETENTION_DAYS = 7;
 
 // How many rows each table lost, in the order they were deleted.
 export type DeletedRows = {

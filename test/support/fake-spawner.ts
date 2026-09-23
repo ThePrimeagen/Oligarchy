@@ -179,15 +179,19 @@ export const fakeSpawner = (script: Script = () => ({ exitCode: 0 })): FakeSpawn
       if (waiter !== undefined) {
         Deferred.doneUnsafe(waiter, Exit.succeed(handle));
       }
-      // The real spawner's release sends the kill signal when the process still runs and the
-      // handle is still referenced; an unref'd child outlives the scope.
+      // The real spawner's release sends the command's own kill signal, escalating after its
+      // forceKillAfter, when the process still runs and the handle is still referenced; an
+      // unref'd child outlives the scope.
       yield* Effect.addFinalizer(() =>
         Effect.suspend(() => {
           released = true;
           // A child already gone cannot be killed.
           return Deferred.isDoneUnsafe(exitSignal) || !referenced
             ? Effect.void
-            : kill().pipe(Effect.catch(() => Effect.void));
+            : kill({
+                killSignal: command.options.killSignal,
+                forceKillAfter: command.options.forceKillAfter,
+              }).pipe(Effect.catch(() => Effect.void));
         }),
       );
       return ChildProcessSpawner.makeHandle({

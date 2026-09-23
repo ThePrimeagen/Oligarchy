@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
-import { describe, expect, inject, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { app, scheduled } from "../../src/dashboard/dashboard.tsx";
 import {
   actions,
@@ -25,6 +25,7 @@ import {
   testResults,
   testRuns,
 } from "../../src/db/schema.ts";
+import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
@@ -34,7 +35,7 @@ const REFUSED_URL = `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`
 const SEEDED_SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const EXIT_WITHIN_MS = 15_000;
 
-const dbUrl = inject("dbUrl");
+const dbUrl = Postgres.getDbUrl();
 
 type QueryRun = {
   readonly code: number | null;
@@ -204,10 +205,12 @@ console.log(JSON.stringify(counted));
   });
 
   it("lists the newest process reading per name, by type then name, and ends the connection", async () => {
+    const qemu = `proc-qemu-${randomUUID().slice(0, 8)}`;
+    const auto = `proc-auto-${randomUUID().slice(0, 8)}`;
     await seed(dbUrl, async (db) => {
       await db.insert(processStats).values([
         {
-          name: "proc-qemu",
+          name: qemu,
           type: "qemu",
           jobs: 9,
           memoryBytes: 9,
@@ -215,14 +218,14 @@ console.log(JSON.stringify(counted));
           reportedAt: sql`now() - interval '1 minute'`,
         },
         {
-          name: "proc-qemu",
+          name: qemu,
           type: "qemu",
           jobs: 2,
           memoryBytes: 1000,
           cpuPercent: 12.5,
         },
         {
-          name: "proc-auto",
+          name: auto,
           type: "automation-client",
           jobs: 1,
           memoryBytes: 2000,
@@ -232,7 +235,8 @@ console.log(JSON.stringify(counted));
     });
     const result = await runQuery(
       `
-const rows = (await query.listProcessStats(url)).filter((row) => row.name.startsWith("proc-"));
+const mine = new Set(${JSON.stringify([qemu, auto])});
+const rows = (await query.listProcessStats(url)).filter((row) => mine.has(row.name));
 console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, row.cpuPercent, row.reportedAt instanceof Date, row.queriedAt instanceof Date].join(" ")).join("\\n"));
 `,
       dbUrl,
@@ -243,16 +247,18 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
     // `type` is the server_type enum, declared qemu then automation-client, and an enum column
     // orders by declaration: the qemu servers come first, as the servers page lays them out.
     expect(lines(result.stdout)).toEqual([
-      "proc-qemu qemu 2 1000 12.5 true true",
-      "proc-auto automation-client 1 2000 4 true true",
+      `${qemu} qemu 2 1000 12.5 true true`,
+      `${auto} automation-client 1 2000 4 true true`,
     ]);
   });
 
   it("lists the last 60 process readings per name as a series, oldest first, drops a reading older than 30 minutes, and ends the connection", async () => {
+    const qemu = `series-qemu-${randomUUID().slice(0, 8)}`;
+    const auto = `series-auto-${randomUUID().slice(0, 8)}`;
     await seed(dbUrl, async (db) => {
       await db.insert(processStats).values([
         ...Array.from({ length: 61 }, (_, index) => ({
-          name: "series-qemu",
+          name: qemu,
           type: "qemu" as const,
           jobs: index,
           memoryBytes: index,
@@ -260,14 +266,14 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
           reportedAt: new Date(Date.now() - (60 - index) * 1_000),
         })),
         {
-          name: "series-auto",
+          name: auto,
           type: "automation-client" as const,
           jobs: 1,
           memoryBytes: 2,
           cpuPercent: 3,
         },
         {
-          name: "series-qemu",
+          name: qemu,
           type: "qemu" as const,
           jobs: 99,
           memoryBytes: 99,
@@ -278,7 +284,8 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
     });
     const result = await runQuery(
       `
-const rows = (await query.listProcessSeries(url)).filter((row) => row.name.startsWith("series-"));
+const mine = new Set(${JSON.stringify([qemu, auto])});
+const rows = (await query.listProcessSeries(url)).filter((row) => mine.has(row.name));
 console.log(rows.map((row) => [row.name, row.type, row.jobs, row.samples.length, row.samples[0].jobs, row.samples.at(-1).jobs].join(" ")).join("\\n"));
 `,
       dbUrl,
@@ -287,8 +294,8 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.samples.length,
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(lines(result.stdout)).toEqual([
-      "series-qemu qemu 60 60 1 60",
-      "series-auto automation-client 1 1 1 1",
+      `${qemu} qemu 60 60 1 60`,
+      `${auto} automation-client 1 1 1 1`,
     ]);
   });
 
@@ -800,15 +807,15 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
           id: keptSession,
           config: { iso: "x" },
           status: "succeeded",
-          startedAt: new Date("2026-09-02T00:00:00Z"),
-          endedAt: new Date("2026-09-02T00:02:00Z"),
+          startedAt: secondsAgo(7_200),
+          endedAt: secondsAgo(7_080),
         },
         {
           id: failedSession,
           config: { iso: "x" },
           status: "failed",
-          startedAt: new Date("2026-09-03T00:00:00Z"),
-          endedAt: new Date("2026-09-03T00:04:00Z"),
+          startedAt: secondsAgo(3_600),
+          endedAt: secondsAgo(3_360),
         },
       ]);
       const runs = await db
@@ -3535,10 +3542,10 @@ const seedLinked = async (
 // The first test sweeps a database with no other row past the cutoff, so its counts are exact;
 // the ones after it match on the rows they seeded.
 describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => {
-  it("deletes every row older than thirty days with what hangs off it, keeps younger rows and the configuration, counts what went, and ends the connection", async () => {
+  it("deletes every row older than seven days with what hangs off it, keeps younger rows and the configuration, counts what went, and ends the connection", async () => {
     const { old, kept } = await seed(dbUrl, async (db) => ({
-      old: await seedAged(db, "old", 31),
-      kept: await seedAged(db, "kept", 29),
+      old: await seedAged(db, "old", 8),
+      kept: await seedAged(db, "kept", 6),
     }));
     const result = await runQuery(SWEEP, dbUrl);
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -3568,7 +3575,7 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
   });
 
   it("takes an old run's results and jobs with it and leaves the younger session one of them ran", async () => {
-    const linked = await seed(dbUrl, (db) => seedLinked(db, "late", 31, 1));
+    const linked = await seed(dbUrl, (db) => seedLinked(db, "late", 8, 1));
     const result = await runQuery(SWEEP, dbUrl);
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
     expect(result.stderr).toBe("");
@@ -3590,8 +3597,8 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
   it("runs as the Worker's scheduled handler: the old rows go and the cron resolves", async () => {
     await seed(dbUrl, async (db) => {
       await db.insert(logs).values([
-        { location: "server", agentId: "PRUNE-cron", text: "old", createdAt: daysAgo(31) },
-        { location: "server", agentId: "PRUNE-cron", text: "kept", createdAt: daysAgo(29) },
+        { location: "server", agentId: "PRUNE-cron", text: "old", createdAt: daysAgo(8) },
+        { location: "server", agentId: "PRUNE-cron", text: "kept", createdAt: daysAgo(6) },
       ]);
     });
     await expect(
@@ -3616,11 +3623,11 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows unhappy path", () =
     // A young run's result on an old session: nothing writes this, and the session's own delete
     // is refused by the foreign key. The whole sweep rolls back, the session's actions included.
     const held = await seed(dbUrl, async (db) => {
-      const linked = await seedLinked(db, "held", 1, 31);
+      const linked = await seedLinked(db, "held", 1, 8);
       await db.insert(actions).values({
         sessionId: linked.sessionId,
         request: { name: "click" },
-        createdAt: daysAgo(31),
+        createdAt: daysAgo(8),
       });
       return linked;
     });
