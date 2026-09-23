@@ -152,7 +152,7 @@ flowchart TB
       moves to In Progress.
 - [ ] Add an integration test for death after Linear moves to In Progress but before `/run`.
 - [ ] Add an integration test for death while `/run` is waiting on the automation client.
-- [ ] Add an unhappy-path test that a failed terminal `finish` database write is retried or later
+- [x] Add an unhappy-path test that a failed terminal `finish` database write is retried or later
       reconciled.
 - [ ] Track every reservation attempt and perform fiber owned by the current singleton
       automation-server in memory.
@@ -214,8 +214,8 @@ flowchart TB
 
 ## 5. Make every terminal job transition durable
 
-- [ ] Add a unit test for a transient database failure in `AutomationStore.finish`.
-- [ ] Add a test for exhaustion of the terminal-write retry policy.
+- [x] Add a unit test for a transient database failure in `AutomationStore.finish`.
+- [x] Add a test for exhaustion of the terminal-write retry policy.
 - [ ] Retry terminal writes with a bounded backoff while the worker still owns the job locally.
 - [ ] Leave the job and client execution information available to the reconciliation pass when
       retries are exhausted.
