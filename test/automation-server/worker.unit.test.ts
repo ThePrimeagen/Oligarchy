@@ -1806,8 +1806,9 @@ const seedRunning = (
   automation: Stores.FakeAutomationStore,
   serverId: string | null,
   resultId = RESULT_ID,
+  action: "drive" | "diagnose" | "mint" = "drive",
 ) => {
-  seedJob(automation, "drive", resultId);
+  seedJob(automation, action, resultId);
   const job = automation.jobs.at(-1);
   if (job !== undefined) {
     job.status = "running";
@@ -1872,6 +1873,122 @@ describe("a running job left by the last automation server", () => {
         ]);
         expect(FakeLog.texts(fixed.log)).toContain(`drive failed; ${RESTARTED}`);
       }),
+  );
+
+  it.effect(
+    "a drive or mint whose result the driver closed has finished: it is closed succeeded, and nothing is sent, moved, or reported",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const mintResult = "44444444-4444-4444-8444-444444444444";
+        const waitingResult = "55555555-5555-4555-8555-555555555555";
+        const clientId = seedLiveClient(fixed.servers);
+        seedResult(fixed.tests, TICKET, "passed", RESULT_ID);
+        seedResult(fixed.tests, TICKET_B, "failed", RESULT_B);
+        seedResult(fixed.tests, "OLI-44", "passed", mintResult);
+        seedResult(fixed.tests, "OLI-45", "pending", waitingResult);
+        seedRunning(fixed.automation, clientId, RESULT_ID);
+        seedRunning(fixed.automation, clientId, RESULT_B);
+        seedRunning(fixed.automation, clientId, mintResult, "mint");
+        seedJob(fixed.automation, "drive", waitingResult);
+        const http = FakeHttp.recordRequests((_, url) =>
+          url.pathname === "/run"
+            ? Effect.sync(() => {
+                const waiting = fixed.tests.results.find((row) => row.id === waitingResult);
+                if (waiting !== undefined) {
+                  waiting.status = "passed";
+                }
+                return FakeHttp.json({ ok: "true" });
+              })
+            : FakeHttp.json({ ok: "true" }),
+        );
+        yield* start(fixed, http.layer);
+        yield* eventually(
+          () => fixed.automation.jobs[3]?.status === "succeeded",
+          "the pending job ran",
+        );
+        expect(fixed.automation.jobs.slice(0, 3)).toEqual(
+          [0, 1, 2].map(() =>
+            expect.objectContaining({
+              status: "succeeded",
+              reason: null,
+              serverId: clientId,
+              finishedAt: expect.any(Date),
+            }),
+          ),
+        );
+        expect(
+          http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
+        ).toEqual([
+          `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", model: MODEL })}`,
+        ]);
+        expect(fixed.linear.calls).toEqual([
+          cleared(TICKET),
+          cleared(TICKET_B),
+          cleared("OLI-44"),
+          cleared("OLI-45"),
+        ]);
+        expect(sentryErrors(fixed.log)).toEqual([]);
+        expect(FakeLog.texts(fixed.log)).toEqual(
+          expect.arrayContaining(["drive succeeded", "mint succeeded"]),
+        );
+      }),
+  );
+
+  it.effect(
+    "a diagnose left running is stopped, failed, and moved to Failed, though its result was closed before it was queued",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests, TICKET, "failed");
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers), RESULT_ID, "diagnose");
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
+        expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
+        expect(fixed.linear.calls).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+        expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([
+          `diagnose failed; ${RESTARTED}`,
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a finished drive whose close write fails three times is reported as should be succeeded, left running, and not moved",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "finishAutomationJob",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      let finishes = 0;
+      const automation = Stores.fakeAutomationStore({
+        finish: () =>
+          Effect.sync(() => {
+            finishes += 1;
+          }).pipe(Effect.andThen(Effect.fail(failure))),
+      });
+      return Effect.gen(function* () {
+        const fixed = harness(FakeLinear.fakeLinear(), automation);
+        seedResult(fixed.tests, TICKET, "passed");
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+        const id = fixed.automation.jobs[0]?.id;
+        yield* start(fixed, FakeHttp.die);
+        yield* eventually(() => sentryErrors(fixed.log).length > 0, "the close was reported");
+        expect(finishes).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("running");
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `close write failed; ${id} should be succeeded`,
+            location: "automation",
+            cause: failure,
+          }),
+        ]);
+        expect(fixed.linear.calls).toEqual([]);
+      });
+    },
   );
 
   it.effect("an automation client that answers 404 holds nothing, and the job is failed", () =>
@@ -2260,9 +2377,11 @@ const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
     return children;
   }).pipe(Effect.provide(Layer.mergeAll(client.http, token)));
 
-const seedRestart = (fixed: Harness, clientId: string) => {
+// `finished` are the drives whose driver closed its result before OpenCode exited.
+const seedRestart = (fixed: Harness, clientId: string, finished: ReadonlyArray<string> = []) => {
   for (const ticket of LEFT) {
-    seedResult(fixed.tests, ticket, "pending", resultOf(ticket));
+    const result = finished.includes(ticket) ? "passed" : "pending";
+    seedResult(fixed.tests, ticket, result, resultOf(ticket));
     seedRunning(fixed.automation, clientId, resultOf(ticket));
   }
   for (const ticket of WAITING) {
@@ -2334,17 +2453,18 @@ const until = (check: Effect.Effect<boolean>, what: string) =>
 
 describe("an automation client with six jobs across an automation server restart", () => {
   it.effect(
-    "the six drives left running are failed, six waiting drives take their place, and no more than six are ever running",
+    "the six drives left running are closed, six waiting drives take their place, and no more than six are ever running",
     () => {
       const counted = countingRunning();
       const fixed = harness(FakeLinear.fakeLinear(), counted.automation);
       return Effect.gen(function* () {
         const client = yield* sixJobClient();
         const children = yield* leftBehind(client, LEFT);
-        // Three drivers exited after the automation server died, so nobody closed their rows.
+        // After the automation server died, three OpenCode runs exited and nobody closed their
+        // rows: two drivers closed their results first, and one quit with its result open.
         const driving = children.slice(0, 3);
-        const finished = children.slice(3);
-        for (const child of finished) {
+        const exited = children.slice(3);
+        for (const child of exited) {
           yield* child.exit(0);
         }
         yield* until(
@@ -2352,7 +2472,7 @@ describe("an automation client with six jobs across an automation server restart
           "three slots given back",
         );
         const clientId = seedLiveClient(fixed.servers);
-        seedRestart(fixed, clientId);
+        seedRestart(fixed, clientId, LEFT.slice(3, 5));
         yield* start(fixed, client.http);
         yield* aMinuteOfTicks(fixed);
         yield* eventually(
@@ -2362,18 +2482,24 @@ describe("an automation client with six jobs across an automation server restart
         // Every row left running was closed before the first new one was written running.
         expect(counted.afterEachWrite).toEqual([1, 2, 3, 4, 5, 6]);
         const [left, waiting] = [fixed.automation.jobs.slice(0, 6), fixed.automation.jobs.slice(6)];
-        expect(left.map((job) => [job.status, job.reason])).toEqual(
-          LEFT.map(() => ["failed", RESTARTED]),
-        );
-        expect(moved(fixed.linear).map((call) => call.identifier)).toEqual(LEFT);
-        // The automation client stopped the three still driving; the three that exited it no
+        expect(left.map((job) => [job.status, job.reason])).toEqual([
+          ["failed", RESTARTED],
+          ["failed", RESTARTED],
+          ["failed", RESTARTED],
+          ["succeeded", null],
+          ["succeeded", null],
+          ["failed", RESTARTED],
+        ]);
+        const failed = [...LEFT.slice(0, 3), LEFT[5]];
+        expect(moved(fixed.linear).map((call) => call.identifier)).toEqual(failed);
+        // The automation client stopped the three still driving. The one that quit it no
         // longer held, and answered 404.
         expect(driving.map((child) => child.kills)).toEqual([
           ["SIGTERM"],
           ["SIGTERM"],
           ["SIGTERM"],
         ]);
-        expect(finished.map((child) => child.kills)).toEqual([[], [], []]);
+        expect(exited.map((child) => child.kills)).toEqual([[], [], []]);
         expect(ticketsOf(fixed, runningRows(fixed.automation))).toEqual(WAITING.slice(0, 6));
         expect(runningRows(fixed.automation).map((job) => job.serverId)).toEqual(
           WAITING.slice(0, 6).map(() => clientId),
@@ -2382,7 +2508,7 @@ describe("an automation client with six jobs across an automation server restart
         expect(yield* livePrompts(client)).toEqual(WAITING.slice(0, 6).map(promptOf));
         expect(yield* client.sessions.jobs).toBe(MAX_JOBS);
         expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual(
-          LEFT.map(() => `drive failed; ${RESTARTED}`),
+          failed.map(() => `drive failed; ${RESTARTED}`),
         );
       });
     },

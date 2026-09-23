@@ -37,6 +37,8 @@ const restarted: Outcome = {
   reason: "automation server restarted",
 };
 
+const succeeded: Outcome = { status: "succeeded", reason: null };
+
 const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
   Cause.hasInterruptsOnly(cause)
     ? aborted
@@ -152,6 +154,9 @@ const place = Effect.fn("place")(function* (
   return deferred;
 });
 
+// A driver's last act is ./ctrl test-results. Until then its result is pending or running.
+const isOpen = (status: string): boolean => status === "pending" || status === "running";
+
 const perform = Effect.fn("perform")(function* (
   job: Automation.AutomationJobRow,
   placement: Placement,
@@ -163,15 +168,15 @@ const perform = Effect.fn("perform")(function* (
   if (job.action === "diagnose") {
     return yield* Effect.void;
   }
-  // A driver's last act is ./ctrl test-results; opencode exiting 0 with the result still open
-  // is an agent that quit early, and the job says so rather than reading as a run.
+  // opencode exiting 0 with the result still open is an agent that quit early, and the job says
+  // so rather than reading as a run.
   const after = yield* tests.findResult(job.resultId);
   if (Option.isNone(after)) {
     return yield* Effect.die(
       new Error(`perform: result ${job.resultId} vanished during the drive`),
     );
   }
-  if (after.value.status === "pending" || after.value.status === "running") {
+  if (isOpen(after.value.status)) {
     return yield* Errors.AutomationClientError.make({
       message: `driver exited; result ${job.resultId} is ${after.value.status}`,
     });
@@ -246,19 +251,27 @@ const abortAt = (url: string, ticket: string) =>
   );
 
 // A running row at startup was taken by the automation server that died: the fiber that
-// would have closed it went with it. Stop it at the automation client that took it, so
-// opencode is killed or the reservation and its qemu slot are given back, then fail it and
-// move its ticket to Failed. A 404 is an automation client holding nothing for the ticket.
-// One that does not answer is reported and the job is failed anyway; nothing asks again.
-// No ticket, no automation client recorded, or that client's row gone: nothing to ask.
-// Once the row is closed it is no longer found at the next startup, so the close and the
-// Linear move finish even when a shutdown lands between them.
-const failInherited = Effect.fn("failInherited")(function* (job: Automation.AutomationJobRow) {
+// would have closed it went with it. A drive or mint whose result its driver closed has
+// finished, and is closed succeeded as that fiber would have closed it. Nothing is asked of
+// its automation client and its ticket is not moved: whatever the driver still does after
+// closing the result, it does on its own. A diagnose's result was closed before it was
+// queued, so it says nothing about the diagnose. Every other row is stopped at the
+// automation client that took it, so opencode is killed or the reservation and its qemu slot
+// are given back, then failed, and its ticket moved to Failed. A 404 is an automation client
+// holding nothing for the ticket. One that does not answer is reported and the job is failed
+// anyway; nothing asks again. No ticket, no automation client recorded, or that client's row
+// gone: nothing to ask. Once the row is closed it is no longer found at the next startup, so
+// the close and the Linear move finish even when a shutdown lands between them.
+const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
   const servers = yield* Servers.ServerStore;
   const linear = yield* Linear.Linear;
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
+  if (job.action !== "diagnose" && Option.isSome(result) && !isOpen(result.value.status)) {
+    yield* Effect.uninterruptible(closeJob(job, succeeded));
+    return;
+  }
   const ticket = Option.isSome(result) ? result.value.linearId : null;
   if (ticket !== null && job.serverId !== null) {
     const client = yield* servers.findServer(job.serverId);
@@ -308,8 +321,9 @@ const failInherited = Effect.fn("failInherited")(function* (job: Automation.Auto
 // the running write are uninterruptible; the HTTP wait is restored so SIGTERM can
 // abandon a reserve that has not landed. A tick that fails is one error line; the next
 // tick runs. Before the first tick, every running row the last automation server left is
-// stopped and failed, one at a time; a row that fails is one error line and the next row is
-// tried, and a listing that fails is one error line. Dispatch starts either way.
+// closed, one at a time: a finished drive or mint succeeded, any other stopped and failed. A
+// row that fails is one error line and the next row is tried, and a listing that fails is one
+// error line. Dispatch starts either way.
 export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
@@ -439,7 +453,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             Effect.uninterruptibleMask((release) =>
               release(perform(job, placed.placement, model)).pipe(
                 Effect.matchCause({
-                  onSuccess: (): Outcome => ({ status: "succeeded", reason: null }),
+                  onSuccess: (): Outcome => succeeded,
                   onFailure: outcomeFrom,
                 }),
                 Effect.flatMap((outcome) => closeJob(job, outcome)),
@@ -478,7 +492,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
 
   const inherited = Effect.gen(function* () {
     for (const job of yield* store.listRunning()) {
-      yield* failInherited(job).pipe(
+      yield* closeInherited(job).pipe(
         Effect.catchCause(reportFailure(`inherited job cleanup failed; ${job.id}`)),
       );
     }
