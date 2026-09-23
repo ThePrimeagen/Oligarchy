@@ -147,7 +147,11 @@ flowchart TB
       it, and proves the old `automation_jobs` row does not remain `running`.
 - [x] Add an integration test for death while `/reserve` is in flight and the database row is
       still `pending`.
-- [ ] Add an integration test for death after `/reserve` succeeds but before `/run` starts.
+- [x] Add an integration test for death after `/reserve` succeeds but before `/run` starts. The
+      automation client granted the reserve and the row is still `pending`; the next automation
+      server reserves the same ticket there again, which answers ok without asking QEMU, and the
+      drive runs. Death after the `running` write is the `/run` waiting case: startup stops it at
+      its automation client and fails it.
 - [ ] Add an integration test for death after the database becomes `running` but before Linear
       moves to In Progress.
 - [ ] Add an integration test for death after Linear moves to In Progress but before `/run`.
@@ -207,8 +211,9 @@ flowchart TB
 - [ ] Add tests for querying a client's reservations and active ticket processes.
 - [ ] Publish configured `max-jobs`, current reservations, and active runs through the heartbeat or
       a status endpoint.
-- [ ] Make reserving the same ticket and action idempotent so a crash after reservation can safely
-      retry while the database row is still pending.
+- [x] Make reserving the same ticket and action idempotent so a crash after reservation can safely
+      retry while the database row is still pending. The reservation keeps its first deadline. The
+      same ticket under the other action is still 400 `already reserved`.
 - [ ] Add one idempotent cancellation operation that releases either an unused reservation or an
       active OpenCode process and its QEMU resources.
 - [ ] Ensure a restarted client begins with no inherited claims and reports old tickets absent.
