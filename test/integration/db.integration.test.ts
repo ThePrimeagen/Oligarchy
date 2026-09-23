@@ -1553,6 +1553,72 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
+      "AutomationStore finish repeated with the outcome that landed is success, as a retry after a lost acknowledgement, and any other outcome is not",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const database = yield* Client.Database;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* Effect.forEach([0, 1], () =>
+            tests.createRun({
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+              definitions: [{ id: definition.id }],
+            }),
+          );
+          const failed = yield* automation.enqueue({
+            resultId: created[0].results[0].id,
+            action: "drive",
+          });
+          const succeeded = yield* automation.enqueue({
+            resultId: created[1].results[0].id,
+            action: "drive",
+          });
+          for (const job of [failed, succeeded]) {
+            expect(yield* automation.markRunning(job.id, uuid())).toBe(true);
+          }
+          expect(yield* automation.finish(failed.id, "failed", "automation server restarted")).toBe(
+            true,
+          );
+          expect(yield* automation.finish(succeeded.id, "succeeded", null)).toBe(true);
+          const closedRows = database.run("select", (db) =>
+            db
+              .select({
+                id: DbSchema.automationJobs.id,
+                status: DbSchema.automationJobs.status,
+                reason: DbSchema.automationJobs.reason,
+                finishedAt: DbSchema.automationJobs.finishedAt,
+              })
+              .from(DbSchema.automationJobs)
+              .orderBy(DbSchema.automationJobs.id),
+          );
+          const before = yield* closedRows;
+          expect(before).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: failed.id,
+                status: "failed",
+                reason: "automation server restarted",
+              }),
+              expect.objectContaining({ id: succeeded.id, status: "succeeded", reason: null }),
+            ]),
+          );
+
+          expect(yield* automation.finish(failed.id, "failed", "automation server restarted")).toBe(
+            true,
+          );
+          expect(yield* automation.finish(succeeded.id, "succeeded", null)).toBe(true);
+          expect(yield* automation.finish(failed.id, "failed", "another reason")).toBe(false);
+          expect(yield* automation.finish(failed.id, "aborted", "aborted")).toBe(false);
+          expect(yield* automation.finish(succeeded.id, "failed", "nope")).toBe(false);
+          expect(yield* automation.finish(uuid(), "failed", "nope")).toBe(false);
+          expect(yield* closedRows).toEqual(before);
+        }),
+    );
+
+    scoped.effect(
       "AutomationStore listRunning returns the running jobs oldest first, and none of the pending or closed ones",
       () =>
         Effect.gen(function* () {
