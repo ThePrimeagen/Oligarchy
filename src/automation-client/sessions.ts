@@ -45,6 +45,10 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
     );
+    // The runs POST /abort is ending. Each answers RunAborted, however OpenCode exits.
+    const aborted = yield* Ref.make<ReadonlySet<ChildProcessSpawner.ChildProcessHandle>>(new Set());
+    const unmark = (handle: ChildProcessSpawner.ChildProcessHandle) =>
+      Ref.update(aborted, (handles) => new Set([...handles].filter((held) => held !== handle)));
     // How many runs are admitted against --max-jobs, and which tickets already hold a slot
     // that run will consume. `running` cannot count them: a run is only in it once OpenCode
     // has spawned, and the slot must be taken before that, so a refused run spawns nothing.
@@ -206,9 +210,13 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           yield* Effect.addFinalizer(() =>
             Ref.update(running, (map) =>
               map.get(ticket) === handle ? mapWithout(map, ticket) : map,
-            ),
+            ).pipe(Effect.andThen(unmark(handle))),
           );
-          return yield* Cli.awaitExit(OpenCode.BIN, handle);
+          const exit = yield* Effect.exit(Cli.awaitExit(OpenCode.BIN, handle));
+          if ((yield* Ref.get(aborted)).has(handle)) {
+            return yield* Errors.RunAborted.make({ agentId: ticket });
+          }
+          return yield* exit;
         }),
       ).pipe(
         Effect.catchTag("CliFailed", (error) =>
@@ -256,6 +264,9 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         }
         return yield* Effect.void;
       }
+      // Marked before the kill: the run sees its child end only after the mark. A kill that
+      // leaves the child running takes the mark back, and that run ends as OpenCode ends it.
+      yield* Ref.update(aborted, (handles) => new Set([...handles, handle]));
       return yield* handle
         .kill({
           killSignal: "SIGTERM",
@@ -266,7 +277,11 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             // A child already gone cannot be killed. isRunning can itself fail; treat that as
             // still running so a probe failure does not look like a successful abort.
             Effect.flatMap(handle.isRunning.pipe(Effect.orElseSucceed(() => true)), (alive) =>
-              alive ? Errors.RunFailed.make({ message: error.message, cause: error }) : Effect.void,
+              alive
+                ? unmark(handle).pipe(
+                    Effect.andThen(Errors.RunFailed.make({ message: error.message, cause: error })),
+                  )
+                : Effect.void,
             ),
           ),
         );

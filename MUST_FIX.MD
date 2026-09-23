@@ -175,7 +175,9 @@ flowchart TB
 - [x] Abort client work before closing inherited work when the automation client still owns that
       ticket.
 - [x] Treat a client `404` during inherited-work cleanup as confirmation that no process remains,
-      then close the job with an explicit owner-lost reason (`automation server restarted`).
+      then close the job with an explicit owner-lost reason (`automation server restarted`). The
+      `404` is reported to Sentry as `JobNotFound` (user decision: a `404` for a running job is
+      always reported).
 - [x] Never requeue work whose side effects are uncertain; close it terminally unless the durable
       state proves `/run` never started.
 - [x] An inherited drive or mint whose result its driver already closed has finished: close it
@@ -185,14 +187,19 @@ flowchart TB
 
 ## 2. Make graceful shutdown stop the work it claims to abort
 
-- [ ] Replace the test that permits OpenCode to outlive a disconnected automation-server with a
-      test for the chosen explicit ownership contract.
-- [ ] Add a test that SIGTERM stops each client child before its job becomes `aborted`.
-- [ ] Add a test that shutdown waits for every terminal database transition.
-- [ ] Have `automation-server` call the owning client's `/abort` during graceful shutdown.
-- [ ] Mark the job `aborted` only after the client confirms the child stopped or confirms it no
-      longer exists.
-- [ ] Keep shutdown bounded and record a distinct failure when client cleanup cannot be confirmed.
+- [x] Replace the test that permits OpenCode to outlive a disconnected automation-server with a
+      test for the chosen explicit ownership contract. The contract: a dropped `/run` leaves
+      OpenCode running, and `POST /abort` is what stops it.
+- [x] Add a test that SIGTERM stops each client child before its job becomes `aborted`.
+- [x] Add a test that shutdown waits for every terminal database transition.
+- [x] Have `automation-server` call the owning client's `/abort` during graceful shutdown. Every
+      client with a job running is asked at once.
+- [x] Mark the job `aborted` only after the client confirms the child stopped or confirms it no
+      longer exists. A `404` is reported to Sentry as `JobNotFound`, then the job is `aborted`.
+- [x] Keep shutdown bounded and record a distinct failure when client cleanup cannot be confirmed.
+      Ten seconds for every client together. A stop that fails or gets no answer is reported
+      `shutdown abort failed; <url>`, and the row stays `running`, so the next startup stops and
+      fails it.
 
 ## 3. Make automation-client execution observable and restart-safe
 
@@ -210,10 +217,13 @@ flowchart TB
 
 - [ ] Add an integration test that SIGKILLs a QEMU server with active sessions and restarts it.
 - [ ] Add a test that graceful QEMU shutdown closes every session before releasing its slots.
-- [ ] Add a test that a QEMU restart does not make old database sessions appear live.
-- [ ] On startup, close nonterminal sessions already routed to this singleton QEMU server URL with
-      an explicit owner-lost reason.
-- [ ] Ensure the affected driver receives a terminal failure instead of waiting indefinitely.
+- [x] Add a test that a QEMU restart does not make old database sessions appear live.
+- [x] On startup, close nonterminal sessions already routed to this singleton QEMU server URL with
+      an explicit owner-lost reason. They are `failed`, reason `qemu server restarted`, with their
+      agent runs ended, before the server takes a request. A cleanup that cannot write fails the
+      startup.
+- [x] Ensure the affected driver receives a terminal failure instead of waiting indefinitely. A
+      follow of the lost session answers that it completed `failed`, and `ctrl` reads it ended.
 - [ ] Reconcile the corresponding automation job after the driver exits or its client owner is
       lost.
 
@@ -234,12 +244,21 @@ flowchart TB
 
 - [ ] Add a dashboard integration test for automation-client `404` during abort.
 - [ ] Add tests for abort when the assigned client row is missing, stale, or unreachable.
-- [ ] Replace tests that intentionally leave a job `running` after a confirmed client `404`.
-- [ ] Treat `404` as already stopped and close the durable job.
+- [x] Replace tests that intentionally leave a job `running` after a confirmed client `404`.
+- [x] Treat `404` as already stopped and close the durable job. The job is `aborted` and the
+      answer is 200. The `404` is reported to Sentry as
+      `JobNotFound: Job had "running" status but 404'd.` (user decision).
 - [ ] On 5xx or unreachable clients, keep retryable ownership information instead of reporting a
       successful abort.
 - [ ] Make a successful dashboard response require that the durable row is terminal.
 - [ ] Make the dashboard, `viz`, and direct automation-server callers report the same outcome.
+      Done for a client `404`: every caller reads 200 and an `aborted` row. Still open for a 5xx,
+      where the dashboard's fallback closes the row and `viz` reports a refusal (item above).
+- [x] A finished job cannot be aborted, including one that finishes while its client is being
+      asked. `/abort` then answers 400 `has no <action> to abort`, as for any finished job, and
+      the row keeps its result. A client `404` in that race is the job ending, not `JobNotFound`.
+      A run the abort's own kill ends answers `/run` 409 `run aborted`. The worker leaves that
+      row to the abort, so it closes `aborted`, never `failed` with OpenCode's exit.
 
 ## 7. Separate claimed, driver-running, and guest-running states
 

@@ -703,6 +703,17 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on("end", () => resolve(text));
   });
 
+const ticketOf = (body: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null && "ticket" in parsed
+      ? String(parsed.ticket)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 describeServing("automation server dispatch", () => {
   it.live(
     "a live client that closes the result and answers 200 marks the drive succeeded; the body carries --model",
@@ -814,42 +825,59 @@ describeServing("automation server dispatch", () => {
     }),
   );
 
-  it.live("SIGTERM while the client is still running aborts the job and exits 0", () =>
-    Effect.promise(async () => {
-      const client = await serveClient((req, res) => {
-        if (req.url === "/reserve") {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: "true" }));
+  it.live(
+    "SIGTERM while the client is still running stops the drive at the client, aborts the job and exits 0",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        // Another test's pending job can be dispatched to this stub too; only ours is counted.
+        const seen: Array<string> = [];
+        let running: () => void = () => undefined;
+        const ran = new Promise<void>((resolve) => {
+          running = resolve;
+        });
+        const client = await serveClient((req, res) => {
+          void readBody(req).then((body) => {
+            if (ticketOf(body) === linearId) {
+              seen.push(`${req.method} ${req.url ?? ""}`);
+              if (req.url === "/run") {
+                running();
+              }
+            }
+            if (req.url === "/reserve" || req.url === "/abort") {
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end(JSON.stringify({ ok: "true" }));
+            }
+          });
+        });
+        const resultId = await seedResult(linearId);
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/automation server listening/);
+          await ran;
+          process.child.kill("SIGTERM");
+          const { code } = await process.exited;
+          expect(code).toBe(0);
+          expect(seen).toEqual(["POST /reserve", "POST /run", "POST /abort"]);
+          const jobs = await jobsFor(resultId);
+          expect(jobs).toEqual([
+            expect.objectContaining({
+              status: "aborted",
+              reason: "automation server shutting down",
+            }),
+          ]);
+        } finally {
+          if (process.child.exitCode === null && process.child.signalCode === null) {
+            process.child.kill("SIGKILL");
+            await process.exited;
+          }
+          await removeServer(client.url);
+          await client.close();
         }
-      });
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
-      const resultId = await seedResult(linearId);
-      await seedJob(resultId, "drive");
-      await seedLiveClient(client.url);
-      const port = await freePort();
-      const process = spawnAutomationServer(["--port", String(port)]);
-      try {
-        await process.waitFor(/automation server listening/);
-        await waitForJob(resultId, "running");
-        process.child.kill("SIGTERM");
-        const { code } = await process.exited;
-        expect(code).toBe(0);
-        const jobs = await jobsFor(resultId);
-        expect(jobs).toEqual([
-          expect.objectContaining({
-            status: "aborted",
-            reason: "automation server shutting down",
-          }),
-        ]);
-      } finally {
-        if (process.child.exitCode === null && process.child.signalCode === null) {
-          process.child.kill("SIGKILL");
-          await process.exited;
-        }
-        await removeServer(client.url);
-        await client.close();
-      }
-    }),
+      }),
   );
 });
 
@@ -956,48 +984,52 @@ describeServing("automation server abort", () => {
     }),
   );
 
-  it.live("404 when the client does not know the session, and the job stays running", () =>
-    Effect.promise(async () => {
-      const client = await serveClient((req, res) => {
-        if (req.url === "/reserve") {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: "true" }));
-          return;
-        }
-        if (req.url === "/abort") {
-          res.writeHead(404, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: 'unknown session "OLI-x"' }));
-        }
-      });
-      const linearId = `OLI-${randomUUID().slice(0, 8)}`;
-      const resultId = await seedResult(linearId);
-      await seedJob(resultId, "drive");
-      await seedLiveClient(client.url);
-      const port = await freePort();
-      const process = spawnAutomationServer(["--port", String(port)]);
-      try {
-        await process.waitFor(/automation server listening/);
-        await waitForJob(resultId, "running");
-        const response = await request(
-          port,
-          "POST",
-          "/abort",
-          { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-          JSON.stringify({ ticket: linearId, action: "drive" }),
-        );
-        expect(response.status).toBe(404);
-        expect(await response.json()).toEqual({
-          error: `unknown session "${linearId}"`,
+  it.live(
+    "a running job its client holds nothing for is reported JobNotFound, closed aborted, and answered 200",
+    () =>
+      Effect.promise(async () => {
+        const client = await serveClient((req, res) => {
+          if (req.url === "/reserve") {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+            return;
+          }
+          if (req.url === "/abort") {
+            res.writeHead(404, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: 'unknown session "OLI-x"' }));
+          }
         });
-        const jobs = await jobsFor(resultId);
-        expect(jobs).toEqual([expect.objectContaining({ status: "running" })]);
-      } finally {
-        process.child.kill("SIGTERM");
-        await process.exited;
-        await removeServer(client.url);
-        await client.close();
-      }
-    }),
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          await process.waitFor(/automation server listening/);
+          await waitForJob(resultId, "running");
+          const response = await request(
+            port,
+            "POST",
+            "/abort",
+            { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+            JSON.stringify({ ticket: linearId, action: "drive" }),
+          );
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({ ok: "true" });
+          const job = await waitForJob(resultId, "aborted");
+          expect(job).toMatchObject({ status: "aborted", reason: "aborted" });
+          await process.waitFor(/JobNotFound: Job had "running" status but 404'd\./);
+          expect(lines(process.stdout())).toContain(
+            `[${linearId}] automation: error: JobNotFound: Job had "running" status but 404'd.`,
+          );
+        } finally {
+          process.child.kill("SIGTERM");
+          await process.exited;
+          await removeServer(client.url);
+          await client.close();
+        }
+      }),
   );
 
   it.live("401 without a bearer", () =>
@@ -1030,17 +1062,6 @@ const stop = async (process: Process) => {
     process.child.kill("SIGKILL");
   }
   await process.exited;
-};
-
-const ticketOf = (body: string): string | undefined => {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    return typeof parsed === "object" && parsed !== null && "ticket" in parsed
-      ? String(parsed.ticket)
-      : undefined;
-  } catch {
-    return undefined;
-  }
 };
 
 describeServing("automation server restart", () => {

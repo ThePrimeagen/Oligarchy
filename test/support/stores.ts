@@ -47,6 +47,8 @@ const conflict = (operation: string, detail: string) =>
 export type FakeSessionStore = {
   readonly sessions: Array<SessionRow>;
   readonly agentRuns: Array<AgentRunRow>;
+  // session_servers: the url the qemu reverse proxy routed each session to.
+  readonly routes: Map<string, string>;
   readonly layer: Layer.Layer<Sessions.SessionStore>;
 };
 
@@ -55,6 +57,7 @@ export const fakeSessionStore = (
 ): FakeSessionStore => {
   const sessions: Array<SessionRow> = [];
   const agentRuns: Array<AgentRunRow> = [];
+  const routes = new Map<string, string>();
   const find = (id: string) => sessions.find((row) => sameId(row.id, id));
   const service = Sessions.SessionStore.of({
     insertSession: (id, config, status) =>
@@ -124,9 +127,29 @@ export const fakeSessionStore = (
         });
         return rows.slice(0, count).map(({ id, status, startedAt }) => ({ id, status, startedAt }));
       }),
+    failRoutedSessions: (serverUrl, reason) =>
+      Effect.sync(() => {
+        const now = new Date();
+        const failed = sessions.filter(
+          (row) =>
+            (row.status === "downloading" || row.status === "running") &&
+            routes.get(row.id) === serverUrl,
+        );
+        for (const row of failed) {
+          row.status = "failed";
+          row.reason = reason;
+          row.endedAt = now;
+          for (const run of agentRuns) {
+            if (sameId(run.sessionId, row.id) && run.endedAt === null) {
+              run.endedAt = now;
+            }
+          }
+        }
+        return failed.map((row) => row.id);
+      }),
     ...overrides,
   });
-  return { sessions, agentRuns, layer: Layer.succeed(Sessions.SessionStore)(service) };
+  return { sessions, agentRuns, routes, layer: Layer.succeed(Sessions.SessionStore)(service) };
 };
 
 // ---------------------------------------------------------------------------

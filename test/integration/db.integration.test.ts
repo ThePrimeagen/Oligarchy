@@ -141,6 +141,69 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect(
+      "failRoutedSessions fails the sessions still downloading or running on one qemu server url, ends their agent runs, and leaves every other row alone",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Sessions.SessionStore;
+          const servers = yield* Servers.ServerStore;
+          // Fresh urls: the container's tables outlive each test body.
+          const dead = `http://dead-${uuid()}:42069`;
+          const alive = `http://alive-${uuid()}:42069`;
+          const [downloading, running, finished, elsewhere, unrouted] = [
+            uuid(),
+            uuid(),
+            uuid(),
+            uuid(),
+            uuid(),
+          ];
+          yield* store.insertSession(downloading, { iso: "x" }, "downloading");
+          for (const id of [running, finished, elsewhere, unrouted]) {
+            yield* store.insertSession(id, { iso: "x" }, "running");
+          }
+          yield* store.endSession(finished, "succeeded", "done");
+          for (const id of [downloading, running, finished]) {
+            yield* servers.routeSession(id, dead);
+          }
+          yield* servers.routeSession(elsewhere, alive);
+          const agent = `agent-${running}`;
+          const other = `agent-${elsewhere}`;
+          yield* store.registerAgent(agent, running);
+          yield* store.registerAgent(other, elsewhere);
+
+          const failed = yield* store.failRoutedSessions(dead, "qemu server restarted");
+          expect([...failed].sort()).toEqual([downloading, running].sort());
+          for (const id of [downloading, running]) {
+            const row = Option.getOrThrow(yield* store.getSession(id));
+            expect(row).toMatchObject({ status: "failed", reason: "qemu server restarted" });
+            expect(row.endedAt).toBeInstanceOf(Date);
+          }
+          expect(Option.getOrThrow(yield* store.getSession(finished))).toMatchObject({
+            status: "succeeded",
+            reason: "done",
+          });
+          for (const id of [elsewhere, unrouted]) {
+            expect(Option.getOrThrow(yield* store.getSession(id))).toMatchObject({
+              status: "running",
+              endedAt: null,
+            });
+          }
+          const database = yield* Client.Database;
+          const runs = yield* database.run("select", (db) =>
+            db
+              .select()
+              .from(DbSchema.agentRuns)
+              .where(sql`${DbSchema.agentRuns.agentId} in (${agent}, ${other})`),
+          );
+          const byAgent = new Map(runs.map((run) => [run.agentId, run]));
+          const session = Option.getOrThrow(yield* store.getSession(running));
+          expect(byAgent.get(agent)?.endedAt?.getTime()).toBe(session.endedAt?.getTime());
+          expect(byAgent.get(other)?.endedAt).toBeNull();
+
+          expect(yield* store.failRoutedSessions(dead, "qemu server restarted")).toEqual([]);
+        }),
+    );
+
     scoped.effect("listSessions orders newest first and active running before downloading", () =>
       Effect.gen(function* () {
         const store = yield* Sessions.SessionStore;

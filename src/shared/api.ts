@@ -276,7 +276,8 @@ export const reserveRun = HttpApiEndpoint.post("reserve", "/reserve", {
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.Ok,
-  error: [Errors.RunFailedWire],
+  // 409: POST /abort ended the run. 500: opencode failed.
+  error: [Errors.RunAbortedWire, Errors.RunFailedWire],
 });
 
 export const abort = HttpApiEndpoint.post("abort", "/abort", {
@@ -285,11 +286,13 @@ export const abort = HttpApiEndpoint.post("abort", "/abort", {
   error: [Errors.UnknownSessionWire, Errors.RunFailedWire],
 });
 
-// The same path on the automation server takes the job's action too (Contract.AbortJobBody).
+// The same path on the automation server takes the job's action too (Contract.AbortJobBody). A
+// client's 404 is no failure of it: the row closes and the answer is 200. A job that finished
+// while its client was being asked is over, and is refused as one.
 export const abortJob = HttpApiEndpoint.post("abort", "/abort", {
   payload: Contract.AbortJobBody,
   success: Contract.Ok,
-  error: [Errors.UnknownSessionWire, Errors.RunFailedWire],
+  error: [Errors.RunFailedWire],
 });
 
 export class Abort extends HttpApiGroup.make("Abort")

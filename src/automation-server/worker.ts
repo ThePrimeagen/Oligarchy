@@ -39,10 +39,27 @@ const restarted: Outcome = {
 
 const succeeded: Outcome = { status: "succeeded", reason: null };
 
-const outcomeFrom = (cause: Cause.Cause<unknown>): Outcome =>
-  Cause.hasInterruptsOnly(cause)
-    ? aborted
-    : { status: "failed", reason: Render.errorDetail(Cause.squash(cause)) };
+const failedFrom = (cause: Cause.Cause<unknown>): Outcome => ({
+  status: "failed",
+  reason: Render.errorDetail(Cause.squash(cause)),
+});
+
+// The line, and the error Sentry groups on, for an automation client answering 404 about a job
+// the database has running: every one is reported, from dispatch and from POST /abort.
+export const reportJobNotFound = Effect.fn("reportJobNotFound")(function* (
+  jobId: string,
+  url: string,
+  ticket: string,
+  cause: Errors.AutomationClientError,
+) {
+  const log = yield* Log.Log;
+  const error = Errors.JobNotFound.make({ jobId, url, cause });
+  yield* log.error(`JobNotFound: ${error.message}`, {
+    location: Log.Locations.automation,
+    agentId: ticket,
+    cause: error,
+  });
+});
 
 type Placement = {
   readonly url: string;
@@ -157,13 +174,9 @@ const place = Effect.fn("place")(function* (
 // A driver's last act is ./ctrl test-results. Until then its result is pending or running.
 const isOpen = (status: string): boolean => status === "pending" || status === "running";
 
-const perform = Effect.fn("perform")(function* (
-  job: Automation.AutomationJobRow,
-  placement: Placement,
-  model: string,
-) {
+// What the job made of a /run that answered 200.
+const judge = Effect.fn("judge")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
-  yield* AutomationClient.run(placement.url, placement.prompt, placement.ticket, model);
   // A diagnose is judged by nothing here: the result was closed before it was queued.
   if (job.action === "diagnose") {
     return yield* Effect.void;
@@ -172,9 +185,7 @@ const perform = Effect.fn("perform")(function* (
   // so rather than reading as a run.
   const after = yield* tests.findResult(job.resultId);
   if (Option.isNone(after)) {
-    return yield* Effect.die(
-      new Error(`perform: result ${job.resultId} vanished during the drive`),
-    );
+    return yield* Effect.die(new Error(`judge: result ${job.resultId} vanished during the drive`));
   }
   if (isOpen(after.value.status)) {
     return yield* Errors.AutomationClientError.make({
@@ -250,6 +261,31 @@ const abortAt = (url: string, ticket: string) =>
     }),
   );
 
+// A shutdown ended the /run wait, and OpenCode outlives a dropped /run, so the automation
+// client is asked to stop the job before its row closes aborted. A 404 is an automation client
+// holding nothing for a job this process has running: reported, then closed aborted. One that
+// fails the stop or does not answer leaves OpenCode unconfirmed: reported, and the row stays
+// running, so the next startup stops it and fails it.
+const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
+  job: Automation.AutomationJobRow,
+  placement: Placement,
+) {
+  const log = yield* Log.Log;
+  const stopped = yield* Effect.result(abortAt(placement.url, placement.ticket));
+  if (Result.isFailure(stopped)) {
+    if (stopped.failure.status !== 404) {
+      yield* log.error(`shutdown abort failed; ${placement.url}`, {
+        location: Log.Locations.automation,
+        agentId: placement.ticket,
+        cause: stopped.failure.cause ?? stopped.failure,
+      });
+      return;
+    }
+    yield* reportJobNotFound(job.id, placement.url, placement.ticket, stopped.failure);
+  }
+  yield* closeJob(job, aborted);
+});
+
 // A running row at startup was taken by the automation server that died: the fiber that
 // would have closed it went with it. A drive or mint whose result its driver closed has
 // finished, and is closed succeeded as that fiber would have closed it. Nothing is asked of
@@ -258,10 +294,10 @@ const abortAt = (url: string, ticket: string) =>
 // queued, so it says nothing about the diagnose. Every other row is stopped at the
 // automation client that took it, so opencode is killed or the reservation and its qemu slot
 // are given back, then failed, and its ticket moved to Failed. A 404 is an automation client
-// holding nothing for the ticket. One that does not answer is reported and the job is failed
-// anyway; nothing asks again. No ticket, no automation client recorded, or that client's row
-// gone: nothing to ask. Once the row is closed it is no longer found at the next startup, so
-// the close and the Linear move finish even when a shutdown lands between them.
+// holding nothing for the ticket, which is reported. One that does not answer is reported and
+// the job is failed anyway; nothing asks again. No ticket, no automation client recorded, or
+// that client's row gone: nothing to ask. Once the row is closed it is no longer found at the
+// next startup, so the close and the Linear move finish even when a shutdown lands between them.
 const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
   const servers = yield* Servers.ServerStore;
@@ -280,7 +316,7 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
       yield* abortAt(url, ticket).pipe(
         Effect.catchTag("AutomationClientError", (error) =>
           error.status === 404
-            ? Effect.void
+            ? reportJobNotFound(job.id, url, ticket, error)
             : log.error(`inherited abort failed; ${url}`, {
                 location: Log.Locations.automation,
                 agentId: ticket,
@@ -323,12 +359,15 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
 // tick runs. Before the first tick, every running row the last automation server left is
 // closed, one at a time: a finished drive or mint succeeded, any other stopped and failed. A
 // row that fails is one error line and the next row is tried, and a listing that fails is one
-// error line. Dispatch starts either way.
+// error line. Dispatch starts either way. A shutdown asks each automation client to stop the
+// jobs it runs, all at once, and closes each aborted once its client answers.
 export const dispatch = Effect.fn("dispatch")(function* (model: string) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
-  const work = yield* Scope.Scope;
+  // The /run fibers. Created before the ticks fork, so a shutdown stops the ticks first; its
+  // finalizers run at once, so every automation client is asked to stop in the same ten seconds.
+  const runs = yield* Scope.fork(yield* Scope.Scope, "parallel");
   // The client the next tick offers a job to first. A client that left the fleet is skipped.
   let nextUrl: string | undefined;
 
@@ -360,7 +399,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               onFailure: (cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? { _tag: "interrupted" as const }
-                  : { _tag: "closed" as const, outcome: outcomeFrom(cause) },
+                  : { _tag: "closed" as const, outcome: failedFrom(cause) },
             }),
           );
           if (placed._tag === "interrupted") {
@@ -386,9 +425,8 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           }
           if (placed._tag === "closed") {
             const closed = yield* closeJob(job, placed.outcome);
-            // An interrupt is a shutdown: do not select the next pending row. A row the
-            // close did not write is still pending, and selecting again would find it.
-            if (!closed || placed.outcome.status === "aborted") {
+            // A row the close did not write is still pending, and selecting again would find it.
+            if (!closed) {
               return yield* Effect.void;
             }
             continue;
@@ -446,30 +484,41 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             nextUrl = following.url;
           }
           // The reservation already returned. /run does not hold the next one. The fiber
-          // lives on the dispatch scope so a shutdown interrupts it. Do not
-          // startImmediately: forkIn adds the interrupt finalizer only after that
-          // evaluate returns, and /run parks on the HTTP wait.
+          // lives on the runs scope so a shutdown interrupts it. It starts uninterruptible: a
+          // shutdown that lands before it runs is held until the /run wait, the one
+          // interruptible part, so the job is still stopped at its automation client. Once
+          // /run answered, a shutdown waits for the result to judge the job. A 409 is a run
+          // POST /abort ended: that abort closes the row once the automation client answers it.
+          const placement = placed.placement;
           yield* Effect.forkIn(
-            Effect.uninterruptibleMask((release) =>
-              release(perform(job, placed.placement, model)).pipe(
-                Effect.matchCause({
-                  onSuccess: (): Outcome => succeeded,
-                  onFailure: outcomeFrom,
-                }),
-                Effect.flatMap((outcome) => closeJob(job, outcome)),
-                Effect.catchCause((cause) => {
+            Effect.interruptible(
+              AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
+            ).pipe(
+              Effect.andThen(judge(job)),
+              Effect.matchCauseEffect({
+                onSuccess: () => closeJob(job, succeeded),
+                onFailure: (cause) => {
                   if (Cause.hasInterruptsOnly(cause)) {
-                    return Effect.void;
+                    return stopAtShutdown(job, placement);
                   }
-                  const error = Cause.squash(cause);
-                  return log.error(`dispatch job failed: ${detail(error)}`, {
-                    location: Log.Locations.automation,
-                    cause: error,
-                  });
-                }),
-              ),
+                  const error = Cause.findErrorOption(cause);
+                  return Option.isSome(error) &&
+                    error.value._tag === "AutomationClientError" &&
+                    error.value.status === 409
+                    ? Effect.void
+                    : closeJob(job, failedFrom(cause));
+                },
+              }),
+              Effect.catchCause((cause) => {
+                const error = Cause.squash(cause);
+                return log.error(`dispatch job failed: ${detail(error)}`, {
+                  location: Log.Locations.automation,
+                  cause: error,
+                });
+              }),
             ),
-            work,
+            runs,
+            { uninterruptible: true },
           );
         }
       }),

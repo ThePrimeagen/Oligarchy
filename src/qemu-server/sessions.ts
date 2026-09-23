@@ -47,6 +47,7 @@ const RESERVATION_TIMEOUT_MS = 10 * 60 * 1000;
 const RESERVATION_TIMEOUT_REASON = "unused for 10 minutes";
 const RELINQUISH_REASON = "relinquished";
 const SHUTDOWN_REASON = "qemu server shutdown";
+const RESTART_REASON = "qemu server restarted";
 // An installed Omarchy shuts down in seconds; a guest still up two minutes after the power button
 // is not going to, and its disk is not one to keep.
 const SAVE_POWEROFF = "2 minutes";
@@ -1273,6 +1274,21 @@ const make = (maxJobs: number, selfUrl?: string) =>
     );
 
     // -------------------------------------------------------------------------
+    // restart
+    // -------------------------------------------------------------------------
+
+    // This process holds no session yet, so a row still downloading or running that the qemu
+    // reverse proxy routed to this url was left by one that died. It is failed before the first
+    // request, so a driver reads a finished session rather than a live one. A qemu server with
+    // no url of its own has none routed to it. A cleanup that cannot write fails the startup.
+    if (selfUrl !== undefined) {
+      const ids = yield* sessionStore.failRoutedSessions(selfUrl, RESTART_REASON);
+      yield* Effect.forEach(ids, (id) => log.error(`failed; ${RESTART_REASON}`, { location: id }), {
+        discard: true,
+      });
+    }
+
+    // -------------------------------------------------------------------------
     // the drain
     // -------------------------------------------------------------------------
 
@@ -1346,7 +1362,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     selfUrl?: string,
   ): Layer.Layer<
     Sessions,
-    never,
+    Errors.DatabaseError,
     | Qemu.Qemu
     | Iso.Iso
     | Minted.Minted

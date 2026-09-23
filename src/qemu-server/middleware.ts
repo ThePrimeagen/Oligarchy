@@ -44,6 +44,7 @@ const isApiError: (value: unknown) => value is Errors.ApiError = Schema.is(
     Errors.ServerFailed,
     Errors.NoServer,
     Errors.RunFailed,
+    Errors.RunAborted,
     Errors.AtCapacity,
     Errors.SetupNeeded,
   ]),
@@ -100,6 +101,7 @@ const attribution = (error: Errors.ApiError, fallback: Log.ProcessAttribution): 
     case "NoServer":
     case "AtCapacity":
     case "SetupNeeded":
+    case "RunAborted":
     case "NotFound":
       return under(fallback.location, error.agentId, fallback);
     case "BadRequest":

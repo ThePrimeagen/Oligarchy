@@ -329,7 +329,8 @@ describe("AutomationServerApi", () => {
     expect(abort.group).toBe("Abort");
     expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/abort"]?.post?.security).toEqual([{ bearer: [] }]);
-    expect(abort.errors).toEqual([400, 401, 404, 500]);
+    // A client that holds nothing is no 404 here: the job closes and the answer is 200.
+    expect(abort.errors).toEqual([400, 401, 500]);
   });
 
   it("is its own api: neither the qemu server nor the qemu reverse proxy answers /linear", () => {
@@ -360,8 +361,8 @@ describe("AutomationClientApi", () => {
     expect(run.group).toBe("Runs");
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
-    // 500: opencode failed. Capacity is /reserve's 503.
-    expect(run.errors).toEqual([400, 401, 500]);
+    // 409: POST /abort ended the run. 500: opencode failed. Capacity is /reserve's 503.
+    expect(run.errors).toEqual([400, 401, 409, 500]);
     const abort = byIdentifier(client, "abort");
     expect(abort.group).toBe("Runs");
     expect(abort.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);

@@ -559,4 +559,24 @@ describe("qemu server command startup failures", () => {
       ]);
     }),
   );
+
+  it.effect("a restart cleanup that cannot write is fatal with the database error's message", () =>
+    Effect.gen(function* () {
+      const cleanup = Errors.DatabaseError.make({
+        operation: "failRoutedSessions",
+        message: "connect ECONNREFUSED 127.0.0.1:5432",
+      });
+      const fake = fakeServer();
+      const failing: QemuServerCommand.QemuServer<never, never> = {
+        ...fake.server,
+        serve: () => Layer.effectDiscard(Effect.fail(cleanup)),
+      };
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(run(failing, [...REQUIRED], log));
+      expect(error).toBe(cleanup);
+      expect(log.lines.map((line) => [line.level, line.text])).toEqual([
+        ["fatal", "qemu server: connect ECONNREFUSED 127.0.0.1:5432"],
+      ]);
+    }),
+  );
 });

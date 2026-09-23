@@ -30,6 +30,9 @@ type Fixture = {
   readonly qemu: Array<string>;
   // When set, each QEMU reserve waits on it, so a test can hold one /reserve in flight.
   readonly holdQemu?: Deferred.Deferred<void>;
+  // Completed once a QEMU reserve is asked. The request crosses a real socket, so yielding
+  // is no promise it has arrived.
+  readonly reachedQemu?: Deferred.Deferred<void>;
 };
 
 // Room for the two runs some tests hold at once; the capacity test passes 1.
@@ -51,6 +54,9 @@ const qemuRecording =
   (agent, _resume, server) =>
     Effect.gen(function* () {
       fixed.qemu.push(server === undefined ? agent : `${agent} ${server}`);
+      if (fixed.reachedQemu !== undefined) {
+        yield* Deferred.succeed(fixed.reachedQemu, undefined);
+      }
       if (fixed.holdQemu !== undefined) {
         yield* Deferred.await(fixed.holdQemu);
       }
@@ -453,13 +459,12 @@ describe("POST /run unhappy path", () => {
     () =>
       Effect.gen(function* () {
         const holdQemu = yield* Deferred.make<void>();
-        const fixed = { ...fixture(() => ({}), 2), holdQemu };
+        const reachedQemu = yield* Deferred.make<void>();
+        const fixed = { ...fixture(() => ({}), 2), holdQemu, reachedQemu };
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
           const pending = yield* Effect.forkChild(reserve(http));
-          for (let i = 0; i < 100 && fixed.qemu.length < 1; i++) {
-            yield* Effect.yieldNow;
-          }
+          yield* Deferred.await(reachedQemu);
           expect(fixed.qemu).toEqual([TICKET]);
           const refused = yield* reserve(http, "OLI-99");
           expect(refused.status).toBe(503);
@@ -585,7 +590,8 @@ describe("POST /run unhappy path", () => {
 });
 
 describe("interruption", () => {
-  it.effect("POST /run finishes opencode even when the client disconnects mid-run", () =>
+  // The automation server's shutdown relies on this: dropping /run stops nothing, /abort does.
+  it.effect("a dropped POST /run leaves OpenCode running until POST /abort stops it", () =>
     Effect.gen(function* () {
       const fixed = fixture(() => ({}));
       yield* Effect.gen(function* () {
@@ -597,31 +603,37 @@ describe("interruption", () => {
         const exit = yield* Fiber.await(pending);
         expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
         expect(yield* spawned.isRunning).toBe(true);
-        yield* spawned.exit(0);
-        expect(yield* spawned.isRunning).toBe(false);
         expect(spawned.kills).toEqual([]);
+        const response = yield* abort(http);
+        expect(response.status).toBe(200);
+        expect(yield* response.json).toEqual({ ok: "true" });
+        expect(spawned.kills).toEqual(["SIGTERM"]);
+        expect(yield* spawned.isRunning).toBe(false);
       }).pipe(Effect.provide(serve(fixed)));
     }),
   );
 });
 
 describe("POST /abort happy path", () => {
-  it.effect("kills the matching opencode and answers ok", () =>
-    Effect.gen(function* () {
-      const fixed = fixture(() => ({}));
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        expect((yield* reserve(http)).status).toBe(200);
-        const pending = yield* Effect.forkChild(run(http));
-        const spawned = yield* fixed.spawner.nextSpawn;
-        const response = yield* abort(http);
-        expect(response.status).toBe(200);
-        expect(yield* response.json).toEqual({ ok: "true" });
-        expect(spawned.kills).toEqual(["SIGTERM"]);
-        const runResponse = yield* Fiber.join(pending);
-        expect(runResponse.status).toBe(500);
-      }).pipe(Effect.provide(serve(fixed)));
-    }),
+  it.effect(
+    "kills the matching opencode and answers ok, and its /run answers 409 run aborted",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(() => ({}));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          expect((yield* reserve(http)).status).toBe(200);
+          const pending = yield* Effect.forkChild(run(http));
+          const spawned = yield* fixed.spawner.nextSpawn;
+          const response = yield* abort(http);
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+          expect(spawned.kills).toEqual(["SIGTERM"]);
+          const runResponse = yield* Fiber.join(pending);
+          expect(runResponse.status).toBe(409);
+          expect(yield* runResponse.json).toEqual({ error: "run aborted" });
+        }).pipe(Effect.provide(serve(fixed)));
+      }),
   );
 });
 

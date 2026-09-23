@@ -202,7 +202,7 @@ describe("Sessions.abort happy path", () => {
     }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
   });
 
-  it.effect("kills the CLI registered under that ticket", () => {
+  it.effect("kills the CLI registered under that ticket, and its run is RunAborted", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
@@ -218,8 +218,7 @@ describe("Sessions.abort happy path", () => {
         { killSignal: "SIGTERM", forceKillAfter: Cli.FORCE_KILL_AFTER },
       ]);
       const error = yield* Effect.flip(Fiber.join(running));
-      expect(error._tag).toBe("RunFailed");
-      expect(error.message).toContain("SIGTERM");
+      expect(error).toMatchObject({ _tag: "RunAborted", message: "run aborted", agentId: TICKET });
     }).pipe(Effect.provide(layer(spawner)));
   });
 
@@ -264,27 +263,30 @@ describe("Sessions.abort happy path", () => {
       yield* Fiber.join(aborting);
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM", "SIGKILL"]);
       const error = yield* Effect.flip(Fiber.join(running));
-      expect(error._tag).toBe("RunFailed");
+      expect(error._tag).toBe("RunAborted");
     }).pipe(Effect.provide(layer(spawner)));
   });
 
-  it.effect("succeeds when kill fails because the child has already exited", () => {
-    const spawner = FakeSpawner.fakeSpawner(() => ({
-      killError: "Failed to kill child process",
-      alreadyDeadOnKill: true,
-    }));
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions.Sessions;
-      yield* sessions.reserve(TICKET, "drive");
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
-      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
-        yield* Effect.yieldNow;
-      }
-      yield* sessions.abort(TICKET);
-      const error = yield* Effect.flip(Fiber.join(running));
-      expect(error._tag).toBe("RunFailed");
-    }).pipe(Effect.provide(layer(spawner)));
-  });
+  it.effect(
+    "succeeds when kill fails because the child has already exited, and its run is RunAborted",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({
+        killError: "Failed to kill child process",
+        alreadyDeadOnKill: true,
+      }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", MODEL));
+        for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        yield* sessions.abort(TICKET);
+        const error = yield* Effect.flip(Fiber.join(running));
+        expect(error._tag).toBe("RunAborted");
+      }).pipe(Effect.provide(layer(spawner)));
+    },
+  );
 });
 
 describe("Sessions.abort unhappy path", () => {
@@ -483,7 +485,7 @@ describe("capacity", () => {
       }
       expect((yield* Effect.flip(sessions.reserve(OTHER, "drive")))._tag).toBe("AtCapacity");
       yield* sessions.abort(TICKET);
-      expect((yield* Effect.flip(Fiber.join(running)))._tag).toBe("RunFailed");
+      expect((yield* Effect.flip(Fiber.join(running)))._tag).toBe("RunAborted");
       yield* sessions.reserve(OTHER, "drive");
       const next = yield* Effect.forkChild(sessions.run(OTHER, "second", MODEL));
       for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {

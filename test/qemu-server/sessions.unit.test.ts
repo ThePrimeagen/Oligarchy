@@ -143,7 +143,9 @@ const harness = (options: Options = {}) => {
   );
   // The recording tracer is provided beneath the service and to the caller: spans are made in
   // whichever fiber calls a method.
-  const run = <A, E>(body: Effect.Effect<A, E, Sessions.Sessions>): Effect.Effect<A, E> =>
+  const run = <A, E>(
+    body: Effect.Effect<A, E, Sessions.Sessions>,
+  ): Effect.Effect<A, E | Errors.DatabaseError> =>
     body.pipe(Effect.provide(layer.pipe(Layer.provideMerge(tracer.layer))));
   return { sessions, actions, debugLogs, log, tracer, qemu, iso, minted, files, fsCalls, run };
 };
@@ -2659,6 +2661,135 @@ describe("drain", () => {
       yield* h.run(Effect.asVoid(Sessions.Sessions));
       expect(texts(h)).toEqual(["qemu server: shutting down; stopping 0 sessions"]);
       expect(h.qemu.calls).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// restart
+// ---------------------------------------------------------------------------
+
+const SELF = "http://10.0.0.5:42069";
+const ELSEWHERE = "http://10.0.0.6:42069";
+const RESTARTED = "qemu server restarted";
+
+type SessionRow = Stores.FakeSessionStore["sessions"][number];
+
+// A row a qemu server wrote before it died, routed to `url` by the qemu reverse proxy.
+const seedSession = (
+  h: Harness,
+  status: SessionRow["status"],
+  url: string | undefined,
+  agent?: string,
+): string => {
+  const id = crypto.randomUUID();
+  const over = status !== "downloading" && status !== "running";
+  h.sessions.sessions.push({
+    id,
+    config: { iso: ISO },
+    status,
+    reason: over ? "done" : null,
+    startedAt: new Date(),
+    endedAt: over ? new Date() : null,
+  });
+  if (url !== undefined) {
+    h.sessions.routes.set(id, url);
+  }
+  if (agent !== undefined) {
+    h.sessions.agentRuns.push({
+      agentId: agent,
+      sessionId: id,
+      startedAt: new Date(),
+      endedAt: null,
+    });
+  }
+  return id;
+};
+
+const rowOf = (h: Harness, id: string): SessionRow | undefined =>
+  h.sessions.sessions.find((row) => row.id === id);
+
+describe("restart", () => {
+  it.effect(
+    "fails the sessions still downloading or running on this url, ends their agent runs, and leaves every other row alone",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({ selfUrl: SELF });
+        const downloading = seedSession(h, "downloading", SELF);
+        const running = seedSession(h, "running", SELF, AGENT);
+        const finished = seedSession(h, "succeeded", SELF);
+        const elsewhere = seedSession(h, "running", ELSEWHERE, OTHER_AGENT);
+        const unrouted = seedSession(h, "running", undefined);
+        // What a driver following the lost session reads now: a finished session.
+        const followed = yield* h.run(
+          Effect.flatMap(Sessions.Sessions, (sessions) => Effect.flip(sessions.follow(running))),
+        );
+        expect(followed).toMatchObject({
+          _tag: "Conflict",
+          message: `session "${running}" has already completed (failed)`,
+        });
+        for (const id of [downloading, running]) {
+          expect(rowOf(h, id)).toMatchObject({
+            status: "failed",
+            reason: RESTARTED,
+            endedAt: expect.any(Date),
+          });
+        }
+        expect(rowOf(h, finished)).toMatchObject({ status: "succeeded", reason: "done" });
+        expect(rowOf(h, elsewhere)).toMatchObject({ status: "running", endedAt: null });
+        expect(rowOf(h, unrouted)).toMatchObject({ status: "running", endedAt: null });
+        expect(h.sessions.agentRuns.map((run) => [run.agentId, run.endedAt !== null])).toEqual([
+          [AGENT, true],
+          [OTHER_AGENT, false],
+        ]);
+        expect(h.log.lines.filter((entry) => entry.level === "error")).toEqual([
+          {
+            level: "error",
+            text: `failed; ${RESTARTED}`,
+            location: downloading,
+            agentId: undefined,
+            skipSentry: false,
+            cause: undefined,
+          },
+          {
+            level: "error",
+            text: `failed; ${RESTARTED}`,
+            location: running,
+            agentId: undefined,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a cleanup that cannot write fails the qemu server's startup, and no session starts",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          selfUrl: SELF,
+          sessionStore: {
+            failRoutedSessions: () =>
+              Effect.fail(failure("failRoutedSessions", "connect ECONNREFUSED")),
+          },
+        });
+        const left = seedSession(h, "running", SELF);
+        const error = yield* Effect.flip(h.run(start()));
+        expect(error).toMatchObject({ _tag: "DatabaseError", operation: "failRoutedSessions" });
+        expect(h.sessions.sessions.map((row) => [row.id, row.status])).toEqual([[left, "running"]]);
+        expect(h.qemu.calls).toEqual([]);
+      }),
+  );
+
+  it.effect("a qemu server with no url of its own closes no rows", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const left = seedSession(h, "running", SELF, AGENT);
+      yield* h.run(Effect.asVoid(Sessions.Sessions));
+      expect(rowOf(h, left)).toMatchObject({ status: "running", endedAt: null });
+      expect(h.sessions.agentRuns[0]?.endedAt).toBeNull();
+      expect(h.log.lines.filter((entry) => entry.level === "error")).toEqual([]);
     }),
   );
 });
