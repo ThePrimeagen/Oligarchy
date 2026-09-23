@@ -531,8 +531,7 @@ describeWithDatabase("automation client POST /run", () => {
       const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
-      // exec: a sleep left behind by the killed shell would hold the client's stdout for a minute.
-      const bin = installOpencode(`touch "${started}"; exec sleep 60`);
+      const bin = installOpencode(`touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
@@ -597,8 +596,57 @@ describeWithDatabase("automation client POST /abort", () => {
       const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
-      // exec: a sleep left behind by the killed shell would hold the client's stdout for a minute.
-      const bin = installOpencode(`touch "${started}"; exec sleep 60`);
+      const bin = installOpencode(`touch "${started}"; sleep 60`);
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        [...REQUIRED, "--port", String(port)],
+        { SERVER_URL: qemu.url },
+        `${bin}:${processEnv.PATH ?? ""}`,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
+        const running = request(
+          port,
+          "/run",
+          AUTH_JSON,
+          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
+        );
+        const began = Date.now();
+        while (!existsSync(started)) {
+          if (Date.now() - began > 10_000) {
+            throw new Error("opencode did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const aborted = await request(
+          port,
+          "/abort",
+          { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          JSON.stringify({ ticket: "OLI-42" }),
+        );
+        expect(aborted.status).toBe(200);
+        expect(await aborted.json()).toEqual({ ok: "true" });
+        const runResponse = await running;
+        expect(runResponse.status).toBe(500);
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        rmSync(bin, { recursive: true, force: true });
+        rmSync(startedDir, { recursive: true, force: true });
+        await qemu.close();
+      }
+    }),
+  );
+
+  it.live("kills a SIGTERM-resistant opencode after the force-kill deadline", () =>
+    Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const started = join(startedDir, "ready");
+      const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
