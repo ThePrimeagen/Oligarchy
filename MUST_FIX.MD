@@ -178,6 +178,8 @@ flowchart TB
       then close the job with an explicit owner-lost reason (`automation server restarted`).
 - [x] Never requeue work whose side effects are uncertain; close it terminally unless the durable
       state proves `/run` never started.
+- [x] An inherited drive or mint whose result its driver already closed has finished: close it
+      `succeeded`, and send nothing to its automation client or Linear. User decision.
 - [x] Prove that one automation client configured for six jobs cannot leave more than six
       client-confirmed `running` rows after reconciliation.
 
