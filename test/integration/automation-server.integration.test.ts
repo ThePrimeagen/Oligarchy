@@ -581,18 +581,25 @@ const STATS: DbSchema.ServerStats = {
   cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
 };
 
-const seedLiveClient = async (url: string) => {
+const seedLiveClient = async (url: string): Promise<string> => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
   try {
     const db = drizzle({ client, schema: DbSchema });
-    await db.insert(DbSchema.servers).values({
-      url,
-      type: "automation-client",
-      heartbeatAt: new Date(),
-      generation: 1,
-      stats: STATS,
-    });
+    const [row] = await db
+      .insert(DbSchema.servers)
+      .values({
+        url,
+        type: "automation-client",
+        heartbeatAt: new Date(),
+        generation: 1,
+        stats: STATS,
+      })
+      .returning({ id: DbSchema.servers.id });
+    if (row === undefined) {
+      throw new Error(`no server row for ${url}`);
+    }
+    return row.id;
   } finally {
     await client.end();
   }
@@ -630,6 +637,24 @@ const seedJob = async (resultId: string, action: "drive" | "diagnose") => {
   try {
     const db = drizzle({ client, schema: DbSchema });
     await db.insert(DbSchema.automationJobs).values({ resultId, action, status: "pending" });
+  } finally {
+    await client.end();
+  }
+};
+
+// The row an automation server that died mid-drive leaves behind: running on `serverId`.
+const seedRunningJob = async (resultId: string, serverId: string) => {
+  const client = new Client({ connectionString: Postgres.getDbUrl() });
+  await client.connect();
+  try {
+    const db = drizzle({ client, schema: DbSchema });
+    await db.insert(DbSchema.automationJobs).values({
+      resultId,
+      action: "drive",
+      status: "running",
+      serverId,
+      startedAt: new Date(),
+    });
   } finally {
     await client.end();
   }
@@ -996,5 +1021,173 @@ describeServing("automation server abort", () => {
         await process.exited;
       }
     }),
+  );
+});
+
+const RESTARTED = "automation server restarted";
+
+const stop = async (process: Process) => {
+  if (process.child.exitCode === null && process.child.signalCode === null) {
+    process.child.kill("SIGKILL");
+  }
+  await process.exited;
+};
+
+const ticketOf = (body: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null && "ticket" in parsed
+      ? String(parsed.ticket)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+describeServing("automation server restart", () => {
+  it.live(
+    "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and fails it",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        const aborts: Array<string> = [];
+        // /run is never answered: opencode is still driving when the automation server dies.
+        const client = await serveClient((req, res) => {
+          void readBody(req).then((body) => {
+            if (req.url === "/abort") {
+              aborts.push(body);
+            }
+            if (req.url !== "/run") {
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end(JSON.stringify({ ok: "true" }));
+            }
+          });
+        });
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const first = spawnAutomationServer(["--port", String(await freePort())]);
+        let second: Process | undefined;
+        try {
+          await first.waitFor(/automation server listening/);
+          const running = await waitForJob(resultId, "running");
+          first.child.kill("SIGKILL");
+          expect((await first.exited).signal).toBe("SIGKILL");
+          expect(await jobsFor(resultId)).toEqual([
+            expect.objectContaining({ status: "running", serverId: running.serverId }),
+          ]);
+          expect(aborts.filter((body) => ticketOf(body) === linearId)).toEqual([]);
+
+          second = spawnAutomationServer(["--port", String(await freePort())]);
+          const job = await waitForJob(resultId, "failed", 30_000);
+          expect(job).toMatchObject({ status: "failed", reason: RESTARTED });
+          expect(job.serverId).toBe(running.serverId);
+          expect(aborts.map(ticketOf).filter((ticket) => ticket === linearId)).toEqual([linearId]);
+          await second.waitFor(new RegExp(`drive failed; ${RESTARTED}`));
+          expect(lines(second.stdout()), second.stdout()).toContain(
+            `[global] automation: error: drive failed; ${RESTARTED}`,
+          );
+        } finally {
+          await stop(first);
+          if (second !== undefined) {
+            await stop(second);
+          }
+          await removeJobs(resultId);
+          await removeServer(client.url);
+          await client.close();
+        }
+      }),
+    120_000,
+  );
+
+  it.live(
+    "SIGKILL while /reserve waits leaves the drive pending; the next automation server places and finishes it",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        let reserves = 0;
+        let reserving: () => void = () => undefined;
+        const reserved = new Promise<void>((resolve) => {
+          reserving = resolve;
+        });
+        // This ticket's first /reserve is never answered. Every other request is ok.
+        const client = await serveClient((req, res) => {
+          void readBody(req).then(async (body) => {
+            const ours = ticketOf(body) === linearId;
+            if (req.url === "/reserve" && ours) {
+              reserves += 1;
+              if (reserves === 1) {
+                reserving();
+                return;
+              }
+            }
+            if (req.url === "/run" && ours) {
+              await closeResult(resultId);
+            }
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+          });
+        });
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const first = spawnAutomationServer(["--port", String(await freePort())]);
+        let second: Process | undefined;
+        try {
+          await first.waitFor(/automation server listening/);
+          await reserved;
+          first.child.kill("SIGKILL");
+          expect((await first.exited).signal).toBe("SIGKILL");
+          expect(await jobsFor(resultId)).toEqual([
+            expect.objectContaining({ status: "pending", serverId: null, startedAt: null }),
+          ]);
+
+          second = spawnAutomationServer(["--port", String(await freePort())]);
+          const job = await waitForJob(resultId, "succeeded", 30_000);
+          expect(job).toMatchObject({ status: "succeeded", reason: null });
+          expect(reserves).toBe(2);
+        } finally {
+          await stop(first);
+          if (second !== undefined) {
+            await stop(second);
+          }
+          await removeJobs(resultId);
+          await removeServer(client.url);
+          await client.close();
+        }
+      }),
+    120_000,
+  );
+
+  it.live(
+    "a drive left running on an automation client that refuses connections is reported and failed, and the automation server keeps serving",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        const url = `http://127.0.0.1:${String(await freePort())}`;
+        const serverId = await seedLiveClient(url);
+        await seedRunningJob(resultId, serverId);
+        const port = await freePort();
+        const process = spawnAutomationServer(["--port", String(port)]);
+        try {
+          const job = await waitForJob(resultId, "failed", 30_000);
+          expect(job).toMatchObject({ status: "failed", reason: RESTARTED, serverId });
+          await process.waitFor(
+            new RegExp(`inherited abort failed; ${url.replaceAll(".", "\\.")}`),
+          );
+          expect(lines(process.stdout()), process.stdout()).toContain(
+            `[${linearId}] automation: error: inherited abort failed; ${url}`,
+          );
+          await process.waitFor(/automation server listening/);
+          const response = await request(port, "GET", "/linear");
+          expect(response.status).toBe(404);
+        } finally {
+          await stop(process);
+          await removeJobs(resultId);
+          await removeServer(url);
+        }
+      }),
+    120_000,
   );
 });
