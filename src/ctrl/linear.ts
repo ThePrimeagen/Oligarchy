@@ -14,6 +14,8 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Errors from "../shared/errors.ts";
 
 export const LINEAR_API_URL = "https://api.linear.app/graphql";
+// A request Linear never answers must not hold the automation server's dispatch or its watches.
+const REQUEST_TIMEOUT = "10 seconds";
 export const AGENT_TEST_LABEL = "agent test";
 export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 // The two board states a ticket is handed through: born in Backlog, where the automation server
@@ -254,7 +256,16 @@ const makeLinear = (
         return yield* Schema.decodeUnknownEffect(data)(envelope.data).pipe(
           Effect.mapError((cause) => invalidResponse(operation, cause)),
         );
-      });
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: REQUEST_TIMEOUT,
+          orElse: () =>
+            Errors.LinearError.make({
+              operation,
+              message: `linear: request failed: no answer within ${REQUEST_TIMEOUT}`,
+            }),
+        }),
+      );
 
     const teamId: Effect.Effect<string, Errors.LinearError> = Effect.gen(function* () {
       const teams = yield* request("teamId", TEAM_QUERY, { name: teamName }, Teams);
