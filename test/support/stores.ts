@@ -619,6 +619,16 @@ export const fakeAutomationStore = (
         }
         return job.status === "running" && job.serverId === serverId;
       }),
+    listRunning: () =>
+      Effect.sync(() =>
+        jobs
+          .filter((job) => job.status === "running")
+          .sort(
+            (left, right) =>
+              left.createdAt.getTime() - right.createdAt.getTime() ||
+              left.id.localeCompare(right.id),
+          ),
+      ),
     hasPending: (resultId, action) =>
       Effect.sync(() =>
         jobs.some(

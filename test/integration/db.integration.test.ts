@@ -1553,6 +1553,41 @@ Postgres.describeWithDatabase("database", () => {
     );
 
     scoped.effect(
+      "AutomationStore listRunning returns the running jobs oldest first, and none of the pending or closed ones",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          expect(yield* automation.listRunning()).toEqual([]);
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* Effect.forEach([0, 1, 2, 3], () =>
+            tests.createRun({
+              iso: "https://example.com/omarchy.iso",
+              serverUrl: "http://127.0.0.1:42069",
+              definitions: [{ id: definition.id }],
+            }),
+          );
+          const resultIds = created.map((run) => run.results[0].id);
+          const older = yield* automation.enqueue({ resultId: resultIds[0], action: "drive" });
+          const newer = yield* automation.enqueue({ resultId: resultIds[1], action: "drive" });
+          const closed = yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
+          const olderServer = uuid();
+          const newerServer = uuid();
+          expect(yield* automation.markRunning(older.id, olderServer)).toBe(true);
+          expect(yield* automation.markRunning(newer.id, newerServer)).toBe(true);
+          expect(yield* automation.markRunning(closed.id, uuid())).toBe(true);
+          expect(yield* automation.finish(closed.id, "failed", "nope")).toBe(true);
+          yield* automation.enqueue({ resultId: resultIds[3], action: "drive" });
+          const running = yield* automation.listRunning();
+          expect(running.map((job) => [job.id, job.status, job.serverId])).toEqual([
+            [older.id, "running", olderServer],
+            [newer.id, "running", newerServer],
+          ]);
+        }),
+    );
+
+    scoped.effect(
       "AutomationStore listJobs returns every running and pending job, diagnoses first, and the newest completed up to count",
       () =>
         Effect.gen(function* () {

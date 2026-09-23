@@ -203,6 +203,18 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return Arr.head(rows);
       });
 
+      // Every running row, oldest first. At startup these are the jobs the last automation
+      // server was waiting on: no fiber of this process will close them.
+      const listRunning = Effect.fn("db.listRunningAutomationJobs")(function* () {
+        return yield* database.run("listRunningAutomationJobs", (db) =>
+          db
+            .select()
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.status, "running"))
+            .orderBy(DbSchema.automationJobs.createdAt, DbSchema.automationJobs.id),
+        );
+      });
+
       // A pending job has no client to stop: closing its row is its whole abort, and the next
       // selection no longer finds it. The status in the condition is what keeps a placement in
       // flight honest: markRunning only takes a row that is still pending, so an abort that
@@ -353,6 +365,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         hasPending,
         jobStatus,
         findRunning,
+        listRunning,
         abortPending,
         finish,
         listJobs,
