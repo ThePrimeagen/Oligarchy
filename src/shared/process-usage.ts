@@ -1,6 +1,7 @@
 import { Clock, Context, Effect, FileSystem, Layer, Option, Ref, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ExternalFailure from "../external-failure.ts";
 import * as Errors from "./errors.ts";
 
 // USER_HZ on Linux: /proc/self/stat counts in these ticks, and macOS's microseconds are read as
@@ -137,8 +138,10 @@ export const procSource: Effect.Effect<Source, never, FileSystem.FileSystem> = E
 const PS = "/bin/ps";
 const PS_ARGS = ["-A", "-o", "pid=", "-o", "ppid=", "-o", "rss="];
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm;
-// ps answers in milliseconds; one that wedges must not hold every later heartbeat with it.
+// ps answers in milliseconds; one that wedges must not hold every later heartbeat with it, and
+// it has nothing to flush, so SIGTERM gets a second before SIGKILL.
 const PS_TIMEOUT = "10 seconds";
+const PS_FORCE_KILL_AFTER = "1 second";
 
 // The rss of `root` and every descendant, as the /proc walk sums them. The ps that printed the
 // listing is root's child for its moment and is left out: /proc is read without one.
@@ -188,13 +191,25 @@ export const psSource = (
     const list = Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(
-          ChildProcess.make(PS, PS_ARGS, { stdin: "ignore", stderr: "ignore" }),
+          ChildProcess.make(PS, PS_ARGS, {
+            stdin: "ignore",
+            stderr: "ignore",
+            detached: false,
+            killSignal: "SIGTERM",
+            forceKillAfter: PS_FORCE_KILL_AFTER,
+          }),
         );
         const text = yield* Stream.mkString(Stream.decodeText(handle.stdout));
         return { text, ps: handle.pid };
       }),
     ).pipe(
-      Effect.mapError((error) => psFailed(error.message, error)),
+      // Node's own reason (`spawn /bin/ps EAGAIN`), not the PlatformError wrapper's.
+      Effect.mapError((error) =>
+        psFailed(
+          ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message),
+          error,
+        ),
+      ),
       Effect.timeoutOrElse({
         duration: PS_TIMEOUT,
         orElse: () => Effect.fail(psFailed(`ps did not answer within ${PS_TIMEOUT}`)),

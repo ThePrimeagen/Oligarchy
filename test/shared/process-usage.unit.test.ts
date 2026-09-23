@@ -384,16 +384,19 @@ const listing = (rows: ReadonlyArray<string>): FakeSpawner.Script =>
   FakeSpawner.byCommand({ "/bin/ps": { exitCode: 0, stdout: rows.join("") } });
 
 // The macOS source over a scripted ps and getrusage, whatever host the test runs on.
-const onMac = (script: FakeSpawner.Script, cpu: () => CpuUsage = () => ({ user: 0, system: 0 })) =>
+const onMac = (
+  spawner: FakeSpawner.FakeSpawner,
+  cpu: () => CpuUsage = () => ({ user: 0, system: 0 }),
+) =>
   Layer.effect(ProcessUsage.ProcessUsage)(
     Effect.flatMap(ProcessUsage.psSource(PID, cpu), ProcessUsage.ProcessUsage.make),
-  ).pipe(Layer.provide(FakeSpawner.fakeSpawner(script).layer));
+  ).pipe(Layer.provide(spawner.layer));
 
 const collectOnMac = (script: FakeSpawner.Script) =>
   Effect.gen(function* () {
     const usage = yield* ProcessUsage.ProcessUsage;
     return yield* usage.collect;
-  }).pipe(Effect.provide(onMac(script)));
+  }).pipe(Effect.provide(onMac(FakeSpawner.fakeSpawner(script))));
 
 describe("ProcessUsage.psSource happy path (macOS)", () => {
   it.effect("sums ps's rss of this pid and every descendant, KiB as bytes, and no one else", () =>
@@ -440,7 +443,7 @@ describe("ProcessUsage.psSource happy path (macOS)", () => {
       expect((yield* usage.collect).cpuPercent).toBe(100);
       yield* TestClock.adjust("30 seconds");
       expect((yield* usage.collect).cpuPercent).toBe(50);
-    }).pipe(Effect.provide(onMac(listing([psRow(PID, 1, 1)]), cpu)));
+    }).pipe(Effect.provide(onMac(FakeSpawner.fakeSpawner(listing([psRow(PID, 1, 1)])), cpu)));
   });
 });
 
@@ -463,10 +466,10 @@ describe("ProcessUsage.psSource unhappy path (macOS)", () => {
         expect(error).toMatchObject({
           _tag: "CliFailed",
           command: "/bin/ps",
-          message: "NotFound: ChildProcess.spawn (/bin/ps)",
+          message: "spawn /bin/ps EAGAIN",
         });
         expect(yield* usage.collect).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
-      }).pipe(Effect.provide(onMac(script)));
+      }).pipe(Effect.provide(onMac(FakeSpawner.fakeSpawner(script))));
     },
   );
 
@@ -504,19 +507,31 @@ describe("ProcessUsage.psSource unhappy path (macOS)", () => {
           command: "/bin/ps",
           message: "ps did not answer within 10 seconds",
         });
+        expect(ps.kills).toEqual(["SIGTERM"]);
         expect(yield* ps.isRunning).toBe(false);
-      }).pipe(
-        Effect.provide(
-          Layer.effect(ProcessUsage.ProcessUsage)(
-            Effect.flatMap(
-              ProcessUsage.psSource(PID, () => ({ user: 0, system: 0 })),
-              ProcessUsage.ProcessUsage.make,
-            ),
-          ).pipe(Layer.provide(spawner.layer)),
-        ),
-      );
+      }).pipe(Effect.provide(onMac(spawner)));
     },
   );
+
+  it.effect("a wedged ps that ignores SIGTERM is killed a second later, so the tick ends", () => {
+    const spawner = FakeSpawner.fakeSpawner(
+      FakeSpawner.byCommand({ "/bin/ps": { ignoreTerm: true } }),
+    );
+    return Effect.gen(function* () {
+      const usage = yield* ProcessUsage.ProcessUsage;
+      const collecting = yield* Effect.forkChild(Effect.flip(usage.collect));
+      const ps = yield* spawner.nextSpawn;
+      yield* TestClock.adjust("10 seconds");
+      expect(collecting.pollUnsafe()).toBeUndefined();
+      expect(ps.kills).toEqual(["SIGTERM"]);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(collecting)).toMatchObject({
+        _tag: "CliFailed",
+        message: "ps did not answer within 10 seconds",
+      });
+      expect(ps.kills).toEqual(["SIGTERM", "SIGKILL"]);
+    }).pipe(Effect.provide(onMac(spawner)));
+  });
 
   it.effect("a header or a blank line is not a process, and the rows after it still count", () =>
     Effect.gen(function* () {
