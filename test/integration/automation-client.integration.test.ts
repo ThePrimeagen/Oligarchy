@@ -531,7 +531,8 @@ describeWithDatabase("automation client POST /run", () => {
       const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
-      const bin = installOpencode(`touch "${started}"; sleep 60`);
+      // exec: a sleep left behind by the killed shell would hold the client's stdout for a minute.
+      const bin = installOpencode(`touch "${started}"; exec sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
@@ -596,7 +597,8 @@ describeWithDatabase("automation client POST /abort", () => {
       const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
-      const bin = installOpencode(`touch "${started}"; sleep 60`);
+      // exec: a sleep left behind by the killed shell would hold the client's stdout for a minute.
+      const bin = installOpencode(`touch "${started}"; exec sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
@@ -646,7 +648,9 @@ describeWithDatabase("automation client POST /abort", () => {
       const qemu = await stubQemuReserve();
       const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
       const started = join(startedDir, "ready");
-      const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
+      // exec: a sleep left behind by the killed shell would hold the client's stdout for a minute.
+      // The ignored SIGTERM survives the exec.
+      const bin = installOpencode(`trap "" TERM; touch "${started}"; exec sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
