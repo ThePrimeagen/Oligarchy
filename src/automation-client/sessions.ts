@@ -1,4 +1,16 @@
-import { Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Semaphore } from "effect";
+import {
+  Cause,
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Semaphore,
+} from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Cli from "../cli.ts";
 import * as Log from "../observability/log.ts";
@@ -45,10 +57,10 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
     );
-    // The runs POST /abort is ending. Each answers RunAborted, however OpenCode exits.
-    const aborted = yield* Ref.make<ReadonlySet<ChildProcessSpawner.ChildProcessHandle>>(new Set());
-    const unmark = (handle: ChildProcessSpawner.ChildProcessHandle) =>
-      Ref.update(aborted, (handles) => new Set([...handles].filter((held) => held !== handle)));
+    // The abort under way for a running ticket, done with whether its kill signalled OpenCode.
+    // A run whose child exits meanwhile waits for it: only a child the kill reached is
+    // RunAborted, and one that had exited on its own ends as it did.
+    const aborts = yield* Ref.make<ReadonlyMap<string, Deferred.Deferred<boolean>>>(new Map());
     // How many runs are admitted against --max-jobs, and which tickets already hold a slot
     // that run will consume. `running` cannot count them: a run is only in it once OpenCode
     // has spawned, and the slot must be taken before that, so a refused run spawns nothing.
@@ -210,10 +222,11 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           yield* Effect.addFinalizer(() =>
             Ref.update(running, (map) =>
               map.get(ticket) === handle ? mapWithout(map, ticket) : map,
-            ).pipe(Effect.andThen(unmark(handle))),
+            ).pipe(Effect.andThen(Ref.update(aborts, (map) => mapWithout(map, ticket)))),
           );
           const exit = yield* Effect.exit(Cli.awaitExit(OpenCode.BIN, handle));
-          if ((yield* Ref.get(aborted)).has(handle)) {
+          const stopping = (yield* Ref.get(aborts)).get(ticket);
+          if (stopping !== undefined && (yield* Deferred.await(stopping))) {
             return yield* Errors.RunAborted.make({ agentId: ticket });
           }
           return yield* exit;
@@ -264,27 +277,28 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         }
         return yield* Effect.void;
       }
-      // Marked before the kill: the run sees its child end only after the mark. A kill that
-      // leaves the child running takes the mark back, and that run ends as OpenCode ends it.
-      yield* Ref.update(aborted, (handles) => new Set([...handles, handle]));
-      return yield* handle
-        .kill({
-          killSignal: "SIGTERM",
-          forceKillAfter: Cli.FORCE_KILL_AFTER,
-        })
-        .pipe(
-          Effect.catch((error) =>
-            // A child already gone cannot be killed. isRunning can itself fail; treat that as
-            // still running so a probe failure does not look like a successful abort.
-            Effect.flatMap(handle.isRunning.pipe(Effect.orElseSucceed(() => true)), (alive) =>
-              alive
-                ? unmark(handle).pipe(
-                    Effect.andThen(Errors.RunFailed.make({ message: error.message, cause: error })),
-                  )
-                : Effect.void,
-            ),
+      // Registered before the kill, so the run sees its child end only once it is there.
+      const signalled = yield* Deferred.make<boolean>();
+      return yield* Ref.update(aborts, (map) => mapWith(map, ticket, signalled)).pipe(
+        Effect.andThen(
+          handle.kill({
+            killSignal: "SIGTERM",
+            forceKillAfter: Cli.FORCE_KILL_AFTER,
+          }),
+        ),
+        Effect.as(true),
+        Effect.catch((error) =>
+          // A child already gone cannot be killed. isRunning can itself fail; treat that as
+          // still running so a probe failure does not look like a successful abort.
+          Effect.flatMap(handle.isRunning.pipe(Effect.orElseSucceed(() => true)), (alive) =>
+            alive
+              ? Errors.RunFailed.make({ message: error.message, cause: error })
+              : Effect.succeed(false),
           ),
-        );
+        ),
+        Effect.onExit((exit) => Deferred.succeed(signalled, Exit.isSuccess(exit) && exit.value)),
+        Effect.asVoid,
+      );
     });
 
     return {

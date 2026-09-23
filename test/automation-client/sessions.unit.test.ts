@@ -268,7 +268,7 @@ describe("Sessions.abort happy path", () => {
   });
 
   it.effect(
-    "succeeds when kill fails because the child has already exited, and its run is RunAborted",
+    "succeeds when kill fails because the child has already exited, and its run ends as the child did",
     () => {
       const spawner = FakeSpawner.fakeSpawner(() => ({
         killError: "Failed to kill child process",
@@ -283,7 +283,7 @@ describe("Sessions.abort happy path", () => {
         }
         yield* sessions.abort(TICKET);
         const error = yield* Effect.flip(Fiber.join(running));
-        expect(error._tag).toBe("RunAborted");
+        expect(error._tag).toBe("RunFailed");
       }).pipe(Effect.provide(layer(spawner)));
     },
   );
