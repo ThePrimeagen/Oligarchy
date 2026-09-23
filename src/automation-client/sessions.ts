@@ -45,10 +45,12 @@ export type ReserveQemu = (
 
 export type RelinquishQemu = (agent: string) => Effect.Effect<void, Errors.Internal>;
 
-// What a ticket holds before its run: which kind, so an expired drive gives its guest slot back,
-// and since when.
+// What a ticket holds before its run: what it was reserved as, so an expired drive gives its
+// guest slot back and the same reserve again is told from another, and since when.
 type Reservation = {
   readonly action: Domain.AutomationAction;
+  readonly resume: string | undefined;
+  readonly server: string | undefined;
   readonly since: number;
 };
 
@@ -89,8 +91,15 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     ) {
       const ran = yield* reserveGate.withPermitsIfAvailable(1)(
         Effect.gen(function* () {
-          const held = yield* Ref.get(slots);
-          if (held.reserved.has(ticket)) {
+          // The same reserve again, action, iso and pin alike, is the one this ticket already
+          // holds: a dispatcher that died before its running write asks again once restarted.
+          // It keeps its first deadline, since a drive's guest slot expires on the qemu
+          // server's clock, not this one's.
+          const held = (yield* Ref.get(slots)).reserved.get(ticket);
+          if (held?.action === action && held.resume === resume && held.server === server) {
+            return yield* Effect.void;
+          }
+          if (held !== undefined) {
             return yield* Errors.BadRequest.make({
               message: "already reserved",
               agentId: ticket,
@@ -115,7 +124,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               true,
               {
                 count: current.count + 1,
-                reserved: mapWith(current.reserved, ticket, { action, since }),
+                reserved: mapWith(current.reserved, ticket, { action, resume, server, since }),
               },
             ] as const;
           });

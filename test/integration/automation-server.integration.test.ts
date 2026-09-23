@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
@@ -20,6 +20,7 @@ import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
+const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
 // The board watch calls Linear as soon as the server listens, once per column. https_proxy does
 // not cover node:https under Bun, so a serving test reaches api.linear.app; each column logs one failure.
@@ -65,13 +66,15 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
 
 // Each process gets an empty cwd (no `.env`) and a different empty HOME. Both directories are
 // removed once it has exited.
-const spawnAutomationServer = (
+const spawnProcess = (
+  executable: string,
+  name: string,
   args: ReadonlyArray<string>,
-  overrides: Record<string, string> = {},
+  overrides: Record<string, string>,
 ): Process => {
   const home = mkdtempSync(join(tmpdir(), "oligarchy-automation-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "oligarchy-automation-cwd-"));
-  const child = spawn(AUTOMATION_SERVER, args, {
+  const child = spawn(executable, args, {
     cwd,
     env: environment(home, overrides),
     stdio: ["ignore", "pipe", "pipe"],
@@ -115,7 +118,7 @@ const spawnAutomationServer = (
           clearTimeout(timer);
           reject(
             new Error(
-              `automation server exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+              `${name} exited ${String(child.exitCode)} before ${pattern.source}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
             ),
           );
         }
@@ -129,6 +132,16 @@ const spawnAutomationServer = (
     });
   return { child, home, cwd, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
 };
+
+const spawnAutomationServer = (
+  args: ReadonlyArray<string>,
+  overrides: Record<string, string> = {},
+): Process => spawnProcess(AUTOMATION_SERVER, "automation server", args, overrides);
+
+const spawnAutomationClient = (
+  args: ReadonlyArray<string>,
+  overrides: Record<string, string> = {},
+): Process => spawnProcess(AUTOMATION_CLIENT, "automation client", args, overrides);
 
 const portOf = (address: string | AddressInfo | null): number =>
   typeof address === "object" && address !== null ? address.port : 0;
@@ -703,6 +716,10 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on("end", () => resolve(text));
   });
 
+const qemuBody = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ agent: Schema.String })),
+);
+
 const ticketOf = (body: string): string | undefined => {
   try {
     const parsed: unknown = JSON.parse(body);
@@ -1064,6 +1081,14 @@ const stop = async (process: Process) => {
   await process.exited;
 };
 
+const installOpencode = (script: string): string => {
+  const bin = mkdtempSync(join(tmpdir(), "oligarchy-opencode-"));
+  const file = join(bin, "opencode");
+  writeFileSync(file, `#!/bin/sh\n${script}\n`);
+  chmodSync(file, 0o755);
+  return bin;
+};
+
 describeServing("automation server restart", () => {
   it.live(
     "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and fails it",
@@ -1174,6 +1199,99 @@ describeServing("automation server restart", () => {
           await removeJobs(resultId);
           await removeServer(client.url);
           await client.close();
+        }
+      }),
+    120_000,
+  );
+
+  it.live(
+    "SIGKILL while a real automation client reserves, which it still grants, leaves the drive pending; the next automation server reserves it there again, QEMU is asked once, and the drive succeeds",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        let qemuReserves = 0;
+        let reaching: () => void = () => undefined;
+        const reached = new Promise<void>((resolve) => {
+          reaching = resolve;
+        });
+        let grant: () => void = () => undefined;
+        // This ticket's first QEMU reserve is answered only once the automation server that
+        // asked for it is dead. Every other request is ok.
+        const qemu = await serveClient((req, res) => {
+          void readBody(req).then((body) => {
+            const ok = () => {
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end(JSON.stringify({ ok: "true" }));
+            };
+            const ours = Option.exists(qemuBody(body), (parsed) => parsed.agent === linearId);
+            if (req.url === "/reserve" && ours) {
+              qemuReserves += 1;
+              if (qemuReserves === 1) {
+                grant = ok;
+                reaching();
+                return;
+              }
+            }
+            ok();
+          });
+        });
+        const bin = installOpencode("exit 0");
+        const clientPort = await freePort();
+        const url = `http://127.0.0.1:${String(clientPort)}`;
+        const client = spawnAutomationClient(
+          [
+            "--max-jobs",
+            "4",
+            "--name",
+            `restart-${linearId}`,
+            "--port",
+            String(clientPort),
+            "--url",
+            url,
+          ],
+          { SERVER_URL: qemu.url, PATH: `${bin}:${process.env.PATH ?? ""}` },
+        );
+        let first: Process | undefined;
+        let second: Process | undefined;
+        try {
+          await client.waitFor(/automation client listening/);
+          await seedJob(resultId, "drive");
+          first = spawnAutomationServer(["--port", String(await freePort())]);
+          await reached;
+          first.child.kill("SIGKILL");
+          expect((await first.exited).signal).toBe("SIGKILL");
+          expect(await jobsFor(resultId)).toEqual([
+            expect.objectContaining({ status: "pending", serverId: null, startedAt: null }),
+          ]);
+          // Granted after its caller died: the automation client holds a reservation the row
+          // does not record.
+          grant();
+          await closeResult(resultId);
+
+          second = spawnAutomationServer(["--port", String(await freePort())]);
+          const job = await waitForJob(resultId, "succeeded", 30_000);
+          expect(job).toMatchObject({ status: "succeeded", reason: null });
+          expect(qemuReserves).toBe(1);
+          const ours = (output: string) => lines(output).filter((line) => line.includes(linearId));
+          expect(ours(second.stdout()).filter((line) => line.includes("reserve failed"))).toEqual(
+            [],
+          );
+          expect(ours(client.stdout()).filter((line) => line.includes("already reserved"))).toEqual(
+            [],
+          );
+        } finally {
+          if (first !== undefined) {
+            await stop(first);
+          }
+          if (second !== undefined) {
+            await stop(second);
+          }
+          await stop(client);
+          await removeJobs(resultId);
+          await removeServer(url);
+          await qemu.close();
+          rmSync(bin, { recursive: true, force: true });
         }
       }),
     120_000,
