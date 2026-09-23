@@ -870,7 +870,16 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .orderBy(queueRank, automationJobs.createdAt)
       .limit(QUEUE_LIMIT);
     const completed = await jobs()
-      .where(inArray(automationJobs.status, ["succeeded", "failed", "aborted", "timed_out"]))
+      .where(
+        inArray(automationJobs.status, [
+          "succeeded",
+          "failed",
+          "aborted",
+          "timed_out",
+          "completed",
+          "errored",
+        ]),
+      )
       .orderBy(desc(automationJobs.finishedAt))
       .limit(QUEUE_LIMIT);
     const jobCounts = await db
@@ -1097,6 +1106,8 @@ export type SessionFollow = {
     | "failed"
     | "aborted"
     | "timed_out"
+    | "completed"
+    | "errored"
     | null;
   readonly imageId: string | null;
   readonly instruction: string;

@@ -319,9 +319,9 @@ describe("parseLine refuses malformed lines with the exact usage text", () => {
     expect(Grammar.parseLine("stop done")).toEqual({
       _tag: "malformed",
       command: "stop",
-      usage: "usage: stop [succeeded|failed|aborted] [reason]",
+      usage: "usage: stop [succeeded|failed|aborted|completed] [reason]",
     });
-    expect(Grammar.STOP_STATUSES).toEqual(["succeeded", "failed", "aborted"]);
+    expect(Grammar.STOP_STATUSES).toEqual(["succeeded", "failed", "aborted", "completed"]);
   });
 });
 

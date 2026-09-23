@@ -905,7 +905,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
       expect(extra, line).toEqual([]);
       expect(status?.startsWith("\x1b["), line).toBe(true);
       expect((status ?? "").slice((status ?? "").indexOf("m") + 1)).toMatch(
-        /^(downloading|running|succeeded|failed|aborted|timed_out) *$/,
+        /^(downloading|running|succeeded|failed|aborted|timed_out|completed|errored) *$/,
       );
       const match = (rest ?? "").match(
         /^ {2}((?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)? ago) *  ([0-9a-f-]{36})$/,

@@ -336,14 +336,14 @@ describe("start", () => {
           expect(h.sessions.agentRuns).toEqual([]);
           expect(h.qemu.calls).toEqual([]);
           expect(h.sessions.sessions).toMatchObject([
-            { status: "failed", reason: `qemu: disk not found: ${DISK}` },
+            { status: "errored", reason: `qemu: disk not found: ${DISK}` },
           ]);
         }),
       );
     }),
   );
 
-  it.effect("a failing qemu-img leaves the agent unregistered and the row failed", () =>
+  it.effect("a failing qemu-img leaves the agent unregistered and the row errored", () =>
     Effect.gen(function* () {
       let prepares = 0;
       const h = harness({
@@ -369,7 +369,7 @@ describe("start", () => {
           expect(h.sessions.agentRuns).toEqual([]);
           expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare"]);
           expect(h.sessions.sessions).toMatchObject([
-            { status: "failed", reason: "qemu-img create exited 1" },
+            { status: "errored", reason: "qemu-img create exited 1" },
           ]);
           expect(h.log.released).toEqual([AGENT]);
           // The registration was never spent and the failed start kept the reservation: the
@@ -383,7 +383,7 @@ describe("start", () => {
   );
 
   it.effect(
-    "a boot failure stops the machine, ends the row failed with the detail and fails StartFailed",
+    "a boot failure stops the machine, ends the row errored with the detail and fails StartFailed",
     () =>
       Effect.gen(function* () {
         const h = harness({
@@ -407,10 +407,10 @@ describe("start", () => {
             expect(error.agentId).toBe(AGENT);
             expect(h.qemu.calls.map((call) => call._tag)).toEqual(["prepare", "start", "stop"]);
             expect(h.sessions.sessions).toMatchObject([
-              { id, status: "failed", reason: "qemu: handshake timeout: kvm: disabled" },
+              { id, status: "errored", reason: "qemu: handshake timeout: kvm: disabled" },
             ]);
             expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
-            expect(spanNamed(h, AGENT)?.attributes.get("session_status")).toBe("failed");
+            expect(spanNamed(h, AGENT)?.attributes.get("session_status")).toBe("errored");
             expect(h.log.released).toEqual([AGENT]);
             expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
               _tag: "UnknownSession",
@@ -418,7 +418,7 @@ describe("start", () => {
             });
             expect(yield* Effect.flip(sessions.follow(id))).toMatchObject({
               _tag: "Conflict",
-              message: `session "${id}" has already completed (failed)`,
+              message: `session "${id}" has already completed (errored)`,
             });
             expect(yield* qemus(sessions)).toBe(0);
             expect(texts(h)).toEqual([`starting; iso ${ISO}`]);
@@ -795,7 +795,7 @@ describe("start resume", () => {
       }),
   );
 
-  it.effect("a minted overlay that fails to prepare ends the row failed as any boot failure", () =>
+  it.effect("a minted overlay that fails to prepare ends the row errored as any boot failure", () =>
     Effect.gen(function* () {
       const h = harness({
         minted: { find: () => Option.some(MINTED) },
@@ -815,7 +815,7 @@ describe("start resume", () => {
             agentId: AGENT,
           });
           expect(h.sessions.sessions[0]).toMatchObject({
-            status: "failed",
+            status: "errored",
             reason: "qemu-img create exited 1",
             config: { iso: URL_ISO, mode: "resume" },
           });
@@ -1211,9 +1211,94 @@ describe("sendKeys", () => {
             { state: "failed", response: "qemu: send-key timed out" },
           ]);
           expect(line(h, "sent")).toBeUndefined();
+          // QEMU is still up: a failed exchange is the driver's to judge, and the session runs on.
+          expect(h.sessions.sessions[0]).toMatchObject({ id, status: "running" });
+          expect(yield* sessions.lookup(id, AGENT)).toBe(live);
         }),
       );
     }),
+  );
+
+  it.effect(
+    "an exchange that fails because QEMU is gone ends the session errored with its debug log",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          script: {
+            sendKey: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+            stderr: "qemu: terminating on signal 9",
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            const events = yield* sessions.follow(id);
+            yield* h.qemu.exit(id, 137);
+            const error = yield* Effect.flip(sessions.sendKeys(live, "a", undefined));
+            expect(error).toMatchObject({ _tag: "ExchangeFailed", sessionId: id, agentId: AGENT });
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "errored",
+              reason: "qemu exited 137",
+            });
+            expect(h.debugLogs.saves).toEqual([
+              { sessionId: id, serial: "", qemu: "qemu: terminating on signal 9" },
+            ]);
+            expect(line(h, "stopped")).toMatchObject({
+              text: "stopped; errored; qemu exited 137",
+              location: id,
+              agentId: AGENT,
+            });
+            expect(yield* Stream.runCollect(events)).toEqual([
+              { type: "session", status: "running" },
+              { type: "action", id: 1, name: "send-keys", state: "running" },
+              { type: "action", id: 1, state: "failed" },
+              { type: "session", status: "errored" },
+            ]);
+            expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
+            expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+              _tag: "UnknownSession",
+              id,
+            });
+            expect(yield* qemus(sessions)).toBe(0);
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a gone QEMU whose row cannot be closed still answers the exchange failure and logs why",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          script: {
+            sendKey: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          },
+          sessionStore: {
+            endSession: () => Effect.fail(failure("endSession", "connect ECONNREFUSED")),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            yield* h.qemu.exit(id, null);
+            const error = yield* Effect.flip(sessions.sendKeys(live, "a", undefined));
+            expect(error).toMatchObject({ _tag: "ExchangeFailed", sessionId: id, agentId: AGENT });
+            const logged = line(h, "db: recording an errored session failed too:");
+            expect(logged).toMatchObject({
+              level: "error",
+              text: "db: recording an errored session failed too: Failed query: endSession",
+              location: id,
+              agentId: AGENT,
+            });
+            expect(logged?.cause).toMatchObject({ _tag: "DatabaseError" });
+            expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+              _tag: "UnknownSession",
+            });
+            expect(yield* qemus(sessions)).toBe(0);
+          }),
+        );
+      }),
   );
 });
 
@@ -2004,7 +2089,7 @@ describe("save", () => {
   );
 
   it.effect(
-    "a guest that does not power off within two minutes is killed, the row fails and nothing is kept",
+    "a guest that does not power off within two minutes is killed, the row errors and nothing is kept",
     () =>
       Effect.gen(function* () {
         const h = harness({ script: { powersOff: false } });
@@ -2025,7 +2110,7 @@ describe("save", () => {
             expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
             expect(h.sessions.sessions[0]).toMatchObject({
               id,
-              status: "failed",
+              status: "errored",
               reason: "guest did not power off within 2 minutes",
             });
             expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
@@ -2035,11 +2120,11 @@ describe("save", () => {
               { type: "session", status: "running" },
               { type: "action", id: 1, name: "save", state: "running" },
               { type: "action", id: 1, state: "failed" },
-              { type: "session", status: "failed" },
+              { type: "session", status: "errored" },
             ]);
             expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
             expect(line(h, "stopped")).toMatchObject({
-              text: "stopped; failed; guest did not power off within 2 minutes",
+              text: "stopped; errored; guest did not power off within 2 minutes",
               location: id,
               agentId: AGENT,
             });
@@ -2078,7 +2163,7 @@ describe("save", () => {
           expect(h.minted.saves).toEqual([]);
           expect(h.sessions.sessions[0]).toMatchObject({
             id,
-            status: "failed",
+            status: "errored",
             reason: "GenericError: no ACPI",
           });
           expect(h.debugLogs.saves).toHaveLength(1);
@@ -2114,7 +2199,7 @@ describe("save", () => {
           expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
           expect(h.sessions.sessions[0]).toMatchObject({
             id,
-            status: "failed",
+            status: "errored",
             reason: "qemu-img convert exited 1",
           });
           expect(h.debugLogs.saves).toHaveLength(1);
@@ -2748,7 +2833,7 @@ const rowOf = (h: Harness, id: string): SessionRow | undefined =>
 
 describe("restart", () => {
   it.effect(
-    "fails the sessions still downloading or running on this url, ends their agent runs, and leaves every other row alone",
+    "errors the sessions still downloading or running on this url, ends their agent runs, and leaves every other row alone",
     () =>
       Effect.gen(function* () {
         const h = harness({ selfUrl: SELF });
@@ -2763,11 +2848,11 @@ describe("restart", () => {
         );
         expect(followed).toMatchObject({
           _tag: "Conflict",
-          message: `session "${running}" has already completed (failed)`,
+          message: `session "${running}" has already completed (errored)`,
         });
         for (const id of [downloading, running]) {
           expect(rowOf(h, id)).toMatchObject({
-            status: "failed",
+            status: "errored",
             reason: RESTARTED,
             endedAt: expect.any(Date),
           });
@@ -2782,7 +2867,7 @@ describe("restart", () => {
         expect(h.log.lines.filter((entry) => entry.level === "error")).toEqual([
           {
             level: "error",
-            text: `failed; ${RESTARTED}`,
+            text: `errored; ${RESTARTED}`,
             location: downloading,
             agentId: undefined,
             skipSentry: false,
@@ -2790,7 +2875,7 @@ describe("restart", () => {
           },
           {
             level: "error",
-            text: `failed; ${RESTARTED}`,
+            text: `errored; ${RESTARTED}`,
             location: running,
             agentId: undefined,
             skipSentry: false,
@@ -3358,7 +3443,7 @@ describe("failed start", () => {
   );
 
   it.effect(
-    "a start refused at the agent's registration ends its row failed with the detail and the retry boots",
+    "a start refused at the agent's registration ends its row errored with the detail and the retry boots",
     () =>
       Effect.gen(function* () {
         let registrations = 0;
@@ -3389,7 +3474,7 @@ describe("failed start", () => {
             expect(yield* qemus(sessions)).toBe(0);
             const id = yield* sessions.start(startBody(), "none", false);
             expect(h.sessions.sessions.map((row) => [row.status, row.reason])).toEqual([
-              ["failed", SLOTS_REFUSED],
+              ["errored", SLOTS_REFUSED],
               ["running", null],
             ]);
             expect(runs).toEqual([{ agentId: AGENT, sessionId: id }]);
@@ -3506,7 +3591,7 @@ describe("failed start", () => {
               message: "duplicate key value violates unique constraint",
               agentId: AGENT,
             });
-            expect(h.sessions.sessions.map((row) => row.status)).toEqual(["failed", "failed"]);
+            expect(h.sessions.sessions.map((row) => row.status)).toEqual(["errored", "errored"]);
             expect(yield* sessions.jobs).toBe(1);
             expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
             yield* sessions.relinquish(AGENT);

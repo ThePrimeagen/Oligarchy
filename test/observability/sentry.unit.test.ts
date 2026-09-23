@@ -247,6 +247,9 @@ describe("QEMU spans unhappy path", () => {
     expect(Sentry.statusExit("timed_out")).toEqual(Exit.fail("deadline_exceeded"));
     expect(Sentry.statusExit("aborted")).toEqual(Exit.fail("aborted"));
     expect(Sentry.statusExit("failed")).toEqual(Exit.fail("internal_error"));
+    // A completed session is a drive that ran to its end, however it is later judged.
+    expect(Sentry.statusExit("completed")).toEqual(Exit.void);
+    expect(Sentry.statusExit("errored")).toEqual(Exit.fail("internal_error"));
   });
 });
 

@@ -43,7 +43,7 @@ describe("renderSessions happy path", () => {
     ]);
   });
 
-  it("colors every status: green succeeded, red failed, yellow running, gray downloading, bright red aborted, magenta timed_out", () => {
+  it("colors every status: green succeeded, red failed, yellow running, gray downloading, bright red aborted, magenta timed_out, cyan completed, bold red errored", () => {
     const statuses = [
       "succeeded",
       "failed",
@@ -51,6 +51,8 @@ describe("renderSessions happy path", () => {
       "downloading",
       "aborted",
       "timed_out",
+      "completed",
+      "errored",
     ] as const;
     const lines = Render.renderSessions(
       statuses.map((status, index) => ({
@@ -68,6 +70,8 @@ describe("renderSessions happy path", () => {
       "\x1b[90mdownloading",
       "\x1b[91maborted    ",
       "\x1b[35mtimed_out  ",
+      "\x1b[36mcompleted  ",
+      "\x1b[1;31merrored    ",
     ]);
     for (const line of lines) {
       expect(line.slice(line.indexOf(RESET) + RESET.length)).toMatch(
@@ -269,8 +273,17 @@ describe("renderAutomationJobs happy path", () => {
     ]);
   });
 
-  it("colors every job status: gray pending, yellow running, green succeeded, red failed, bright red aborted, magenta timed_out", () => {
-    const statuses = ["pending", "running", "succeeded", "failed", "aborted", "timed_out"] as const;
+  it("colors every job status: gray pending, yellow running, green succeeded, red failed, bright red aborted, magenta timed_out, cyan completed, bold red errored", () => {
+    const statuses = [
+      "pending",
+      "running",
+      "succeeded",
+      "failed",
+      "aborted",
+      "timed_out",
+      "completed",
+      "errored",
+    ] as const;
     const lines = Render.renderAutomationJobs(
       {
         running: [job("running", "drive", 1, "OLI-1", "t")],
@@ -289,6 +302,8 @@ describe("renderAutomationJobs happy path", () => {
       "\x1b[31mfailed   ",
       "\x1b[91maborted  ",
       "\x1b[35mtimed_out",
+      "\x1b[36mcompleted",
+      "\x1b[1;31merrored  ",
     ]);
     expect(Object.keys(Render.JOB_STATUS_COLOR).sort()).toEqual([...statuses].sort());
   });

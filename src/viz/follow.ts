@@ -22,6 +22,8 @@ export const STATUS_COLOR: Readonly<Record<Domain.FollowStatus, string>> = {
   failed: Text.PALETTE.love,
   aborted: Text.PALETTE.love,
   timed_out: Text.PALETTE.iris,
+  completed: Text.PALETTE.foam,
+  errored: Text.PALETTE.rose,
 };
 
 // An action's request is the QMP command as sent; `execute` names it.

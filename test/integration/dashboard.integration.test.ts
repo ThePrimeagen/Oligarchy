@@ -1716,7 +1716,8 @@ const seedQueue = async (
 };
 
 // Two running, the diagnose queued after the drive; four pending, a diagnose between two drives
-// and one nobody has ticketed; four completed, finishing in another order than they were queued.
+// and one nobody has ticketed; six finished, one of each closing status, in another order than
+// they were queued.
 const QUEUE_JOBS: ReadonlyArray<QueuedJob> = [
   {
     ticket: "QUE-101",
@@ -1771,6 +1772,23 @@ const QUEUE_JOBS: ReadonlyArray<QueuedJob> = [
     startedSecondsAgo: 3_900,
     finishedSecondsAgo: 1_200,
   },
+  {
+    ticket: "QUE-110",
+    action: "drive",
+    status: "completed",
+    queuedSecondsAgo: 5_000,
+    startedSecondsAgo: 4_900,
+    finishedSecondsAgo: 1_500,
+  },
+  {
+    ticket: "QUE-111",
+    action: "drive",
+    status: "errored",
+    reason: "qemu exited 137",
+    queuedSecondsAgo: 6_000,
+    startedSecondsAgo: 5_900,
+    finishedSecondsAgo: 1_800,
+  },
 ];
 
 // The first test arranges the queue; the page and fragment tests read it as it is; the cap test
@@ -1796,7 +1814,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     expect(lines(result.stdout)).toEqual([
       "QUE-102 QUE-101",
       "QUE-104 QUE-103 QUE-105 null",
-      "QUE-107:failed QUE-108:aborted QUE-106:succeeded QUE-109:timed_out",
+      "QUE-107:failed QUE-108:aborted QUE-106:succeeded QUE-109:timed_out QUE-110:completed QUE-111:errored",
       "queue-order drive session timed out true true true true null null null null",
     ]);
   });

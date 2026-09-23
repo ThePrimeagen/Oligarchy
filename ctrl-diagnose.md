@@ -21,7 +21,7 @@ Every value is a flag. Everything is read from and written to the database: no q
 
 Prints everything stored for the session as one JSON object, keyed `session`, `logs`, `results`, `test_definition`, `test_run`, `actions`, `images`, `debug_log`, `diagnosis`. Run it first; every other command follows from what it says. One selector prints that value bare; several print an object keyed by them.
 
-- `--status` — the session row. `status` and `reason` are the driver's verdict: `succeeded`, `failed`, `aborted`, or `timed_out` when nobody stopped it for ten minutes. `config.iso` is what it booted; `startedAt` and `endedAt` when.
+- `--status` — the session row. `status` and `reason` are the driver's verdict: `succeeded`, `failed`, `aborted`, `completed` (it drove every step and left the judging to you), or `timed_out` when nobody stopped it for ten minutes; `errored` is the system failing the session (a start or save that failed, QEMU gone mid-session, a qemu server that restarted), not the test. `config.iso` is what it booted; `startedAt` and `endedAt` when.
 - `--test-results` — the test result the driver closed, or `null`: `status` (`passed` or `failed`), `reason`, `model` (the Cursor model that drove it).
 - `--test-def` — the mission: `name`, `description`, `instruction`, and `proof`, what had to be on screen for a pass. Judge against the proof.
 - `--test-run` — the run the result belongs to, or `null`: `iso`, `serverUrl`, `status`.

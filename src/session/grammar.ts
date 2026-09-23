@@ -8,7 +8,7 @@ send-keys <keys>                      type into the guest, e.g. send-keys hello<
 mouse <verb> <x> <y> [...]            move, click, double-click, scroll, drag, hold or release; "mouse" then tab lists the verbs
 intent start <message>                declare what you are about to do
 intent end                            close the open intent
-stop [status] [reason]                stop the session; status is succeeded, failed, or aborted
+stop [status] [reason]                stop the session; status is succeeded, failed, aborted, or completed
 status                                show agent, server, session, and intent
 exit                                  stop the session and leave`;
 
@@ -206,7 +206,7 @@ const parseStop = (rest: string): Command => {
   }
   const status = rest.split(/\s+/, 1)[0];
   if (!isStopStatus(status)) {
-    return malformed("stop", "usage: stop [succeeded|failed|aborted] [reason]");
+    return malformed("stop", "usage: stop [succeeded|failed|aborted|completed] [reason]");
   }
   const reason = rest.slice(status.length).trim();
   return {

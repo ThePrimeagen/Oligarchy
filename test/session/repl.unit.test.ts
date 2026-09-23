@@ -430,7 +430,7 @@ describe("refusals and failures", () => {
           "usage: send-keys <keys>",
           "usage: intent start <message>",
           "usage: intent end",
-          "usage: stop [succeeded|failed|aborted] [reason]",
+          "usage: stop [succeeded|failed|aborted|completed] [reason]",
           `session ${SESSION_ID} is already running. stop it first.`,
         ]);
         yield* h.type("stop");

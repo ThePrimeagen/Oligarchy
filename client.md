@@ -54,7 +54,7 @@ If you are the client, or an agent driving the client: do not look at code. Only
 ./client mouse release      --session-id <id> --x <0..1> --y <0..1> [--button left|middle|right]
 ./client intent start --session-id <id> --test-result-id <id> --message <text>
 ./client intent end   --session-id <id>
-./client stop       --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
+./client stop       --session-id <id> [--status succeeded|failed|aborted|completed] [--reason <text>]
 ./client save       --session-id <id>
 ```
 
@@ -323,13 +323,13 @@ Ends the open intent. Ending with none open fails. End the open intent before `s
 ## stop
 
 ```
-./client stop --agent-id <agent> --server-url <url> --session-id <id> [--status succeeded|failed|aborted] [--reason <text>]
+./client stop --agent-id <agent> --server-url <url> --session-id <id> [--status succeeded|failed|aborted|completed] [--reason <text>]
 ```
 
 Kills the session. `--agent-id` must be the agent that started it.
 
 - `--session-id <id>` — the session.
-- `--status <status>` — the verdict: `succeeded`, `failed`, or `aborted`. Omit it and the stop is an abort.
+- `--status <status>` — the verdict: `succeeded`, `failed`, `aborted`, or `completed` (the drive ran to its end and a diagnosis will judge it). Omit it and the stop is an abort. `errored` is not a verdict a driver gives: the qemu server writes it when the system failed the session (a start or a save that failed, or QEMU gone when an exchange fails), and the next request for that session is `unknown session`.
 - `--reason <text>` — optional text stored with the verdict.
 
 ```bash

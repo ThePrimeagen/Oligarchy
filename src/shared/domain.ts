@@ -38,6 +38,8 @@ export const SessionStatus = Schema.Literals([
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]).annotate({ identifier: "@oligarchy/shared/domain/SessionStatus" });
 export type SessionStatus = typeof SessionStatus.Type;
 
@@ -51,14 +53,18 @@ export const SessionEndStatus = Schema.Literals([
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]).annotate({
   identifier: "@oligarchy/shared/domain/SessionEndStatus",
 });
 export type SessionEndStatus = typeof SessionEndStatus.Type;
 
-export const StopStatus = Schema.Literals(["succeeded", "failed", "aborted"]).annotate({
-  identifier: "@oligarchy/shared/domain/StopStatus",
-});
+export const StopStatus = Schema.Literals(["succeeded", "failed", "aborted", "completed"]).annotate(
+  {
+    identifier: "@oligarchy/shared/domain/StopStatus",
+  },
+);
 export type StopStatus = typeof StopStatus.Type;
 
 export const FollowStatus = Schema.Literals([
@@ -68,6 +74,8 @@ export const FollowStatus = Schema.Literals([
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]).annotate({ identifier: "@oligarchy/shared/domain/FollowStatus" });
 export type FollowStatus = typeof FollowStatus.Type;
 
@@ -141,6 +149,8 @@ export const TestResultStatus = Schema.Literals([
   "failed",
   "aborted",
   "timed_out",
+  "completed",
+  "errored",
 ]).annotate({ identifier: "@oligarchy/shared/domain/TestResultStatus" });
 export type TestResultStatus = typeof TestResultStatus.Type;
 

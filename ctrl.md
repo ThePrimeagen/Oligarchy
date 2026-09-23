@@ -198,7 +198,7 @@ Closes one pending test result with the verdict.
 ./ctrl session list [--count <n>] [--active] [--json]
 ```
 
-Prints the most recent sessions, newest first, one per line: the status, colored (green `succeeded`, red `failed`, yellow `running`, gray `downloading`, bright red `aborted`, magenta `timed_out`); how long ago it started (`45s ago`, `12m ago`, `1h30m ago`, `3d5h ago`); then the session id. Not used while driving a guest.
+Prints the most recent sessions, newest first, one per line: the status, colored (green `succeeded`, red `failed`, yellow `running`, gray `downloading`, bright red `aborted`, magenta `timed_out`, cyan `completed`, bold red `errored`); how long ago it started (`45s ago`, `12m ago`, `1h30m ago`, `3d5h ago`); then the session id. Not used while driving a guest.
 
 - `--count <n>` — how many sessions to print, at least 1. Default 10.
 - `--active` — print up to the requested count of active sessions, with running sessions before downloads.
@@ -217,7 +217,7 @@ Prints the most recent sessions, newest first, one per line: the status, colored
 Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest; a reviewing agent starts here, and the session id is all it needs — everything else is reached from it. With only a test result id in hand, [session --search](#session---search) finds the session first.
 
 - `--session-id <id>` — the session; `SESSION_ID` when omitted.
-- `--status` — the session row: `{ id, config, status, reason, startedAt, endedAt }`. `status` and `reason` are the driver's verdict as `./client stop` recorded it; `config` is what it booted.
+- `--status` — the session row: `{ id, config, status, reason, startedAt, endedAt }`. `status` and `reason` are the driver's verdict as `./client stop` recorded it, or `errored` with what the qemu server saw fail; `config` is what it booted.
 - `--logs` — its log lines, oldest first.
 - `--test-def` — the test definition its result ran, in the wording it ran (a later `test define` does not change it), or `null`.
 - `--test-results` — the test result attributed to it, or `null`.
@@ -305,7 +305,7 @@ Records the post-run diagnosis: a reviewer's verdict on one session that has end
 ./ctrl automation --list [--count <n>]
 ```
 
-Prints the automation queue from the database, never an endpoint: every running job, then every pending job, then the most recently completed jobs. Each job is one line: the status, colored (yellow `running`, gray `pending`, green `succeeded`, red `failed`, bright red `aborted`, magenta `timed_out`); the action (`drive` or `diagnose`); how long ago (`5s ago`, `12m ago`, `1h30m ago`, `3d5h ago`) — running from when it started, pending from when it was queued, completed from when it finished; the Linear ticket, or `—` when none; then the test name. Empty groups still print their header. Not used while driving a guest.
+Prints the automation queue from the database, never an endpoint: every running job, then every pending job, then the most recently completed jobs. Each job is one line: the status, colored (yellow `running`, gray `pending`, green `succeeded`, red `failed`, bright red `aborted`, magenta `timed_out`, cyan `completed`, bold red `errored`); the action (`drive` or `diagnose`); how long ago (`5s ago`, `12m ago`, `1h30m ago`, `3d5h ago`) — running from when it started, pending from when it was queued, completed from when it finished; the Linear ticket, or `—` when none; then the test name. Empty groups still print their header. Not used while driving a guest.
 
 - `--list` — required.
 - `--count <n>` — how many completed jobs to print, at least 1. Default 10. Running and pending are always printed in full.

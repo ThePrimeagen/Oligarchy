@@ -136,7 +136,7 @@ export const fakeSessionStore = (
             routes.get(row.id) === serverUrl,
         );
         for (const row of failed) {
-          row.status = "failed";
+          row.status = "errored";
           row.reason = reason;
           row.endedAt = now;
           for (const run of agentRuns) {
