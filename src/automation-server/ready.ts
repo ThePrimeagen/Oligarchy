@@ -12,6 +12,22 @@ const detail = (error: unknown): string =>
     ? Render.errorDetail(ExternalFailure.causeOf(error))
     : Render.errorDetail(error);
 
+// The job row is already queued whatever Linear answers, and Linear is waiting on the webhook's
+// answer: one attempt, then the log. The board watch labels a pending job's ticket it finds unlabeled.
+export const mark = Effect.fn("markReady")(function* (identifier: string) {
+  const linear = yield* Linear.Linear;
+  const log = yield* Log.Log;
+  yield* linear.markReady(identifier).pipe(
+    Effect.catch((error) =>
+      log.error(`ready label add failed: ${detail(error)}`, {
+        location: Log.Locations.automation,
+        agentId: identifier,
+        cause: error,
+      }),
+    ),
+  );
+});
+
 // The job row is already closed. A Linear miss must not reopen it; two immediate retries, then the log.
 export const release = Effect.fn("releaseReady")(function* (identifier: string) {
   const linear = yield* Linear.Linear;

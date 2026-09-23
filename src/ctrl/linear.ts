@@ -455,8 +455,9 @@ const makeLinear = (
       state: { name: { eq: name } },
     });
 
-    // The id does not change for the life of the process. The two watches can label at once, so
-    // the lookup runs one at a time and a failed lookup is not stored. The next ticket tries again.
+    // The id does not change for the life of the process. The watches and POST /linear can label
+    // at once, so the lookup runs one at a time and a failed lookup is not stored. The next ticket
+    // tries again.
     const readyLabel = yield* SynchronizedRef.make<Option.Option<string>>(Option.none());
 
     const readyLabelId = Effect.fn("Linear.readyLabelId")(function* () {

@@ -7,6 +7,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Handlers from "../../src/automation-server/handlers.ts";
 import * as Log from "../../src/observability/log.ts";
+import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
@@ -138,6 +139,9 @@ const seedJob = (
   });
 };
 
+const labeled = (fixed: Fixture) =>
+  fixed.linear.calls.filter((call) => call.method === "markReady");
+
 const issueBody = (state: string, extras: Record<string, unknown> = {}) =>
   JSON.stringify({
     action: "update",
@@ -181,29 +185,88 @@ describe("POST /linear", () => {
     }),
   );
 
-  it.effect("queues drive when Automation Needed arrives for a known ticket", () =>
-    Effect.gen(function* () {
-      const body = issueBody("Automation Needed");
-      const fixed = fixture();
-      const resultId = seedResult(fixed, "OLI-1063");
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.stores.automation.jobs).toEqual([
-        expect.objectContaining({ resultId, action: "drive", status: "pending" }),
-      ]);
-      expect(fixed.log.lines).toEqual([
-        {
-          level: "info",
-          text: "linear webhook queued drive; Automation Needed",
-          location: "automation",
-          agentId: "OLI-1063",
-          skipSentry: false,
-          cause: undefined,
-        },
-      ]);
-    }),
+  it.effect(
+    "queues drive when Automation Needed arrives for a known ticket, and labels it ready",
+    () =>
+      Effect.gen(function* () {
+        const body = issueBody("Automation Needed");
+        const fixed = fixture();
+        const resultId = seedResult(fixed, "OLI-1063");
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId, action: "drive", status: "pending" }),
+        ]);
+        expect(labeled(fixed)).toEqual([{ method: "markReady", identifier: "OLI-1063" }]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: "linear webhook queued drive; Automation Needed",
+            location: "automation",
+            agentId: "OLI-1063",
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a ready label that fails is one error line, and the queued drive still answers 200",
+    () =>
+      Effect.gen(function* () {
+        const body = issueBody("Automation Needed");
+        const refused = Errors.LinearError.make({
+          operation: "markReady",
+          message: "linear: labeling OLI-1063 ready failed",
+        });
+        let attempts = 0;
+        const fixed = {
+          ...fixture(),
+          linear: FakeLinear.fakeLinear({
+            overrides: {
+              markReady: () =>
+                Effect.suspend(() => {
+                  attempts += 1;
+                  return Effect.fail(refused);
+                }),
+            },
+          }),
+        };
+        const resultId = seedResult(fixed, "OLI-1063");
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* webhook(http, body, sign(body));
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId, action: "drive", status: "pending" }),
+        ]);
+        // Linear is waiting on this answer, and the board watch labels a pending job it finds
+        // unlabeled, so there is no second attempt.
+        expect(attempts).toBe(1);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: "linear webhook queued drive; Automation Needed",
+            location: "automation",
+            agentId: "OLI-1063",
+            skipSentry: false,
+            cause: undefined,
+          },
+          {
+            level: "error",
+            text: "ready label add failed: linear: labeling OLI-1063 ready failed",
+            location: "automation",
+            agentId: "OLI-1063",
+            skipSentry: false,
+            cause: refused,
+          },
+        ]);
+      }),
   );
 
   it.effect("queues mint, not drive, when Automation Needed is for the mint definition", () =>
@@ -227,23 +290,27 @@ describe("POST /linear", () => {
         expect.objectContaining({ resultId, action: "mint", status: "pending" }),
       ]);
       expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook queued mint; Automation Needed"]);
+      expect(labeled(fixed)).toEqual([{ method: "markReady", identifier: "OLI-1063" }]);
     }),
   );
 
-  it.effect("queues diagnose when Needs Review arrives for a known ticket", () =>
-    Effect.gen(function* () {
-      const body = issueBody("Needs Review");
-      const fixed = fixture();
-      const resultId = seedResult(fixed, "OLI-1063");
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.stores.automation.jobs).toEqual([
-        expect.objectContaining({ resultId, action: "diagnose", status: "pending" }),
-      ]);
-      expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook queued diagnose; Needs Review"]);
-    }),
+  it.effect(
+    "queues diagnose when Needs Review arrives for a known ticket, and labels nothing",
+    () =>
+      Effect.gen(function* () {
+        const body = issueBody("Needs Review");
+        const fixed = fixture();
+        const resultId = seedResult(fixed, "OLI-1063");
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId, action: "diagnose", status: "pending" }),
+        ]);
+        expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook queued diagnose; Needs Review"]);
+        expect(labeled(fixed)).toEqual([]);
+      }),
   );
 
   it.effect("ignores a queueable state when no result has that Linear id (unhappy)", () =>
@@ -259,6 +326,7 @@ describe("POST /linear", () => {
         "linear webhook ignored; no result for Automation Needed",
       ]);
       expect(fixed.log.lines[0]?.agentId).toBe("OLI-1063");
+      expect(labeled(fixed)).toEqual([]);
     }),
   );
 
@@ -277,6 +345,7 @@ describe("POST /linear", () => {
         "linear webhook queued drive; Automation Needed",
         "linear webhook ignored; drive already queued",
       ]);
+      expect(labeled(fixed)).toEqual([{ method: "markReady", identifier: "OLI-1063" }]);
     }),
   );
 
@@ -291,6 +360,7 @@ describe("POST /linear", () => {
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.stores.automation.jobs).toEqual([]);
       expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook recorded; In Progress"]);
+      expect(labeled(fixed)).toEqual([]);
     }),
   );
 });
@@ -332,6 +402,7 @@ describe("POST /linear refusals", () => {
           },
         ]);
         expect(fixed.reporter.reported).toEqual([]);
+        expect(fixed.linear.calls).toEqual([]);
       }),
   );
 
