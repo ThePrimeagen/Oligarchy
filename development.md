@@ -26,8 +26,8 @@ exist.
   names the bundle; `bun run client` runs the sources for one that names them. `--no-env-file`
   because Bun's own loader would
   read `.env.local` and `.env.<NODE_ENV>` as well and expand `$` inside values, ahead of
-  `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks
-  (Config, below). Bun transpiles the sources on load, and `erasableSyntaxOnly` stays on so they
+  `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks,
+  and `--env-file` when one was passed (Config, below). Bun transpiles the sources on load, and `erasableSyntaxOnly` stays on so they
   remain plain JavaScript once the annotations go: no enums, namespaces or parameter properties.
 - `./viz` draws with OpenTUI (`@opentui/core`, cells rendered by a native core behind a
   TypeScript API) through its Solid reconciler (`@opentui/solid`; `solid-js` is pinned to the one
@@ -59,7 +59,8 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
-  wins, and an empty value counts as unset.
+  wins, and an empty value counts as unset. `--env-file <path>` on any process is a second file,
+  read after the process environment and before `.env`.
 
 ## Vocabulary
 
@@ -415,10 +416,16 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 - Read with `Config.nonEmptyString`, `Config.redacted`, `Config.string`; secrets are `Redacted`
   from parse to use and unwrapped with `Redacted.value` exactly once at the SDK or header boundary.
 - Install the provider once at the entry with `Config.providerLayer`
-  (`Layer<never, never, FileSystem>`): `ConfigProvider.fromEnv()` first,
-  `ConfigProvider.fromDotEnv({ path: ".env" })` filling missing keys only when `.env` exists,
-  joined with `ConfigProvider.orElse`; an unreadable `.env` is a defect. Why: an already-set
-  injected variable is never replaced by a file. `fromEnv` treats an empty value as absent.
+  (`Layer<never, never, FileSystem | Stdio>`): `ConfigProvider.fromEnv()` first, then
+  `--env-file` when the process arguments name one (`--env-file <path>` or `--env-file=<path>`,
+  last one wins, `--` ends the scan), then `ConfigProvider.fromDotEnv({ path: ".env" })` when
+  `.env` exists. Each is joined with `ConfigProvider.orElse` so it fills only keys still missing.
+  The path is read from `Stdio.args` inside the provider, before the CLI parses, because a flag
+  that falls back to config has to see the file. An unreadable `.env`, a missing path after
+  `--env-file`, or a named file that cannot be read, is a defect. Why: an already-set injected
+  variable is never replaced by a file. `fromEnv` treats an empty value as absent. `$` in a file
+  stays literal. Every command accepts the flag (`EnvFile.withEnvFile`); a session started with
+  it forwards the same path to each client child.
 - Report a missing or invalid variable as `MissingVariable { name }`, rendered exactly
   `<NAME> is not set`; never a stack trace, never the value. The accessors are `Config.required`
   and `Config.requiredRedacted` (Effects failing `MissingVariable`), one named accessor per
@@ -433,18 +440,25 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 
 ```ts
-export const providerLayer: Layer.Layer<never, never, FileSystem.FileSystem> = ConfigProvider.layer(
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const env = ConfigProvider.fromEnv();
-    const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
-    if (!hasDotEnv) {
-      return env;
-    }
-    const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
-    return ConfigProvider.orElse(env, dotEnv);
-  }),
-);
+export const providerLayer: Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =
+  ConfigProvider.layer(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const args = yield* (yield* Stdio.Stdio).args;
+      let provider = ConfigProvider.fromEnv();
+      const extra = yield* envFileArg(args);
+      if (Option.isSome(extra)) {
+        const file = yield* ConfigProvider.fromDotEnv({ path: extra.value }).pipe(Effect.orDie);
+        provider = ConfigProvider.orElse(provider, file);
+      }
+      const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
+      if (!hasDotEnv) {
+        return provider;
+      }
+      const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
+      return ConfigProvider.orElse(provider, dotEnv);
+    }),
+  );
 
 const missing = (name: string) => () => Errors.MissingVariable.make({ name });
 
@@ -1121,8 +1135,10 @@ Schema and module rules above already cover most of them; the rest:
   a pooler url cannot be migrated by accident), builds `Database.make(url)` in a scope, and runs
   `migrateDatabase` (`database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle"
   }))`); it prints `database migrations applied` and fails with `DATABASE_MIGRATION_URL is not set`
-  (a `.env` fills missing variables only; an empty value counts as unset). Tests only ever migrate
-  an ephemeral container.
+  (a `.env` fills missing variables only; an empty value counts as unset). `bun run test:db:migrate`
+  is that same program with `--env-file .env`, and `bun run prod:db:migrate` with
+  `--env-file .prod-env`. Both drop an already-set `DATABASE_MIGRATION_URL` first, so the named
+  file is the one that migrates. Tests only ever migrate an ephemeral container.
 
 ## Review
 

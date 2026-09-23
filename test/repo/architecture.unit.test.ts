@@ -138,6 +138,16 @@ describe("Effect.run placement", () => {
 });
 
 describe("CLI flags", () => {
+  it("every command accepts --env-file", () => {
+    expect(
+      violations((path, source) =>
+        path.endsWith("/command.ts") && !source.includes("EnvFile.withEnvFile")
+          ? ["missing EnvFile.withEnvFile"]
+          : [],
+      ),
+    ).toEqual([]);
+  });
+
   it("every Flag.boolean carries Flag.withDefault", () => {
     expect(
       violations((_, source) => {

@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Layer, Path, Ref, Stream } from "effect";
+import { Effect, Layer, Option, Path, Ref, Stream } from "effect";
 import * as Children from "../../src/session/children.ts";
 import * as State from "../../src/session/state.ts";
 import * as FakeChildren from "../support/fake-children.ts";
@@ -22,11 +22,12 @@ const hostLayer = Layer.succeed(State.Host)(
 const provide = (spawner: FakeChildren.FakeSpawner) =>
   Layer.mergeAll(hostLayer, spawner.layer, Path.layer);
 
-const session = Effect.gen(function* () {
-  const made = yield* State.make(SERVER_URL);
-  yield* Ref.set(made.agentId, "session-agent-1");
-  return made;
-});
+const session = (envFile: Option.Option<string> = Option.none()) =>
+  Effect.gen(function* () {
+    const made = yield* State.make(SERVER_URL, envFile);
+    yield* Ref.set(made.agentId, "session-agent-1");
+    return made;
+  });
 
 describe("runClient", () => {
   it.effect(
@@ -34,7 +35,7 @@ describe("runClient", () => {
     () =>
       Effect.gen(function* () {
         const spawner = FakeChildren.fakeSpawner(() => ({ code: 0, stdout: `${SESSION_ID}\n` }));
-        const result = yield* Children.runClient(yield* session, [
+        const result = yield* Children.runClient(yield* session(), [
           "start",
           "--iso",
           "omarchy.iso",
@@ -75,7 +76,7 @@ describe("runClient", () => {
         code: 1,
         stderr: 'unknown session "x"\n    at somewhere\n',
       }));
-      const result = yield* Children.runClient(yield* session, [
+      const result = yield* Children.runClient(yield* session(), [
         "get-image",
         "--session-id",
         "x",
@@ -89,10 +90,20 @@ describe("runClient", () => {
   it.effect("reads the agent id at spawn time so a fresh start uses the new id", () =>
     Effect.gen(function* () {
       const spawner = FakeChildren.fakeSpawner(() => ({ code: 0 }));
-      const made = yield* session;
+      const made = yield* session();
       yield* Ref.set(made.agentId, "session-agent-2");
       yield* Children.runClient(made, ["get-serial"]).pipe(Effect.provide(provide(spawner)));
       expect(spawner.spawned[0]?.command.args).toContain("session-agent-2");
+    }),
+  );
+
+  it.effect("passes --env-file through when the session was given one (happy)", () =>
+    Effect.gen(function* () {
+      const spawner = FakeChildren.fakeSpawner(() => ({ code: 0 }));
+      yield* Children.runClient(yield* session(Option.some(".prod-env")), ["relinquish"]).pipe(
+        Effect.provide(provide(spawner)),
+      );
+      expect(spawner.spawned[0]?.command.args.slice(2, 4)).toEqual(["--env-file", ".prod-env"]);
     }),
   );
 
@@ -103,7 +114,7 @@ describe("runClient", () => {
         code: 0,
         stdout: Stream.make(bytes.subarray(0, 3), bytes.subarray(3)),
       }));
-      const result = yield* Children.runClient(yield* session, ["get-image"]).pipe(
+      const result = yield* Children.runClient(yield* session(), ["get-image"]).pipe(
         Effect.provide(provide(spawner)),
       );
       expect(Array.from(result.stdout)).toEqual(Array.from(bytes));

@@ -17,6 +17,8 @@ export class Host extends Context.Service<Host, HostShape>()("@oligarchy/session
 
 export type Session = {
   readonly serverUrl: string;
+  // Forwarded to every client child, so a session started with --env-file drives with that file.
+  readonly envFile: Option.Option<string>;
   readonly agentId: Ref.Ref<string>;
   readonly sessionId: Ref.Ref<Option.Option<string>>;
   readonly intentOpen: Ref.Ref<boolean>;
@@ -29,10 +31,14 @@ export const freshAgentId: Effect.Effect<string> = Effect.sync(
   () => `session-${crypto.randomUUID()}`,
 );
 
-export const make = (serverUrl: string): Effect.Effect<Session> =>
+export const make = (
+  serverUrl: string,
+  envFile: Option.Option<string> = Option.none(),
+): Effect.Effect<Session> =>
   Effect.gen(function* () {
     return {
       serverUrl,
+      envFile,
       agentId: yield* Ref.make(yield* freshAgentId),
       sessionId: yield* Ref.make(Option.none<string>()),
       intentOpen: yield* Ref.make(false),

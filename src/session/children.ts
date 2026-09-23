@@ -1,4 +1,4 @@
-import { Effect, Path, type PlatformError, Ref, Stream } from "effect";
+import { Effect, Option, Path, type PlatformError, Ref, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as State from "./state.ts";
@@ -46,9 +46,22 @@ const clientCommand = (
     const host = yield* State.Host;
     const agentId = yield* Ref.get(session.agentId);
     const main = yield* clientEntry;
+    const envFile = Option.match(session.envFile, {
+      onNone: (): ReadonlyArray<string> => [],
+      onSome: (path): ReadonlyArray<string> => ["--env-file", path],
+    });
     return ChildProcess.make(
       host.execPath,
-      [...BUN_FLAGS, main, ...args, "--agent-id", agentId, "--server-url", session.serverUrl],
+      [
+        ...BUN_FLAGS,
+        main,
+        ...envFile,
+        ...args,
+        "--agent-id",
+        agentId,
+        "--server-url",
+        session.serverUrl,
+      ],
       { stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true, extendEnv: true },
     );
   });

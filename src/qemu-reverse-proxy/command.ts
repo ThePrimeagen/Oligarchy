@@ -3,6 +3,7 @@ import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Client from "../db/client.ts";
+import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -66,4 +67,5 @@ export const makeQemuReverseProxyCommand = <RServe>(server: QemuReverseProxyServ
     Command.withDescription(
       "The qemu reverse proxy: registers servers and routes each session's requests to the server that started it",
     ),
+    EnvFile.withEnvFile,
   );

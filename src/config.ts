@@ -5,27 +5,80 @@ import {
   Effect,
   FileSystem,
   Layer,
+  Option,
   Redacted,
+  Stdio,
 } from "effect";
 import * as Errors from "./shared/errors.ts";
 
 export const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 
-// The environment first, then `.env` in the working directory when it exists: an already-set
-// variable always wins over the file.
-export const providerLayer: Layer.Layer<never, never, FileSystem.FileSystem> = ConfigProvider.layer(
+const ENV_FILE = "--env-file";
+
+// Last one wins, matching a repeated flag. `--` ends the scan, as it ends flags for the CLI.
+const envFileArg = (args: ReadonlyArray<string>): Effect.Effect<Option.Option<string>> =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const env = ConfigProvider.fromEnv();
-    const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
-    if (!hasDotEnv) {
-      return env;
+    let path: string | undefined;
+    let missing = false;
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index];
+      if (arg === undefined || arg === "--") {
+        break;
+      }
+      if (arg === ENV_FILE) {
+        const next = args[index + 1];
+        if (next === undefined || next === "--" || next.startsWith("-")) {
+          missing = true;
+          path = undefined;
+          continue;
+        }
+        path = next;
+        missing = false;
+        index += 1;
+        continue;
+      }
+      if (arg.startsWith(`${ENV_FILE}=`)) {
+        const value = arg.slice(ENV_FILE.length + 1);
+        if (value === "") {
+          missing = true;
+          path = undefined;
+        } else {
+          path = value;
+          missing = false;
+        }
+      }
     }
-    // A `.env` that exists but cannot be read is a broken working directory, not a missing variable.
-    const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
-    return ConfigProvider.orElse(env, dotEnv);
-  }),
-);
+    if (missing) {
+      return yield* Effect.die(new Error("--env-file needs a path"));
+    }
+    return Option.fromUndefinedOr(path);
+  });
+
+// The process environment first, then `--env-file` when one was passed, then `.env` when it
+// exists. Each source fills only what the earlier ones left unset, so a variable already in
+// the environment is never replaced by a file. The file is read from the process arguments
+// here, before the CLI parses, because a flag that falls back to config has to see it. An
+// unreadable `.env`, or an `--env-file` that was named and cannot be read, is a defect.
+export const providerLayer: Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =
+  ConfigProvider.layer(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const args = yield* (yield* Stdio.Stdio).args;
+      let provider = ConfigProvider.fromEnv();
+      const extra = yield* envFileArg(args);
+      if (Option.isSome(extra)) {
+        const file = yield* ConfigProvider.fromDotEnv({ path: extra.value }).pipe(Effect.orDie);
+        provider = ConfigProvider.orElse(provider, file);
+      }
+      const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
+      if (!hasDotEnv) {
+        return provider;
+      }
+      // A `.env` that exists but cannot be read is a broken working directory, not a missing variable.
+      const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
+      return ConfigProvider.orElse(provider, dotEnv);
+    }),
+  );
 
 const missing = (name: string) => () => Errors.MissingVariable.make({ name });
 

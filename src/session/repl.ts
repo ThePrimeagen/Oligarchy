@@ -260,12 +260,15 @@ const prompt = (repl: Repl): Effect.Effect<void> =>
     ),
   );
 
-export const run = Effect.fn("Repl.run")(function* (serverUrl: string) {
+export const run = Effect.fn("Repl.run")(function* (
+  serverUrl: string,
+  envFile: Option.Option<string> = Option.none(),
+) {
   yield* Effect.scoped(
     Effect.gen(function* () {
       const host = yield* State.Host;
       const scope = yield* Effect.scope;
-      const session = yield* State.make(serverUrl);
+      const session = yield* State.make(serverUrl, envFile);
       const terminal = yield* Readline.open(host.input, host.output);
       const exitRequested = yield* Deferred.make<void>();
       const repl: Repl = {

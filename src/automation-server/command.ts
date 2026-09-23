@@ -3,6 +3,7 @@ import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Client from "../db/client.ts";
+import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -81,4 +82,5 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
     Command.withDescription(
       "The automation server: POST /linear verifies a signed Linear webhook and enqueues drive or diagnose jobs, then dispatches them to live automation clients; every thirty seconds the check kicks off one new job per live automation client and never more, moving a ticket unchanged for ninety seconds from Backlog to Automation Needed, queuing it, and labeling it ready while that job is pending, or else queuing one unchanged ticket in Automation Needed unless a pending job for that action is already waiting, in which case the ticket is labeled ready and later polls leave it out until that drive or mint finishes, or queuing one in Needs Review the way that webhook would have queued it; dispatch launches jobs one reservation at a time, round robin onto a client whose reserve succeeds, and does not start the next job until that response is back; POST /abort closes a pending job or stops a running one",
     ),
+    EnvFile.withEnvFile,
   );

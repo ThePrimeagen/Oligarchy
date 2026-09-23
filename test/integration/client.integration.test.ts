@@ -455,6 +455,58 @@ describe("./client unhappy path", () => {
     }
   });
 
+  it("loads --env-file ahead of .env and still fills a key only .env has", async () => {
+    const stub = await proxy();
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-prod-env-"));
+    await writeFile(join(dir, ".env"), `OLIGARCHY_TOKEN=from-dotenv\nSERVER_URL=${stub.url}\n`);
+    await writeFile(join(dir, ".prod-env"), "OLIGARCHY_TOKEN=from-prod$ken\n");
+    try {
+      const result = await run(
+        ["relinquish", "--agent-id", AGENT, "--env-file", ".prod-env"],
+        { PATH: process.env.PATH, HOME: process.env.HOME },
+        dir,
+      );
+      expect(result.stderr).toBe("");
+      expect(result.code).toBe(0);
+      expect(stub.requests).toEqual([
+        {
+          method: "POST",
+          url: "/relinquish",
+          authorization: "Bearer from-prod$ken",
+          body: { agent: AGENT },
+        },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when --env-file names a file that is not there", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-prod-env-missing-"));
+    try {
+      const result = await run(
+        ["relinquish", "--agent-id", AGENT, "--env-file", ".prod-env"],
+        { PATH: process.env.PATH, HOME: process.env.HOME },
+        dir,
+      );
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(".prod-env");
+      expect(result.stderr).not.toContain("USAGE");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when --env-file has no path", async () => {
+    const result = await run(
+      ["relinquish", "--agent-id", AGENT, "--env-file"],
+      { PATH: process.env.PATH, HOME: process.env.HOME },
+      tmpdir(),
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("--env-file needs a path");
+  });
+
   it("prints the cause when the layers themselves fail: an unreadable .env", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oligarchy-client-env-"));
     // A directory named .env exists, so the provider tries to read it and fails with EISDIR.

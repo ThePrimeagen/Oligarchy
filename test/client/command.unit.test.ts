@@ -782,6 +782,7 @@ describe("client help", () => {
         expect(help).toContain("--session-id");
         expect(help).toContain("--agent-id");
         expect(help).toContain("--server-url");
+        expect(help).toContain("--env-file");
         expect(yield* TestConsole.errorLines).toEqual([]);
       }),
   );
@@ -819,6 +820,35 @@ describe("client parse failures", () => {
       const help = showHelp(error);
       expect(help.errors.length).toBeGreaterThan(0);
       expect(help.errors.map((failure) => failure.message).join("\n")).toContain("--agent-id");
+    }),
+  );
+
+  it.effect(
+    "--env-file is accepted and the request still uses the process environment (happy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(ok);
+        yield* run(["relinquish", ...shared, "--env-file", ".prod-env"], { http: recorder.layer });
+        expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+          `POST ${SERVER}/relinquish`,
+        ]);
+        expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+        expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ agent: AGENT });
+      }),
+  );
+
+  it.effect("--env-file without a path is a usage error and makes no request (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(ok);
+      const error = yield* Effect.flip(
+        run(["relinquish", ...shared, "--env-file"], { http: recorder.layer }),
+      );
+      expect(
+        showHelp(error)
+          .errors.map((failure) => failure.message)
+          .join("\n"),
+      ).toContain("--env-file");
+      expect(recorder.requests).toEqual([]);
     }),
   );
 

@@ -61,7 +61,7 @@ describe("package.json scripts", () => {
 
   // --no-env-file on every process: Bun's own loader would read `.env.local` as well and expand
   // `$` inside values, where the config provider reads `.env` alone, as written, for what the
-  // environment lacks.
+  // environment lacks, plus `--env-file` when one was passed.
   it("runs every process on bun from its entry with exactly the preloads it needs", () => {
     for (const [name, preloads] of Object.entries(PROCESSES)) {
       const script = scripts[name] ?? "";
@@ -93,6 +93,24 @@ describe("package.json scripts", () => {
     expect(Object.values(scripts).some((script) => script.includes("drizzle-kit push"))).toBe(
       false,
     );
+  });
+
+  // The named file is the one that migrates: an already-exported DATABASE_MIGRATION_URL is
+  // dropped, or a shell that sourced the other file would win and migrate the wrong database.
+  it("prod:db:migrate and test:db:migrate each migrate from their own env file (happy)", () => {
+    expect(scripts["prod:db:migrate"]).toBe(
+      "env -u DATABASE_MIGRATION_URL bun --no-env-file src/db/migrate.ts --env-file .prod-env",
+    );
+    expect(scripts["test:db:migrate"]).toBe(
+      "env -u DATABASE_MIGRATION_URL bun --no-env-file src/db/migrate.ts --env-file .env",
+    );
+  });
+
+  it("neither migrate script points at the other environment (unhappy)", () => {
+    expect(scripts["prod:db:migrate"] ?? "").not.toMatch(/--env-file \.env$/);
+    expect(scripts["test:db:migrate"] ?? "").not.toContain(".prod-env");
+    expect(scripts["prod:db:migrate"] ?? "").not.toContain("drizzle-kit");
+    expect(scripts["test:db:migrate"] ?? "").not.toContain("drizzle-kit");
   });
 
   // Top-level wrangler config is production. A `dev` without --env local would bind the

@@ -63,6 +63,7 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `--agent-id <agent>` — your id, from the Linear ticket. Required on every action.
 - `--server-url <url>` — the qemu server, a full URL used exactly as given. Falls back to `SERVER_URL` from the environment, then `http://127.0.0.1:42069`.
 - `OLIGARCHY_TOKEN` — read from the environment and sent on every request. It is already set; do not write a `.env`. Missing means exit 1.
+- `--env-file <path>` — optional, on every action. Also read this file. A variable already in the environment wins; this file fills what is still unset; `.env` fills what both lack. A driving agent does not pass it.
 
 `start` prints a session id; every action on the machine takes it as `--session-id`, and `reserve` and `relinquish`, which are about the agent and not a machine, take none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
 

@@ -2,6 +2,7 @@ import { Deferred, Effect, Layer } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as EnvFile from "../env-file.ts";
 
 const DEFAULT_PORT = 8080;
 
@@ -25,4 +26,5 @@ export const makeDigCommand = <RServe>(server: DigServer<RServe>) =>
     Command.withDescription(
       "The four-spot rhythm digging game: sit in a lobby, ready up, and dig dirt to WASD",
     ),
+    EnvFile.withEnvFile,
   );

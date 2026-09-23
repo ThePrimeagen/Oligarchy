@@ -29,6 +29,8 @@
     "check:fast": "bun run check:lint && bun run check:format && bun run check:types && bun run test:unit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun --no-env-file src/db/migrate.ts",
+    "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --no-env-file src/db/migrate.ts --env-file .prod-env",
+    "test:db:migrate": "env -u DATABASE_MIGRATION_URL bun --no-env-file src/db/migrate.ts --env-file .env",
     "prepare": "effect-tsgo patch --oxlint"
   },
   "dependencies": {

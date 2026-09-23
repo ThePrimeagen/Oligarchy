@@ -2,6 +2,7 @@ import { Effect, FileSystem, Layer, Option, type Redacted, Schema, Stdio, Stream
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import * as Config from "../config.ts";
+import * as EnvFile from "../env-file.ts";
 import * as Actions from "../db/actions.ts";
 import * as Client from "../db/client.ts";
 import * as Errors from "../shared/errors.ts";
@@ -82,10 +83,12 @@ export const makeSessionCommand = (deps: Deps = live) => {
     Effect.gen(function* () {
       // The client children read it from the environment; fail here, before the first prompt.
       yield* Config.oligarchyToken;
-      yield* Repl.run(serverUrl);
+      // The same file this process loaded, so each child client loads it too.
+      yield* Repl.run(serverUrl, yield* EnvFile.envFile);
     }),
   ).pipe(
     Command.withDescription("Drive one QEMU session interactively; or image --image-id <id>"),
     Command.withSubcommands([image]),
+    EnvFile.withEnvFile,
   );
 };

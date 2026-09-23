@@ -2,6 +2,7 @@ import { Array as Arr, Console, Effect, FileSystem, Option, Path, Stdio, Stream 
 import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Config from "../config.ts";
+import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
@@ -430,4 +431,5 @@ export const makeClientCommand = () =>
       save,
       follow,
     ]),
+    EnvFile.withEnvFile,
   );

@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Effect, FileSystem, Inspectable, Layer, Redacted } from "effect";
+import { Cause, Effect, Exit, FileSystem, Inspectable, Layer, Redacted, Stdio } from "effect";
 import * as Config from "../../src/config.ts";
 import * as Support from "../support/config.ts";
 
@@ -112,11 +112,16 @@ const withProcessEnv = <A, E, R>(
   );
 
 const dotEnvFileSystem = (contents: string) =>
-  FileSystem.layerNoop({
-    exists: (path) => Effect.succeed(path === ".env"),
-    readFileString: (path) =>
-      path === ".env" ? Effect.succeed(contents) : Effect.die(`unexpected readFileString ${path}`),
-  });
+  Layer.mergeAll(
+    FileSystem.layerNoop({
+      exists: (path) => Effect.succeed(path === ".env"),
+      readFileString: (path) =>
+        path === ".env"
+          ? Effect.succeed(contents)
+          : Effect.die(`unexpected readFileString ${path}`),
+    }),
+    Stdio.layerTest({}),
+  );
 
 describe("providerLayer", () => {
   it.effect("fills missing variables from .env in the working directory", () =>
@@ -144,7 +149,13 @@ describe("providerLayer", () => {
         expect(yield* Config.required("OLIGARCHY_TEST_SET")).toBe("from-env");
         const error = yield* Effect.flip(Config.required("OLIGARCHY_TEST_FILL"));
         expect(error.message).toBe("OLIGARCHY_TEST_FILL is not set");
-      }).pipe(Effect.provide(Config.providerLayer.pipe(Layer.provide(FileSystem.layerNoop({}))))),
+      }).pipe(
+        Effect.provide(
+          Config.providerLayer.pipe(
+            Layer.provide(Layer.mergeAll(FileSystem.layerNoop({}), Stdio.layerTest({}))),
+          ),
+        ),
+      ),
     ),
   );
 
@@ -157,6 +168,131 @@ describe("providerLayer", () => {
         Config.providerLayer.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_TEST_OTHER=1\n"))),
       ),
     ),
+  );
+});
+
+const envFiles = (files: Record<string, string>) =>
+  FileSystem.layerNoop({
+    exists: (path) => Effect.succeed(Object.hasOwn(files, path)),
+    readFileString: (path) => {
+      const contents = files[path];
+      return contents === undefined
+        ? Effect.die(`unexpected readFileString ${path}`)
+        : Effect.succeed(contents);
+    },
+  });
+
+const provideProvider = (args: ReadonlyArray<string>, files: Record<string, string>) =>
+  Config.providerLayer.pipe(
+    Layer.provide(Layer.mergeAll(envFiles(files), Stdio.layerTest({ args: Effect.succeed(args) }))),
+  );
+
+const readFill = Config.required("OLIGARCHY_TEST_FILL");
+
+describe("providerLayer --env-file", () => {
+  const dot =
+    "OLIGARCHY_TEST_SET=from-dotenv\nOLIGARCHY_TEST_FILE=from-dotenv\nOLIGARCHY_TEST_DOT=from-dotenv\n";
+  const extra =
+    "OLIGARCHY_TEST_SET=from-file\nOLIGARCHY_TEST_FILE=from-file\nOLIGARCHY_TEST_LITERAL=to$ken\n";
+
+  it.effect("lets the process environment win, then --env-file, then .env (happy)", () =>
+    withProcessEnv(
+      { OLIGARCHY_TEST_SET: "from-env" },
+      Effect.gen(function* () {
+        expect(yield* Config.required("OLIGARCHY_TEST_SET")).toBe("from-env");
+        expect(yield* Config.required("OLIGARCHY_TEST_FILE")).toBe("from-file");
+        expect(yield* Config.required("OLIGARCHY_TEST_DOT")).toBe("from-dotenv");
+        expect(yield* Config.required("OLIGARCHY_TEST_LITERAL")).toBe("to$ken");
+      }).pipe(
+        Effect.provide(
+          provideProvider(["--env-file", ".prod-env"], { ".env": dot, ".prod-env": extra }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reads --env-file=path the same way as the split flag (happy)", () =>
+    Effect.gen(function* () {
+      expect(yield* readFill).toBe("from-file");
+    }).pipe(
+      Effect.provide(
+        provideProvider(["--env-file=.prod-env"], {
+          ".prod-env": "OLIGARCHY_TEST_FILL=from-file\n",
+        }),
+      ),
+    ),
+  );
+
+  it.effect("uses the last --env-file when the flag is repeated (happy)", () =>
+    Effect.gen(function* () {
+      expect(yield* readFill).toBe("second");
+    }).pipe(
+      Effect.provide(
+        provideProvider(["--env-file", "first.env", "--env-file", "second.env"], {
+          "first.env": "OLIGARCHY_TEST_FILL=first\n",
+          "second.env": "OLIGARCHY_TEST_FILL=second\n",
+        }),
+      ),
+    ),
+  );
+
+  it.effect("does not read --env-file after -- (unhappy)", () =>
+    Effect.gen(function* () {
+      expect(yield* readFill).toBe("from-dotenv");
+    }).pipe(
+      Effect.provide(
+        provideProvider(["--", "--env-file", ".prod-env"], {
+          ".env": "OLIGARCHY_TEST_FILL=from-dotenv\n",
+          ".prod-env": "OLIGARCHY_TEST_FILL=from-file\n",
+        }),
+      ),
+    ),
+  );
+
+  const failedRead = (args: ReadonlyArray<string>, files: Record<string, string>) =>
+    Effect.exit(readFill.pipe(Effect.provide(provideProvider(args, files))));
+
+  it.effect("fails when --env-file is passed without a path (unhappy)", () =>
+    Effect.gen(function* () {
+      const exit = yield* failedRead(["--env-file"], { ".env": "OLIGARCHY_TEST_FILL=1\n" });
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.pretty(exit.cause)).toContain("--env-file needs a path");
+      }
+    }),
+  );
+
+  it.effect("fails when --env-file= is empty (unhappy)", () =>
+    Effect.gen(function* () {
+      const exit = yield* failedRead(["--env-file="], {});
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.pretty(exit.cause)).toContain("--env-file needs a path");
+      }
+    }),
+  );
+
+  it.effect("fails when the named file cannot be read (unhappy)", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        readFill.pipe(
+          Effect.provide(
+            Config.providerLayer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  FileSystem.layerNoop({}),
+                  Stdio.layerTest({ args: Effect.succeed(["--env-file", ".prod-env"]) }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.pretty(exit.cause)).toContain(".prod-env");
+      }
+    }),
   );
 });
 

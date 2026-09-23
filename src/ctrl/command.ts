@@ -15,6 +15,7 @@ import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
+import * as EnvFile from "../env-file.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
@@ -1253,5 +1254,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       diagnoseCommand,
       automationCommand,
     ]),
+    EnvFile.withEnvFile,
   );
 };

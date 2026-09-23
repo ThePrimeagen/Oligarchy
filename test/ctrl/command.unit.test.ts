@@ -3786,6 +3786,7 @@ describe("--help", () => {
         expect(printed).toMatch(/error-type/);
         expect(printed).toMatch(/diagnose/);
         expect(printed).toMatch(/automation/);
+        expect(printed).toMatch(/--env-file/);
         expect(printed.includes("--dump")).toBe(false);
       }),
   );

@@ -3,6 +3,7 @@ import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Client from "../db/client.ts";
+import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
@@ -93,4 +94,5 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
     Command.withDescription(
       "The automation client: POST /reserve takes a --max-jobs slot for a ticket, for a drive after reserving QEMU first, for a diagnose alone, and refuses a second reserve on this server while one has not answered; POST /run consumes that reservation and launches OpenCode with a prompt and waits until it finishes; POST /abort kills the matching run by ticket",
     ),
+    EnvFile.withEnvFile,
   );

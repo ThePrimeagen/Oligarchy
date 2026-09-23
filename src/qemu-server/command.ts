@@ -4,6 +4,7 @@ import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Config from "../config.ts";
+import * as EnvFile from "../env-file.ts";
 import * as Client from "../db/client.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
@@ -137,4 +138,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
           ),
         );
       }),
-  ).pipe(Command.withDescription("The qemu server: boots QEMU sessions and drives them over QMP"));
+  ).pipe(
+    Command.withDescription("The qemu server: boots QEMU sessions and drives them over QMP"),
+    EnvFile.withEnvFile,
+  );
