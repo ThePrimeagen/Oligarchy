@@ -11,9 +11,10 @@ import {
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as Config from "../config.ts";
 import * as Errors from "../shared/errors.ts";
 
-export const LINEAR_API_URL = "https://api.linear.app/graphql";
+export const LINEAR_API_URL = Config.DEFAULT_LINEAR_API_URL;
 // A request Linear never answers must not hold the automation server's dispatch or its watches.
 const REQUEST_TIMEOUT = "10 seconds";
 export const AGENT_TEST_LABEL = "agent test";
@@ -24,6 +25,8 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
+// Where the automation server puts a ticket once a client has reserved it, before /run.
+export const IN_PROGRESS_STATE = "In Progress";
 // Where the automation server puts a ticket whose job it failed without a run to judge.
 export const FAILED_STATE = "Failed";
 // A ticket in Automation Needed that already has its pending job. The watch's list leaves
@@ -193,6 +196,7 @@ export type LinearService = {
   readonly markReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToInProgress: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -204,6 +208,7 @@ export type LinearService = {
 const makeLinear = (
   token: Redacted.Redacted,
   teamName: string,
+  apiUrl: string,
 ): Effect.Effect<LinearService, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
@@ -218,7 +223,7 @@ const makeLinear = (
       Effect.gen(function* () {
         const response = yield* client
           .execute(
-            HttpClientRequest.post(LINEAR_API_URL).pipe(
+            HttpClientRequest.post(apiUrl).pipe(
               HttpClientRequest.setHeader("Authorization", Redacted.value(token)),
               HttpClientRequest.setHeader("Content-Type", "application/json"),
               HttpClientRequest.bodyJsonUnsafe({ query, variables }),
@@ -373,6 +378,26 @@ const makeLinear = (
             Errors.LinearError.make({
               operation: "moveIssue",
               message: `linear: moving ${ticket.identifier} failed`,
+            }),
+        ),
+      );
+    });
+
+    const moveToInProgress = Effect.fn("Linear.moveToInProgress")(function* (identifier: string) {
+      const team = yield* teamId;
+      const stateId = yield* stateNamed(team, IN_PROGRESS_STATE);
+      yield* request(
+        "moveToInProgress",
+        ISSUE_UPDATE_MUTATION,
+        { id: identifier, input: { stateId } },
+        IssueUpdate,
+      ).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveToInProgress",
+              message: `linear: moving ${identifier} to In Progress failed`,
             }),
         ),
       );
@@ -536,6 +561,7 @@ const makeLinear = (
       markReady,
       clearReady,
       moveToFailed,
+      moveToInProgress,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,
@@ -548,6 +574,7 @@ export class Linear extends Context.Service<Linear>()("@oligarchy/ctrl/Linear", 
   static readonly layer = (
     token: Redacted.Redacted,
     teamName: string,
+    apiUrl = LINEAR_API_URL,
   ): Layer.Layer<Linear, never, HttpClient.HttpClient> =>
-    Layer.effect(this)(this.make(token, teamName));
+    Layer.effect(this)(this.make(token, teamName, apiUrl));
 }

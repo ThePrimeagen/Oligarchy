@@ -483,6 +483,31 @@ describe("Linear happy path", () => {
     }),
   );
 
+  it.effect(
+    "moveToInProgress finds the team's In Progress state and moves the ticket by identifier",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp(happyLinear);
+        yield* Effect.flatMap(Linear.Linear, (client) => client.moveToInProgress("OLI-45")).pipe(
+          Effect.provide(linear().pipe(Layer.provide(http.layer))),
+        );
+        const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+          JSON.parse(request.body),
+        );
+        expect(bodies).toEqual([
+          { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+          {
+            query: expect.stringContaining("workflowStates"),
+            variables: { name: "In Progress", teamId: "team-id" },
+          },
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: "OLI-45", input: { stateId: stateId("In Progress") } },
+          },
+        ]);
+      }),
+  );
+
   it.effect("an answer that takes nine seconds is kept", () =>
     Effect.gen(function* () {
       const http = FakeHttp.respondWith(() =>
@@ -808,6 +833,44 @@ describe("Linear unhappy path", () => {
         _tag: "LinearError",
         operation: "moveToFailed",
         message: "linear: moving OLI-45 to Failed failed",
+      });
+    }),
+  );
+
+  it.effect("moveToInProgress refuses a board without an In Progress state before any update", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("workflowStates") && body.variables?.name === "In Progress"
+          ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToInProgress("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "stateIds",
+        message: "linear: no state named In Progress",
+      });
+      const queries = http.requests.map((request) => JSON.parse(request.body).query);
+      expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
+    }),
+  );
+
+  it.effect("moveToInProgress reports an update that did not succeed by ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToInProgress("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToInProgress",
+        message: "linear: moving OLI-45 to In Progress failed",
       });
     }),
   );

@@ -10,7 +10,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect } from "vitest";
+import { afterAll, beforeAll, describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Option, Schema } from "effect";
 import { eq, inArray, sql } from "drizzle-orm";
@@ -22,9 +22,11 @@ import * as Postgres from "../support/postgres.ts";
 const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
 const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
-// The board watch calls Linear as soon as the server listens, once per column. https_proxy does
-// not cover node:https under Bun, so a serving test reaches api.linear.app; each column logs one failure.
+// The board watch calls Linear as soon as the server listens, and dispatch moves a reserved
+// ticket to In Progress before /run. https_proxy does not cover node:https under Bun, so a
+// serving test points LINEAR_API_URL at a local stub instead of api.linear.app.
 const LINEAR_TOKEN = "lin_api_test";
+let happyLinearUrl = "";
 const TOKEN = "test-token";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
@@ -55,6 +57,7 @@ const environment = (home: string, overrides: Record<string, string>): NodeJS.Pr
     LINEAR_TEAM: "Fixture Team",
     OLIGARCHY_TOKEN: TOKEN,
     DATABASE_URL: dbUrl === "" ? UNREACHABLE : dbUrl,
+    ...(happyLinearUrl === "" ? {} : { LINEAR_API_URL: happyLinearUrl }),
     https_proxy: "http://127.0.0.1:1",
     http_proxy: "http://127.0.0.1:1",
     no_proxy: "",
@@ -716,6 +719,82 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on("end", () => resolve(text));
   });
 
+const graphqlFields = (
+  body: string,
+): { readonly query: string; readonly variables: Record<string, unknown> } => {
+  const variables: Record<string, unknown> = {};
+  let query = "";
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed === "object" && parsed !== null) {
+      if ("query" in parsed && typeof parsed.query === "string") {
+        query = parsed.query;
+      }
+      if (
+        "variables" in parsed &&
+        typeof parsed.variables === "object" &&
+        parsed.variables !== null
+      ) {
+        for (const [key, value] of Object.entries(parsed.variables)) {
+          variables[key] = value;
+        }
+      }
+    }
+  } catch {
+    query = "";
+  }
+  return { query, variables };
+};
+
+const stateIdOf = (variables: Record<string, unknown>): string => {
+  const input = variables.input;
+  return typeof input === "object" && input !== null && "stateId" in input
+    ? String(input.stateId)
+    : "";
+};
+
+// Enough of Linear's GraphQL for the board watch and for moving a ticket.
+const linearJson = (query: string, variables: Record<string, unknown>): unknown => {
+  const name = typeof variables.name === "string" ? variables.name : "";
+  if (query.includes("teams(")) {
+    return { data: { teams: { nodes: [{ id: "team-id" }] } } };
+  }
+  if (query.includes("workflowStates")) {
+    return { data: { workflowStates: { nodes: [{ id: `state-${name}` }] } } };
+  }
+  if (query.includes("issues(")) {
+    return {
+      data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+    };
+  }
+  if (query.includes("issueLabels")) {
+    return { data: { issueLabels: { nodes: [{ id: "label-ready" }] } } };
+  }
+  return { data: { issueUpdate: { success: true } } };
+};
+
+const writeJson = (res: ServerResponse, json: unknown) => {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(json));
+};
+
+let closeHappyLinear: () => Promise<void> = async () => undefined;
+
+beforeAll(async () => {
+  const linear = await serveClient((req, res) => {
+    void readBody(req).then((body) => {
+      const { query, variables } = graphqlFields(body);
+      writeJson(res, linearJson(query, variables));
+    });
+  });
+  happyLinearUrl = linear.url;
+  closeHappyLinear = linear.close;
+});
+
+afterAll(async () => {
+  await closeHappyLinear();
+});
+
 const qemuBody = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ agent: Schema.String })),
 );
@@ -1359,6 +1438,102 @@ describeServing("automation server restart", () => {
           await removeServer(url);
           await qemu.close();
           rmSync(bin, { recursive: true, force: true });
+        }
+      }),
+    120_000,
+  );
+
+  it.live(
+    "SIGKILL after the drive is running and before Linear moves to In Progress leaves it running; the next automation server stops it at its automation client and fails it, and /run never starts",
+    () =>
+      Effect.promise(async () => {
+        const linearId = `OLI-${randomUUID().slice(0, 8)}`;
+        const resultId = await seedResult(linearId);
+        const updates: Array<string> = [];
+        let holding: () => void = () => undefined;
+        const held = new Promise<void>((resolve) => {
+          holding = resolve;
+        });
+        // Answer every Linear call except the move to In Progress, which stays open.
+        const linear = await serveClient((req, res) => {
+          void readBody(req).then((body) => {
+            const { query, variables } = graphqlFields(body);
+            const stateId = stateIdOf(variables);
+            if (query.includes("issueUpdate") && stateId === "state-In Progress") {
+              updates.push(stateId);
+              holding();
+              return;
+            }
+            if (query.includes("issueUpdate") && stateId !== "") {
+              updates.push(stateId);
+            }
+            writeJson(res, linearJson(query, variables));
+          });
+        });
+        let runs = 0;
+        let ran: () => void = () => undefined;
+        const startedRun = new Promise<void>((resolve) => {
+          ran = resolve;
+        });
+        const aborts: Array<string> = [];
+        const client = await serveClient((req, res) => {
+          void readBody(req).then((body) => {
+            if (req.url === "/abort") {
+              aborts.push(body);
+            }
+            if (req.url === "/run" && ticketOf(body) === linearId) {
+              runs += 1;
+              ran();
+            }
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: "true" }));
+          });
+        });
+        await seedJob(resultId, "drive");
+        await seedLiveClient(client.url);
+        const first = spawnAutomationServer(["--port", String(await freePort())], {
+          LINEAR_API_URL: linear.url,
+        });
+        let second: Process | undefined;
+        try {
+          await first.waitFor(/automation server listening/);
+          const running = await waitForJob(resultId, "running");
+          // markRunning has committed. The In Progress update is the next step, and /run
+          // waits for it to land.
+          const moved = await Promise.race([
+            held.then(() => "held" as const),
+            startedRun.then(() => "ran" as const),
+            new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 15_000)),
+          ]);
+          expect(moved).toBe("held");
+          expect(runs).toBe(0);
+          expect(updates).toEqual(["state-In Progress"]);
+          first.child.kill("SIGKILL");
+          expect((await first.exited).signal).toBe("SIGKILL");
+          expect(await jobsFor(resultId)).toEqual([
+            expect.objectContaining({ status: "running", serverId: running.serverId }),
+          ]);
+          expect(aborts.filter((body) => ticketOf(body) === linearId)).toEqual([]);
+
+          second = spawnAutomationServer(["--port", String(await freePort())], {
+            LINEAR_API_URL: linear.url,
+          });
+          const job = await waitForJob(resultId, "failed", 30_000);
+          expect(job).toMatchObject({ status: "failed", reason: RESTARTED });
+          expect(job.serverId).toBe(running.serverId);
+          expect(aborts.map(ticketOf).filter((ticket) => ticket === linearId)).toEqual([linearId]);
+          expect(runs).toBe(0);
+          expect(updates).toContain("state-Failed");
+          await second.waitFor(new RegExp(`drive failed; ${RESTARTED}`));
+        } finally {
+          await stop(first);
+          if (second !== undefined) {
+            await stop(second);
+          }
+          await removeJobs(resultId);
+          await removeServer(client.url);
+          await client.close();
+          await linear.close();
         }
       }),
     120_000,

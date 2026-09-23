@@ -77,7 +77,11 @@ const ServerLive = (port: number, model: string) =>
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
 const LinearLive = Layer.unwrap(
-  Effect.map(Config.linearAccess, ({ token, team }) => Linear.Linear.layer(token, team)),
+  Effect.gen(function* () {
+    const { token, team } = yield* Config.linearAccess;
+    const apiUrl = yield* Config.linearApiUrl;
+    return Linear.Linear.layer(token, team, apiUrl);
+  }),
 );
 
 // LINEAR_WEBHOOK_SECRET signs POST /linear; LINEAR_API_TOKEN reads the columns the webhook

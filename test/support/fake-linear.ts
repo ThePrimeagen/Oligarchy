@@ -21,6 +21,7 @@ export type LinearCall =
   | { readonly method: "markReady"; readonly identifier: string }
   | { readonly method: "clearReady"; readonly identifier: string }
   | { readonly method: "moveToFailed"; readonly identifier: string }
+  | { readonly method: "moveToInProgress"; readonly identifier: string }
   | { readonly method: "listBacklog" }
   | { readonly method: "listAutomationNeeded" }
   | { readonly method: "listNeedsReview" };
@@ -89,6 +90,8 @@ export const fakeLinear = (
     markReady: (identifier) => record({ method: "markReady", identifier }, Effect.void),
     clearReady: (identifier) => record({ method: "clearReady", identifier }, Effect.void),
     moveToFailed: (identifier) => record({ method: "moveToFailed", identifier }, Effect.void),
+    moveToInProgress: (identifier) =>
+      record({ method: "moveToInProgress", identifier }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
     listAutomationNeeded: record({ method: "listAutomationNeeded" }, Effect.succeed([])),
     listNeedsReview: record({ method: "listNeedsReview" }, Effect.succeed([])),
@@ -105,6 +108,7 @@ export const fakeLinear = (
     markReady: overrides.markReady ?? defaults.markReady,
     clearReady: overrides.clearReady ?? defaults.clearReady,
     moveToFailed: overrides.moveToFailed ?? defaults.moveToFailed,
+    moveToInProgress: overrides.moveToInProgress ?? defaults.moveToInProgress,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
     listAutomationNeeded: overrides.listAutomationNeeded ?? defaults.listAutomationNeeded,
     listNeedsReview: overrides.listNeedsReview ?? defaults.listNeedsReview,

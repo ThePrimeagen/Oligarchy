@@ -436,6 +436,7 @@ describe("dispatch happy path", () => {
         "diagnose succeeded",
       ]);
       expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
+      expect(fixed.linear.calls.filter((call) => call.method === "moveToInProgress")).toEqual([]);
     }),
   );
 
@@ -664,6 +665,87 @@ describe("dispatch happy path", () => {
       expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
     }),
   );
+
+  it.effect(
+    "a reserved drive stays running and does not start /run until Linear is In Progress",
+    () =>
+      Effect.gen(function* () {
+        const moving = yield* Deferred.make<void>();
+        const releaseMove = yield* Deferred.make<void>();
+        let moves = 0;
+        const fixed = harness(
+          FakeLinear.fakeLinear({
+            overrides: {
+              moveToInProgress: (identifier) =>
+                Effect.gen(function* () {
+                  moves += 1;
+                  expect(identifier).toBe(TICKET);
+                  yield* Deferred.succeed(moving, undefined);
+                  yield* Deferred.await(releaseMove);
+                }),
+            },
+          }),
+        );
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        const clientId = seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        yield* start(fixed, http.layer);
+        yield* Deferred.await(moving);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "running",
+          serverId: clientId,
+          startedAt: expect.any(Date),
+        });
+        expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`]);
+        expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+        yield* Deferred.succeed(releaseMove, undefined);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        expect(moves).toBe(1);
+        expect(http.requests.map((request) => request.url)).toEqual([
+          `${URL}/reserve`,
+          `${URL}/run`,
+        ]);
+        expect(FakeLog.texts(fixed.log)).toEqual([
+          `dispatching drive; ${URL}; ${MODEL}`,
+          "drive succeeded",
+        ]);
+      }),
+  );
+
+  it.effect("a move to In Progress that fails twice then succeeds starts /run", () => {
+    const refused = Errors.LinearError.make({
+      operation: "moveToInProgress",
+      message: `linear: moving ${TICKET} to In Progress failed`,
+    });
+    let attempts = 0;
+    const fixed = harness(
+      FakeLinear.fakeLinear({
+        overrides: {
+          moveToInProgress: () =>
+            Effect.gen(function* () {
+              attempts += 1;
+              if (attempts < 3) {
+                return yield* Effect.fail(refused);
+              }
+              return yield* Effect.void;
+            }),
+        },
+      }),
+    );
+    return Effect.gen(function* () {
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      const clientId = seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(attempts).toBe(3);
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: clientId });
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
+    });
+  });
 });
 
 describe("a drive that returns with its result still open", () => {
@@ -720,6 +802,70 @@ describe("a drive that returns with its result still open", () => {
 });
 
 describe("dispatch unhappy path", () => {
+  it.effect(
+    "a move to In Progress that fails three times releases the reservation and fails the job",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "moveToInProgress",
+        message: `linear: moving ${TICKET} to In Progress failed`,
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToInProgress: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        const clientId = seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve" || url.pathname === "/abort") {
+            return FakeHttp.json({ ok: "true" });
+          }
+          return closing(fixed.tests);
+        });
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "failed");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "failed",
+          reason: refused.message,
+          serverId: clientId,
+        });
+        expect(fixed.automation.jobs[0]?.finishedAt).toBeInstanceOf(Date);
+        expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+          `POST ${URL}/reserve`,
+          `POST ${URL}/abort`,
+        ]);
+        expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({ ticket: TICKET });
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `move to In Progress failed; ${URL}`,
+            agentId: TICKET,
+            location: "automation",
+            skipSentry: false,
+            cause: refused,
+          }),
+          expect.objectContaining({
+            text: `drive failed; ${refused.message}`,
+            location: "automation",
+            skipSentry: false,
+          }),
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+          cleared(TICKET),
+        ]);
+        expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+      });
+    },
+  );
+
   it.effect("a 500 marks the job failed with the client's error", () =>
     Effect.gen(function* () {
       const fixed = harness();
@@ -1872,6 +2018,7 @@ describe("a running job left by the last automation server", () => {
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
           { method: "moveToFailed", identifier: TICKET },
+          { method: "moveToInProgress", identifier: TICKET_B },
           cleared(TICKET_B),
         ]);
         expect(FakeLog.texts(fixed.log)).toContain(`drive failed; ${RESTARTED}`);
@@ -1930,6 +2077,7 @@ describe("a running job left by the last automation server", () => {
           cleared(TICKET),
           cleared(TICKET_B),
           cleared("OLI-44"),
+          { method: "moveToInProgress", identifier: "OLI-45" },
           cleared("OLI-45"),
         ]);
         expect(sentryErrors(fixed.log)).toEqual([]);
@@ -2530,7 +2678,10 @@ describe("a shutdown with drives running", () => {
           }),
         ]);
         expect(FakeLog.texts(fixed.log)).not.toContain("drive aborted");
-        expect(fixed.linear.calls).toEqual([]);
+        expect(fixed.linear.calls).toEqual([
+          { method: "moveToInProgress", identifier: TICKET },
+          { method: "moveToInProgress", identifier: TICKET_B },
+        ]);
       }),
   );
 
@@ -2931,7 +3082,7 @@ describe("the write that closes a finished job", () => {
         }),
       ]);
       expect(FakeLog.texts(fixed.log)).not.toContain("drive succeeded");
-      expect(fixed.linear.calls).toEqual([]);
+      expect(fixed.linear.calls).toEqual([{ method: "moveToInProgress", identifier: TICKET }]);
     });
   });
 });
