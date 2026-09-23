@@ -1151,14 +1151,7 @@ Schema and module rules above already cover most of them; the rest:
 
 ## Review
 
-Before a change ships, spawn a GPT-5.6 Sol subagent (`gpt-5.6-sol-high`) to review it. Give it the
-repo path, where to find the diff, a summary of the request being made, and this prompt verbatim:
-
-> Thoroughly review the change being proposed and understand the request being made. All changes
-> must strive for simplicity and correctness. All errors must be handled, but we do not want
-> unneeded abstractions or excessive code. No normalization functions. Instead, it should just be
-> straightforward, good programming: simple checks, guard statements where they're needed, asserts
-> for conditions that shall not exist in our application.
+Before a change ships, follow the sol-review skill (`.cursor/skills/sol-review/SKILL.md`).
 
 Findings that add guards or ceremony get declined with the reason stated, per the Philosophy
 section. Machine reviews are held to the same bar: a reviewer that introduces nullable state for
