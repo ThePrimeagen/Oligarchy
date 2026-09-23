@@ -227,7 +227,34 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     const abort = Effect.fn("Sessions.abort")(function* (ticket: string) {
       const handle = (yield* Ref.get(running)).get(ticket);
       if (handle === undefined) {
-        return yield* Errors.unknownSession(ticket, ticket);
+        // A reserve nobody has run still holds a slot, and a drive's guest slot with it.
+        // Abort is how the dispatcher gives both back when the pending row was closed
+        // under it. A ticket that holds neither is unknown, as it always was.
+        const reservation = yield* Ref.modify(slots, (held) => {
+          const reserved = held.reserved.get(ticket);
+          if (reserved === undefined) {
+            return [undefined, held] as const;
+          }
+          return [
+            reserved,
+            { count: held.count - 1, reserved: mapWithout(held.reserved, ticket) },
+          ] as const;
+        });
+        if (reservation === undefined) {
+          return yield* Errors.unknownSession(ticket, ticket);
+        }
+        if (reservation.action === "drive" || reservation.action === "mint") {
+          yield* relinquishQemu(ticket).pipe(
+            Effect.catch((error) =>
+              log.error(`relinquish failed: ${Render.headline(error)}`, {
+                location: Log.Locations.automationClient,
+                agentId: ticket,
+                cause: error,
+              }),
+            ),
+          );
+        }
+        return yield* Effect.void;
       }
       return yield* handle
         .kill({

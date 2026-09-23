@@ -89,10 +89,10 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
 const uninterruptible = { uninterruptible: true } as const;
 
 // The job named by its ticket and action closes whether it waits or runs. A pending job has no
-// client to stop, so closing its row is the whole abort; the claim that may be taking it at
-// that moment either never sees it or has made it running, which the lookup after finds. A
-// running job is stopped at the client that claimed it, then its row is closed. A job that is
-// over, or was never queued, is refused.
+// client to stop, so closing its row is the whole abort; a placement that reserved after this
+// wins nothing, because running is written only while the row is still pending, and that
+// placement releases the reservation. A running job is stopped at the client that took it,
+// then its row is closed. A job that is over, or was never queued, is refused.
 export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
   handlers.handle(
     "abort",

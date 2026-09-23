@@ -81,7 +81,7 @@ export const reserve = Effect.fn("reserve")(function* (
       if (error._tag === "HttpClientError") {
         const response = error.response;
         if (response === undefined) {
-          return Effect.fail(failed(url, "/reserve", undefined, "", error));
+          return Effect.fail(failed(url, "/reserve", undefined, "", error.reason.cause ?? error));
         }
         return response.text.pipe(
           Effect.orElseSucceed(() => ""),
@@ -112,7 +112,7 @@ export const run = Effect.fn("run")(function* (
       if (error._tag === "HttpClientError") {
         const response = error.response;
         if (response === undefined) {
-          return Effect.fail(failed(url, "/run", undefined, "", error));
+          return Effect.fail(failed(url, "/run", undefined, "", error.reason.cause ?? error));
         }
         return response.text.pipe(
           Effect.orElseSucceed(() => ""),
@@ -132,7 +132,7 @@ export const abort = Effect.fn("abort")(function* (url: string, ticket: string) 
       if (error._tag === "HttpClientError") {
         const response = error.response;
         if (response === undefined) {
-          return Effect.fail(failed(url, "/abort", undefined, "", error));
+          return Effect.fail(failed(url, "/abort", undefined, "", error.reason.cause ?? error));
         }
         return response.text.pipe(
           Effect.orElseSucceed(() => ""),

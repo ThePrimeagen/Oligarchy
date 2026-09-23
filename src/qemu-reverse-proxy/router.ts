@@ -361,8 +361,35 @@ const make = Effect.gen(function* () {
     return yield* commitStart(reserved.value, request, agent);
   });
 
+  // The server already took the slot. Give it back before the route failure leaves this
+  // process; a 400 means the server holds nothing, which is what relinquish was for.
+  const releaseAccepted = (url: string, agent: string) =>
+    Effect.gen(function* () {
+      const who = { agentId: agent };
+      const response = yield* http
+        .execute(
+          HttpClientRequest.post("/relinquish").pipe(
+            HttpClientRequest.prependUrl(url),
+            HttpClientRequest.bearerToken(token),
+            HttpClientRequest.bodyJsonUnsafe(Contract.ReserveAgentBody.make({ agent })),
+          ),
+        )
+        .pipe(Effect.mapError((error) => unreachable(url, error, who)));
+      if (response.status === 200 || response.status === 400) {
+        return yield* Effect.void;
+      }
+      const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
+      return yield* serverFailed(
+        url,
+        `server ${url} answered ${String(response.status)}: ${ProxyClient.apiError(text)}`,
+        undefined,
+        who,
+      );
+    });
+
   // One server's answer to the reserve, sent as it came and passed back as it came; a 200 routes
-  // the agent there.
+  // the agent there. A route that cannot be written gives the slot back and fails: another
+  // server would fail the same write.
   const askToReserve = (
     url: string,
     request: HttpServerRequest.HttpServerRequest,
@@ -381,9 +408,22 @@ const make = Effect.gen(function* () {
       );
       const headers = forwardedHeaders(response.headers);
       if (response.status === 200) {
-        yield* store
-          .routeAgent(agent, url)
-          .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
+        const routed = yield* Effect.result(
+          store
+            .routeAgent(agent, url)
+            .pipe(Effect.mapError((cause) => internal(cause, undefined, agent))),
+        );
+        if (Result.isFailure(routed)) {
+          const released = yield* Effect.result(releaseAccepted(url, agent));
+          if (Result.isFailure(released)) {
+            yield* log.error(`relinquish failed; ${url}`, {
+              location: Log.Locations.server,
+              agentId: agent,
+              cause: released.failure,
+            });
+          }
+          return yield* routed.failure;
+        }
         yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
       }
       return { status: response.status, text, headers };
@@ -413,7 +453,42 @@ const make = Effect.gen(function* () {
             return yield* Errors.NotFound.make({ message: `no server ${pinned}`, agentId: agent });
           }
           yield* probe(pinned, { agentId: agent });
-          const answer = yield* askToReserve(pinned, request, agent);
+          const asked = yield* Effect.result(askToReserve(pinned, request, agent));
+          if (Result.isFailure(asked)) {
+            // A pin does not fall back. The failure propagates, and the job stays pending.
+            return yield* asked.failure;
+          }
+          const answer = asked.success;
+          const pinnedSetup =
+            body.resume !== undefined && answer.status === 409
+              ? maxJobsGained(answer.text)
+              : undefined;
+          // 200 reserved, 503 is full, and a real setup-needed 409 is the mint answer.
+          // Anything else is reported. A 2xx that is not 200 must not look reserved.
+          if (answer.status === 200 || answer.status === 503 || pinnedSetup !== undefined) {
+            return HttpServerResponse.text(answer.text, {
+              status: answer.status,
+              headers: answer.headers,
+            });
+          }
+          yield* log.error(`reserve failed; ${pinned}`, {
+            location: Log.Locations.server,
+            agentId: agent,
+            cause: serverFailed(
+              pinned,
+              `server ${pinned} answered ${String(answer.status)}: ${ProxyClient.apiError(answer.text)}`,
+              undefined,
+              { agentId: agent },
+            ),
+          });
+          if (answer.status < 300) {
+            return HttpServerResponse.text(
+              JSON.stringify({
+                error: `server ${pinned} answered ${String(answer.status)}`,
+              }),
+              { status: 502, headers: answer.headers },
+            );
+          }
           return HttpServerResponse.text(answer.text, {
             status: answer.status,
             headers: answer.headers,
@@ -434,9 +509,10 @@ const make = Effect.gen(function* () {
         const ranked: Array<{ readonly url: string; readonly qemus: number }> = [];
         for (const { url, result } of probed) {
           if (Result.isFailure(result)) {
-            yield* log.warning(`server skipped; ${result.failure.message}`, {
+            yield* log.error(`server skipped; ${result.failure.message}`, {
               location: Log.Locations.server,
               agentId: agent,
+              cause: result.failure.cause ?? result.failure,
             });
             continue;
           }
@@ -452,7 +528,26 @@ const make = Effect.gen(function* () {
           | { readonly status: number; readonly text: string; readonly headers: Headers.Input }
           | undefined;
         for (const { url } of ranked) {
-          const answer = yield* askToReserve(url, request, agent);
+          const asked = yield* Effect.result(askToReserve(url, request, agent));
+          if (Result.isFailure(asked)) {
+            // The route table itself failed. Another server fails the same write.
+            if (asked.failure._tag === "Internal") {
+              return yield* asked.failure;
+            }
+            yield* log.error(`reserve failed; ${url}`, {
+              location: Log.Locations.server,
+              agentId: agent,
+              cause: asked.failure,
+            });
+            continue;
+          }
+          const answer = asked.success;
+          if (answer.status === 200) {
+            return HttpServerResponse.text(answer.text, {
+              status: answer.status,
+              headers: answer.headers,
+            });
+          }
           if (answer.status === 503) {
             lastCapacity = answer;
             continue;
@@ -462,9 +557,15 @@ const make = Effect.gen(function* () {
             unminted.push({ url, maxJobs: gained });
             continue;
           }
-          return HttpServerResponse.text(answer.text, {
-            status: answer.status,
-            headers: answer.headers,
+          yield* log.error(`reserve failed; ${url}`, {
+            location: Log.Locations.server,
+            agentId: agent,
+            cause: serverFailed(
+              url,
+              `server ${url} answered ${String(answer.status)}: ${ProxyClient.apiError(answer.text)}`,
+              undefined,
+              { agentId: agent },
+            ),
           });
         }
         const setup = unminted[0];

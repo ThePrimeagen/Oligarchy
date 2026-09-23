@@ -182,6 +182,26 @@ describe("Sessions.run unhappy path", () => {
 });
 
 describe("Sessions.abort happy path", () => {
+  it.effect("abort of an unused reservation releases the slot and the guest", () => {
+    const relinquished: Array<string> = [];
+    const relinquishQemu: Sessions.RelinquishQemu = (ticket) =>
+      Effect.sync(() => {
+        relinquished.push(ticket);
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "drive");
+      expect(yield* sessions.jobs).toBe(1);
+      yield* sessions.abort(TICKET);
+      expect(yield* sessions.jobs).toBe(0);
+      expect(relinquished).toEqual([TICKET]);
+      yield* sessions.reserve(OTHER, "drive");
+      expect(yield* sessions.jobs).toBe(1);
+      expect(spawner.spawned).toEqual([]);
+    }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu)));
+  });
+
   it.effect("kills the CLI registered under that ticket", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({}));
     return Effect.gen(function* () {
@@ -268,6 +288,35 @@ describe("Sessions.abort happy path", () => {
 });
 
 describe("Sessions.abort unhappy path", () => {
+  it.effect(
+    "a relinquish that fails after aborting a reservation is logged and the slot is free",
+    () => {
+      const log = FakeLog.fakeLog();
+      const failure = Errors.Internal.make({
+        cause: new Error("relinquish refused"),
+        agentId: TICKET,
+      });
+      const relinquishQemu: Sessions.RelinquishQemu = () => Effect.fail(failure);
+      const spawner = FakeSpawner.fakeSpawner(() => ({}));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* sessions.abort(TICKET);
+        expect(yield* sessions.jobs).toBe(0);
+        expect(log.lines).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: "relinquish failed: internal error: relinquish refused",
+            agentId: TICKET,
+            cause: failure,
+          }),
+        ]);
+        yield* sessions.reserve(OTHER, "drive");
+        expect(yield* sessions.jobs).toBe(1);
+      }).pipe(Effect.provide(layer(spawner, 1, qemuOk(), relinquishQemu, log)));
+    },
+  );
+
   it.effect("an unknown ticket is UnknownSession", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {

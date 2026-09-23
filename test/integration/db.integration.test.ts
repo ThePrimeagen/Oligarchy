@@ -21,6 +21,25 @@ import * as Errors from "../../src/shared/errors.ts";
 import * as Support from "../support/config.ts";
 import * as Postgres from "../support/postgres.ts";
 
+// Selects the next pending job and marks it running, which is what a placement does once a
+// client has reserved. The row nextPending returns is still pending.
+const takePending = (
+  automation: Context.Service.Shape<typeof Automation.AutomationStore>,
+  serverId: string,
+  except: ReadonlyArray<string> = [],
+) =>
+  Effect.gen(function* () {
+    const selected = yield* automation.nextPending(except);
+    if (Option.isNone(selected)) {
+      return Option.none<Automation.AutomationJobRow>();
+    }
+    const marked = yield* automation.markRunning(selected.value.id, serverId);
+    if (!marked) {
+      return Option.none<Automation.AutomationJobRow>();
+    }
+    return yield* automation.findRunning(selected.value.resultId);
+  });
+
 const uuid = (): string => crypto.randomUUID();
 
 // A fresh snake_case key per test: the container's tables outlive each test body.
@@ -1156,7 +1175,7 @@ Postgres.describeWithDatabase("database", () => {
           expect(yield* automation.hasPending(resultId, "drive")).toBe(true);
           expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.some("pending"));
           expect(yield* automation.hasPending(resultId, "diagnose")).toBe(false);
-          const claimed = yield* automation.claim(crypto.randomUUID());
+          const claimed = yield* takePending(automation, crypto.randomUUID());
           expect(Option.isSome(claimed)).toBe(true);
           expect(yield* automation.hasPending(resultId, "drive")).toBe(false);
           if (Option.isSome(claimed)) {
@@ -1191,7 +1210,7 @@ Postgres.describeWithDatabase("database", () => {
         const firstServer = crypto.randomUUID();
         const secondServer = crypto.randomUUID();
         expect(yield* automation.findRunning(older.resultId)).toEqual(Option.none());
-        const claimed = yield* automation.claim(firstServer);
+        const claimed = yield* takePending(automation, firstServer);
         expect(Option.isSome(claimed)).toBe(true);
         if (Option.isSome(claimed)) {
           expect(claimed.value).toMatchObject({
@@ -1202,13 +1221,58 @@ Postgres.describeWithDatabase("database", () => {
           expect(claimed.value.startedAt).toBeInstanceOf(Date);
         }
         expect(yield* automation.findRunning(older.resultId)).toEqual(claimed);
-        const next = yield* automation.claim(secondServer);
+        const next = yield* takePending(automation, secondServer);
         expect(Option.isSome(next)).toBe(true);
         if (Option.isSome(next)) {
           expect(next.value).toMatchObject({ id: newer.id, serverId: secondServer });
         }
-        expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
+        expect(yield* takePending(automation, crypto.randomUUID())).toEqual(Option.none());
       }),
+    );
+
+    scoped.effect(
+      "AutomationStore nextPending leaves the row pending, and markRunning loses when abort landed first",
+      () =>
+        Effect.gen(function* () {
+          yield* emptyQueue;
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const other = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const enqueued = yield* automation.enqueue({
+            resultId: created.results[0].id,
+            action: "drive",
+          });
+          const selected = Option.getOrThrow(yield* automation.nextPending());
+          expect(selected).toMatchObject({
+            id: enqueued.id,
+            status: "pending",
+            serverId: null,
+            startedAt: null,
+          });
+          const serverId = crypto.randomUUID();
+          expect(yield* automation.markRunning(selected.id, serverId)).toBe(true);
+          expect(yield* automation.markRunning(selected.id, crypto.randomUUID())).toBe(false);
+          const running = Option.getOrThrow(yield* automation.findRunning(selected.resultId));
+          expect(running).toMatchObject({ status: "running", serverId });
+          expect(running.startedAt).toBeInstanceOf(Date);
+          const queued = yield* automation.enqueue({
+            resultId: other.results[0].id,
+            action: "drive",
+          });
+          expect(yield* automation.abortPending(queued.resultId, "drive")).toBe(true);
+          expect(yield* automation.markRunning(queued.id, crypto.randomUUID())).toBe(false);
+          expect(yield* automation.findRunning(queued.resultId)).toEqual(Option.none());
+        }),
     );
 
     // Queue order is mint, then diagnose, then drive, each oldest first. A diagnose still
@@ -1265,14 +1329,14 @@ Postgres.describeWithDatabase("database", () => {
           );
           const order: Array<string> = [];
           for (const _ of [0, 1, 2, 3]) {
-            const claimed = yield* automation.claim(crypto.randomUUID());
+            const claimed = yield* takePending(automation, crypto.randomUUID());
             expect(Option.isSome(claimed)).toBe(true);
             if (Option.isSome(claimed)) {
               order.push(claimed.value.id);
             }
           }
           expect(order).toEqual([olderDiagnose.id, newerDiagnose.id, oldDrive.id, newDrive.id]);
-          expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
+          expect(yield* takePending(automation, crypto.randomUUID())).toEqual(Option.none());
         }),
     );
 
@@ -1321,13 +1385,16 @@ Postgres.describeWithDatabase("database", () => {
             sql`update automation_jobs set created_at = now() - interval '2 minutes' where id = ${diagnose.id}`,
           ),
         );
-        const first = Option.getOrThrow(yield* automation.claim(crypto.randomUUID()));
-        expect(first.id).toBe(minted.id);
+        const first = Option.getOrThrow(yield* automation.nextPending());
+        expect(first).toMatchObject({ id: minted.id, status: "pending" });
         // A mint whose own reserve was 503 stays pending and is skipped for the rest of this tick.
-        yield* automation.unclaim(minted.id);
-        const second = Option.getOrThrow(yield* automation.claim(crypto.randomUUID(), [minted.id]));
+        const second = Option.getOrThrow(
+          yield* takePending(automation, crypto.randomUUID(), [minted.id]),
+        );
         expect(second.id).toBe(diagnose.id);
-        const third = Option.getOrThrow(yield* automation.claim(crypto.randomUUID(), [minted.id]));
+        const third = Option.getOrThrow(
+          yield* takePending(automation, crypto.randomUUID(), [minted.id]),
+        );
         expect(third.id).toBe(drive.id);
       }),
     );
@@ -1380,61 +1447,23 @@ Postgres.describeWithDatabase("database", () => {
               sql`update automation_jobs set created_at = now() - interval '1 minute' where id = ${thirdDrive.id}`,
             ),
           );
-          const running = yield* automation.claim(crypto.randomUUID());
+          const running = yield* takePending(automation, crypto.randomUUID());
           expect(Option.map(running, (job) => job.id)).toEqual(Option.some(firstDrive.id));
           const diagnose = yield* automation.enqueue({
             resultId: resultIds[0],
             action: "diagnose",
           });
           // The first result is busy: its diagnose waits, and the second drive is taken instead.
-          const next = yield* automation.claim(crypto.randomUUID());
+          const next = yield* takePending(automation, crypto.randomUUID());
           expect(Option.map(next, (job) => job.id)).toEqual(Option.some(secondDrive.id));
           expect(yield* automation.finish(firstDrive.id, "succeeded", null)).toBe(true);
           // Its drive closed, the diagnose goes before the drive that has waited longer.
-          const afterClose = yield* automation.claim(crypto.randomUUID());
+          const afterClose = yield* takePending(automation, crypto.randomUUID());
           expect(Option.map(afterClose, (job) => job.id)).toEqual(Option.some(diagnose.id));
-          const last = yield* automation.claim(crypto.randomUUID());
+          const last = yield* takePending(automation, crypto.randomUUID());
           expect(Option.map(last, (job) => job.id)).toEqual(Option.some(thirdDrive.id));
-          expect(yield* automation.claim(crypto.randomUUID())).toEqual(Option.none());
+          expect(yield* takePending(automation, crypto.randomUUID())).toEqual(Option.none());
         }),
-    );
-
-    scoped.effect("AutomationStore unclaim returns a running job to pending as it was", () =>
-      Effect.gen(function* () {
-        yield* emptyQueue;
-        const tests = yield* Tests.TestStore;
-        const automation = yield* Automation.AutomationStore;
-        const database = yield* Client.Database;
-        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
-        const created = yield* tests.createRun({
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: "http://127.0.0.1:42069",
-          definitions: [{ id: definition.id }],
-        });
-        const enqueued = yield* automation.enqueue({
-          resultId: created.results[0].id,
-          action: "drive",
-        });
-        const createdAt = enqueued.createdAt;
-        const serverId = crypto.randomUUID();
-        yield* automation.claim(serverId);
-        expect(yield* automation.unclaim(enqueued.id)).toBe(true);
-        const [row] = yield* database.run("select", (db) =>
-          db
-            .select()
-            .from(DbSchema.automationJobs)
-            .where(eq(DbSchema.automationJobs.id, enqueued.id)),
-        );
-        expect(row).toMatchObject({
-          status: "pending",
-          serverId: null,
-          startedAt: null,
-          finishedAt: null,
-          reason: null,
-        });
-        expect(row?.createdAt).toEqual(createdAt);
-        expect(yield* automation.unclaim(enqueued.id)).toBe(false);
-      }),
     );
 
     scoped.effect(
@@ -1475,7 +1504,7 @@ Postgres.describeWithDatabase("database", () => {
           // Closed once: a second abort finds nothing pending, and neither does one for a
           // job that has been claimed since.
           expect(yield* automation.abortPending(resultId, "diagnose")).toBe(false);
-          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, crypto.randomUUID()))).toBe(true);
           expect(yield* automation.abortPending(resultId, "drive")).toBe(false);
           expect(Option.isSome(yield* automation.findRunning(resultId))).toBe(true);
         }),
@@ -1497,7 +1526,7 @@ Postgres.describeWithDatabase("database", () => {
           resultId: created.results[0].id,
           action: "drive",
         });
-        const claimed = yield* automation.claim(crypto.randomUUID());
+        const claimed = yield* takePending(automation, crypto.randomUUID());
         expect(Option.isSome(claimed)).toBe(true);
         expect(yield* automation.findRunning(created.results[0].id)).toEqual(claimed);
         expect(yield* automation.finish(enqueued.id, "succeeded", null)).toBe(true);
@@ -1554,8 +1583,8 @@ Postgres.describeWithDatabase("database", () => {
             resultId: resultIds[1],
             action: "diagnose",
           });
-          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
-          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, crypto.randomUUID()))).toBe(true);
           yield* automation.finish(completedDrive.id, "succeeded", null);
           yield* automation.finish(completedDiagnose.id, "failed", "nope");
           yield* database.run("stamp", (db) =>
@@ -1565,8 +1594,8 @@ Postgres.describeWithDatabase("database", () => {
           );
           yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
           yield* automation.enqueue({ resultId: resultIds[3], action: "diagnose" });
-          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
-          expect(Option.isSome(yield* automation.claim(crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, crypto.randomUUID()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, crypto.randomUUID()))).toBe(true);
           yield* automation.enqueue({ resultId: resultIds[4], action: "drive" });
           yield* automation.enqueue({ resultId: resultIds[5], action: "diagnose" });
           const listed = yield* automation.listJobs(1);
@@ -1641,7 +1670,7 @@ Postgres.describeWithDatabase("database", () => {
           yield* automation.enqueue({ resultId, action: "drive" });
           // The client took the job and reserved a guest for the ticket: the reservation names
           // the qemu server before any session exists.
-          expect(Option.isSome(yield* automation.claim(client?.id ?? uuid()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, client?.id ?? uuid()))).toBe(true);
           yield* servers.routeAgent(ticket, qemuUrl);
           const reserved = yield* automation.listJobs(0);
           expect(
@@ -1684,7 +1713,7 @@ Postgres.describeWithDatabase("database", () => {
           const ticket = `PLC-${uuid().slice(0, 8)}`;
           yield* tests.setLinearId(resultId, ticket);
           yield* automation.enqueue({ resultId, action: "drive" });
-          expect(Option.isSome(yield* automation.claim(uuid()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, uuid()))).toBe(true);
           const sessionId = uuid();
           yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
           yield* sessions.registerAgent(ticket, sessionId);
@@ -1775,8 +1804,8 @@ Postgres.describeWithDatabase("database", () => {
           const drive = yield* automation.enqueue({ resultId: resultIds[0], action: "drive" });
           yield* automation.enqueue({ resultId: resultIds[1], action: "diagnose" });
           // Claim takes the diagnose first, then the drive.
-          expect(Option.isSome(yield* automation.claim(uuid()))).toBe(true);
-          expect(Option.isSome(yield* automation.claim(uuid()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, uuid()))).toBe(true);
+          expect(Option.isSome(yield* takePending(automation, uuid()))).toBe(true);
           yield* automation.enqueue({ resultId: resultIds[2], action: "drive" });
           yield* automation.enqueue({ resultId: resultIds[3], action: "drive" });
           const listed = yield* automation.listJobs(0);
