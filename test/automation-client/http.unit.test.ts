@@ -8,6 +8,7 @@ import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
+import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as Reporter from "../support/reporter.ts";
@@ -33,6 +34,8 @@ type Fixture = {
   // Completed once a QEMU reserve is asked. The request crosses a real socket, so yielding
   // is no promise it has arrived.
   readonly reachedQemu?: Deferred.Deferred<void>;
+  // When set, each QEMU reserve fails with it once asked.
+  readonly qemuFailure?: Errors.Internal;
 };
 
 // Room for the two runs some tests hold at once; the capacity test passes 1.
@@ -60,6 +63,10 @@ const qemuRecording =
       if (fixed.holdQemu !== undefined) {
         yield* Deferred.await(fixed.holdQemu);
       }
+      if (fixed.qemuFailure !== undefined) {
+        return yield* fixed.qemuFailure;
+      }
+      return yield* Effect.void;
     });
 
 const serve = (fixed: Fixture) =>
@@ -454,8 +461,39 @@ describe("POST /run unhappy path", () => {
     }),
   );
 
+  it.effect("a reserve whose QEMU call fails is 500 and reaches Sentry with its cause", () =>
+    Effect.gen(function* () {
+      const unreachable = Errors.ProxyUnreachable.make({
+        message: "POST http://127.0.0.1:55555/reserve failed",
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:55555"),
+      });
+      const fixed: Fixture = {
+        ...fixture(),
+        qemuFailure: Errors.Internal.make({ cause: unreachable, agentId: TICKET }),
+      };
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const refused = yield* reserve(http);
+        expect(refused.status).toBe(500);
+        expect(yield* refused.json).toEqual({ error: "internal error" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.qemu).toEqual([TICKET]);
+      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: connect ECONNREFUSED 127.0.0.1:55555",
+          location: "automation-client",
+          agentId: TICKET,
+          skipSentry: false,
+          cause: unreachable,
+        },
+      ]);
+    }),
+  );
+
   it.effect(
-    "a second reserve while one is in flight on this server is 503 and does not ask QEMU",
+    "a second reserve while one is in flight on this server is 503, does not ask QEMU and skips Sentry",
     () =>
       Effect.gen(function* () {
         const holdQemu = yield* Deferred.make<void>();
@@ -482,7 +520,7 @@ describe("POST /run unhappy path", () => {
             text: "POST /reserve failed: a reserve is already in flight",
             location: "automation-client",
             agentId: "OLI-99",
-            skipSentry: false,
+            skipSentry: true,
             cause: undefined,
           },
         ]);
@@ -564,15 +602,15 @@ describe("POST /run unhappy path", () => {
           yield* second.exit(0);
           expect((yield* Fiber.join(accepted)).status).toBe(200);
         }).pipe(Effect.provide(serve(fixed)));
-        // The refusal names the ticket it turned away; a 503 is the dispatcher's problem to place
-        // elsewhere, so unlike a 4xx it reaches Sentry.
+        // The refusal names the ticket it turned away; a full client is an answer the dispatcher
+        // places elsewhere, so it skips Sentry.
         expect(fixed.log.lines).toEqual([
           {
             level: "error",
             text: "POST /reserve failed: at capacity: max-jobs is 1",
             location: "automation-client",
             agentId: "OLI-99",
-            skipSentry: false,
+            skipSentry: true,
             cause: undefined,
           },
           {

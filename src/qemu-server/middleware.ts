@@ -123,6 +123,7 @@ const detail = (error: Errors.ApiError): string =>
     : error.message;
 
 // A refusal (< 500) is the caller's problem and skips Sentry; a failure carries its cause there.
+// A full machine's 503 is an answer, not a failure: the dispatcher places the work elsewhere.
 // A second reserve for an id that already holds one is this process breaking its own contract,
 // so that 400 is reported.
 const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.Report => {
@@ -130,7 +131,7 @@ const report = (error: Errors.ApiError, fallback: Log.ProcessAttribution): Log.R
   if (error._tag === "BadRequest" && error.message === "already reserved") {
     return who;
   }
-  return Errors.apiStatus(error) < 500
+  return error._tag === "AtCapacity" || Errors.apiStatus(error) < 500
     ? { ...who, skipSentry: true }
     : { ...who, cause: "cause" in error ? error.cause : undefined };
 };

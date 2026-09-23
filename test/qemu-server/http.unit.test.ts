@@ -1260,55 +1260,60 @@ describe("Sessions failures", () => {
     }),
   );
 
-  it.effect("an AtCapacity from reserve is 503 with its message, attributed to the agent", () =>
-    Effect.gen(function* () {
-      const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({
-          reserve: (agent) =>
-            Effect.fail(
-              Errors.AtCapacity.make({
-                message: "at capacity: max-jobs is 2",
-                agentId: agent,
-              }),
-            ),
-        }),
-      });
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        const error = yield* Effect.flip(
-          api.Sessions.reserve({
-            payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
+  it.effect(
+    "an AtCapacity from reserve is 503 with its message, attributed to the agent, and skips Sentry",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture({
+          sessions: FakeSessions.fakeSessions({
+            reserve: (agent) =>
+              Effect.fail(
+                Errors.AtCapacity.make({
+                  message: "at capacity: max-jobs is 2",
+                  agentId: agent,
+                }),
+              ),
           }),
-        );
-        expect(error).toMatchObject({ _tag: "AtCapacity", message: "at capacity: max-jobs is 2" });
-        const http = yield* HttpClient.HttpClient;
-        const raw = yield* http.post("/reserve", {
-          headers: { authorization: `Bearer ${TOKEN}` },
-          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
         });
-        expect(raw.status).toBe(503);
-        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 2" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toEqual([
-        {
-          level: "error",
-          text: "POST /reserve failed: at capacity: max-jobs is 2",
-          location: "server",
-          agentId: AGENT_ID,
-          skipSentry: false,
-          cause: undefined,
-        },
-        {
-          level: "error",
-          text: "POST /reserve failed: at capacity: max-jobs is 2",
-          location: "server",
-          agentId: AGENT_ID,
-          skipSentry: false,
-          cause: undefined,
-        },
-      ]);
-      expect(fixed.reporter.reported).toEqual([]);
-    }),
+        yield* Effect.gen(function* () {
+          const api = yield* client;
+          const error = yield* Effect.flip(
+            api.Sessions.reserve({
+              payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
+            }),
+          );
+          expect(error).toMatchObject({
+            _tag: "AtCapacity",
+            message: "at capacity: max-jobs is 2",
+          });
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: `Bearer ${TOKEN}` },
+            body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
+          });
+          expect(raw.status).toBe(503);
+          expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 2" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /reserve failed: at capacity: max-jobs is 2",
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: true,
+            cause: undefined,
+          },
+          {
+            level: "error",
+            text: "POST /reserve failed: at capacity: max-jobs is 2",
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: true,
+            cause: undefined,
+          },
+        ]);
+        expect(fixed.reporter.reported).toEqual([]);
+      }),
   );
 
   it.effect(
@@ -1613,6 +1618,45 @@ describe("defects", () => {
           agent_id: AGENT_ID,
         });
       }),
+  );
+
+  it.effect("the real Log never reports an AtCapacity from reserve, but a reserve defect", () =>
+    Effect.gen(function* () {
+      const defect = new Error("connect ECONNREFUSED 127.0.0.1:5432");
+      const fixed = fixture({
+        sessions: FakeSessions.fakeSessions({
+          reserve: (agent) =>
+            agent === AGENT_ID
+              ? Effect.fail(
+                  Errors.AtCapacity.make({ message: "at capacity: max-jobs is 2", agentId: agent }),
+                )
+              : Effect.die(defect),
+        }),
+      });
+      const stdout = Log.Log.layerStdout.pipe(Layer.provide(fixed.reporter.layer));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const full = yield* http.post("/reserve", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
+        });
+        expect(full.status).toBe(503);
+        expect(yield* full.json).toEqual({ error: "at capacity: max-jobs is 2" });
+        const broken = yield* http.post("/reserve", {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          body: HttpBody.jsonUnsafe({ agent: OTHER_AGENT_ID }),
+        });
+        expect(broken.status).toBe(500);
+        expect(yield* broken.json).toEqual({ error: "internal error" });
+      }).pipe(Effect.provide(serve(fixed, stdout)));
+      expect(fixed.reporter.reported).toHaveLength(1);
+      expect(fixed.reporter.reported[0]?.error.message).toBe(
+        `POST /reserve failed: ${Cause.pretty(Cause.die(defect))}`,
+      );
+      expect(Render.errorDetail(fixed.reporter.reported[0]?.error.cause)).toBe(
+        "connect ECONNREFUSED 127.0.0.1:5432",
+      );
+    }),
   );
 });
 
