@@ -1170,7 +1170,7 @@ const installOpencode = (script: string): string => {
 
 describeServing("automation server restart", () => {
   it.live(
-    "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and fails it",
+    "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and errors it",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1203,13 +1203,13 @@ describeServing("automation server restart", () => {
           expect(aborts.filter((body) => ticketOf(body) === linearId)).toEqual([]);
 
           second = spawnAutomationServer(["--port", String(await freePort())]);
-          const job = await waitForJob(resultId, "failed", 30_000);
-          expect(job).toMatchObject({ status: "failed", reason: RESTARTED });
+          const job = await waitForJob(resultId, "errored", 30_000);
+          expect(job).toMatchObject({ status: "errored", reason: RESTARTED });
           expect(job.serverId).toBe(running.serverId);
           expect(aborts.map(ticketOf).filter((ticket) => ticket === linearId)).toEqual([linearId]);
-          await second.waitFor(new RegExp(`drive failed; ${RESTARTED}`));
+          await second.waitFor(new RegExp(`drive errored; ${RESTARTED}`));
           expect(lines(second.stdout()), second.stdout()).toContain(
-            `[global] automation: error: drive failed; ${RESTARTED}`,
+            `[global] automation: error: drive errored; ${RESTARTED}`,
           );
         } finally {
           await stop(first);
@@ -1377,7 +1377,7 @@ describeServing("automation server restart", () => {
   );
 
   it.live(
-    "a drive left running before its /run started: the next automation server gives back the reservation a real automation client holds, its guest slot with it, and fails the drive",
+    "a drive left running before its /run started: the next automation server gives back the reservation a real automation client holds, its guest slot with it, and errors the drive",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1417,8 +1417,8 @@ describeServing("automation server restart", () => {
           await seedRunningJob(resultId, serverId);
 
           automationServer = spawnAutomationServer(["--port", String(await freePort())]);
-          const job = await waitForJob(resultId, "failed", 30_000);
-          expect(job).toMatchObject({ status: "failed", reason: RESTARTED, serverId });
+          const job = await waitForJob(resultId, "errored", 30_000);
+          expect(job).toMatchObject({ status: "errored", reason: RESTARTED, serverId });
           expect(qemuCalls).toEqual(["/reserve", "/relinquish"]);
           const refused = await request(
             clientPort,
@@ -1444,7 +1444,7 @@ describeServing("automation server restart", () => {
   );
 
   it.live(
-    "SIGKILL after the drive is running and before Linear moves to In Progress leaves it running; the next automation server stops it at its automation client and fails it, and /run never starts",
+    "SIGKILL after the drive is running and before Linear moves to In Progress leaves it running; the next automation server stops it at its automation client and errors it, and /run never starts",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1518,13 +1518,17 @@ describeServing("automation server restart", () => {
           second = spawnAutomationServer(["--port", String(await freePort())], {
             LINEAR_API_URL: linear.url,
           });
-          const job = await waitForJob(resultId, "failed", 30_000);
-          expect(job).toMatchObject({ status: "failed", reason: RESTARTED });
+          const job = await waitForJob(resultId, "errored", 30_000);
+          expect(job).toMatchObject({ status: "errored", reason: RESTARTED });
           expect(job.serverId).toBe(running.serverId);
           expect(aborts.map(ticketOf).filter((ticket) => ticket === linearId)).toEqual([linearId]);
           expect(runs).toBe(0);
+          const deadline = Date.now() + 15_000;
+          while (!updates.includes("state-Failed") && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
           expect(updates).toContain("state-Failed");
-          await second.waitFor(new RegExp(`drive failed; ${RESTARTED}`));
+          await second.waitFor(new RegExp(`drive errored; ${RESTARTED}`));
         } finally {
           await stop(first);
           if (second !== undefined) {
@@ -1540,7 +1544,7 @@ describeServing("automation server restart", () => {
   );
 
   it.live(
-    "a drive left running on an automation client that refuses connections is reported and failed, and the automation server keeps serving",
+    "a drive left running on an automation client that refuses connections is reported and errored, and the automation server keeps serving",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1551,8 +1555,8 @@ describeServing("automation server restart", () => {
         const port = await freePort();
         const process = spawnAutomationServer(["--port", String(port)]);
         try {
-          const job = await waitForJob(resultId, "failed", 30_000);
-          expect(job).toMatchObject({ status: "failed", reason: RESTARTED, serverId });
+          const job = await waitForJob(resultId, "errored", 30_000);
+          expect(job).toMatchObject({ status: "errored", reason: RESTARTED, serverId });
           await process.waitFor(
             new RegExp(`inherited abort failed; ${url.replaceAll(".", "\\.")}`),
           );

@@ -32,8 +32,10 @@ const aborted: Outcome = {
   reason: "automation server shutting down",
 };
 
+// The automation server that owned the row is gone. That is the harness, the same way a qemu
+// server restart errors the sessions it left, not a run that failed.
 const restarted: Outcome = {
-  status: "failed",
+  status: "errored",
   reason: "automation server restarted",
 };
 
@@ -41,6 +43,12 @@ const succeeded: Outcome = { status: "succeeded", reason: null };
 
 const failedFrom = (cause: Cause.Cause<unknown>): Outcome => ({
   status: "failed",
+  reason: Render.errorDetail(Cause.squash(cause)),
+});
+
+// The harness could not place the job, so the run never started.
+const erroredFrom = (cause: Cause.Cause<unknown>): Outcome => ({
+  status: "errored",
   reason: Render.errorDetail(Cause.squash(cause)),
 });
 
@@ -174,25 +182,26 @@ const place = Effect.fn("place")(function* (
 // A driver's last act is ./ctrl test-results. Until then its result is pending or running.
 const isOpen = (status: string): boolean => status === "pending" || status === "running";
 
-// What the job made of a /run that answered 200.
+// What the job made of a /run that answered 200. An open result is the run: the driver quit.
+// A missing row is a defect, and a database error reading it fails this effect.
 const judge = Effect.fn("judge")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
   // A diagnose is judged by nothing here: the result was closed before it was queued.
   if (job.action === "diagnose") {
-    return yield* Effect.void;
+    return succeeded;
   }
-  // opencode exiting 0 with the result still open is an agent that quit early, and the job says
-  // so rather than reading as a run.
   const after = yield* tests.findResult(job.resultId);
   if (Option.isNone(after)) {
     return yield* Effect.die(new Error(`judge: result ${job.resultId} vanished during the drive`));
   }
   if (isOpen(after.value.status)) {
-    return yield* Errors.AutomationClientError.make({
-      message: `driver exited; result ${job.resultId} is ${after.value.status}`,
-    });
+    const open: Outcome = {
+      status: "failed",
+      reason: `driver exited; result ${job.resultId} is ${after.value.status}`,
+    };
+    return open;
   }
-  return yield* Effect.void;
+  return succeeded;
 });
 
 const logOutcome = Effect.fn("logOutcome")(function* (
@@ -207,6 +216,10 @@ const logOutcome = Effect.fn("logOutcome")(function* (
   }
   if (outcome.status === "aborted") {
     yield* log.info(`${job.action} aborted`, attr);
+    return;
+  }
+  if (outcome.status === "errored") {
+    yield* log.error(`${job.action} errored; ${outcome.reason}`, attr);
     return;
   }
   yield* log.error(`${job.action} failed; ${outcome.reason}`, attr);
@@ -293,9 +306,9 @@ const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
 // closing the result, it does on its own. A diagnose's result was closed before it was
 // queued, so it says nothing about the diagnose. Every other row is stopped at the
 // automation client that took it, so opencode is killed or the reservation and its qemu slot
-// are given back, then failed, and its ticket moved to Failed. A 404 is an automation client
+// are given back, then errored, and its ticket moved to Failed. A 404 is an automation client
 // holding nothing for the ticket, which is reported. One that does not answer is reported and
-// the job is failed anyway; nothing asks again. No ticket, no automation client recorded, or
+// the job is errored anyway; nothing asks again. No ticket, no automation client recorded, or
 // that client's row gone: nothing to ask. Once the row is closed it is no longer found at the
 // next startup, so the close and the Linear move finish even when a shutdown lands between them.
 const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.AutomationJobRow) {
@@ -351,8 +364,9 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
 // responses are never in flight. The row stays pending until a client has reserved;
 // pending -> running names that client. A drive or mint is then moved to In Progress,
 // three attempts, and only then does /run start. A diagnose is left for its driver to
-// move to In Review. A move that still fails gives the reservation back and fails the
-// job. The move does not hold the next reservation, and neither does /run. A 503 or 409
+// move to In Review. A move that still fails gives the reservation back and errors the
+// job: Linear did not move, so the run never started. The move does not hold the next
+// reservation, and neither does /run. A 503 or 409
 // from a client is ordinary and the next client
 // is asked; when none can take the job the row stays pending for a later pass. Any
 // other reserve failure is logged and the next client is asked. A mint's own refusal
@@ -360,7 +374,7 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
 // the running write are uninterruptible; the HTTP wait is restored so SIGTERM can
 // abandon a reserve that has not landed. A tick that fails is one error line; the next
 // tick runs. Before the first tick, every running row the last automation server left is
-// closed, one at a time: a finished drive or mint succeeded, any other stopped and failed. A
+// closed, one at a time: a finished drive or mint succeeded, any other stopped and errored. A
 // row that fails is one error line and the next row is tried, and a listing that fails is one
 // error line. Dispatch starts either way. A shutdown asks each automation client to stop the
 // jobs it runs, all at once, and closes each aborted once its client answers.
@@ -402,7 +416,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               onFailure: (cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? { _tag: "interrupted" as const }
-                  : { _tag: "closed" as const, outcome: failedFrom(cause) },
+                  : { _tag: "closed" as const, outcome: erroredFrom(cause) },
             }),
           );
           if (placed._tag === "interrupted") {
@@ -456,9 +470,9 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               cause: written.failure,
             });
             yield* releaseReservation(placed.placement.url, placed.placement.ticket);
-            // The reservation is gone. Record the database failure on the row, three
-            // attempts. A successful write is not logged again.
-            yield* store.finish(job.id, "failed", "DATABASE FAILURE").pipe(
+            // The reservation is gone. The database failed the harness, so the row is
+            // errored, three attempts. A successful write is not logged again.
+            yield* store.finish(job.id, "errored", "DATABASE FAILURE").pipe(
               Effect.tapError((error) =>
                 log.error(`failure write failed; ${placed.placement.url}`, {
                   location: Log.Locations.automation,
@@ -517,7 +531,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
                     cause: error,
                   });
                   yield* releaseReservation(placement.url, placement.ticket);
-                  yield* closeJob(job, { status: "failed", reason: detail(error) });
+                  yield* closeJob(job, { status: "errored", reason: detail(error) });
                   return yield* Effect.void;
                 }
               }
@@ -530,17 +544,30 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               ).pipe(
                 Effect.andThen(judge(job)),
                 Effect.matchCauseEffect({
-                  onSuccess: () => closeJob(job, succeeded),
+                  onSuccess: (outcome) => closeJob(job, outcome),
                   onFailure: (cause) => {
                     if (Cause.hasInterruptsOnly(cause)) {
                       return stopAtShutdown(job, placement);
                     }
                     const error = Cause.findErrorOption(cause);
-                    return Option.isSome(error) &&
+                    // 409 is a run POST /abort ended: that abort closes the row.
+                    if (
+                      Option.isSome(error) &&
                       error.value._tag === "AutomationClientError" &&
                       error.value.status === 409
-                      ? Effect.void
-                      : closeJob(job, failedFrom(cause));
+                    ) {
+                      return Effect.void;
+                    }
+                    // 500 is the client reporting that the run failed. No answer, any other
+                    // status, a database error reading the result, or a vanished row is the harness.
+                    if (
+                      Option.isSome(error) &&
+                      error.value._tag === "AutomationClientError" &&
+                      error.value.status === 500
+                    ) {
+                      return closeJob(job, failedFrom(cause));
+                    }
+                    return closeJob(job, erroredFrom(cause));
                   },
                 }),
               );
