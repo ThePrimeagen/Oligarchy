@@ -436,6 +436,10 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   always the same one.
 - Configuration is either a hardcoded constant or a required value, never a silent optional; CLI
   knobs (`isTTY`, `FORCE_COLOR`, `TERM`, `execPath`) are read in `main.ts` and `render.ts` only.
+- The harness's non-secret configuration is the checked-in `oligarchy.json`, read from beside
+  the package by `src/harness/config.ts`. `load` fails when the file is missing or malformed,
+  and the message names the field. The OpenRouter token stays an environment variable, and a
+  token key in the file is refused.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 
