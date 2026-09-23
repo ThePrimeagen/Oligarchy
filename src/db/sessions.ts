@@ -56,6 +56,53 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
       );
     });
 
+    // A qemu server that died left its sessions downloading or running, with nothing to end
+    // them. The one that comes back on its url fails every such row routed to it, and the agent
+    // runs on them, in one transaction, and gets back their ids.
+    const failRoutedSessions = Effect.fn("db.failRoutedSessions")(function* (
+      serverUrl: string,
+      reason: string,
+    ) {
+      const endedAt = sql`now()`;
+      return yield* database.transaction("failRoutedSessions", (tx) =>
+        Effect.gen(function* () {
+          const failed = yield* Client.attempt("failRoutedSessions", () =>
+            tx
+              .update(DbSchema.sessions)
+              .set({ status: "failed", reason, endedAt })
+              .where(
+                and(
+                  inArray(DbSchema.sessions.status, ["downloading", "running"]),
+                  inArray(
+                    DbSchema.sessions.id,
+                    tx
+                      .select({ id: DbSchema.sessionServers.sessionId })
+                      .from(DbSchema.sessionServers)
+                      .where(eq(DbSchema.sessionServers.serverUrl, serverUrl)),
+                  ),
+                ),
+              )
+              .returning({ id: DbSchema.sessions.id }),
+          );
+          const ids = failed.map((row) => row.id);
+          if (ids.length > 0) {
+            yield* Client.attempt("failRoutedSessions", () =>
+              tx
+                .update(DbSchema.agentRuns)
+                .set({ endedAt })
+                .where(
+                  and(
+                    inArray(DbSchema.agentRuns.sessionId, ids),
+                    isNull(DbSchema.agentRuns.endedAt),
+                  ),
+                ),
+            );
+          }
+          return ids;
+        }),
+      );
+    });
+
     const getSessionStatus = Effect.fn("db.getSessionStatus")(function* (id: string) {
       const rows = yield* database.run("getSessionStatus", (db) =>
         db
@@ -134,6 +181,7 @@ export class SessionStore extends Context.Service<SessionStore>()("@oligarchy/db
       insertSession,
       sessionRunning,
       endSession,
+      failRoutedSessions,
       getSessionStatus,
       getSession,
       sessionExists,
