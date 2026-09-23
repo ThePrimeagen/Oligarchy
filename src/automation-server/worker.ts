@@ -295,9 +295,9 @@ const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
 // automation client that took it, so opencode is killed or the reservation and its qemu slot
 // are given back, then failed, and its ticket moved to Failed. A 404 is an automation client
 // holding nothing for the ticket, which is reported. One that does not answer is reported and
-// the job is failed anyway; nothing asks again. No ticket, no automation client recorded, or that client's row
-// gone: nothing to ask. Once the row is closed it is no longer found at the next startup, so
-// the close and the Linear move finish even when a shutdown lands between them.
+// the job is failed anyway; nothing asks again. No ticket, no automation client recorded, or
+// that client's row gone: nothing to ask. Once the row is closed it is no longer found at the
+// next startup, so the close and the Linear move finish even when a shutdown lands between them.
 const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
   const servers = yield* Servers.ServerStore;
@@ -484,37 +484,33 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             nextUrl = following.url;
           }
           // The reservation already returned. /run does not hold the next one. The fiber
-          // lives on the runs scope so a shutdown interrupts it. Do not startImmediately:
-          // forkIn adds the interrupt finalizer only after that evaluate returns, and /run
-          // parks on the HTTP wait. Only the /run wait is interruptible: once /run answered,
-          // a shutdown waits for the result to judge the job.
+          // lives on the runs scope so a shutdown interrupts it. It starts uninterruptible: a
+          // shutdown that lands before it runs is held until the /run wait, the one
+          // interruptible part, so the job is still stopped at its automation client. Once
+          // /run answered, a shutdown waits for the result to judge the job.
           const placement = placed.placement;
           yield* Effect.forkIn(
-            Effect.uninterruptibleMask((release) =>
-              release(
-                AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
-              ).pipe(
-                Effect.andThen(judge(job)),
-                Effect.matchCauseEffect({
-                  onSuccess: () => closeJob(job, succeeded),
-                  onFailure: (cause) =>
-                    Cause.hasInterruptsOnly(cause)
-                      ? stopAtShutdown(job, placement)
-                      : closeJob(job, failedFrom(cause)),
-                }),
-                Effect.catchCause((cause) => {
-                  if (Cause.hasInterruptsOnly(cause)) {
-                    return Effect.void;
-                  }
-                  const error = Cause.squash(cause);
-                  return log.error(`dispatch job failed: ${detail(error)}`, {
-                    location: Log.Locations.automation,
-                    cause: error,
-                  });
-                }),
-              ),
+            Effect.interruptible(
+              AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
+            ).pipe(
+              Effect.andThen(judge(job)),
+              Effect.matchCauseEffect({
+                onSuccess: () => closeJob(job, succeeded),
+                onFailure: (cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? stopAtShutdown(job, placement)
+                    : closeJob(job, failedFrom(cause)),
+              }),
+              Effect.catchCause((cause) => {
+                const error = Cause.squash(cause);
+                return log.error(`dispatch job failed: ${detail(error)}`, {
+                  location: Log.Locations.automation,
+                  cause: error,
+                });
+              }),
             ),
             runs,
+            { uninterruptible: true },
           );
         }
       }),

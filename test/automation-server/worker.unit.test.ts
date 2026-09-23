@@ -2307,7 +2307,101 @@ const twoRunning = (fixed: Harness, http: FakeHttp.Recorder) =>
     return scope;
   });
 
+// The fake automation store, with some of its methods wrapped around its own.
+const wrapped = (
+  automation: Stores.FakeAutomationStore,
+  wrap: (
+    store: typeof Automation.AutomationStore.Service,
+  ) => Partial<typeof Automation.AutomationStore.Service>,
+): Stores.FakeAutomationStore => ({
+  jobs: automation.jobs,
+  layer: Layer.effect(Automation.AutomationStore)(
+    Effect.gen(function* () {
+      const store = yield* Automation.AutomationStore;
+      return Automation.AutomationStore.of({ ...store, ...wrap(store) });
+    }),
+  ).pipe(Layer.provide(automation.layer)),
+});
+
+// Every request but /abort waits forever; /abort is ok.
+const stoppable = reserving((_request, url) =>
+  url.pathname === "/abort" ? FakeHttp.json({ ok: "true" }) : Effect.never,
+);
+
 describe("a shutdown with drives running", () => {
+  it.effect(
+    "a shutdown that lands while the running write commits still stops the drive at its automation client",
+    () =>
+      Effect.gen(function* () {
+        const writing = yield* Deferred.make<void>();
+        const written = yield* Deferred.make<void>();
+        const fixed = harness(
+          FakeLinear.fakeLinear(),
+          wrapped(Stores.fakeAutomationStore(), (store) => ({
+            markRunning: (id, serverId) =>
+              store.markRunning(id, serverId).pipe(
+                Effect.tap(() => Deferred.succeed(writing, undefined)),
+                Effect.tap(() => Deferred.await(written)),
+              ),
+          })),
+        );
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(stoppable);
+        const scope = yield* start(fixed, http.layer);
+        yield* Deferred.await(writing);
+        const shutdown = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
+        yield* Deferred.succeed(written, undefined);
+        yield* Fiber.join(shutdown);
+        expect(sentTo(http, "/abort")).toEqual([`${URL}/abort`]);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "aborted",
+          reason: SHUTTING_DOWN,
+        });
+      }),
+  );
+
+  it.effect("a shutdown ends only once the aborted row is written", () =>
+    Effect.gen(function* () {
+      const writing = yield* Deferred.make<void>();
+      const written = yield* Deferred.make<void>();
+      const fixed = harness(
+        FakeLinear.fakeLinear(),
+        wrapped(Stores.fakeAutomationStore(), (store) => ({
+          finish: (id, status, reason) =>
+            Deferred.succeed(writing, undefined).pipe(
+              Effect.andThen(Deferred.await(written)),
+              Effect.andThen(store.finish(id, status, reason)),
+            ),
+        })),
+      );
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(stoppable);
+      const scope = yield* start(fixed, http.layer);
+      yield* eventually(() => sentTo(http, "/run").length === 1, "the drive running");
+      let closed = false;
+      const shutdown = yield* Scope.close(scope, Exit.void).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            closed = true;
+          }),
+        ),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(writing);
+      expect(sentTo(http, "/abort")).toEqual([`${URL}/abort`]);
+      expect(closed).toBe(false);
+      expect(fixed.automation.jobs[0]?.status).toBe("running");
+      yield* Deferred.succeed(written, undefined);
+      yield* Fiber.join(shutdown);
+      expect(closed).toBe(true);
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "aborted", reason: SHUTTING_DOWN });
+    }),
+  );
+
   it.effect(
     "stops every drive at its automation client at once, and closes each aborted only once it answers",
     () =>
@@ -2595,23 +2689,16 @@ const runningRows = (automation: Stores.FakeAutomationStore) =>
 // the largest is the most the database ever held at once.
 const countingRunning = (automation = Stores.fakeAutomationStore()) => {
   const afterEachWrite: Array<number> = [];
-  const layer = Layer.effect(Automation.AutomationStore)(
-    Effect.gen(function* () {
-      const store = yield* Automation.AutomationStore;
-      return Automation.AutomationStore.of({
-        ...store,
-        markRunning: (id, serverId) =>
-          store.markRunning(id, serverId).pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                afterEachWrite.push(runningRows(automation).length);
-              }),
-            ),
-          ),
-      });
-    }),
-  ).pipe(Layer.provide(automation.layer));
-  const counted: Stores.FakeAutomationStore = { jobs: automation.jobs, layer };
+  const counted = wrapped(automation, (store) => ({
+    markRunning: (id, serverId) =>
+      store.markRunning(id, serverId).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            afterEachWrite.push(runningRows(automation).length);
+          }),
+        ),
+      ),
+  }));
   return { afterEachWrite, automation: counted };
 };
 
