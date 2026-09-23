@@ -38,8 +38,9 @@ const Heading: FC<{ follow: SessionFollow }> = ({ follow }) => (
 );
 
 // A step line only while an intent is still open and the definition actually lists steps. The
-// place is 1-based and walks every intent up to the open one, so a line the list repeats is
-// the copy still ahead. An open intent that is not one of those steps is a dash.
+// place is 1-based and walks every intent still in the feed, so a line the list repeats is the
+// copy still ahead. An earlier copy that has scrolled off the feed is not there to pass. An
+// open intent that is not one of those steps is a dash.
 const Step: FC<{ follow: SessionFollow }> = ({ follow }) => {
   const steps = stepsOf(follow.instruction);
   const intents = follow.events.flatMap((event) => (event.kind === "intent" ? [event] : []));

@@ -54,10 +54,10 @@ export const indexOf = (steps: ReadonlyArray<string>, message: string): number =
 // 1-based place of the last message, walking the earlier ones first. A repeated line takes
 // the next copy still ahead, so the second "Click Style." is not the first. A message that
 // matches nothing still ahead is not a step: the last one is then 0, and an earlier one
-// leaves the walk where it was.
+// leaves the walk where it was. The caller hands the intents it still has; one that has
+// scrolled off that list is not there to pass.
 export const placeOf = (steps: ReadonlyArray<string>, messages: ReadonlyArray<string>): number => {
   let cursor = 0;
-  let place = 0;
   for (const [index, message] of messages.entries()) {
     const wanted = stepText(message);
     const at = wanted.length === 0 ? -1 : steps.indexOf(wanted, cursor);
@@ -68,7 +68,6 @@ export const placeOf = (steps: ReadonlyArray<string>, messages: ReadonlyArray<st
       continue;
     }
     cursor = at + 1;
-    place = cursor;
   }
-  return place;
+  return cursor;
 };

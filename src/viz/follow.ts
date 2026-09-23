@@ -240,7 +240,8 @@ const intentPiece = (text: string, failed: boolean): Text.Piece => ({
 });
 
 // On a ticket the pane is the open step, not the session's history: the place of that line in
-// the ActionList, the line itself, and only the actions started under it.
+// the ActionList, the line itself, and only the actions started under it. The place walks the
+// intents still in the follow.
 export const ticketRows = (
   view: Full,
   steps: ReadonlyArray<string>,
@@ -259,7 +260,7 @@ export const ticketRows = (
       saidSteps.push(entry.name);
     }
   }
-  const place = intent === undefined ? 0 : Steps.placeOf(steps, saidSteps);
+  const place = Steps.placeOf(steps, saidSteps);
   const indexText =
     intent !== undefined && place === 0
       ? `—/${String(steps.length)}`
