@@ -237,11 +237,11 @@ flowchart TB
 
 - [ ] Add rendering tests for each business state without asserting presentation details.
 - [ ] Add query tests that classify an unowned inherited row as stale rather than live.
-- [ ] Keep the durable job `pending` throughout reservation attempts.
-- [ ] Change the durable job to `running` only after the automation client and required QEMU
+- [x] Keep the durable job `pending` throughout reservation attempts.
+- [x] Change the durable job to `running` only after the automation client and required QEMU
       capacity have both been reserved.
 - [ ] Show `pending`, `running`, `guest running`, and inherited failure separately.
-- [ ] Count dashboard `running` only when reservations were confirmed and the database transition
+- [x] Count dashboard `running` only when reservations were confirmed and the database transition
       succeeded.
 - [ ] Show queued depth separately from concurrency so `pending 29` is not presented as a
       six-slot violation.
@@ -270,22 +270,26 @@ flowchart TB
 
 ## 10. Make placement failures recoverable
 
-- [ ] Add a worker test that one unreachable automation client does not fail the job while another
+- [x] Add a worker test that one unreachable automation client does not fail the job while another
       live client can accept it.
 - [ ] Add a proxy test for a QEMU server dying between probe and reserve.
-- [ ] Add a test that every full automation client and QEMU server leaves the job pending.
-- [ ] Add a test that every not-minted QEMU server leaves the drive pending while setup proceeds.
-- [ ] Add a test that an unexpected failure from every server reports each failure to Sentry and
+- [x] Add a test that every full automation client and QEMU server leaves the job pending.
+- [x] Add a test that every not-minted QEMU server leaves the drive pending while setup proceeds.
+- [x] Add a test that an unexpected failure from every server reports each failure to Sentry and
       still leaves the job pending.
-- [ ] Add a test that expected full and not-minted answers do not report to Sentry.
-- [ ] Try the remaining eligible automation clients after a transient reserve failure.
-- [ ] Try the remaining eligible QEMU servers after a selected server fails its reserve request.
-- [ ] Never terminalize a job or move its Linear issue because placement was unavailable.
-- [ ] Report every reserve failure other than full or not minted to Sentry with the server URL,
+- [x] Add a test that expected full and not-minted answers do not report to Sentry.
+- [x] Try the remaining eligible automation clients after a transient reserve failure.
+- [x] Try the remaining eligible QEMU servers after a selected server fails its reserve request.
+- [x] Never terminalize a job or move its Linear issue because placement was unavailable.
+- [x] Report every reserve failure other than full or not minted to Sentry with the server URL,
       ticket, and original cause.
-- [ ] After every eligible server has been tried, leave the job pending and wait for the next
+- [x] After every eligible server has been tried, leave the job pending and wait for the next
       dispatch pass.
-- [ ] Preserve the original network cause in `automation-client/qemu.ts`.
+- [x] Preserve the original network cause in `automation-client/qemu.ts`.
+- [x] On QEMU routing database failure, report to Sentry, relinquish QEMU, and return
+      `500 DATABASE FAILURE`.
+- [x] When `pending → running` exhausts three database attempts, report to Sentry, release capacity,
+      and fail the job with reason `DATABASE FAILURE`.
 - [ ] Require the automation client's QEMU proxy URL at startup instead of silently defaulting to
       an unrelated local port.
 
