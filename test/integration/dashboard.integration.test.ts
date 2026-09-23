@@ -1798,7 +1798,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
     const { status, html } = await getPage("/servers", dbUrl);
     expect(status).toBe(200);
     expect(html).toMatch(
-      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s"><p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>(?:<ul[^>]*aria-label="Test suites"[^>]*>[\s\S]*?<\/ul>)?<h3>running 2<\/h3><table>/,
+      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s">(?:<p>no test suites<\/p>|<ul[^>]*aria-label="Test suites"[^>]*>[\s\S]*?<\/ul>)<h3>running 2<\/h3><table>/,
     );
     // The ages are read against the database's clock: a minute has margin, seconds are counted.
     expect(html).toMatch(
@@ -1818,9 +1818,7 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
   it("serves the queue alone at /servers/queue, what the automation half's poll swaps in", async () => {
     const { status, html } = await getPage("/servers/queue", dbUrl);
     expect(status).toBe(200);
-    expect(html).toMatch(
-      /^<p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>/,
-    );
+    expect(html).toMatch(/^(?:<p>no test suites<\/p>|<ul[^>]*aria-label="Test suites"[^>]*>)/);
     expect(html).toContain('href="https://linear.app/issue/QUE-102"');
     expect(html).toContain('href="/tickets/QUE-102"');
     expect(html).toContain('href="https://linear.app/issue/QUE-109"');
@@ -1867,104 +1865,80 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
     ]);
   });
 
-  it("counts an open result as pending or running, and a closed suite with a failure as failed", async () => {
-    const read = async (): Promise<ReadonlyArray<number>> => {
+  it("lists the three newest suites, newest first, each with how many passed and failed and completed once every result has run", async () => {
+    const inserted = await seed(dbUrl, async (db) => {
+      const definitions = await db
+        .insert(testDefinitions)
+        .values([
+          { name: "suite-latest-a", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-latest-b", description: "d", instruction: "i", proof: "p" },
+          { name: "suite-latest-c", description: "d", instruction: "i", proof: "p" },
+        ])
+        .returning({ id: testDefinitions.id });
+      const [first, second, third] = definitions;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error("suite-latest definitions were not inserted");
+      }
+      const run = (name: string, startsIn: number, status: "pending" | "running") => ({
+        name,
+        iso: "https://example.com/omarchy.iso",
+        serverUrl: "http://127.0.0.1:42069",
+        status,
+        startedAt: secondsAgo(-startsIn),
+      });
+      // Started ahead of every run the other tests left, so these four are the newest and the
+      // first of them is the one the three leave out.
+      const runs = await db
+        .insert(testRuns)
+        .values([
+          run("suite-latest-oldest", 60, "pending"),
+          // The run row still says running. The results have all closed, so it is completed.
+          run("suite-latest-done", 120, "running"),
+          run("suite-latest-open", 180, "pending"),
+          run("suite-latest-stopped", 240, "pending"),
+        ])
+        .returning({ id: testRuns.id, name: testRuns.name });
+      const runId = (name: string): string => {
+        const found = runs.find((row) => row.name === name);
+        if (found === undefined) {
+          throw new Error(`${name} was not inserted`);
+        }
+        return found.id;
+      };
+      await db.insert(testResults).values([
+        { runId: runId("suite-latest-oldest"), definitionId: first.id, status: "passed" },
+        { runId: runId("suite-latest-done"), definitionId: first.id, status: "passed" },
+        { runId: runId("suite-latest-done"), definitionId: second.id, status: "passed" },
+        { runId: runId("suite-latest-done"), definitionId: third.id, status: "failed" },
+        { runId: runId("suite-latest-open"), definitionId: first.id, status: "passed" },
+        { runId: runId("suite-latest-open"), definitionId: second.id, status: "failed" },
+        { runId: runId("suite-latest-open"), definitionId: third.id, status: "running" },
+        { runId: runId("suite-latest-stopped"), definitionId: first.id, status: "passed" },
+        { runId: runId("suite-latest-stopped"), definitionId: second.id, status: "aborted" },
+      ]);
+      return {
+        runIds: runs.map((row) => row.id),
+        definitionIds: definitions.map((row) => row.id),
+      };
+    });
+    try {
       const result = await runQuery(
         `
 const queue = await query.listAutomationQueue(url);
-console.log([queue.runningCount, queue.pendingCount, queue.suites.pending, queue.suites.running, queue.suites.passed, queue.suites.failed, queue.suites.aborted].join(" "));
+for (const suite of queue.suites) {
+  console.log([suite.name, suite.status, suite.passed, suite.failed, suite.startedAt instanceof Date, suite.queriedAt instanceof Date].join(" "));
+}
 `,
         dbUrl,
       );
       expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
       expect(result.stderr).toBe("");
       expect(result.code).toBe(0);
-      const row = lines(result.stdout)[0];
-      if (row === undefined) {
-        throw new Error("listAutomationQueue printed nothing");
-      }
-      return row.split(" ").map(Number);
-    };
-    const before = await read();
-    const inserted = await seed(dbUrl, async (db) => {
-      const definitions = await db
-        .insert(testDefinitions)
-        .values([
-          { name: "suite-counts-a", description: "d", instruction: "i", proof: "p" },
-          { name: "suite-counts-b", description: "d", instruction: "i", proof: "p" },
-          { name: "suite-counts-c", description: "d", instruction: "i", proof: "p" },
-          { name: "suite-counts-d", description: "d", instruction: "i", proof: "p" },
-        ])
-        .returning({ id: testDefinitions.id });
-      const [open, fresh, closed] = definitions;
-      if (open === undefined || fresh === undefined || closed === undefined) {
-        throw new Error("suite-counts definitions were not inserted");
-      }
-      const runs = await db
-        .insert(testRuns)
-        .values([
-          {
-            name: "suite-counts-open",
-            iso: "https://example.com/omarchy.iso",
-            serverUrl: "http://127.0.0.1:42069",
-            status: "pending",
-          },
-          {
-            name: "suite-counts-fresh",
-            iso: "https://example.com/omarchy.iso",
-            serverUrl: "http://127.0.0.1:42069",
-            status: "pending",
-          },
-          {
-            name: "suite-counts-closed",
-            iso: "https://example.com/omarchy.iso",
-            serverUrl: "http://127.0.0.1:42069",
-            // The run row still says running. The results have all closed, so it is not current.
-            status: "running",
-          },
-        ])
-        .returning({ id: testRuns.id });
-      const [openRun, freshRun, closedRun] = runs;
-      if (openRun === undefined || freshRun === undefined || closedRun === undefined) {
-        throw new Error("suite-counts runs were not inserted");
-      }
-      const more = await db
-        .insert(testDefinitions)
-        .values([
-          { name: "suite-counts-e", description: "d", instruction: "i", proof: "p" },
-          { name: "suite-counts-f", description: "d", instruction: "i", proof: "p" },
-          { name: "suite-counts-g", description: "d", instruction: "i", proof: "p" },
-        ])
-        .returning({ id: testDefinitions.id });
-      const [second, third, fourth] = more;
-      if (second === undefined || third === undefined || fourth === undefined) {
-        throw new Error("suite-counts definitions were not inserted");
-      }
-      await db.insert(testResults).values([
-        { runId: openRun.id, definitionId: open.id, status: "passed" },
-        { runId: openRun.id, definitionId: second.id, status: "failed" },
-        { runId: openRun.id, definitionId: third.id, status: "running" },
-        { runId: openRun.id, definitionId: fourth.id, status: "pending" },
-        { runId: freshRun.id, definitionId: open.id, status: "pending" },
-        { runId: freshRun.id, definitionId: second.id, status: "aborted" },
-        { runId: closedRun.id, definitionId: open.id, status: "passed" },
-        { runId: closedRun.id, definitionId: second.id, status: "failed" },
-        { runId: closedRun.id, definitionId: third.id, status: "timed_out" },
+      expect(lines(result.stdout)).toEqual([
+        "suite-latest-stopped aborted 1 0 true true",
+        "suite-latest-open running 1 1 true true",
+        "suite-latest-done completed 2 1 true true",
       ]);
-      return {
-        runIds: [openRun.id, freshRun.id, closedRun.id],
-        definitionIds: [...definitions, ...more].map((row) => row.id),
-      };
-    });
-    try {
-      const after = await read();
-      expect(after[0] - before[0]).toBe(0);
-      expect(after[1] - before[1]).toBe(0);
-      expect(after[2] - before[2]).toBe(1);
-      expect(after[3] - before[3]).toBe(1);
-      expect(after[4] - before[4]).toBe(0);
-      expect(after[5] - before[5]).toBe(1);
-      expect(after[6] - before[6]).toBe(0);
     } finally {
       await seed(dbUrl, async (db) => {
         await db.delete(testResults).where(inArray(testResults.runId, inserted.runIds));
@@ -2073,7 +2047,12 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       const page = await postAbortSuite(dbUrl, inserted.runId);
       expect(page.status).toBe(200);
       expect(page.html).not.toContain(`value="${inserted.runId}"`);
-      expect(page.html).toContain(`>${inserted.runId.slice(0, 6)}</span><span>aborted</span>`);
+      const item = page.html
+        .split("<li>")
+        .map((part) => part.split("</li>")[0] ?? "")
+        .find((part) => part.includes(`>${inserted.runId.slice(0, 6)}<`));
+      expect(item).toContain(">aborted<");
+      expect(item).not.toContain(">completed<");
       expect(page.html).not.toContain("postgres://");
       const stored = await seed(dbUrl, async (db) => {
         const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
@@ -2885,9 +2864,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
       );
       expect(response.status).toBe(200);
       const html = await response.text();
-      expect(html).toMatch(
-        /^<p>pending \d+ · running \d+ · succeeded \d+ · failed \d+(?: · aborted \d+)?<\/p>/,
-      );
+      expect(html).toMatch(/^(?:<p>no test suites<\/p>|<ul[^>]*aria-label="Test suites"[^>]*>)/);
       expect(html).toMatch(/<h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/);
       expect(html).toMatch(
         /<h3>pending 1<\/h3><table>.*?<a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-2">ABT-HX-2<\/a>.*?<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-1">ABT-HX-1<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1">abort-htmx-pending<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><\/td><\/tr>/s,

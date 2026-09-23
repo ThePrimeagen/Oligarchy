@@ -72,17 +72,13 @@ export type AutomationJob = {
 
 // A suite is one test run, judged from its results. The run row's own status is not
 // that: it is opened pending, and a row that still says running can already be finished.
-// Running wins over pending, and either wins over a verdict, so a suite with one result
-// still open stays open. A closed suite with a failure is failed; one with a pass and no
-// failure is passed; one whose results were only aborted or timed out is aborted.
-export type SuiteStatus = "pending" | "running" | "passed" | "failed" | "aborted";
+// Running wins over pending, and either wins over a close, so a suite with one result
+// still open stays open. A closed suite is completed once every result has run, passed or
+// failed; one with a result aborted or timed out is aborted: that test never reached a verdict.
+export type SuiteStatus = "pending" | "running" | "completed" | "aborted";
 
-// One run's result tallies. startedAt is the run's created stamp, milliseconds.
-// stopped is results aborted or timed out: a pass beside one of those is not a success.
-export type SuiteRow = {
-  readonly id: string;
-  readonly name: string;
-  readonly startedAt: number;
+// One run's result tallies. stopped is results aborted or timed out.
+export type SuiteTally = {
   readonly pending: number;
   readonly running: number;
   readonly passed: number;
@@ -90,42 +86,28 @@ export type SuiteRow = {
   readonly stopped: number;
 };
 
-// The same row, classified, with startedAt as the clock the page reads an age from.
-export type SuitePill = {
+// One of the latest runs, classified. queriedAt is the clock its age is read against.
+export type Suite = {
   readonly id: string;
   readonly name: string;
   readonly status: SuiteStatus;
   readonly startedAt: Date;
-  readonly pending: number;
-  readonly running: number;
   readonly passed: number;
   readonly failed: number;
-};
-
-// Counts are every suite. pills are the fifty newest finished, then the fifty oldest
-// still running, then the fifty oldest still pending: the finished ones show how the
-// last runs landed, and the open ones are the runs that never quite finished.
-export type SuiteBoard = {
-  readonly pending: number;
-  readonly running: number;
-  readonly passed: number;
-  readonly failed: number;
-  readonly aborted: number;
   readonly queriedAt: Date;
-  readonly pills: ReadonlyArray<SuitePill>;
 };
 
 // The queue as the page shows it. running and pending are the fifty an operator
-// reads; the counts beside those headings are the whole lists. suites is every run,
-// counted in full, with the pills cut at fifty. Completed is the fifty that finished
-// last, and has no count: that total only grows.
+// reads; the counts beside those headings are the whole lists. suites is the three runs
+// started last, newest first. Completed is the fifty that finished last, and has no
+// count: that total only grows.
 export type AutomationQueue = {
   readonly running: ReadonlyArray<AutomationJob>;
   readonly pending: ReadonlyArray<AutomationJob>;
   readonly completed: ReadonlyArray<AutomationJob>;
   readonly runningCount: number;
   readonly pendingCount: number;
-  readonly suites: SuiteBoard;
+  readonly suites: ReadonlyArray<Suite>;
 };
 
 const countOf = (
@@ -836,77 +818,24 @@ export function listServers(connectionString: string): Promise<Server[]> {
 // Fifty of each list: an operator reads the front of the queue and what finished last.
 const QUEUE_LIMIT = 50;
 
-// The same fifty for suite pills. Finished keeps the newest: that is how the last runs landed.
-// Running and pending keep the oldest: those are the ones that never quite finished.
-const SUITE_PILL_LIMIT = 50;
+// The last three runs are what an operator watches: the one going now and the two before it.
+const SUITE_LIMIT = 3;
 
-const suiteStatusOf = (row: SuiteRow): SuiteStatus => {
-  if (row.running > 0) {
+export const suiteStatusOf = (tally: SuiteTally): SuiteStatus => {
+  if (tally.running > 0) {
     return "running";
   }
-  if (row.pending > 0) {
+  if (tally.pending > 0) {
     return "pending";
   }
-  if (row.failed > 0) {
-    return "failed";
+  if (tally.stopped > 0) {
+    return "aborted";
   }
-  if (row.passed > 0 && row.stopped === 0) {
-    return "passed";
-  }
-  return "aborted";
+  return "completed";
 };
-
-const byStartedAt = (
-  left: { readonly startedAt: number; readonly id: string },
-  right: { readonly startedAt: number; readonly id: string },
-): number => left.startedAt - right.startedAt || left.id.localeCompare(right.id);
-
-type OrderedSuite = SuiteRow & { readonly status: SuiteStatus };
-
-export type OrderedSuites = {
-  readonly pending: number;
-  readonly running: number;
-  readonly passed: number;
-  readonly failed: number;
-  readonly aborted: number;
-  readonly pills: ReadonlyArray<OrderedSuite>;
-};
-
-// Counts are the whole set. The pills are three groups in the order an operator scans them:
-// the latest finished runs, oldest of that fifty on the left, then the oldest runs still
-// running, then the oldest still pending.
-export function orderSuites(rows: ReadonlyArray<SuiteRow>): OrderedSuites {
-  const counted = { pending: 0, running: 0, passed: 0, failed: 0, aborted: 0 };
-  const finished: OrderedSuite[] = [];
-  const running: OrderedSuite[] = [];
-  const pending: OrderedSuite[] = [];
-  for (const row of rows) {
-    const status = suiteStatusOf(row);
-    counted[status] += 1;
-    const pill: OrderedSuite = { ...row, status };
-    if (status === "running") {
-      running.push(pill);
-    } else if (status === "pending") {
-      pending.push(pill);
-    } else {
-      finished.push(pill);
-    }
-  }
-  finished.sort(byStartedAt);
-  running.sort(byStartedAt);
-  pending.sort(byStartedAt);
-  return {
-    ...counted,
-    pills: [
-      ...finished.slice(-SUITE_PILL_LIMIT),
-      ...running.slice(0, SUITE_PILL_LIMIT),
-      ...pending.slice(0, SUITE_PILL_LIMIT),
-    ],
-  };
-}
 
 // The queue in three lists, each ordered and cut by the database, plus the totals the headings
-// show and the open suites. Running and pending follow claim order: mint, then diagnose, then
+// show and the latest suites. Running and pending follow claim order: mint, then diagnose, then
 // drive, each oldest first. Completed is every terminal status, newest finished first: finished_at is
 // the stamp the close writes, the row's last change. The clock in each select is the one the
 // stamps' ages are read against, and it keeps a poll out of Hyperdrive's query cache. The
@@ -952,8 +881,8 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .from(automationJobs)
       .where(inArray(automationJobs.status, ["running", "pending"]))
       .groupBy(automationJobs.status);
-    // One row per run. A result still pending or running keeps the suite open even when
-    // every job for it has already stopped, which is how the running count used to stick.
+    // The runs started last, one row each, newest first. A result still pending or running
+    // keeps the suite open even when every job for it has already stopped.
     const suiteRows = await db
       .select({
         id: testRuns.id,
@@ -979,44 +908,24 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       })
       .from(testRuns)
       .innerJoin(testResults, eq(testResults.runId, testRuns.id))
-      .groupBy(testRuns.id, testRuns.name, testRuns.startedAt);
-    const [firstSuite] = suiteRows;
-    const ordered = orderSuites(
-      suiteRows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        startedAt: row.startedAt.getTime(),
-        pending: row.pending,
-        running: row.running,
-        passed: row.passed,
-        failed: row.failed,
-        stopped: row.stopped,
-      })),
-    );
+      .groupBy(testRuns.id, testRuns.name, testRuns.startedAt)
+      .orderBy(desc(testRuns.startedAt), desc(testRuns.id))
+      .limit(SUITE_LIMIT);
     return {
       running,
       pending,
       completed,
       runningCount: countOf(jobCounts, "running"),
       pendingCount: countOf(jobCounts, "pending"),
-      suites: {
-        pending: ordered.pending,
-        running: ordered.running,
-        passed: ordered.passed,
-        failed: ordered.failed,
-        aborted: ordered.aborted,
-        queriedAt: firstSuite?.queriedAt ?? new Date(0),
-        pills: ordered.pills.map((pill) => ({
-          id: pill.id,
-          name: pill.name,
-          status: pill.status,
-          startedAt: new Date(pill.startedAt),
-          pending: pill.pending,
-          running: pill.running,
-          passed: pill.passed,
-          failed: pill.failed,
-        })),
-      },
+      suites: suiteRows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        status: suiteStatusOf(row),
+        startedAt: row.startedAt,
+        passed: row.passed,
+        failed: row.failed,
+        queriedAt: row.queriedAt,
+      })),
     };
   });
 }
