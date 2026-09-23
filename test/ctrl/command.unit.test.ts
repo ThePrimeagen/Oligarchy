@@ -1248,9 +1248,9 @@ describe("mint", () => {
   };
   // A qemu server the fleet knows and hears from; `alive` false registers it without a heartbeat.
   const qemu = (h: ReturnType<typeof harness>, url: string, name: string, alive = true) => {
-    h.stores.servers.servers.push({ id: `id-${name}`, url, name, type: "qemu" });
+    h.stores.servers.servers.push({ id: `id-${name}`, url, name, type: "qemu", maxJobs: null });
     if (alive) {
-      h.stores.servers.heartbeats.push({ url, type: "qemu", name, stats });
+      h.stores.servers.heartbeats.push({ url, type: "qemu", name, stats, maxJobs: 4 });
     }
   };
   const minted = (values: Prompts.MintValues) =>
@@ -1268,12 +1268,14 @@ describe("mint", () => {
         url: "http://127.0.0.1:52222",
         name: "automation-client-5",
         type: "automation-client",
+        maxJobs: null,
       });
       h.stores.servers.heartbeats.push({
         url: "http://127.0.0.1:52222",
         type: "automation-client",
         name: "automation-client-5",
         stats,
+        maxJobs: 4,
       });
       const exit = yield* h.run(MINT, WITH_LINEAR);
       expect(Exit.isSuccess(exit)).toBe(true);

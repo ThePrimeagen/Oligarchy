@@ -19,6 +19,7 @@ export type Machine = {
   readonly name: string | null;
   readonly type: ServerType;
   readonly stats: DbSchema.ServerStats | null;
+  readonly maxJobs: number | null;
   readonly generation: number;
   readonly heartbeatAt: Date | null;
   readonly queriedAt: Date;
@@ -37,28 +38,59 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
 
     // A server's own word on itself, its kind included: its row comes into being on the first
     // heartbeat or is rewritten, the generation counting every write, stamped by the database's
-    // clock.
+    // clock. maxJobs is the --max-jobs seed: written on insert, and on update only when the
+    // column is still null, so an operator's setMaxJobs is never undone by a heartbeat.
     const heartbeat = Effect.fn("db.heartbeat")(function* (
       url: string,
       type: ServerType,
       name: string,
       stats: DbSchema.ServerStats,
+      maxJobs: number,
     ) {
       const now = sql`now()`;
       yield* database.run("heartbeat", (db) =>
         db
           .insert(DbSchema.servers)
-          .values({ url, name, type, stats, generation: 1, heartbeatAt: now })
+          .values({ url, name, type, stats, maxJobs, generation: 1, heartbeatAt: now })
           .onConflictDoUpdate({
             target: DbSchema.servers.url,
             set: {
               name,
               type,
               stats,
+              maxJobs: sql`coalesce(${DbSchema.servers.maxJobs}, ${maxJobs})`,
               generation: sql`${DbSchema.servers.generation} + 1`,
               heartbeatAt: now,
             },
           }),
+      );
+    });
+
+    // The operator's on-demand capacity: false when no row carries the url. A process that
+    // announces under that url re-reads within a minute and adjusts.
+    const setMaxJobs = Effect.fn("db.setMaxJobs")(function* (url: string, maxJobs: number) {
+      const rows = yield* database.run("setMaxJobs", (db) =>
+        db
+          .update(DbSchema.servers)
+          .set({ maxJobs })
+          .where(eq(DbSchema.servers.url, url))
+          .returning({ url: DbSchema.servers.url }),
+      );
+      return rows.length > 0;
+    });
+
+    // None when the url is unknown or max_jobs has not been named yet.
+    const maxJobsFor = Effect.fn("db.maxJobsFor")(function* (url: string) {
+      const rows = yield* database.run("maxJobsFor", (db) =>
+        db
+          .select({ maxJobs: DbSchema.servers.maxJobs })
+          .from(DbSchema.servers)
+          .where(eq(DbSchema.servers.url, url))
+          .limit(1),
+      );
+      const row = Arr.head(rows);
+      return Option.flatMap(row, (found) =>
+        found.maxJobs === null ? Option.none() : Option.some(found.maxJobs),
       );
     });
 
@@ -96,6 +128,7 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
             name: DbSchema.servers.name,
             type: DbSchema.servers.type,
             stats: DbSchema.servers.stats,
+            maxJobs: DbSchema.servers.maxJobs,
             generation: DbSchema.servers.generation,
             heartbeatAt: DbSchema.servers.heartbeatAt,
             queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.servers.createdAt),
@@ -197,6 +230,8 @@ export class ServerStore extends Context.Service<ServerStore>()("@oligarchy/db/S
     return {
       addServer,
       heartbeat,
+      setMaxJobs,
+      maxJobsFor,
       removeServer,
       listServers,
       listMachines,

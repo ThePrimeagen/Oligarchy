@@ -14,6 +14,7 @@ import * as Stores from "../support/stores.ts";
 
 const URL = "http://127.0.0.1:55332";
 const NAME = "garage";
+const MAX_JOBS = 4;
 
 // What FakeQemu.fakeStats says for collect(0), cut down to what the row keeps.
 const ROW_STATS = {
@@ -23,8 +24,14 @@ const ROW_STATS = {
 };
 
 // One heartbeat as the store records it: this process announces itself as an automation-client.
-const ANNOUNCED = { url: URL, type: "automation-client", name: NAME, stats: ROW_STATS };
-const REGISTERED = { url: URL, type: "automation-client", name: NAME };
+const ANNOUNCED = {
+  url: URL,
+  type: "automation-client",
+  name: NAME,
+  stats: ROW_STATS,
+  maxJobs: MAX_JOBS,
+};
+const REGISTERED = { url: URL, type: "automation-client", name: NAME, maxJobs: MAX_JOBS };
 
 const SAMPLE = { memoryBytes: 8_192_000, cpuPercent: 4.5 };
 const PROCESS = {
@@ -45,6 +52,8 @@ const fakeSessions = (jobs: Effect.Effect<number> = Effect.succeed(0)) =>
       run: () => Effect.die("Unexpected Sessions.run"),
       abort: () => Effect.die("Unexpected Sessions.abort"),
       jobs,
+      maxJobs: Effect.succeed(MAX_JOBS),
+      setMaxJobs: () => Effect.void,
     }),
   );
 
@@ -70,7 +79,7 @@ const start = (
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Heartbeat.announce(URL, NAME).pipe(
+    yield* Heartbeat.announce(URL, NAME, MAX_JOBS).pipe(
       Effect.provide(Layer.mergeAll(sessions, stats, store.layer, process.layer, usage, log.layer)),
       Scope.provide(scope),
     );
@@ -153,6 +162,7 @@ describe("automation-client heartbeat happy path", () => {
         url: "http://127.0.0.1:1",
         name: null,
         type: "qemu" as const,
+        maxJobs: null,
       };
       store.servers.push(other);
       const { scope, log } = yield* start(store);
@@ -202,13 +212,13 @@ describe("automation-client heartbeat unhappy path", () => {
         let attempts = 0;
         const written: Array<typeof ANNOUNCED> = [];
         const store = Stores.fakeServerStore({
-          heartbeat: (url, type, name, stats) =>
+          heartbeat: (url, type, name, stats, maxJobs) =>
             Effect.suspend(() => {
               attempts += 1;
               if (attempts === 1) {
                 return Effect.fail(refused);
               }
-              written.push({ url, type, name, stats });
+              written.push({ url, type, name, stats, maxJobs });
               return Effect.void;
             }),
         });

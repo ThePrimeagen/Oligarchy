@@ -46,10 +46,11 @@ export type TestDefinition = typeof testDefinitions.$inferSelect;
 export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
 
 // One server of the fleet with what it last said of itself, and the database's clock at the
-// read, so the page measures a heartbeat's age against the clock that stamped it.
+// read, so the page measures a heartbeat's age against the clock that stamped it. maxJobs is
+// null until a process or an operator has named the capacity.
 export type Server = Pick<
   typeof servers.$inferSelect,
-  "url" | "name" | "stats" | "generation" | "heartbeatAt"
+  "url" | "name" | "type" | "stats" | "maxJobs" | "generation" | "heartbeatAt"
 > & {
   readonly queriedAt: Date;
 };
@@ -813,23 +814,25 @@ export function listTestBasePrompts(connectionString: string): Promise<TestBaseP
   );
 }
 
-// The qemu fleet in registration order. automation-client rows share the table and are listed
-// apart. The clock in the select is the one a heartbeat's age is read against, and it keeps a
-// poll out of Hyperdrive's query cache: every poll sees the newest write.
+// The fleet in registration order: qemu servers then automation clients, as the enum declares
+// the kinds. The clock in the select is the one a heartbeat's age is read against, and it keeps
+// a poll out of Hyperdrive's query cache: every poll sees the newest write. max_jobs is what
+// the operator (or the process's --max-jobs seed) set as capacity.
 export function listServers(connectionString: string): Promise<Server[]> {
   return withDatabase(connectionString, (db) =>
     db
       .select({
         url: servers.url,
         name: servers.name,
+        type: servers.type,
         stats: servers.stats,
+        maxJobs: servers.maxJobs,
         generation: servers.generation,
         heartbeatAt: servers.heartbeatAt,
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
       })
       .from(servers)
-      .where(eq(servers.type, "qemu"))
-      .orderBy(servers.createdAt, servers.url),
+      .orderBy(servers.type, servers.createdAt, servers.url),
   );
 }
 
@@ -1608,6 +1611,24 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
 export function addServer(connectionString: string, url: string): Promise<void> {
   return withDatabase(connectionString, async (db) => {
     await db.insert(servers).values({ url, type: "qemu" }).onConflictDoNothing();
+  });
+}
+
+// The operator's on-demand capacity for a live or registered url. false when nothing was
+// registered under the url: the route turns that into its 404. The process that announces under
+// that url re-reads within a minute and adjusts.
+export function setMaxJobs(
+  connectionString: string,
+  url: string,
+  maxJobs: number,
+): Promise<boolean> {
+  return withDatabase(connectionString, async (db) => {
+    const rows = await db
+      .update(servers)
+      .set({ maxJobs })
+      .where(eq(servers.url, url))
+      .returning({ url: servers.url });
+    return rows.length > 0;
   });
 }
 

@@ -172,6 +172,8 @@ export const fakeSessions = (
         // Nothing is minted on the fake machine unless a test overrides it.
         minted: (iso) => record("minted", iso).pipe(Effect.as(false)),
         jobs: record("jobs").pipe(Effect.as(STATS.qemus)),
+        maxJobs: record("maxJobs").pipe(Effect.as(4)),
+        setMaxJobs: (next) => record("setMaxJobs", next),
         ...overrides,
       });
     }),

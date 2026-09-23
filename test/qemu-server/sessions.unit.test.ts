@@ -3459,4 +3459,20 @@ describe("reservation expiry", () => {
       );
     }),
   );
+
+  it.effect("setMaxJobs raises the limit so another reserve is admitted", () =>
+    Effect.gen(function* () {
+      const h = harness({ maxJobs: 1 });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          expect((yield* Effect.flip(sessions.reserve(OTHER_AGENT)))._tag).toBe("AtCapacity");
+          yield* sessions.setMaxJobs(2);
+          yield* sessions.reserve(OTHER_AGENT);
+          expect(yield* sessions.maxJobs).toBe(2);
+        }),
+      );
+    }),
+  );
 });

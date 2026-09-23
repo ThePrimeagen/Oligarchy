@@ -1755,8 +1755,9 @@ Postgres.describeWithDatabase("database", () => {
             "automation-client",
             `runner-${clientUrl.slice(-8)}`,
             stats,
+            4,
           );
-          yield* servers.heartbeat(qemuUrl, "qemu", `garage-${qemuUrl.slice(-8)}`, stats);
+          yield* servers.heartbeat(qemuUrl, "qemu", `garage-${qemuUrl.slice(-8)}`, stats, 4);
           const client = (yield* servers.listLiveServers("automation-client")).find(
             (live) => live.url === clientUrl,
           );
@@ -2019,13 +2020,13 @@ Postgres.describeWithDatabase("database", () => {
             db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
           );
           const name = `qemu-${url.slice(-8)}`;
-          yield* store.heartbeat(url, "qemu", name, first);
+          yield* store.heartbeat(url, "qemu", name, first, 4);
           expect(yield* store.listServers("qemu")).toContain(url);
           const [row] = yield* rowOf;
           expect(row).toMatchObject({ url, name, type: "qemu", stats: first, generation: 1 });
           expect(row?.heartbeatAt).toBeInstanceOf(Date);
           const second: DbSchema.ServerStats = { ...first, qemus: 2 };
-          yield* store.heartbeat(url, "qemu", name, second);
+          yield* store.heartbeat(url, "qemu", name, second, 4);
           const rows = yield* rowOf;
           expect(rows).toHaveLength(1);
           expect(rows[0]).toMatchObject({
@@ -2068,7 +2069,7 @@ Postgres.describeWithDatabase("database", () => {
             cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
           };
           const name = `claimed-${url.slice(-8)}`;
-          yield* store.heartbeat(url, "qemu", name, stats);
+          yield* store.heartbeat(url, "qemu", name, stats, 4);
           const rows = yield* rowOf;
           expect(rows).toHaveLength(1);
           expect(rows[0]).toMatchObject({ url, name, type: "qemu", stats, generation: 1 });
@@ -2093,7 +2094,7 @@ Postgres.describeWithDatabase("database", () => {
             db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
           );
           const name = `auto-${url.slice(-8)}`;
-          yield* store.heartbeat(url, "automation-client", name, first);
+          yield* store.heartbeat(url, "automation-client", name, first, 4);
           expect(yield* store.listServers("automation-client")).toContain(url);
           expect(yield* store.listServers("qemu")).not.toContain(url);
           const [row] = yield* rowOf;
@@ -2106,7 +2107,7 @@ Postgres.describeWithDatabase("database", () => {
           });
           expect(row?.heartbeatAt).toBeInstanceOf(Date);
           const second: DbSchema.ServerStats = { ...first, cpu: { ...first.cpu, mean1m: 5 } };
-          yield* store.heartbeat(url, "automation-client", name, second);
+          yield* store.heartbeat(url, "automation-client", name, second, 4);
           const rows = yield* rowOf;
           expect(rows).toHaveLength(1);
           expect(rows[0]).toMatchObject({
@@ -2158,9 +2159,9 @@ Postgres.describeWithDatabase("database", () => {
           const stale = `http://10.0.0.21:${uuid().slice(0, 8)}`;
           const qemu = `http://10.0.0.22:${uuid().slice(0, 8)}`;
           const silent = `http://10.0.0.23:${uuid().slice(0, 8)}`;
-          yield* store.heartbeat(fresh, "automation-client", `live-${fresh.slice(-8)}`, stats);
-          yield* store.heartbeat(stale, "automation-client", `stale-${stale.slice(-8)}`, stats);
-          yield* store.heartbeat(qemu, "qemu", `qemu-live-${qemu.slice(-8)}`, stats);
+          yield* store.heartbeat(fresh, "automation-client", `live-${fresh.slice(-8)}`, stats, 4);
+          yield* store.heartbeat(stale, "automation-client", `stale-${stale.slice(-8)}`, stats, 4);
+          yield* store.heartbeat(qemu, "qemu", `qemu-live-${qemu.slice(-8)}`, stats, 4);
           yield* store.addServer(silent, "automation-client");
           yield* database.run("stamp", (db) =>
             db
@@ -2205,14 +2206,15 @@ Postgres.describeWithDatabase("database", () => {
           const unclaimed = `http://10.0.0.32:${uuid().slice(0, 8)}`;
           const alive = `http://10.0.0.33:${uuid().slice(0, 8)}`;
           const justAdded = `http://10.0.0.34:${uuid().slice(0, 8)}`;
-          yield* store.heartbeat(dead, "qemu", `dead-${dead.slice(-8)}`, stats);
+          yield* store.heartbeat(dead, "qemu", `dead-${dead.slice(-8)}`, stats, 4);
           yield* store.heartbeat(
             deadClient,
             "automation-client",
             `dead-${deadClient.slice(-8)}`,
             stats,
+            4,
           );
-          yield* store.heartbeat(alive, "qemu", `alive-${alive.slice(-8)}`, stats);
+          yield* store.heartbeat(alive, "qemu", `alive-${alive.slice(-8)}`, stats, 4);
           yield* store.addServer(unclaimed, "qemu");
           yield* store.addServer(justAdded, "qemu");
           const stamp = (url: string, ago: string) =>
@@ -2292,11 +2294,17 @@ Postgres.describeWithDatabase("database", () => {
           const database = yield* Client.Database;
           const url = `http://10.0.0.31:${uuid().slice(0, 8)}`;
           const name = `auto-proc-${url.slice(-8)}`;
-          yield* servers.heartbeat(url, "automation-client", name, {
-            qemus: 0,
-            memory: { totalBytes: 1, usedBytes: 0 },
-            cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
-          });
+          yield* servers.heartbeat(
+            url,
+            "automation-client",
+            name,
+            {
+              qemus: 0,
+              memory: { totalBytes: 1, usedBytes: 0 },
+              cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+            },
+            4,
+          );
           yield* store.report(name, "automation-client", {
             jobs: 2,
             memoryBytes: 1_000,
@@ -2425,9 +2433,9 @@ Postgres.describeWithDatabase("database", () => {
           const name = `fleet-${claimed.slice(-8)}`;
           const clientName = `fleet-client-${client.slice(-8)}`;
           // The client registers first and is still listed last: kind before registration.
-          yield* store.heartbeat(client, "automation-client", clientName, first);
-          yield* store.heartbeat(claimed, "qemu", name, first);
-          yield* store.heartbeat(claimed, "qemu", name, second);
+          yield* store.heartbeat(client, "automation-client", clientName, first, 4);
+          yield* store.heartbeat(claimed, "qemu", name, first, 4);
+          yield* store.heartbeat(claimed, "qemu", name, second, 4);
           yield* store.addServer(quiet, "qemu");
           const machines = yield* store.listMachines();
           const mine = machines.filter((row) => [claimed, quiet, client].includes(row.url));
@@ -2451,6 +2459,7 @@ Postgres.describeWithDatabase("database", () => {
             name: null,
             type: "qemu",
             stats: null,
+            maxJobs: null,
             generation: 0,
             heartbeatAt: null,
           });
@@ -2479,13 +2488,46 @@ Postgres.describeWithDatabase("database", () => {
           memory: { totalBytes: 1, usedBytes: 0 },
           cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
         };
-        yield* store.heartbeat(first, "qemu", name, stats);
-        const error = yield* Effect.flip(store.heartbeat(second, "qemu", name, stats));
+        yield* store.heartbeat(first, "qemu", name, stats, 4);
+        const error = yield* Effect.flip(store.heartbeat(second, "qemu", name, stats, 4));
         expect(error).toMatchObject({ _tag: "DatabaseError", operation: "heartbeat" });
         expect(String(error.cause)).toContain("duplicate key");
         expect(yield* store.listServers("qemu")).toContain(first);
         expect(yield* store.listServers("qemu")).not.toContain(second);
         expect(yield* store.removeServer(first)).toBe(true);
+      }),
+    );
+
+    scoped.effect(
+      "ServerStore setMaxJobs writes max_jobs and maxJobsFor reads it; heartbeat keeps an operator value (happy)",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* Servers.ServerStore;
+          const database = yield* Client.Database;
+          const url = `http://10.0.0.50:${uuid().slice(0, 8)}`;
+          const name = `cap-${url.slice(-8)}`;
+          const stats: DbSchema.ServerStats = {
+            qemus: 0,
+            memory: { totalBytes: 1, usedBytes: 0 },
+            cpu: { mean1m: 0, mean2m: 0, mean3m: 0 },
+          };
+          const rowOf = database.run("select", (db) =>
+            db.select().from(DbSchema.servers).where(eq(DbSchema.servers.url, url)),
+          );
+          yield* store.heartbeat(url, "qemu", name, stats, 4);
+          expect(yield* store.maxJobsFor(url)).toEqual(Option.some(4));
+          expect(yield* store.setMaxJobs(url, 8)).toBe(true);
+          expect(yield* store.maxJobsFor(url)).toEqual(Option.some(8));
+          yield* store.heartbeat(url, "qemu", name, stats, 4);
+          expect((yield* rowOf)[0]?.maxJobs).toBe(8);
+          expect(yield* store.removeServer(url)).toBe(true);
+        }),
+    );
+
+    scoped.effect("ServerStore setMaxJobs is false for an unknown url (unhappy)", () =>
+      Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        expect(yield* store.setMaxJobs(`http://10.0.0.51:${uuid().slice(0, 8)}`, 2)).toBe(false);
       }),
     );
 

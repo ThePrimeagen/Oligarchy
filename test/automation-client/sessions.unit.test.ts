@@ -531,6 +531,33 @@ describe("capacity", () => {
       expect(spawner.spawned.map((spawned) => spawned.args[5])).toEqual(["second"]);
     }).pipe(Effect.provide(layer(spawner, 1)));
   });
+
+  it.effect("setMaxJobs raises the limit so another reserve is admitted", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "diagnose");
+      expect((yield* Effect.flip(sessions.reserve(OTHER, "diagnose")))._tag).toBe("AtCapacity");
+      yield* sessions.setMaxJobs(2);
+      yield* sessions.reserve(OTHER, "diagnose");
+      expect(yield* sessions.maxJobs).toBe(2);
+    }).pipe(Effect.provide(layer(spawner, 1)));
+  });
+
+  it.effect(
+    "setMaxJobs below the held count does not kill work; it refuses new reserves until the count falls",
+    () => {
+      const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "diagnose");
+        yield* sessions.reserve(OTHER, "diagnose");
+        yield* sessions.setMaxJobs(1);
+        expect((yield* Effect.flip(sessions.reserve("OLI-7", "diagnose")))._tag).toBe("AtCapacity");
+        expect(yield* sessions.jobs).toBe(2);
+      }).pipe(Effect.provide(layer(spawner, 2)));
+    },
+  );
 });
 
 describe("QEMU-first reserve", () => {

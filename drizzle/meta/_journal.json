@@ -106,6 +106,13 @@
       "when": 1790008738640,
       "tag": "0015_mint_action",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790038525023,
+      "tag": "0016_petite_outlaw_kid",
+      "breakpoints": true
     }
   ]
 }
