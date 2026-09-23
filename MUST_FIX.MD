@@ -257,8 +257,9 @@ flowchart TB
 - [x] A finished job cannot be aborted, including one that finishes while its client is being
       asked. `/abort` then answers 400 `has no <action> to abort`, as for any finished job, and
       the row keeps its result. A client `404` in that race is the job ending, not `JobNotFound`.
-      A run the abort's own kill ends answers `/run` 409 `run aborted`. The worker leaves that
-      row to the abort, so it closes `aborted`, never `failed` with OpenCode's exit.
+      A run whose OpenCode the abort's kill reached answers `/run` 409 `run aborted`; one that
+      had already exited ends as it did. The worker leaves a 409 row to the abort, so it closes
+      `aborted`, never `failed` with OpenCode's exit.
 
 ## 7. Separate claimed, driver-running, and guest-running states
 
