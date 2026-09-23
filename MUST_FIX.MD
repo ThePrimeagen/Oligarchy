@@ -151,11 +151,18 @@ flowchart TB
       automation server dies while the automation client reserves, and the automation client
       still grants it, so it holds a reservation while the row is `pending`. The next automation
       server reserves the same ticket there again, which answers ok without asking QEMU, and the
-      drive runs. Death after the `running` write is the `/run` waiting case: startup stops it at
-      its automation client and fails it.
-- [ ] Add an integration test for death after the database becomes `running` but before Linear
-      moves to In Progress.
-- [ ] Add an integration test for death after Linear moves to In Progress but before `/run`.
+      drive runs.
+- [x] Add an integration test for death after the database becomes `running` but before Linear
+      moves to In Progress. The driver moves the ticket from inside `/run`, so this is death
+      anywhere from the `running` write until the driver moves it. Before `/run` starts, the
+      automation client holds an unused reservation: the next automation server aborts it there,
+      which gives back the slot and its guest slot, and fails the job `automation server
+      restarted`. Once `/run` waits, it is the `/run` waiting case below. An automation client
+      that refuses connections is reported, and the job is failed all the same.
+- [ ] ~~Add an integration test for death after Linear moves to In Progress but before `/run`.~~
+      Dropped: user decision, not applicable. The driver moves the ticket to In Progress from
+      inside `/run`, so nothing moves it before `/run` starts. It returns if the automation server
+      takes that move over (N8 in the planned flow).
 - [x] Add an integration test for death while `/run` is waiting on the automation client.
 - [x] Add an unhappy-path test that a failed terminal `finish` database write is retried or later
       reconciled.
