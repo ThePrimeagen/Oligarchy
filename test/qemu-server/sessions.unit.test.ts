@@ -143,7 +143,9 @@ const harness = (options: Options = {}) => {
   );
   // The recording tracer is provided beneath the service and to the caller: spans are made in
   // whichever fiber calls a method.
-  const run = <A, E>(body: Effect.Effect<A, E, Sessions.Sessions>): Effect.Effect<A, E> =>
+  const run = <A, E>(
+    body: Effect.Effect<A, E, Sessions.Sessions>,
+  ): Effect.Effect<A, E | Errors.DatabaseError> =>
     body.pipe(Effect.provide(layer.pipe(Layer.provideMerge(tracer.layer))));
   return { sessions, actions, debugLogs, log, tracer, qemu, iso, minted, files, fsCalls, run };
 };
@@ -2762,7 +2764,7 @@ describe("restart", () => {
   );
 
   it.effect(
-    "a cleanup that cannot write is one error line, and the qemu server still reserves and starts",
+    "a cleanup that cannot write fails the qemu server's startup, and no session starts",
     () =>
       Effect.gen(function* () {
         const h = harness({
@@ -2773,23 +2775,10 @@ describe("restart", () => {
           },
         });
         const left = seedSession(h, "running", SELF);
-        const id = yield* h.run(Effect.map(start(), (started) => started.id));
-        expect(h.log.lines.filter((entry) => entry.level === "error")).toEqual([
-          {
-            level: "error",
-            text: "restart cleanup failed: connect ECONNREFUSED",
-            location: "server",
-            agentId: undefined,
-            skipSentry: false,
-            cause: expect.objectContaining({
-              _tag: "DatabaseError",
-              operation: "failRoutedSessions",
-            }),
-          },
-        ]);
-        expect(rowOf(h, left)?.status).toBe("running");
-        expect(Domain.isSessionId(id)).toBe(true);
-        expect(rowOf(h, id)?.status).toBe("aborted");
+        const error = yield* Effect.flip(h.run(start()));
+        expect(error).toMatchObject({ _tag: "DatabaseError", operation: "failRoutedSessions" });
+        expect(h.sessions.sessions.map((row) => [row.id, row.status])).toEqual([[left, "running"]]);
+        expect(h.qemu.calls).toEqual([]);
       }),
   );
 

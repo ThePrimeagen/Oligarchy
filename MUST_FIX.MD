@@ -220,7 +220,8 @@ flowchart TB
 - [x] Add a test that a QEMU restart does not make old database sessions appear live.
 - [x] On startup, close nonterminal sessions already routed to this singleton QEMU server URL with
       an explicit owner-lost reason. They are `failed`, reason `qemu server restarted`, with their
-      agent runs ended, before the server takes a request.
+      agent runs ended, before the server takes a request. A cleanup that cannot write fails the
+      startup.
 - [x] Ensure the affected driver receives a terminal failure instead of waiting indefinitely. A
       follow of the lost session answers that it completed `failed`, and `ctrl` reads it ended.
 - [ ] Reconcile the corresponding automation job after the driver exits or its client owner is

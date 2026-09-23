@@ -31,7 +31,7 @@ export type QemuServer<RHost, RServe> = {
     port: number,
     url: Option.Option<string>,
     dataDir: string,
-  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
+  ) => Layer.Layer<never, HttpServerError.ServeError | Errors.DatabaseError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 

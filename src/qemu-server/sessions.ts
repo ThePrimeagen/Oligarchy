@@ -1280,22 +1280,12 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // This process holds no session yet, so a row still downloading or running that the qemu
     // reverse proxy routed to this url was left by one that died. It is failed before the first
     // request, so a driver reads a finished session rather than a live one. A qemu server with
-    // no url of its own has none routed to it. A cleanup that cannot write is one error line,
-    // and the server starts anyway.
+    // no url of its own has none routed to it. A cleanup that cannot write fails the startup.
     if (selfUrl !== undefined) {
-      yield* sessionStore.failRoutedSessions(selfUrl, RESTART_REASON).pipe(
-        Effect.flatMap((ids) =>
-          Effect.forEach(ids, (id) => log.error(`failed; ${RESTART_REASON}`, { location: id }), {
-            discard: true,
-          }),
-        ),
-        Effect.catch((error) =>
-          log.error(`restart cleanup failed: ${detail(error)}`, {
-            location: Log.Locations.server,
-            cause: error,
-          }),
-        ),
-      );
+      const ids = yield* sessionStore.failRoutedSessions(selfUrl, RESTART_REASON);
+      yield* Effect.forEach(ids, (id) => log.error(`failed; ${RESTART_REASON}`, { location: id }), {
+        discard: true,
+      });
     }
 
     // -------------------------------------------------------------------------
@@ -1372,7 +1362,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     selfUrl?: string,
   ): Layer.Layer<
     Sessions,
-    never,
+    Errors.DatabaseError,
     | Qemu.Qemu
     | Iso.Iso
     | Minted.Minted
