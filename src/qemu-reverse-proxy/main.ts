@@ -81,10 +81,10 @@ const DatabaseLive = Layer.unwrap(
   Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
 );
 
-// A ticket is a Linear issue. The proxy does not start without the token, the same way it
-// does not start without the database.
+// A ticket is a Linear issue on LINEAR_TEAM. The proxy does not start without the token or the
+// team, the same way it does not start without the database.
 const LinearLive = Layer.unwrap(
-  Effect.map(Config.linearApiToken, (token) => Linear.Linear.layer(token)),
+  Effect.map(Config.linearAccess, ({ token, team }) => Linear.Linear.layer(token, team)),
 );
 
 // Sentry sits beneath Log so the log rows flush before Sentry does, and Log captures the reporter.

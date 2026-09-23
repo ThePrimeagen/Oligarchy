@@ -105,7 +105,7 @@ server is ticketed only after every server that holds the disk is at
 From `.env` in the repo root (already-set vars win):
 
 - All: whatever the wrappers already read (`OLIGARCHY_TOKEN`, `DATABASE_URL`, …)
-- `ctrl test run` and `ctrl test run testsuite`: `LINEAR_API_TOKEN`, `DATABASE_URL`
+- `ctrl test run`, `ctrl test run testsuite`, `ctrl mint`, `ctrl test list`, the automation server and the qemu reverse proxy: `LINEAR_API_TOKEN`, `LINEAR_TEAM`, `DATABASE_URL`. `LINEAR_TEAM` is the Linear team name, required, with no default, so a local process and production can name different teams.
 - qemu-server: `TMPDIR` **in the process environment**, expanded path
 - automation-client: `SERVER_URL=http://127.0.0.1:55555` so `/reserve` hits the
   proxy (which places onto a live qemu). Default is `:42069`. Not in `.env`.

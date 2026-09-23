@@ -22,6 +22,7 @@ const env = {
   AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
   LINEAR_API_URL: "http://127.0.0.1:1/graphql",
   LINEAR_API_TOKEN: "lin_api_x",
+  LINEAR_TEAM: "Local Board",
 };
 
 const ISO = "https://example.com/omarchy.iso";
@@ -95,6 +96,33 @@ describe("POST /create-test-suite-run unhappy path", () => {
   });
 });
 
+describe("POST /create-test-suite-run unhappy path: missing team", () => {
+  it("answers LINEAR_TEAM is not set and does not call Linear or the database", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await app.request(
+        "/create-test-suite-run",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        { ...env, LINEAR_TEAM: "" },
+      );
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "LINEAR_TEAM is not set" });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(error.mock.calls.map((call) => call.join(" ")).join("\n")).not.toContain(
+        SENTINEL_PASSWORD,
+      );
+    } finally {
+      fetchSpy.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
+
 describe("POST /create-test-suite-run unhappy path: unreachable database", () => {
   it("answers 500 without the database password, and does not call Linear", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -123,13 +151,13 @@ describe("create test-suite-run runner", () => {
       id: "run-id",
       tests: [{ id: "result-id", linear: { identifier: "OLI-42" } }],
     };
-    const calls: Array<readonly [string, string, ReadonlyArray<string>]> = [];
+    const calls: Array<readonly [string, string, string, ReadonlyArray<string>]> = [];
     const answer = await createTestSuiteRun(
       env,
       env.HYPERDRIVE.connectionString,
       body,
-      async (connectionString, token, args) => {
-        calls.push([connectionString, token, args]);
+      async (connectionString, token, team, args) => {
+        calls.push([connectionString, token, team, args]);
         return created;
       },
     );
@@ -137,6 +165,7 @@ describe("create test-suite-run runner", () => {
       [
         env.HYPERDRIVE.connectionString,
         env.LINEAR_API_TOKEN,
+        env.LINEAR_TEAM,
         ["test", "run", "testsuite", "--iso", ISO, "--version", "1.2.3", "--server-url", SERVER],
       ],
     ]);

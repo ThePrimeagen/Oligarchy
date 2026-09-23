@@ -52,7 +52,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
-- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test run`, `test run testsuite`, `mint` and `test list` also read `LINEAR_API_TOKEN`. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
+- `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test run`, `test run testsuite`, `mint` and `test list` also read `LINEAR_API_TOKEN` and `LINEAR_TEAM`, in that order. `LINEAR_TEAM` is the Linear team those tickets are filed on. It is required and has no default, so a local run and production can name different teams. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. A missing variable means exit 1.
 - `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
 - `--server-url <url>` — taken by `test run`, `test run testsuite` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
@@ -98,7 +98,7 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 ./ctrl test run --name <definition> --server-url <url> --iso <https-url> --version <version>
 ```
 
-Creates one pending test run and one Linear issue for one stored test definition, in its newest wording, and prints them as JSON. `--name` is required; omitting it is a usage error, and the run of every definition is `test run testsuite`. The issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into the issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Creates one pending test run and one Linear issue for one stored test definition, in its newest wording, and prints them as JSON. `--name` is required; omitting it is a usage error, and the run of every definition is `test run testsuite`. The issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into the issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
 The issue is created in `Backlog` and moved to `Automation Needed` once its result carries its identifier. One left in `Backlog` by a failure or a Ctrl-C is logged as `ticket trapped in Backlog; <reason>` and reported to Sentry; a failure also fails the run naming the ticket (`…; created OLI-n`).
 
@@ -116,7 +116,7 @@ The issue is created in `Backlog` and moved to `Automation Needed` once its resu
 ./ctrl test run testsuite --server-url <url> --iso <https-url> --version <version>
 ```
 
-One pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test run --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+One pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test run --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
 The dashboard answers the same run at `POST /create-test-suite-run` by running `./ctrl test run testsuite`, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
 
@@ -132,7 +132,7 @@ Tickets are born in `Backlog` and moved to `Automation Needed` as in `test run`.
 ./ctrl mint --server-url <url> --iso <https-url> [--unminted]
 ```
 
-Not a test: it gets the ISO installed once on every qemu server, so that server holds the ISO's minted disk and every later test on it can `start --resume` into a finished install instead of installing. For each live qemu server the reverse proxy at `--server-url` knows, it creates one pending run with one result under the definition named `mint`, and one Linear issue pinned to that server: the ticket tells its driver to `relinquish`, `reserve --server <that server>`, `start` fresh, install as the `mint` definition instructs, shut the machine down from inside, end with `./client save` instead of `stop`, and close the result with what `save` answered. The `mint` label sits beside the agent test label on every issue. Prints the runs as JSON, one per server: run id, result id, server url, ticket. Reads `LINEAR_API_TOKEN`.
+Not a test: it gets the ISO installed once on every qemu server, so that server holds the ISO's minted disk and every later test on it can `start --resume` into a finished install instead of installing. For each live qemu server the reverse proxy at `--server-url` knows, it creates one pending run with one result under the definition named `mint`, and one Linear issue pinned to that server: the ticket tells its driver to `relinquish`, `reserve --server <that server>`, `start` fresh, install as the `mint` definition instructs, shut the machine down from inside, end with `./client save` instead of `stop`, and close the result with what `save` answered. The `mint` label sits beside the agent test label on every issue. Prints the runs as JSON, one per server: run id, result id, server url, ticket. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
 - `--iso <https-url>` — the ISO to install. Must be HTTPS. Every server minted from it answers `start --resume` for that url afterwards.
 - `--server-url <url>` — the reverse proxy the drivers talk to; the live qemu servers behind it are the ones minted.
@@ -151,7 +151,7 @@ Refused before anything is created when there is no definition named `mint` — 
 ./ctrl test list
 ```
 
-Prints every Linear issue on the Oligarchy team whose status type is backlog, as JSON: `id`, `identifier`, `title`, `url`, `updatedAt`. An empty backlog prints `[]`. Not used while driving a guest. Reads `LINEAR_API_TOKEN`.
+Prints every Linear issue on the team named by `LINEAR_TEAM` whose status type is backlog, as JSON: `id`, `identifier`, `title`, `url`, `updatedAt`. An empty backlog prints `[]`. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
 ```bash
 ./ctrl test list

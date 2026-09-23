@@ -77,14 +77,14 @@ const ServerLive = (port: number, model: string) =>
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
 const LinearLive = Layer.unwrap(
-  Effect.map(Config.linearApiToken, (token) => Linear.Linear.layer(token)),
+  Effect.map(Config.linearAccess, ({ token, team }) => Linear.Linear.layer(token, team)),
 );
 
 // LINEAR_WEBHOOK_SECRET signs POST /linear; LINEAR_API_TOKEN reads the columns the webhook
-// missed; OLIGARCHY_TOKEN authenticates POST /run to a client and POST /abort from
-// Cloudflare; DATABASE_URL holds the queue, the live-server list and the logs rows. Sentry sits
-// beneath Log so Log captures the reporter. Lines land in logs with location/agentId
-// "automation"; durable jobs remain automation_jobs.
+// missed and LINEAR_TEAM names the board those columns belong to; OLIGARCHY_TOKEN authenticates
+// POST /run to a client and POST /abort from Cloudflare; DATABASE_URL holds the queue, the
+// live-server list and the logs rows. Sentry sits beneath Log so Log captures the reporter.
+// Lines land in logs with location/agentId "automation"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(
   Log.Log.layer,
   Handlers.LinearWebhookSecret.layer,
@@ -110,8 +110,9 @@ const command = AutomationServerCommand.makeAutomationServerCommand({
 });
 
 // The graph is built before the command runs: a missing LINEAR_WEBHOOK_SECRET, LINEAR_API_TOKEN,
-// OLIGARCHY_TOKEN or DATABASE_URL is the one failure no Log exists to record, so it is printed
-// here. Every later failure logs its own fatal line; a defect has nothing else to say for it.
+// LINEAR_TEAM, OLIGARCHY_TOKEN or DATABASE_URL is the one failure no Log exists to record, so it
+// is printed here. Every later failure logs its own fatal line; a defect has nothing else to say
+// for it.
 const program = Effect.gen(function* () {
   const services = yield* Layer.build(MainLive).pipe(Effect.tapCause(Render.reportFailure));
   yield* Command.run(command, { version: Api.VERSION }).pipe(

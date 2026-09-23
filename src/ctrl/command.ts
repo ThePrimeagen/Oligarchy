@@ -56,6 +56,7 @@ export type Deps = {
   readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
   readonly linear: (
     token: Redacted.Redacted,
+    team: string,
   ) => Layer.Layer<Linear.Linear, never, HttpClient.HttpClient>;
 };
 
@@ -253,12 +254,12 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       });
     };
 
-  // DATABASE_URL is read first so it is the one reported first.
+  // Sequential on purpose: DATABASE_URL, then LINEAR_API_TOKEN, then LINEAR_TEAM.
   const withDbAndLinear = Layer.unwrap(
     Effect.gen(function* () {
       const url = yield* Config.databaseUrl;
-      const token = yield* Config.linearApiToken;
-      return Layer.mergeAll(deps.database(url), deps.linear(token));
+      const { token, team } = yield* Config.linearAccess;
+      return Layer.mergeAll(deps.database(url), deps.linear(token, team));
     }),
   );
 
@@ -477,9 +478,9 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     readonly iso: string;
     readonly unminted: boolean;
   }) {
-    // Configuration before work: after DATABASE_URL and LINEAR_API_TOKEN (the command's layers,
-    // the same order as every ctrl command), the bearer is the third variable reported, and it is
-    // refused before any query or Linear call.
+    // Configuration before work: after DATABASE_URL, LINEAR_API_TOKEN and LINEAR_TEAM (the
+    // command's layers, the same order as every ctrl command), the bearer is the next variable
+    // reported, and it is refused before any query or Linear call.
     const token = input.unminted ? Option.some(yield* Config.oligarchyToken) : Option.none();
     const tests = yield* Tests.TestStore;
     const servers = yield* Servers.ServerStore;
@@ -1033,7 +1034,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
   );
 
   const testListCommand = Command.make("list", {}, testList).pipe(
-    Command.withDescription("Print the Oligarchy backlog from Linear as JSON"),
+    Command.withDescription("Print LINEAR_TEAM's backlog from Linear as JSON"),
     Command.provide(withDbAndLinear),
   );
 

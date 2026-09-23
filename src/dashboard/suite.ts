@@ -31,6 +31,7 @@ type SuiteBody = {
 type SuiteRunner = (
   connectionString: string,
   token: string,
+  team: string,
   args: ReadonlyArray<string>,
 ) => Promise<unknown>;
 
@@ -125,7 +126,7 @@ const commandMessage = (error: unknown): string | undefined => {
 };
 
 // `Log` and the printed JSON both come through this console. A finalizer may add a line after.
-const runCtrlCommand: SuiteRunner = async (connectionString, token, args) => {
+const runCtrlCommand: SuiteRunner = async (connectionString, token, team, args) => {
   const lines: Array<string> = [];
   const recording: Console.Console = Object.assign(Object.create(console), {
     log: (...parts: ReadonlyArray<unknown>) => {
@@ -138,7 +139,7 @@ const runCtrlCommand: SuiteRunner = async (connectionString, token, args) => {
       FetchHttpClient.layer,
       ConfigProvider.layer(
         ConfigProvider.fromEnv({
-          env: { DATABASE_URL: connectionString, LINEAR_API_TOKEN: token },
+          env: { DATABASE_URL: connectionString, LINEAR_API_TOKEN: token, LINEAR_TEAM: team },
         }),
       ),
       Layer.succeed(Console.Console, recording),
@@ -160,14 +161,14 @@ const runCtrlCommand: SuiteRunner = async (connectionString, token, args) => {
 };
 
 export const createTestSuiteRun = async (
-  env: { readonly LINEAR_API_TOKEN: string },
+  env: { readonly LINEAR_API_TOKEN: string; readonly LINEAR_TEAM: string },
   connectionString: string,
   body: unknown,
   run: SuiteRunner = runCtrlCommand,
 ): Promise<unknown> => {
   const request = readBody(body);
   try {
-    return await run(connectionString, env.LINEAR_API_TOKEN, [
+    return await run(connectionString, env.LINEAR_API_TOKEN, env.LINEAR_TEAM, [
       "test",
       "run",
       "testsuite",

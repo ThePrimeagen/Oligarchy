@@ -8,6 +8,7 @@ const env = {
   AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
   LINEAR_API_URL: "http://127.0.0.1:1",
   LINEAR_API_TOKEN: "lin_api_x",
+  LINEAR_TEAM: "Local Board",
 };
 
 const abort = (body: string | Record<string, unknown>) =>
