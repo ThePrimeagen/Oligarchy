@@ -63,10 +63,10 @@ const tracking = (watch: string, seen: ReadonlyArray<Seen>): string =>
     .join(", ")}`;
 
 // The result is looked up first, so a missing one, retried every poll and logged once per
-// snapshot, never says it is being processed. Then enqueue, through the same path as POST
-// /linear. An enqueue that lands and then loses the process leaves the ticket in Backlog;
-// the next poll finds the duplicate and moves it. The pair stays interruptible: a torn
-// enqueue and move is that recovery, and a hung Linear request must not hold shutdown. A
+// snapshot, never says it is being processed. Then that result is enqueued, through the same
+// insert as POST /linear. An enqueue that lands and then loses the process leaves the ticket
+// in Backlog; the next poll finds the duplicate and moves it. The pair stays interruptible: a
+// torn enqueue and move is that recovery, and a hung Linear request must not hold shutdown. A
 // ticket with no body is still queued.
 const processBacklog = Effect.fn("processBacklog")(function* (
   ticket: Linear.LinearBacklogTicket,
@@ -87,15 +87,12 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     return "missing";
   }
   const definition = yield* tests.definitionName(found.value.definitionId);
+  const action = Enqueue.queuedAction("drive", definition);
   yield* log.info(
-    `backlog watch processing out of bounds ticket; ${pings(rounds)}; queueing ${Enqueue.queuedAction("drive", definition)} and moving it to Automation Needed`,
+    `backlog watch processing out of bounds ticket; ${pings(rounds)}; queueing ${action} and moving it to Automation Needed`,
     { location: Log.Locations.automation, agentId: ticket.identifier },
   );
-  const placed = yield* Enqueue.enqueueTicket(ticket.identifier, "drive");
-  // Deleted since the lookup above; the next poll finds it missing.
-  if (placed.result === "missing") {
-    return "missing";
-  }
+  const placed = yield* Enqueue.enqueueResult(found.value.id, action);
   const adopted = placed.result;
   return yield* Effect.gen(function* () {
     // Label before the move. A miss leaves the ticket in Backlog; the next poll tries again.
@@ -171,16 +168,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
     `automation needed watch processing out of bounds ticket; ${pings(rounds)}; queueing ${action}`,
     { location: Log.Locations.automation, agentId: ticket.identifier },
   );
-  const placed = yield* Enqueue.enqueueTicket(ticket.identifier, "drive");
-  if (placed.result === "missing") {
-    if (rounds === ROUNDS_BEFORE_MOVE) {
-      yield* log.info("automation needed watch left the ticket in Automation Needed; no result", {
-        location: Log.Locations.automation,
-        agentId: ticket.identifier,
-      });
-    }
-    return "missing";
-  }
+  const placed = yield* Enqueue.enqueueResult(found.value.id, action);
   const line =
     placed.result === "queued"
       ? `automation needed watch queued ${placed.action}`
@@ -225,15 +213,11 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
     `needs review watch processing out of bounds ticket; ${pings(rounds)}; queueing diagnose`,
     { location: Log.Locations.automation, agentId: ticket.identifier },
   );
-  const placed = yield* Enqueue.enqueueTicket(ticket.identifier, "diagnose");
-  // Deleted since the lookup above; the next poll finds it missing.
-  if (placed.result === "missing") {
-    return "missing";
-  }
+  const placed = yield* Enqueue.enqueueResult(found.value.id, "diagnose");
   const line =
     placed.result === "queued"
       ? `needs review watch queued ${placed.action}`
-      : `needs review watch; ${placed.action} already queued`;
+      : `needs review watch; ${already(placed.action, placed.status)}`;
   yield* log.info(line, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,

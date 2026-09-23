@@ -937,6 +937,50 @@ const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =
     return { stores, log, moved, linear, scope };
   });
 
+// Retention deletes TICKET's result right after the watch reads it, so any later lookup is empty.
+const startDeleting = (column: "listBacklog" | Column, board: Array<Linear.LinearBacklogTicket>) =>
+  Effect.gen(function* () {
+    const tests = Stores.fakeTestStore(
+      {},
+      {
+        findResultByLinearId: (linearId) =>
+          Effect.sync(() => {
+            const index = tests.results.findIndex((row) => row.linearId === linearId);
+            return Option.fromUndefinedOr(
+              index === -1 ? undefined : tests.results.splice(index, 1)[0],
+            );
+          }),
+      },
+    );
+    const automation = Stores.fakeAutomationStore();
+    const servers = Stores.fakeServerStore();
+    const log = FakeLog.fakeLog();
+    const moved: Array<Move> = [];
+    const linear = FakeLinear.fakeLinear({
+      overrides: {
+        [column]: Effect.sync(() => [...board]),
+        moveIssue: (issue, stateId) =>
+          Effect.sync(() => {
+            moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+            const index = board.findIndex((item) => item.identifier === issue.identifier);
+            if (index !== -1) {
+              board.splice(index, 1);
+            }
+          }),
+      },
+    });
+    seedResult(tests, TICKET);
+    announceClient(servers);
+    const scope = yield* Scope.make();
+    yield* Backlog.watch().pipe(
+      Effect.provide(
+        Layer.mergeAll(tests.layer, automation.layer, servers.layer, linear.layer, log.layer),
+      ),
+      Scope.provide(scope),
+    );
+    return { tests, automation, log, moved, linear };
+  });
+
 const mintDefinition = {
   id: 1,
   name: "mint",
@@ -1696,6 +1740,63 @@ describe("automation needed and needs review watch unhappy path", () => {
         ]);
         yield* TestClock.adjust("30 seconds");
         expect(automation.jobs).toHaveLength(1);
+      }),
+  );
+
+  it.effect("the backlog watch queues the result it looked up, without looking it up again", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { tests, automation, log, moved } = yield* startDeleting("listBacklog", board);
+      yield* TestClock.adjust("90 seconds");
+      expect(tests.results).toEqual([]);
+      expect(automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+      ]);
+      expect(moved).toEqual([automationNeeded(TICKET)]);
+      expect(acted(log)).toEqual([
+        "backlog watch processing out of bounds ticket; 3/3 pings; queueing drive and moving it to Automation Needed",
+        "backlog watch moved to Automation Needed; queued drive",
+      ]);
+    }),
+  );
+
+  it.effect(
+    "the automation needed watch queues the result it looked up, without looking it up again",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { tests, automation, log, linear } = yield* startDeleting(
+          "listAutomationNeeded",
+          board,
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(tests.results).toEqual([]);
+        expect(automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(acted(log)).toEqual([
+          "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+          "automation needed watch queued drive",
+        ]);
+        expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
+      }),
+  );
+
+  it.effect(
+    "the needs review watch queues the result it looked up, without looking it up again",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { tests, automation, log } = yield* startDeleting("listNeedsReview", board);
+        yield* TestClock.adjust("90 seconds");
+        expect(tests.results).toEqual([]);
+        expect(automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+        ]);
+        expect(acted(log)).toEqual([
+          "needs review watch processing out of bounds ticket; 3/3 pings; queueing diagnose",
+          "needs review watch queued diagnose",
+        ]);
       }),
   );
 
