@@ -13,6 +13,8 @@
   "rules": [
     { "type": "Text", "globs": ["**/*.md", "**/*.html"], "fallthrough": false }
   ],
+  // Top-level Hyperdrive is production. `bun run dev` is `--env local`, which binds the
+  // shared test Hyperdrive below. Bindings are not inherited, so each environment names its own.
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
@@ -36,5 +38,23 @@
   "vars": {
     "AUTOMATION_SERVER_URL": "https://oligarchy-automation.trm.sh",
     "LINEAR_API_URL": "https://api.linear.app/graphql"
+  },
+  "env": {
+    "local": {
+      // Shared test database. `wrangler deploy --env local` would publish
+      // oligarchy-dashboard-local, not the production routes.
+      "workers_dev": true,
+      "routes": [],
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "be7183f62d6e488a9a46fb4d396b8c60"
+        }
+      ],
+      "vars": {
+        "AUTOMATION_SERVER_URL": "https://oligarchy-automation.trm.sh",
+        "LINEAR_API_URL": "https://api.linear.app/graphql"
+      }
+    }
   }
 }

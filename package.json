@@ -19,7 +19,7 @@
     "qemu-reverse-proxy": "bun --no-env-file --preload ./src/observability/instrument.ts src/qemu-reverse-proxy/main.ts",
     "automation-server": "bun --no-env-file --preload ./src/observability/instrument.ts src/automation-server/main.ts",
     "automation-client": "bun --no-env-file --preload ./src/observability/instrument.ts src/automation-client/main.ts",
-    "dev": "wrangler dev --remote",
+    "dev": "wrangler dev --remote --env local",
     "check:lint": "oxlint --deny-warnings .",
     "check:format": "oxfmt --check .",
     "format": "oxfmt .",
