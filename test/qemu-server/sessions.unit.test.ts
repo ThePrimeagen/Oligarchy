@@ -2718,7 +2718,14 @@ describe("restart", () => {
         const finished = seedSession(h, "succeeded", SELF);
         const elsewhere = seedSession(h, "running", ELSEWHERE, OTHER_AGENT);
         const unrouted = seedSession(h, "running", undefined);
-        yield* h.run(Effect.asVoid(Sessions.Sessions));
+        // What a driver following the lost session reads now: a finished session.
+        const followed = yield* h.run(
+          Effect.flatMap(Sessions.Sessions, (sessions) => Effect.flip(sessions.follow(running))),
+        );
+        expect(followed).toMatchObject({
+          _tag: "Conflict",
+          message: `session "${running}" has already completed (failed)`,
+        });
         for (const id of [downloading, running]) {
           expect(rowOf(h, id)).toMatchObject({
             status: "failed",
