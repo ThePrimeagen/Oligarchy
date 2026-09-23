@@ -1261,6 +1261,8 @@ Postgres.describeWithDatabase("database", () => {
           });
           const serverId = crypto.randomUUID();
           expect(yield* automation.markRunning(selected.id, serverId)).toBe(true);
+          // The update committed and the acknowledgement was lost: the same client is still it.
+          expect(yield* automation.markRunning(selected.id, serverId)).toBe(true);
           expect(yield* automation.markRunning(selected.id, crypto.randomUUID())).toBe(false);
           const running = Option.getOrThrow(yield* automation.findRunning(selected.resultId));
           expect(running).toMatchObject({ status: "running", serverId });

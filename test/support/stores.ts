@@ -607,14 +607,17 @@ export const fakeAutomationStore = (
       }),
     markRunning: (id, serverId) =>
       Effect.sync(() => {
-        const job = jobs.find((row) => sameId(row.id, id) && row.status === "pending");
+        const job = jobs.find((row) => sameId(row.id, id));
         if (job === undefined) {
           return false;
         }
-        job.status = "running";
-        job.startedAt = new Date();
-        job.serverId = serverId;
-        return true;
+        if (job.status === "pending") {
+          job.status = "running";
+          job.startedAt = new Date();
+          job.serverId = serverId;
+          return true;
+        }
+        return job.status === "running" && job.serverId === serverId;
       }),
     hasPending: (resultId, action) =>
       Effect.sync(() =>

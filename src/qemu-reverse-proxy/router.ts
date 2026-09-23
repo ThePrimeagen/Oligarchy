@@ -22,6 +22,7 @@ import * as Errors from "../shared/errors.ts";
 // A server that has not answered its /stats in this long is skipped for the reserve that asked and
 // is null in GET /servers; the request that probed it does not wait longer.
 export const PROBE_TIMEOUT = "10 seconds";
+const RELEASE_TIMEOUT = "10 seconds";
 
 // This reverse proxy fronts the servers that boot QEMU: the probe is their /stats, the placement
 // their qemus. It registers a server as one and reads only those rows, whatever else is in the
@@ -122,9 +123,17 @@ const serverFailed = (
 // A qemu server's own 409: it has room, and no minted disk for this resume. The number is
 // the slots setting that machine up would add, which is its max-jobs, not its idle count.
 const SETUP_NEEDED = /^setup needed: max-jobs is (\d+)$/;
+const SetupWire = Schema.fromJsonString(Schema.Struct({ error: Schema.String }));
+const decodeSetupWire = Schema.decodeUnknownOption(SetupWire);
 
+// Only the JSON wire `{ "error": "setup needed: max-jobs is N" }`. A raw body that
+// happens to contain those words is not that answer.
 const maxJobsGained = (text: string): number | undefined => {
-  const matched = SETUP_NEEDED.exec(ProxyClient.apiError(text));
+  const decoded = decodeSetupWire(text);
+  if (Option.isNone(decoded)) {
+    return undefined;
+  }
+  const matched = SETUP_NEEDED.exec(decoded.value.error);
   if (matched === null) {
     return undefined;
   }
@@ -363,29 +372,44 @@ const make = Effect.gen(function* () {
 
   // The server already took the slot. Give it back before the route failure leaves this
   // process; a 400 means the server holds nothing, which is what relinquish was for.
-  const releaseAccepted = (url: string, agent: string) =>
-    Effect.gen(function* () {
-      const who = { agentId: agent };
-      const response = yield* http
-        .execute(
-          HttpClientRequest.post("/relinquish").pipe(
-            HttpClientRequest.prependUrl(url),
-            HttpClientRequest.bearerToken(token),
-            HttpClientRequest.bodyJsonUnsafe(Contract.ReserveAgentBody.make({ agent })),
+  // Reserve is uninterruptible, so the wait is made interruptible for the timeout.
+  const releaseAccepted = (url: string, agent: string) => {
+    const who = { agentId: agent };
+    return Effect.interruptible(
+      Effect.gen(function* () {
+        const response = yield* http
+          .execute(
+            HttpClientRequest.post("/relinquish").pipe(
+              HttpClientRequest.prependUrl(url),
+              HttpClientRequest.bearerToken(token),
+              HttpClientRequest.bodyJsonUnsafe(Contract.ReserveAgentBody.make({ agent })),
+            ),
+          )
+          .pipe(Effect.mapError((error) => unreachable(url, error, who)));
+        if (response.status === 200 || response.status === 400) {
+          return yield* Effect.void;
+        }
+        const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
+        return yield* serverFailed(
+          url,
+          `server ${url} answered ${String(response.status)}: ${ProxyClient.apiError(text)}`,
+          undefined,
+          who,
+        );
+      }),
+    ).pipe(
+      Effect.timeoutOrElse({
+        duration: RELEASE_TIMEOUT,
+        orElse: () =>
+          serverFailed(
+            url,
+            `server ${url} unreachable: no answer within ${RELEASE_TIMEOUT}`,
+            new Error(`no answer within ${RELEASE_TIMEOUT}`),
+            who,
           ),
-        )
-        .pipe(Effect.mapError((error) => unreachable(url, error, who)));
-      if (response.status === 200 || response.status === 400) {
-        return yield* Effect.void;
-      }
-      const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
-      return yield* serverFailed(
-        url,
-        `server ${url} answered ${String(response.status)}: ${ProxyClient.apiError(text)}`,
-        undefined,
-        who,
-      );
-    });
+      }),
+    );
+  };
 
   // One server's answer to the reserve, sent as it came and passed back as it came; a 200 routes
   // the agent there. A route that cannot be written gives the slot back and fails: another
@@ -414,6 +438,22 @@ const make = Effect.gen(function* () {
             .pipe(Effect.mapError((cause) => internal(cause, undefined, agent))),
         );
         if (Result.isFailure(routed)) {
+          // The write may have committed and the error is only a lost acknowledgement.
+          const looked = yield* Effect.result(
+            store
+              .serverForAgent(agent)
+              .pipe(Effect.mapError((cause) => internal(cause, undefined, agent))),
+          );
+          if (Result.isSuccess(looked)) {
+            const route = looked.success;
+            if (Option.isSome(route) && route.value === url) {
+              yield* log.info(`reserved; ${url}`, {
+                location: Log.Locations.server,
+                agentId: agent,
+              });
+              return { status: response.status, text, headers };
+            }
+          }
           const released = yield* Effect.result(releaseAccepted(url, agent));
           if (Result.isFailure(released)) {
             yield* log.error(`relinquish failed; ${url}`, {
@@ -427,6 +467,18 @@ const make = Effect.gen(function* () {
         yield* log.info(`reserved; ${url}`, { location: Log.Locations.server, agentId: agent });
       }
       return { status: response.status, text, headers };
+    });
+
+  const databaseFailure = (url: string, agent: string, cause: unknown) =>
+    Effect.gen(function* () {
+      yield* log.error(
+        `route failed; ${url}`,
+        Object.assign(
+          { location: Log.Locations.server, agentId: agent },
+          cause === undefined ? undefined : { cause },
+        ),
+      );
+      return HttpServerResponse.jsonUnsafe({ error: "DATABASE FAILURE" }, { status: 500 });
     });
 
   const reserve = Effect.fn("Router.reserve")(function* (
@@ -455,7 +507,11 @@ const make = Effect.gen(function* () {
           yield* probe(pinned, { agentId: agent });
           const asked = yield* Effect.result(askToReserve(pinned, request, agent));
           if (Result.isFailure(asked)) {
-            // A pin does not fall back. The failure propagates, and the job stays pending.
+            // A pin does not fall back. A route that could not be saved is the database
+            // failure, already relinquished; every other failure propagates as it came.
+            if (asked.failure._tag === "Internal") {
+              return yield* databaseFailure(pinned, agent, asked.failure.cause);
+            }
             return yield* asked.failure;
           }
           const answer = asked.success;
@@ -532,7 +588,7 @@ const make = Effect.gen(function* () {
           if (Result.isFailure(asked)) {
             // The route table itself failed. Another server fails the same write.
             if (asked.failure._tag === "Internal") {
-              return yield* asked.failure;
+              return yield* databaseFailure(url, agent, asked.failure.cause);
             }
             yield* log.error(`reserve failed; ${url}`, {
               location: Log.Locations.server,

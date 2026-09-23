@@ -107,8 +107,9 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return Arr.head(pending);
       });
 
-      // pending -> running, only if the row is still pending. An abort that landed
-      // first leaves the row aborted and this update changes nothing.
+      // pending -> running, only if the row is still pending. An acknowledgement can be
+      // lost after the update commits: the same client already running is that success.
+      // An abort, or a different client, changes nothing.
       const markRunning = Effect.fn("db.markAutomationJobRunning")(function* (
         id: string,
         serverId: string,
@@ -125,7 +126,23 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
             )
             .returning({ id: DbSchema.automationJobs.id }),
         );
-        return rows.length > 0;
+        if (rows.length > 0) {
+          return true;
+        }
+        const current = yield* database.run("markAutomationJobRunning", (db) =>
+          db
+            .select({
+              status: DbSchema.automationJobs.status,
+              serverId: DbSchema.automationJobs.serverId,
+            })
+            .from(DbSchema.automationJobs)
+            .where(eq(DbSchema.automationJobs.id, id))
+            .limit(1),
+        );
+        const row = Arr.head(current);
+        return (
+          Option.isSome(row) && row.value.status === "running" && row.value.serverId === serverId
+        );
       });
 
       // The row the Automation Needed watch must not insert over: a pending job is the

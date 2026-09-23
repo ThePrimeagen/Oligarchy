@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Redacted, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import {
   HttpBody,
@@ -1449,6 +1449,7 @@ describe("placement", () => {
             body: HttpBody.jsonUnsafe(reserveBody),
           });
           expect(raw.status).toBe(500);
+          expect(yield* raw.json).toEqual({ error: "DATABASE FAILURE" });
         }).pipe(Effect.provide(serve(fixed)));
         expect(fixed.store.agents.size).toBe(0);
         expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
@@ -1457,6 +1458,16 @@ describe("placement", () => {
             .filter((request) => request.url.endsWith("/relinquish"))
             .map((request) => request.url),
         ).toEqual([`${SERVER_B}/relinquish`]);
+        expect(fixed.log.lines.filter((line) => line.text === `route failed; ${SERVER_B}`)).toEqual(
+          [
+            expect.objectContaining({
+              level: "error",
+              agentId: AGENT_ID,
+              skipSentry: false,
+              cause: failure,
+            }),
+          ],
+        );
       });
     },
   );
@@ -1485,8 +1496,16 @@ describe("placement", () => {
           body: HttpBody.jsonUnsafe(reserveBody),
         });
         expect(raw.status).toBe(500);
+        expect(yield* raw.json).toEqual({ error: "DATABASE FAILURE" });
       }).pipe(Effect.provide(serve(fixed)));
       expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+      expect(fixed.log.lines.filter((line) => line.text === `route failed; ${SERVER_B}`)).toEqual([
+        expect.objectContaining({
+          level: "error",
+          skipSentry: false,
+          cause: failure,
+        }),
+      ]);
       expect(fixed.log.lines.filter((line) => line.text.startsWith("relinquish failed;"))).toEqual([
         expect.objectContaining({
           level: "error",
@@ -1497,6 +1516,142 @@ describe("placement", () => {
       ]);
     });
   });
+
+  it.effect(
+    "a route write that commits and then fails is a reservation and is not relinquished",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "routeAgent",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      const agents = new Map<string, string>();
+      return Effect.gen(function* () {
+        const fixed = fixture(
+          (request, url) =>
+            url.pathname === "/reserve" || url.pathname === "/relinquish"
+              ? FakeHttp.json({ ok: "true" })
+              : fleet(request, url),
+          {
+            store: Stores.fakeServerStore({
+              routeAgent: (agentId, url) =>
+                Effect.gen(function* () {
+                  agents.set(agentId, url);
+                  return yield* Effect.fail(failure);
+                }),
+              serverForAgent: (agentId) =>
+                Effect.sync(() => Option.fromUndefinedOr(agents.get(agentId))),
+            }),
+          },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(reserveBody),
+          });
+          expect(raw.status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(agents.get(AGENT_ID)).toBe(SERVER_B);
+        expect(
+          fixed.upstream.requests.filter((request) => request.url.endsWith("/relinquish")),
+        ).toEqual([]);
+      });
+    },
+  );
+
+  it.effect(
+    "a relinquish that never answers is reported after ten seconds and does not hang",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "routeAgent",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      return Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const fixed = fixture(
+          (request, url) => {
+            if (url.pathname === "/relinquish") {
+              return Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+            }
+            return url.pathname === "/reserve"
+              ? FakeHttp.json({ ok: "true" })
+              : fleet(request, url);
+          },
+          { store: Stores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const request = yield* Effect.forkChild(
+            http.post("/reserve", {
+              headers: { authorization: AUTHORIZATION },
+              body: HttpBody.jsonUnsafe(reserveBody),
+            }),
+          );
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("10 seconds");
+          const response = yield* Fiber.join(request);
+          expect(response.status).toBe(500);
+          expect(yield* response.json).toEqual({ error: "DATABASE FAILURE" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+        expect(fixed.log.lines.filter((line) => line.text === `route failed; ${SERVER_B}`)).toEqual(
+          [
+            expect.objectContaining({
+              level: "error",
+              skipSentry: false,
+              cause: failure,
+            }),
+          ],
+        );
+        expect(
+          fixed.log.lines.some(
+            (line) =>
+              line.level === "error" &&
+              line.text === `relinquish failed; ${SERVER_B}` &&
+              !line.skipSentry,
+          ),
+        ).toBe(true);
+      });
+    },
+  );
+
+  it.effect("a raw setup-needed body is not a mint answer", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname !== "/reserve") {
+          return fleet(request, url);
+        }
+        return new Response("setup needed: max-jobs is 4", {
+          status: 409,
+          headers: { "content-type": "text/plain" },
+        });
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(resumeBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "no server available" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+      expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+      expect(
+        fixed.log.lines
+          .filter((line) => line.text.startsWith("reserve failed;"))
+          .map((line) => [line.level, line.skipSentry]),
+      ).toEqual([
+        ["error", false],
+        ["error", false],
+      ]);
+    }),
+  );
 
   // A reserve pinned to a server url goes there and nowhere else: what ./ctrl mint relies on to
   // put one install on every server.

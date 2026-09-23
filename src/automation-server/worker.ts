@@ -12,6 +12,7 @@ import * as Prompts from "./prompts.ts";
 import * as Ready from "./ready.ts";
 
 const DISPATCH_INTERVAL = "5 seconds";
+const RELEASE_TIMEOUT = "10 seconds";
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 
@@ -292,8 +293,18 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             }
             continue;
           }
+          // The tick is uninterruptible after reserve returns, and a timeout only lands
+          // on an interruptible wait. Ten seconds: a client that never answers must not
+          // hold the next pass.
           const releaseReservation = (url: string, ticket: string) =>
-            AutomationClient.abort(url, ticket).pipe(
+            Effect.interruptible(AutomationClient.abort(url, ticket)).pipe(
+              Effect.timeoutOrElse({
+                duration: RELEASE_TIMEOUT,
+                orElse: () =>
+                  Errors.AutomationClientError.make({
+                    message: `automation client: POST ${url}/abort failed: no answer within ${RELEASE_TIMEOUT}`,
+                  }),
+              }),
               Effect.catch((error) =>
                 log.error(`reserve release failed; ${url}`, {
                   location: Log.Locations.automation,
@@ -314,6 +325,19 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               cause: written.failure,
             });
             yield* releaseReservation(placed.placement.url, placed.placement.ticket);
+            // The reservation is gone. Record the database failure on the row, three
+            // attempts. A successful write is not logged again.
+            yield* store.finish(job.id, "failed", "DATABASE FAILURE").pipe(
+              Effect.tapError((error) =>
+                log.error(`failure write failed; ${placed.placement.url}`, {
+                  location: Log.Locations.automation,
+                  agentId: placed.placement.ticket,
+                  cause: error,
+                }),
+              ),
+              Effect.retry(Schedule.recurs(2)),
+              Effect.catch(() => Effect.void),
+            );
             return yield* Effect.void;
           }
           if (!written.success) {
