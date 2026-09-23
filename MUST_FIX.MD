@@ -111,10 +111,10 @@ flowchart TB
   EXEC["OpenCode executes the test"]:::kept
   DONE["Result, Linear, client execution,<br/>and job close consistently"]:::kept
   FAIL["automation_jobs: failed<br/>Linear: Failed"]:::kept
-  ERR["automation_jobs: errored<br/>Linear: Failed"]:::added
+  ERR["automation_jobs: errored<br/>Linear: Errored"]:::added
   DBFAIL["+ Database still fails after three attempts:<br/>cancel reservations, report Sentry, error"]:::added
   LINEARFAIL["+ Linear move fails after retries:<br/>cancel reservations and error"]:::added
-  RUNFAIL["+ Client cannot start execution:<br/>cancel reservations and fail"]:::added
+  RUNFAIL["+ Client cannot start execution:<br/>cancel reservations and error"]:::added
 
   P --> N1 --> N2
   N2 -->|"reserved"| N6 --> N7
@@ -127,12 +127,12 @@ flowchart TB
   N8 -->|"moved"| N9
   N8 -->|"retry exhausted"| LINEARFAIL --> ERR
   N9 -->|"started"| RUN --> EXEC --> N11 --> DONE
-  N9 -->|"start failed"| RUNFAIL --> FAIL
+  N9 -->|"start failed"| RUNFAIL --> ERR
 
   START["Automation server startup"]:::decision
   INHERITED["Find every inherited running job"]:::decision
   CANCEL["+ Cancel client reservation/process<br/>and QEMU work"]:::added
-  INHERITEDFAIL["+ Database errored and Linear Failed:<br/>automation server restarted"]:::added
+  INHERITEDFAIL["+ Database errored and Linear Errored:<br/>automation server restarted"]:::added
   UNREACHABLE["+ If the automation client does not answer,<br/>report Sentry and error anyway"]:::added
   NORMAL["+ Normal pending dispatch may start"]:::added
 
@@ -176,7 +176,7 @@ flowchart TB
 - [x] Do not assume an inherited row is dead: its OpenCode child may still be active on the
       automation client after the previous server connection disappeared.
 - [x] Cancel a confirmed reservation or active execution before closing its database row `errored`
-      and moving its Linear issue to Failed.
+      and moving its Linear issue to Errored.
 - [x] Treat an absent execution as already stopped, ~~and retain an unreachable execution as
       unresolved for retry~~. Changed: user decision. An automation client that does not answer
       is reported to Sentry and the job is errored anyway; nothing retries it.
@@ -193,8 +193,9 @@ flowchart TB
       always reported).
 - [x] Never requeue work whose side effects are uncertain; close it terminally unless the durable
       state proves `/run` never started.
-- [x] An inherited drive or mint whose result its driver already closed has finished: close it
-      `succeeded`, and send nothing to its automation client or Linear. User decision.
+- [x] An inherited drive or mint whose result its driver already closed has finished: judge it
+      as dispatch would, `completed`, or `errored` when its qemu session errored, and send nothing
+      to its automation client. An errored one moves the ticket to Errored. User decision.
 - [x] Prove that one automation client configured for six jobs cannot leave more than six
       client-confirmed `running` rows after reconciliation.
 

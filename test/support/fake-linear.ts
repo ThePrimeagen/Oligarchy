@@ -20,7 +20,7 @@ export type LinearCall =
     }
   | { readonly method: "markReady"; readonly identifier: string }
   | { readonly method: "clearReady"; readonly identifier: string }
-  | { readonly method: "moveToFailed"; readonly identifier: string }
+  | { readonly method: "moveToErrored"; readonly identifier: string; readonly message: string }
   | { readonly method: "moveToInProgress"; readonly identifier: string }
   | { readonly method: "listBacklog" }
   | { readonly method: "listAutomationNeeded" }
@@ -89,7 +89,8 @@ export const fakeLinear = (
       record({ method: "moveIssue", ticket: issue, stateId: state }, Effect.void),
     markReady: (identifier) => record({ method: "markReady", identifier }, Effect.void),
     clearReady: (identifier) => record({ method: "clearReady", identifier }, Effect.void),
-    moveToFailed: (identifier) => record({ method: "moveToFailed", identifier }, Effect.void),
+    moveToErrored: (identifier, message) =>
+      record({ method: "moveToErrored", identifier, message }, Effect.void),
     moveToInProgress: (identifier) =>
       record({ method: "moveToInProgress", identifier }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
@@ -107,7 +108,7 @@ export const fakeLinear = (
     moveIssue: overrides.moveIssue ?? defaults.moveIssue,
     markReady: overrides.markReady ?? defaults.markReady,
     clearReady: overrides.clearReady ?? defaults.clearReady,
-    moveToFailed: overrides.moveToFailed ?? defaults.moveToFailed,
+    moveToErrored: overrides.moveToErrored ?? defaults.moveToErrored,
     moveToInProgress: overrides.moveToInProgress ?? defaults.moveToInProgress,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
     listAutomationNeeded: overrides.listAutomationNeeded ?? defaults.listAutomationNeeded,
