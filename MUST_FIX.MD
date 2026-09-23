@@ -97,7 +97,7 @@ flowchart TB
   N8["+ Automation server moves Linear to In Progress"]:::added
   N9["+ Tell the reserved client to run"]:::added
   N10["+ Startup cancels and fails inherited running work<br/>before normal dispatch starts"]:::added
-  N11["+ Terminal writes retry;<br/>periodic reconciliation repairs misses"]:::added
+  N11["+ Terminal writes retry three times;<br/>then Sentry and manual repair"]:::added
 
   R1 -. "replace" .-> N1
   R2 -. "replace" .-> N2
@@ -132,48 +132,51 @@ flowchart TB
   INHERITED["Find every inherited running job"]:::decision
   CANCEL["+ Cancel client reservation/process<br/>and QEMU work"]:::added
   INHERITEDFAIL["+ Database failed and Linear Failed:<br/>automation server restarted"]:::added
-  BLOCK["+ If cleanup is unreachable, report Sentry<br/>and keep dispatch blocked"]:::added
+  UNREACHABLE["+ If the automation client does not answer,<br/>report Sentry and fail anyway"]:::added
   NORMAL["+ Normal pending dispatch may start"]:::added
 
   START --> INHERITED
   INHERITED -->|"none"| NORMAL
   INHERITED -->|"cleanup confirmed"| CANCEL --> INHERITEDFAIL --> NORMAL --> P
-  INHERITED -->|"cleanup unreachable"| BLOCK --> INHERITED
+  INHERITED -->|"cleanup unreachable"| UNREACHABLE --> INHERITEDFAIL
 ```
 
 ## 1. Reconcile orphaned running jobs after process death
 
-- [ ] Add an integration test that SIGKILLs `automation-server` with a drive in progress, restarts
+- [x] Add an integration test that SIGKILLs `automation-server` with a drive in progress, restarts
       it, and proves the old `automation_jobs` row does not remain `running`.
-- [ ] Add an integration test for death while `/reserve` is in flight and the database row is
+- [x] Add an integration test for death while `/reserve` is in flight and the database row is
       still `pending`.
 - [ ] Add an integration test for death after `/reserve` succeeds but before `/run` starts.
 - [ ] Add an integration test for death after the database becomes `running` but before Linear
       moves to In Progress.
 - [ ] Add an integration test for death after Linear moves to In Progress but before `/run`.
-- [ ] Add an integration test for death while `/run` is waiting on the automation client.
+- [x] Add an integration test for death while `/run` is waiting on the automation client.
 - [x] Add an unhappy-path test that a failed terminal `finish` database write is retried or later
       reconciled.
-- [ ] Track every reservation attempt and perform fiber owned by the current singleton
-      automation-server in memory.
-- [ ] On startup, treat every existing nonterminal row as inherited work and reconcile it against
-      the assigned automation client.
-- [ ] Run startup reconciliation before the dispatch loop may select any pending job.
-- [ ] Do not assume an inherited row is dead: its OpenCode child may still be active on the
+- [ ] ~~Track every reservation attempt and perform fiber owned by the current singleton
+      automation-server in memory.~~ Dropped: user decision. Every running row at startup is the
+      dead process's; nothing needs a registry.
+- [x] On startup, treat every existing nonterminal row as inherited work and reconcile it against
+      the assigned automation client. A pending row needs nothing: dispatch places it as usual.
+- [x] Run startup reconciliation before the dispatch loop may select any pending job.
+- [x] Do not assume an inherited row is dead: its OpenCode child may still be active on the
       automation client after the previous server connection disappeared.
-- [ ] Cancel a confirmed reservation or active execution before moving its database row and Linear
+- [x] Cancel a confirmed reservation or active execution before moving its database row and Linear
       issue to Failed.
-- [ ] Treat an absent execution as already stopped, and retain an unreachable execution as
-      unresolved for retry.
-- [ ] Keep new dispatch gated while inherited work is unresolved so a restart cannot exceed real
-      client or QEMU capacity.
-- [ ] Periodically reconcile database-running rows that are absent from the current process's
-      ownership registry.
-- [ ] Abort client work before closing inherited work when the automation client still owns that
+- [x] Treat an absent execution as already stopped, ~~and retain an unreachable execution as
+      unresolved for retry~~. Changed: user decision. An automation client that does not answer
+      is reported to Sentry and the job is failed anyway; nothing retries it.
+- [ ] ~~Keep new dispatch gated while inherited work is unresolved so a restart cannot exceed real
+      client or QEMU capacity.~~ Dropped: user decision. An unreachable automation client does not
+      block dispatch.
+- [ ] ~~Periodically reconcile database-running rows that are absent from the current process's
+      ownership registry.~~ Dropped: user decision (Sentry, then manual repair).
+- [x] Abort client work before closing inherited work when the automation client still owns that
       ticket.
-- [ ] Treat a client `404` during inherited-work cleanup as confirmation that no process remains,
-      then close the job with an explicit owner-lost reason.
-- [ ] Never requeue work whose side effects are uncertain; close it terminally unless the durable
+- [x] Treat a client `404` during inherited-work cleanup as confirmation that no process remains,
+      then close the job with an explicit owner-lost reason (`automation server restarted`).
+- [x] Never requeue work whose side effects are uncertain; close it terminally unless the durable
       state proves `/run` never started.
 - [ ] Prove that one automation client configured for six jobs cannot leave more than six
       client-confirmed `running` rows after reconciliation.
@@ -216,9 +219,11 @@ flowchart TB
 
 - [x] Add a unit test for a transient database failure in `AutomationStore.finish`.
 - [x] Add a test for exhaustion of the terminal-write retry policy.
-- [ ] Retry terminal writes with a bounded backoff while the worker still owns the job locally.
-- [ ] Leave the job and client execution information available to the reconciliation pass when
-      retries are exhausted.
+- [x] Retry terminal writes with a bounded backoff while the worker still owns the job locally.
+      Three immediate attempts, like the running write.
+- [ ] ~~Leave the job and client execution information available to the reconciliation pass when
+      retries are exhausted.~~ Replaced: user decision. A Sentry line names the job and the status
+      it should have; the row stays running for an operator to mark.
 - [ ] Use `timed_out` or remove it from the automation-job vocabulary; do not retain a terminal
       status that no code can write.
 
