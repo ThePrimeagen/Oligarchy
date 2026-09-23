@@ -2249,6 +2249,39 @@ describe("a running job left by the last automation server", () => {
   );
 
   it.effect(
+    "a drive whose result the driver closed on a session the qemu server errored is errored and moved, and nothing is sent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const sessionId = "44444444-4444-4444-8444-444444444444";
+        seedResult(fixed.tests, TICKET, "passed");
+        const result = fixed.tests.results[0];
+        if (result !== undefined) {
+          result.sessionId = sessionId;
+        }
+        fixed.sessions.sessions.push({
+          id: sessionId,
+          config: { iso: "x" },
+          status: "errored",
+          reason: "qemu exited 137",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        });
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        const reason = `session ${sessionId} errored; qemu exited 137`;
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason });
+        expect(fixed.tests.results[0]).toMatchObject({ status: "errored", reason });
+        expect(http.requests).toEqual([]);
+        expect(erroredMoves(fixed.linear)).toEqual([
+          { method: "moveToErrored", identifier: TICKET, message: `drive errored; ${reason}` },
+        ]);
+      }),
+  );
+
+  it.effect(
     "a diagnose left running is stopped, errored, and moved to Errored; its closed result is left alone",
     () =>
       Effect.gen(function* () {

@@ -716,7 +716,7 @@ const ticketOf = (body: string): string | undefined => {
 
 describeServing("automation server dispatch", () => {
   it.live(
-    "a live client that closes the result and answers 200 marks the drive succeeded; the body carries --model",
+    "a live client that closes the result and answers 200 marks the drive completed; the body carries --model",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -739,8 +739,8 @@ describeServing("automation server dispatch", () => {
         const process = spawnAutomationServer(["--port", String(port), "--model", MODEL]);
         try {
           await process.waitFor(/automation server listening/);
-          const job = await waitForJob(resultId, "succeeded");
-          expect(job).toMatchObject({ action: "drive", status: "succeeded", reason: null });
+          const job = await waitForJob(resultId, "completed");
+          expect(job).toMatchObject({ action: "drive", status: "completed", reason: null });
           // The queue is shared with every integration file that ran before: a pending job one of
           // them left is dispatched here too, so this ticket's body is found by its ticket.
           const parsed: Array<{ prompt: string; model: string }> = bodies.map((text) =>
@@ -761,7 +761,7 @@ describeServing("automation server dispatch", () => {
   );
 
   it.live(
-    "a live client that answers 200 with the result still pending marks the drive failed",
+    "a live client that answers 200 with the result still pending marks the drive errored",
     () =>
       Effect.promise(async () => {
         const client = await serveClient((_req, res) => {
@@ -776,10 +776,10 @@ describeServing("automation server dispatch", () => {
         const process = spawnAutomationServer(["--port", String(port)]);
         try {
           await process.waitFor(/automation server listening/);
-          const job = await waitForJob(resultId, "failed");
+          const job = await waitForJob(resultId, "errored");
           expect(job).toMatchObject({
             action: "drive",
-            status: "failed",
+            status: "errored",
             reason: `driver exited; result ${resultId} is pending`,
           });
         } finally {
@@ -815,7 +815,7 @@ describeServing("automation server dispatch", () => {
           reason: null,
         });
         expect(process.stdout()).toContain(linearId);
-        expect(process.stdout()).not.toContain("drive failed");
+        expect(process.stdout()).not.toContain("drive errored");
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
@@ -1066,7 +1066,7 @@ const stop = async (process: Process) => {
 
 describeServing("automation server restart", () => {
   it.live(
-    "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and fails it",
+    "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and errors it",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1099,13 +1099,13 @@ describeServing("automation server restart", () => {
           expect(aborts.filter((body) => ticketOf(body) === linearId)).toEqual([]);
 
           second = spawnAutomationServer(["--port", String(await freePort())]);
-          const job = await waitForJob(resultId, "failed", 30_000);
-          expect(job).toMatchObject({ status: "failed", reason: RESTARTED });
+          const job = await waitForJob(resultId, "errored", 30_000);
+          expect(job).toMatchObject({ status: "errored", reason: RESTARTED });
           expect(job.serverId).toBe(running.serverId);
           expect(aborts.map(ticketOf).filter((ticket) => ticket === linearId)).toEqual([linearId]);
-          await second.waitFor(new RegExp(`drive failed; ${RESTARTED}`));
+          await second.waitFor(new RegExp(`drive errored; ${RESTARTED}`));
           expect(lines(second.stdout()), second.stdout()).toContain(
-            `[global] automation: error: drive failed; ${RESTARTED}`,
+            `[global] automation: error: drive errored; ${RESTARTED}`,
           );
         } finally {
           await stop(first);
@@ -1163,8 +1163,8 @@ describeServing("automation server restart", () => {
           ]);
 
           second = spawnAutomationServer(["--port", String(await freePort())]);
-          const job = await waitForJob(resultId, "succeeded", 30_000);
-          expect(job).toMatchObject({ status: "succeeded", reason: null });
+          const job = await waitForJob(resultId, "completed", 30_000);
+          expect(job).toMatchObject({ status: "completed", reason: null });
           expect(reserves).toBe(2);
         } finally {
           await stop(first);
@@ -1180,7 +1180,7 @@ describeServing("automation server restart", () => {
   );
 
   it.live(
-    "a drive left running on an automation client that refuses connections is reported and failed, and the automation server keeps serving",
+    "a drive left running on an automation client that refuses connections is reported and errored, and the automation server keeps serving",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1191,8 +1191,8 @@ describeServing("automation server restart", () => {
         const port = await freePort();
         const process = spawnAutomationServer(["--port", String(port)]);
         try {
-          const job = await waitForJob(resultId, "failed", 30_000);
-          expect(job).toMatchObject({ status: "failed", reason: RESTARTED, serverId });
+          const job = await waitForJob(resultId, "errored", 30_000);
+          expect(job).toMatchObject({ status: "errored", reason: RESTARTED, serverId });
           await process.waitFor(
             new RegExp(`inherited abort failed; ${url.replaceAll(".", "\\.")}`),
           );

@@ -289,7 +289,8 @@ const reportErrored = Effect.fn("reportErrored")(function* (
   );
   if (job.action !== "diagnose") {
     yield* tests.errorResult(job.resultId, reason).pipe(
-      Effect.catch((error) =>
+      Effect.retry(Schedule.recurs(2)),
+      Effect.catchTag("DatabaseError", (error) =>
         log.error(`result errored write failed; ${job.resultId}: ${detail(error)}`, {
           ...attr,
           cause: error,
@@ -385,7 +386,8 @@ const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
 
 // A running row at startup was taken by the automation server that died: the fiber that
 // would have closed it went with it. A drive or mint whose result its driver closed has
-// finished, and is closed completed as that fiber would have closed it. Nothing is asked of
+// finished, and is judged as that fiber would have judged it: completed, or errored when the
+// qemu server errored its session, with the Errored move that brings. Nothing is asked of
 // its automation client and its ticket is not moved: whatever the driver still does after
 // closing the result, it does on its own. A diagnose's result was closed before it was
 // queued, so it says nothing about the diagnose. Every other row is stopped at the
@@ -402,7 +404,8 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
   if (job.action !== "diagnose" && Option.isSome(result) && !isOpen(result.value.status)) {
-    yield* Effect.uninterruptible(closeJob(job, finished(job)));
+    const outcome = yield* judge(job);
+    yield* Effect.uninterruptible(closeJob(job, outcome));
     return;
   }
   const ticket = Option.isSome(result) ? result.value.linearId : null;

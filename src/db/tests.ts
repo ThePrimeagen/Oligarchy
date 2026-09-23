@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, notInArray, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -186,9 +186,9 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
           .where(
             and(
               eq(DbSchema.testResults.id, resultId),
-              // An operator close writes aborted. A later test-results must not replace it.
-              // A pass or a fail may still be revised.
-              ne(DbSchema.testResults.status, "aborted"),
+              // An operator close writes aborted and the automation server errored. A later
+              // test-results must not replace either. A pass or a fail may still be revised.
+              notInArray(DbSchema.testResults.status, ["aborted", "errored"]),
             ),
           )
           .returning({ id: DbSchema.testResults.id }),

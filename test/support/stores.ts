@@ -479,8 +479,8 @@ export const fakeTestStore = (
     closeResult: (resultId, status, reason, sessionId) =>
       Effect.sync(() => {
         const row = results.find((result) => sameId(result.id, resultId));
-        // Same predicate as TestStore.closeResult: an abort is the operator's close.
-        if (row === undefined || row.status === "aborted") {
+        // Same predicate as TestStore.closeResult: an abort or an error is final.
+        if (row === undefined || row.status === "aborted" || row.status === "errored") {
           return false;
         }
         row.status = status;
