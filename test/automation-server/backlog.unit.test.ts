@@ -123,14 +123,7 @@ const start = (
     return { stores, log, moved, linear, scope };
   });
 
-const ready = (identifier: string) => ({
-  method: "markReady" as const,
-  ticket: {
-    id: `issue-${identifier}`,
-    identifier,
-    url: `https://linear.app/issue/${identifier}`,
-  },
-});
+const ready = (identifier: string) => ({ method: "markReady" as const, identifier });
 
 const automationNeeded = (identifier: string): Move => ({
   issueId: `issue-${identifier}`,
@@ -1507,11 +1500,11 @@ describe("automation needed and needs review watch unhappy path", () => {
         const linear = FakeLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...board]),
-            markReady: (issue) =>
+            markReady: (identifier) =>
               fail
                 ? Effect.fail(refused)
                 : Effect.sync(() => {
-                    labeled.push(issue.identifier);
+                    labeled.push(identifier);
                   }),
           },
         });

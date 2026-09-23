@@ -18,7 +18,7 @@ export type LinearCall =
       readonly ticket: Linear.LinearTicket;
       readonly stateId: string;
     }
-  | { readonly method: "markReady"; readonly ticket: Linear.LinearTicket }
+  | { readonly method: "markReady"; readonly identifier: string }
   | { readonly method: "clearReady"; readonly identifier: string }
   | { readonly method: "moveToFailed"; readonly identifier: string }
   | { readonly method: "listBacklog" }
@@ -86,7 +86,7 @@ export const fakeLinear = (
       record({ method: "describeIssue", ticket, description, stateId: state }, Effect.void),
     moveIssue: (issue, state) =>
       record({ method: "moveIssue", ticket: issue, stateId: state }, Effect.void),
-    markReady: (ticket) => record({ method: "markReady", ticket }, Effect.void),
+    markReady: (identifier) => record({ method: "markReady", identifier }, Effect.void),
     clearReady: (identifier) => record({ method: "clearReady", identifier }, Effect.void),
     moveToFailed: (identifier) => record({ method: "moveToFailed", identifier }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),

@@ -189,8 +189,8 @@ export type LinearService = {
     ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
-  readonly markReady: (ticket: LinearTicket) => Effect.Effect<void, Errors.LinearError>;
   // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
+  readonly markReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
@@ -487,13 +487,13 @@ const makeLinear = (
         ),
       );
 
-    const markReady = Effect.fn("Linear.markReady")(function* (ticket: LinearTicket) {
+    const markReady = Effect.fn("Linear.markReady")(function* (identifier: string) {
       const id = yield* readyLabelId();
       yield* setReady(
         "markReady",
-        ticket.id,
+        identifier,
         { addedLabelIds: [id] },
-        `linear: labeling ${ticket.identifier} ready failed`,
+        `linear: labeling ${identifier} ready failed`,
       );
     });
 

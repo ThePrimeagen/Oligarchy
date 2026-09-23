@@ -17,12 +17,6 @@ const ROUNDS_BEFORE_MOVE = 3;
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 
-const labeled = (ticket: Linear.LinearBacklogTicket): Linear.LinearTicket => ({
-  id: ticket.id,
-  identifier: ticket.identifier,
-  url: ticket.url,
-});
-
 // A pending row is the queue. Anything else the unique index kept is named by its status.
 const already = (
   action: Automation.AutomationAction,
@@ -97,7 +91,7 @@ const processBacklog = Effect.fn("processBacklog")(function* (
   return yield* Effect.gen(function* () {
     // Label before the move. A miss leaves the ticket in Backlog; the next poll tries again.
     if (yield* automation.hasPending(found.value.id, placed.action)) {
-      yield* linear.markReady(labeled(ticket));
+      yield* linear.markReady(ticket.identifier);
     }
     const team = yield* linear.teamId;
     const states = yield* linear.stateIds(team);
@@ -159,7 +153,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
         `automation needed watch processing out of bounds ticket; ${pings(rounds)}; ${action} already pending, labeling it ready`,
         { location: Log.Locations.automation, agentId: ticket.identifier },
       );
-      yield* linear.markReady(labeled(ticket));
+      yield* linear.markReady(ticket.identifier);
     }
     // Settled, and it does not spend this check's one new job.
     return "duplicate";
@@ -180,7 +174,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   // A new row is pending. A duplicate of a finished row is not, and stays unlabeled.
   // Returning settles this snapshot. The label is what a restart uses.
   if (placed.result === "queued") {
-    yield* linear.markReady(labeled(ticket));
+    yield* linear.markReady(ticket.identifier);
   }
   return placed.result;
 });
