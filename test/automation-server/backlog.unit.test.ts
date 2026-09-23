@@ -118,6 +118,25 @@ const automationNeeded = (identifier: string): Move => ({
   stateId: FakeLinear.STATES.automationNeeded,
 });
 
+// Every poll writes one tracking line per column that lists a ticket. `acted` is everything else:
+// what the watch did to a ticket, and what failed.
+const TRACKING = " watch tracking out of bounds tickets; ";
+const tracked = (log: FakeLog.FakeLog): ReadonlyArray<string> =>
+  FakeLog.texts(log).filter((text) => text.includes(TRACKING));
+const acted = (log: FakeLog.FakeLog): ReadonlyArray<string> =>
+  FakeLog.texts(log).filter((text) => !text.includes(TRACKING));
+const errors = (log: FakeLog.FakeLog): ReadonlyArray<FakeLog.Line> =>
+  log.lines.filter((line) => line.level === "error");
+
+const trackingLine = (text: string): FakeLog.Line => ({
+  level: "info",
+  text,
+  location: "automation",
+  agentId: "automation",
+  skipSentry: false,
+  cause: undefined,
+});
+
 describe("backlog watch happy path", () => {
   it.effect(
     "saves a backlog ticket and, after three unchanged thirty-second rounds, moves it to Automation Needed and queues its drive",
@@ -139,6 +158,18 @@ describe("backlog watch happy path", () => {
         expect(moved).toEqual([automationNeeded(TICKET)]);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
         expect(log.lines).toEqual([
+          trackingLine("backlog watch tracking out of bounds tickets; OLI-45 0/3 pings"),
+          trackingLine("backlog watch tracking out of bounds tickets; OLI-45 1/3 pings"),
+          trackingLine("backlog watch tracking out of bounds tickets; OLI-45 2/3 pings"),
+          trackingLine("backlog watch tracking out of bounds tickets; OLI-45 3/3 pings"),
+          {
+            level: "info",
+            text: "backlog watch processing out of bounds ticket; 3/3 pings; queueing drive and moving it to Automation Needed",
+            location: "automation",
+            agentId: TICKET,
+            skipSentry: false,
+            cause: undefined,
+          },
           {
             level: "info",
             text: "backlog watch moved to Automation Needed; queued drive",
@@ -149,6 +180,25 @@ describe("backlog watch happy path", () => {
           },
         ]);
       }),
+  );
+
+  it.effect("logs every backlog ticket it tracks, with its pings, on every poll", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { log } = yield* start(board);
+      yield* TestClock.adjust("29 seconds");
+      board.push(ticket(OTHER, SEEN));
+      yield* TestClock.adjust("31 seconds");
+      expect(log.lines).toEqual([
+        trackingLine("backlog watch tracking out of bounds tickets; OLI-45 0/3 pings"),
+        trackingLine(
+          "backlog watch tracking out of bounds tickets; OLI-45 1/3 pings, OLI-46 0/3 pings",
+        ),
+        trackingLine(
+          "backlog watch tracking out of bounds tickets; OLI-45 2/3 pings, OLI-46 1/3 pings",
+        ),
+      ]);
+    }),
   );
 
   it.effect("queues mint, not drive, when the backlog ticket's result is the mint definition", () =>
@@ -170,7 +220,10 @@ describe("backlog watch happy path", () => {
       ]);
       expect(moved).toEqual([automationNeeded(TICKET)]);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
-      expect(FakeLog.texts(log)).toEqual(["backlog watch moved to Automation Needed; queued mint"]);
+      expect(acted(log)).toEqual([
+        "backlog watch processing out of bounds ticket; 3/3 pings; queueing mint and moving it to Automation Needed",
+        "backlog watch moved to Automation Needed; queued mint",
+      ]);
     }),
   );
 
@@ -338,7 +391,7 @@ describe("backlog watch happy path", () => {
   );
 
   it.effect(
-    "no live client kicks off nothing, and a client that appears is used on the next check",
+    "no live client kicks off nothing and says nothing, and a client that appears is used on the next check with the pings the ticket has",
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
@@ -364,11 +417,19 @@ describe("backlog watch happy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(moved).toEqual([]);
         expect(stores.automation.jobs).toEqual([]);
+        expect(acted(log)).toEqual([]);
+        expect(tracked(log).at(-1)).toBe(
+          "backlog watch tracking out of bounds tickets; OLI-45 3/3 pings",
+        );
         announceClient(stores.servers);
         yield* TestClock.adjust("30 seconds");
         expect(moved).toEqual([automationNeeded(TICKET)]);
         expect(stores.automation.jobs).toEqual([
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(acted(log)).toEqual([
+          "backlog watch processing out of bounds ticket; 4/3 pings; queueing drive and moving it to Automation Needed",
+          "backlog watch moved to Automation Needed; queued drive",
         ]);
       }),
   );
@@ -413,7 +474,27 @@ describe("backlog watch unhappy path", () => {
   );
 
   it.effect(
-    "no result leaves the ticket in the backlog, and a result that appears later is adopted on the next poll",
+    "an edit starts a ticket's pings over, and a ticket that leaves drops out of the tracking line",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN)];
+        const { log } = yield* start(board);
+        yield* TestClock.adjust("30 seconds");
+        board.splice(0, 2, ticket(TICKET, EDITED));
+        yield* TestClock.adjust("30 seconds");
+        board.length = 0;
+        yield* TestClock.adjust("30 seconds");
+        expect(tracked(log)).toEqual([
+          "backlog watch tracking out of bounds tickets; OLI-45 0/3 pings, OLI-46 0/3 pings",
+          "backlog watch tracking out of bounds tickets; OLI-45 1/3 pings, OLI-46 1/3 pings",
+          "backlog watch tracking out of bounds tickets; OLI-45 0/3 pings",
+        ]);
+        expect(acted(log)).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "no result leaves the ticket in the backlog without processing it, and a result that appears later is adopted on the next poll",
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
@@ -421,12 +502,17 @@ describe("backlog watch unhappy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(moved).toEqual([]);
         expect(stores.automation.jobs).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual(["backlog watch left the ticket in Backlog; no result"]);
+        expect(acted(log)).toEqual(["backlog watch left the ticket in Backlog; no result"]);
         seedResult(stores.tests, TICKET);
         yield* TestClock.adjust("30 seconds");
         expect(moved).toEqual([automationNeeded(TICKET)]);
         expect(stores.automation.jobs).toEqual([
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(acted(log)).toEqual([
+          "backlog watch left the ticket in Backlog; no result",
+          "backlog watch processing out of bounds ticket; 4/3 pings; queueing drive and moving it to Automation Needed",
+          "backlog watch moved to Automation Needed; queued drive",
         ]);
       }),
   );
@@ -450,7 +536,8 @@ describe("backlog watch unhappy path", () => {
       yield* TestClock.adjust("90 seconds");
       expect(stores.automation.jobs).toHaveLength(1);
       expect(moved).toEqual([automationNeeded(TICKET)]);
-      expect(FakeLog.texts(log)).toEqual([
+      expect(acted(log)).toEqual([
+        "backlog watch processing out of bounds ticket; 3/3 pings; queueing drive and moving it to Automation Needed",
         "backlog watch moved to Automation Needed; drive already queued",
       ]);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
@@ -490,7 +577,10 @@ describe("backlog watch unhappy path", () => {
         yield* TestClock.adjust("30 seconds");
         fail = true;
         yield* TestClock.adjust("30 seconds");
+        // The failed poll saw no tickets, so it tracks none.
         expect(log.lines).toEqual([
+          trackingLine("backlog watch tracking out of bounds tickets; OLI-45 0/3 pings"),
+          trackingLine("backlog watch tracking out of bounds tickets; OLI-45 1/3 pings"),
           {
             level: "error",
             text: "backlog watch failed: linear: request failed",
@@ -533,17 +623,25 @@ describe("backlog watch unhappy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
       ]);
       expect(moved).toEqual([]);
-      expect(log.lines[0]).toMatchObject({
-        level: "error",
-        text: `backlog watch failed: linear: moving ${TICKET} failed`,
-        location: "automation",
-        agentId: TICKET,
-        cause: refused,
-      });
+      expect(errors(log)).toEqual([
+        expect.objectContaining({
+          level: "error",
+          text: `backlog watch failed: linear: moving ${TICKET} failed`,
+          location: "automation",
+          agentId: TICKET,
+          cause: refused,
+        }),
+      ]);
       fail = false;
       yield* TestClock.adjust("30 seconds");
       expect(moved).toEqual([automationNeeded(TICKET)]);
       expect(stores.automation.jobs).toHaveLength(1);
+      expect(acted(log)).toEqual([
+        "backlog watch processing out of bounds ticket; 3/3 pings; queueing drive and moving it to Automation Needed",
+        `backlog watch failed: linear: moving ${TICKET} failed`,
+        "backlog watch processing out of bounds ticket; 4/3 pings; queueing drive and moving it to Automation Needed",
+        "backlog watch moved to Automation Needed; drive already queued",
+      ]);
     }),
   );
 
@@ -587,17 +685,25 @@ describe("backlog watch unhappy path", () => {
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
         ]);
         expect(steps).toEqual([]);
-        expect(log.lines[0]).toMatchObject({
-          level: "error",
-          text: `backlog watch failed: linear: labeling ${TICKET} ready failed`,
-          location: "automation",
-          agentId: TICKET,
-          cause: refused,
-        });
+        expect(errors(log)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: `backlog watch failed: linear: labeling ${TICKET} ready failed`,
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
         fail = false;
         yield* TestClock.adjust("30 seconds");
         expect(steps).toEqual(["ready", "move"]);
         expect(stores.automation.jobs).toHaveLength(1);
+        expect(acted(log)).toEqual([
+          "backlog watch processing out of bounds ticket; 3/3 pings; queueing drive and moving it to Automation Needed",
+          `backlog watch failed: linear: labeling ${TICKET} ready failed`,
+          "backlog watch processing out of bounds ticket; 4/3 pings; queueing drive and moving it to Automation Needed",
+          "backlog watch moved to Automation Needed; drive already queued",
+        ]);
       }),
   );
 
@@ -612,9 +718,19 @@ describe("backlog watch unhappy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(moved).toEqual([automationNeeded(OTHER)]);
         expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT]);
-        expect(FakeLog.texts(log)).toEqual([
-          "backlog watch left the ticket in Backlog; no result",
-          "backlog watch moved to Automation Needed; queued drive",
+        expect(log.lines.filter((line) => line.agentId !== "automation")).toEqual([
+          expect.objectContaining({
+            text: "backlog watch left the ticket in Backlog; no result",
+            agentId: TICKET,
+          }),
+          expect.objectContaining({
+            text: "backlog watch processing out of bounds ticket; 3/3 pings; queueing drive and moving it to Automation Needed",
+            agentId: OTHER,
+          }),
+          expect.objectContaining({
+            text: "backlog watch moved to Automation Needed; queued drive",
+            agentId: OTHER,
+          }),
         ]);
         yield* TestClock.adjust("30 seconds");
         expect(moved).toEqual([automationNeeded(OTHER), automationNeeded(THIRD)]);
@@ -684,13 +800,17 @@ describe("backlog watch unhappy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT]);
         expect(moved).toEqual([automationNeeded(OTHER)]);
-        expect(log.lines[0]).toMatchObject({
-          level: "error",
-          text: "backlog watch failed: connect ECONNREFUSED 127.0.0.1:5432",
-          location: "automation",
-          agentId: TICKET,
-          cause: refused,
-        });
+        // The lookup failed before the watch did anything to the ticket, so it never says it
+        // is processing it.
+        expect(log.lines.filter((line) => line.agentId === TICKET)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: "backlog watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
         yield* TestClock.adjust("30 seconds");
         expect(automation.jobs.map((job) => job.resultId)).toEqual([OTHER_RESULT, THIRD_RESULT]);
         expect(moved).toEqual([automationNeeded(OTHER), automationNeeded(THIRD)]);
@@ -726,13 +846,15 @@ describe("backlog watch unhappy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT]);
         expect(moved).toEqual([]);
-        expect(log.lines[0]).toMatchObject({
-          level: "error",
-          text: `backlog watch failed: linear: moving ${TICKET} failed`,
-          location: "automation",
-          agentId: TICKET,
-          cause: refused,
-        });
+        expect(errors(log)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: `backlog watch failed: linear: moving ${TICKET} failed`,
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
         fail = false;
         yield* TestClock.adjust("30 seconds");
         expect(moved.map((item) => item.identifier)).toEqual([TICKET, OTHER]);
@@ -820,12 +942,26 @@ describe("automation needed watch happy path", () => {
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
         ]);
         expect(moved).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        expect(acted(log)).toEqual([
+          "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+          "automation needed watch queued drive",
+        ]);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
-        expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        expect(acted(log)).toEqual([
+          "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+          "automation needed watch queued drive",
+        ]);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
+        expect(tracked(log)).toEqual([
+          "automation needed watch tracking out of bounds tickets; OLI-45 0/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 1/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 2/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 3/3 pings",
+          "automation needed watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
+          "automation needed watch tracking out of bounds tickets; OLI-45 5/3 pings (handled)",
+        ]);
       }),
   );
 
@@ -841,7 +977,10 @@ describe("automation needed watch happy path", () => {
       ]);
       expect(moved).toEqual([]);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
-      expect(FakeLog.texts(log)).toEqual(["automation needed watch queued mint"]);
+      expect(acted(log)).toEqual([
+        "automation needed watch processing out of bounds ticket; 3/3 pings; queueing mint",
+        "automation needed watch queued mint",
+      ]);
     }),
   );
 
@@ -883,19 +1022,24 @@ describe("automation needed watch happy path", () => {
         });
         yield* TestClock.adjust("90 seconds");
         expect(stores.automation.jobs.map((job) => job.resultId)).toEqual([RESULT, OTHER_RESULT]);
-        expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+        const lines = [
+          "automation needed watch processing out of bounds ticket; 3/3 pings; drive already pending, labeling it ready",
+          "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+          "automation needed watch queued drive",
+        ];
+        expect(acted(log)).toEqual(lines);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([
           ready(TICKET),
           ready(OTHER),
         ]);
         yield* TestClock.adjust("30 seconds");
         expect(stores.automation.jobs).toHaveLength(2);
-        expect(log.lines).toHaveLength(1);
+        expect(acted(log)).toEqual(lines);
       }),
   );
 
   it.effect(
-    "a pending drive is the queue row, so the watch does not enqueue again and says nothing",
+    "a pending drive is the queue row, so the watch only labels it ready and says so, once",
     () =>
       Effect.gen(function* () {
         const board = [ticket(TICKET, SEEN)];
@@ -917,11 +1061,14 @@ describe("automation needed watch happy path", () => {
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
         ]);
         expect(moved).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual([]);
+        const lines = [
+          "automation needed watch processing out of bounds ticket; 3/3 pings; drive already pending, labeling it ready",
+        ];
+        expect(acted(log)).toEqual(lines);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
-        expect(log.lines).toHaveLength(0);
+        expect(acted(log)).toEqual(lines);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       }),
   );
@@ -947,11 +1094,14 @@ describe("automation needed watch happy path", () => {
       expect(stores.automation.jobs).toEqual([
         expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
       ]);
-      expect(FakeLog.texts(log)).toEqual([]);
+      const lines = [
+        "automation needed watch processing out of bounds ticket; 3/3 pings; mint already pending, labeling it ready",
+      ];
+      expect(acted(log)).toEqual(lines);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
       yield* TestClock.adjust("60 seconds");
       expect(stores.automation.jobs).toHaveLength(1);
-      expect(log.lines).toHaveLength(0);
+      expect(acted(log)).toEqual(lines);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
     }),
   );
@@ -970,11 +1120,18 @@ describe("needs review watch happy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
       ]);
       expect(moved).toEqual([]);
-      expect(FakeLog.texts(log)).toEqual(["needs review watch queued diagnose"]);
+      const lines = [
+        "needs review watch processing out of bounds ticket; 3/3 pings; queueing diagnose",
+        "needs review watch queued diagnose",
+      ];
+      expect(acted(log)).toEqual(lines);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
       yield* TestClock.adjust("30 seconds");
       expect(stores.automation.jobs).toHaveLength(1);
-      expect(log.lines).toHaveLength(1);
+      expect(acted(log)).toEqual(lines);
+      expect(tracked(log).at(-1)).toBe(
+        "needs review watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
+      );
     }),
   );
 
@@ -990,7 +1147,10 @@ describe("needs review watch happy path", () => {
         expect(stores.automation.jobs).toEqual([
           expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
         ]);
-        expect(FakeLog.texts(log)).toEqual(["needs review watch queued diagnose"]);
+        expect(acted(log)).toEqual([
+          "needs review watch processing out of bounds ticket; 3/3 pings; queueing diagnose",
+          "needs review watch queued diagnose",
+        ]);
       }),
   );
 });
@@ -1040,23 +1200,58 @@ describe("automation needed and needs review watch unhappy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(moved).toEqual([]);
         expect(stores.automation.jobs).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual([
+        expect(acted(log)).toEqual([
           "automation needed watch left the ticket in Automation Needed; no result",
         ]);
         yield* TestClock.adjust("30 seconds");
-        expect(FakeLog.texts(log)).toEqual([
+        expect(acted(log)).toEqual([
           "automation needed watch left the ticket in Automation Needed; no result",
         ]);
         seedResult(stores.tests, TICKET);
         yield* TestClock.adjust("30 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
-        expect(FakeLog.texts(log)).toEqual([
+        const lines = [
           "automation needed watch left the ticket in Automation Needed; no result",
+          "automation needed watch processing out of bounds ticket; 5/3 pings; queueing drive",
           "automation needed watch queued drive",
-        ]);
+        ];
+        expect(acted(log)).toEqual(lines);
         yield* TestClock.adjust("30 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
-        expect(log.lines).toHaveLength(2);
+        expect(acted(log)).toEqual(lines);
+      }),
+  );
+
+  it.effect(
+    "no result leaves the Needs Review ticket, logs once, and a result that appears later is queued once",
+    () =>
+      Effect.gen(function* () {
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, moved, log } = yield* startColumn("listNeedsReview", board);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([]);
+        expect(stores.automation.jobs).toEqual([]);
+        expect(acted(log)).toEqual([
+          "needs review watch left the ticket in Needs Review; no result",
+        ]);
+        yield* TestClock.adjust("30 seconds");
+        expect(acted(log)).toEqual([
+          "needs review watch left the ticket in Needs Review; no result",
+        ]);
+        seedResult(stores.tests, TICKET);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+        ]);
+        const lines = [
+          "needs review watch left the ticket in Needs Review; no result",
+          "needs review watch processing out of bounds ticket; 5/3 pings; queueing diagnose",
+          "needs review watch queued diagnose",
+        ];
+        expect(acted(log)).toEqual(lines);
+        yield* TestClock.adjust("30 seconds");
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(acted(log)).toEqual(lines);
       }),
   );
 
@@ -1083,11 +1278,15 @@ describe("automation needed and needs review watch unhappy path", () => {
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "failed" }),
         ]);
         expect(moved).toEqual([]);
-        expect(FakeLog.texts(log)).toEqual(["automation needed watch; drive already failed"]);
+        const lines = [
+          "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+          "automation needed watch; drive already failed",
+        ];
+        expect(acted(log)).toEqual(lines);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
         yield* TestClock.adjust("60 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
-        expect(log.lines).toHaveLength(1);
+        expect(acted(log)).toEqual(lines);
         expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([]);
       }),
   );
@@ -1113,7 +1312,10 @@ describe("automation needed and needs review watch unhappy path", () => {
         expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
         expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
       ]);
-      expect(FakeLog.texts(log)).toEqual(["automation needed watch queued drive"]);
+      expect(acted(log)).toEqual([
+        "automation needed watch processing out of bounds ticket; 3/3 pings; queueing drive",
+        "automation needed watch queued drive",
+      ]);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
     }),
   );
@@ -1163,19 +1365,26 @@ describe("automation needed and needs review watch unhappy path", () => {
         yield* TestClock.adjust("90 seconds");
         expect(stores.automation.jobs).toHaveLength(1);
         expect(labeled).toEqual([]);
-        expect(log.lines[0]).toMatchObject({
-          level: "error",
-          text: "automation needed watch failed: linear: labeling OLI-45 ready failed",
-          location: "automation",
-          agentId: TICKET,
-          cause: refused,
-        });
+        expect(errors(log)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: "automation needed watch failed: linear: labeling OLI-45 ready failed",
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
         fail = false;
         yield* TestClock.adjust("30 seconds");
         expect(labeled).toEqual([TICKET]);
         expect(stores.automation.jobs).toHaveLength(1);
         yield* TestClock.adjust("30 seconds");
         expect(labeled).toEqual([TICKET]);
+        expect(acted(log)).toEqual([
+          "automation needed watch processing out of bounds ticket; 3/3 pings; drive already pending, labeling it ready",
+          "automation needed watch failed: linear: labeling OLI-45 ready failed",
+          "automation needed watch processing out of bounds ticket; 4/3 pings; drive already pending, labeling it ready",
+        ]);
       }),
   );
 
@@ -1211,20 +1420,25 @@ describe("automation needed and needs review watch unhappy path", () => {
         );
         yield* TestClock.adjust("90 seconds");
         expect(automation.jobs).toEqual([]);
-        expect(log.lines[0]).toMatchObject({
-          level: "error",
-          text: "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
-          location: "automation",
-          agentId: TICKET,
-          cause: refused,
-        });
+        expect(errors(log)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
         fail = false;
         yield* TestClock.adjust("30 seconds");
         expect(automation.jobs).toEqual([
           expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
         ]);
-        expect(FakeLog.texts(log)).toEqual([
+        // The lookup failed before the watch knew what to do, so the first poll never says it
+        // is processing the ticket.
+        expect(acted(log)).toEqual([
           "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+          "automation needed watch processing out of bounds ticket; 4/3 pings; queueing drive",
           "automation needed watch queued drive",
         ]);
       }),
@@ -1262,7 +1476,12 @@ describe("automation needed and needs review watch unhappy path", () => {
         yield* TestClock.adjust("30 seconds");
         fail = true;
         yield* TestClock.adjust("30 seconds");
+        // The failed Automation Needed poll tracks nothing; Needs Review still tracks its ticket.
         expect(log.lines).toEqual([
+          trackingLine("automation needed watch tracking out of bounds tickets; OLI-45 0/3 pings"),
+          trackingLine("needs review watch tracking out of bounds tickets; OLI-46 0/3 pings"),
+          trackingLine("automation needed watch tracking out of bounds tickets; OLI-45 1/3 pings"),
+          trackingLine("needs review watch tracking out of bounds tickets; OLI-46 1/3 pings"),
           {
             level: "error",
             text: "automation needed watch failed: linear: request failed",
@@ -1271,6 +1490,7 @@ describe("automation needed and needs review watch unhappy path", () => {
             skipSentry: false,
             cause: refused,
           },
+          trackingLine("needs review watch tracking out of bounds tickets; OLI-46 2/3 pings"),
         ]);
         fail = false;
         // The failed poll did not reset Automation Needed, and it did not delay Needs Review:
@@ -1330,13 +1550,18 @@ describe("automation needed and needs review watch unhappy path", () => {
         );
         yield* TestClock.adjust("90 seconds");
         expect(automation.jobs).toEqual([]);
-        expect(log.lines[0]).toMatchObject({
-          level: "error",
-          text: "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
-          location: "automation",
-          agentId: TICKET,
-          cause: refused,
-        });
+        expect(acted(log)).toEqual([
+          "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+        ]);
+        expect(errors(log)).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: "automation needed watch failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: "automation",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
         fail = false;
         yield* TestClock.adjust("30 seconds");
         expect(automation.jobs).toEqual([
