@@ -1,7 +1,8 @@
 import { createHmac } from "node:crypto";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Layer, Redacted } from "effect";
+import { Deferred, Effect, Fiber, Layer, Redacted } from "effect";
+import { TestClock } from "effect/testing";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as AutomationClient from "../../src/automation-server/client.ts";
@@ -264,6 +265,51 @@ describe("POST /linear", () => {
             agentId: "OLI-1063",
             skipSentry: false,
             cause: refused,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a ready label Linear never answers gives up at three seconds, inside the five Linear waits",
+    () =>
+      Effect.gen(function* () {
+        const body = issueBody("Automation Needed");
+        const asked = yield* Deferred.make<void>();
+        const fixed = {
+          ...fixture(),
+          linear: FakeLinear.fakeLinear({
+            overrides: {
+              markReady: () =>
+                Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+            },
+          }),
+        };
+        const resultId = seedResult(fixed, "OLI-1063");
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const answered = yield* webhook(http, body, sign(body)).pipe(Effect.forkChild);
+          yield* Deferred.await(asked);
+          yield* TestClock.adjust("3 seconds");
+          const response = yield* Fiber.join(answered);
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId, action: "drive", status: "pending" }),
+        ]);
+        expect(fixed.log.lines).toEqual([
+          expect.objectContaining({
+            level: "info",
+            text: "linear webhook queued drive; Automation Needed",
+          }),
+          {
+            level: "error",
+            text: "ready label add failed: linear: labeling OLI-1063 ready failed: no answer within 3 seconds",
+            location: "automation",
+            agentId: "OLI-1063",
+            skipSentry: false,
+            cause: expect.objectContaining({ _tag: "LinearError", operation: "markReady" }),
           },
         ]);
       }),

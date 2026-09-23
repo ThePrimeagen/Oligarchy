@@ -12,12 +12,24 @@ const detail = (error: unknown): string =>
     ? Render.errorDetail(ExternalFailure.causeOf(error))
     : Render.errorDetail(error);
 
-// The job row is already queued whatever Linear answers, and Linear is waiting on the webhook's
-// answer: one attempt, then the log. The board watch labels a pending job's ticket it finds unlabeled.
+// Linear drops a webhook delivery unanswered after five seconds, and a cold label lookup is up to
+// four requests of ten seconds each.
+const MARK_BUDGET = "3 seconds";
+
+// The job row is already queued whatever Linear answers: one attempt inside the webhook's deadline,
+// then the log. The board watch labels a pending job's ticket it finds unlabeled.
 export const mark = Effect.fn("markReady")(function* (identifier: string) {
   const linear = yield* Linear.Linear;
   const log = yield* Log.Log;
   yield* linear.markReady(identifier).pipe(
+    Effect.timeoutOrElse({
+      duration: MARK_BUDGET,
+      orElse: () =>
+        Errors.LinearError.make({
+          operation: "markReady",
+          message: `linear: labeling ${identifier} ready failed: no answer within ${MARK_BUDGET}`,
+        }),
+    }),
     Effect.catch((error) =>
       log.error(`ready label add failed: ${detail(error)}`, {
         location: Log.Locations.automation,
