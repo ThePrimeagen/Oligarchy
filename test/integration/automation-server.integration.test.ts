@@ -716,7 +716,6 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on("end", () => resolve(text));
   });
 
-// A QEMU proxy body names the ticket `agent`.
 const qemuBody = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ agent: Schema.String })),
 );
@@ -1082,7 +1081,6 @@ const stop = async (process: Process) => {
   await process.exited;
 };
 
-// An `opencode` on a PATH of its own, so a real automation client runs this script instead.
 const installOpencode = (script: string): string => {
   const bin = mkdtempSync(join(tmpdir(), "oligarchy-opencode-"));
   const file = join(bin, "opencode");
@@ -1207,7 +1205,7 @@ describeServing("automation server restart", () => {
   );
 
   it.live(
-    "SIGKILL after a real automation client granted /reserve leaves the drive pending; the next automation server reserves it there again, QEMU is asked once, and the drive succeeds",
+    "SIGKILL while a real automation client reserves, which it still grants, leaves the drive pending; the next automation server reserves it there again, QEMU is asked once, and the drive succeeds",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -1266,7 +1264,8 @@ describeServing("automation server restart", () => {
           expect(await jobsFor(resultId)).toEqual([
             expect.objectContaining({ status: "pending", serverId: null, startedAt: null }),
           ]);
-          // The automation client holds the reservation its dead caller asked for.
+          // Granted after its caller died: the automation client holds a reservation the row
+          // does not record.
           grant();
           await closeResult(resultId);
 
