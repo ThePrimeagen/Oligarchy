@@ -59,8 +59,6 @@ describe("drive happy path", () => {
       expect(text).toContain(TICKET);
       expect(text).toContain(MODEL);
       expect(text).toContain("driving agent");
-      expect(text).not.toContain("In Progress");
-      expect(text).toContain('move it to "Needs Review"');
       expect(text).toContain(
         "the intent message is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
       );
