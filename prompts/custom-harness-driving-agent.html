@@ -19,27 +19,31 @@ Past steps:
 </progress>
 
 <reply>
-You MUST use a tool. The reply is one line, the tool call JSON, and nothing else.
-client runs one ./client command from the client tools. Done leaves the loop successfully.
-Do not call intent. The harness opens and closes intents.
-Do not call start, stop, or save. The harness starts the guest and stops it when you call Done.
-Do not pass --agent-id, --session-id, or --server-url. The harness adds them.
+You must reply with ONLY the tool JSON.  It must be valid JSON.
 </reply>
 
 <rules>
-When you are done, call Done. You are done.
-If a screenshot is not good enough, take another screenshot.
-Never take more than two screenshots in a row.
+* Tool call for moving/clicking/dragging the mouse or typing
+* update_screenshot for waiting one cycle to get a more up to date screen shot
+** Never call this 2x in a row.
+* Done will state that you are done with the run
 </rules>
 
 <example>
-Given this context, your response should look like the tool call below. One line, and nothing else.
+<input-prompt>
+<role>
+You drive one guest, one action at a time. You are not a developing agent.
+</role>
 
-<context>
-The lock screen is up. The password is prime. Type the password and press enter.
-</context>
+<mission>
+...
+</mission>
+...
+</input-prompt>
 
+<output>
 {"name":"client","arguments":{"reason":"type the password","args":["send-keys","--keys","prime<ENTER>"]}}
+</output>
 </example>
 
 <tools>
