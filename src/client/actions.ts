@@ -1,21 +1,23 @@
 import {
   Array as Arr,
-  Cause,
+  Config as EffectConfig,
   Console,
   Effect,
   Exit,
   FileSystem,
   Option,
   Path,
-  Result,
   Schema,
   Stdio,
   Stream,
+  Terminal,
 } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
+import * as Flag from "effect/unstable/cli/Flag";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Config from "../config.ts";
+import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
-import * as Render from "../observability/render.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
@@ -29,6 +31,9 @@ const connect = Effect.fn("client.connect")(function* (serverUrl: string) {
   return yield* ProxyClient.connect({ serverUrl, token });
 });
 
+// A local ISO is checked here so the message names the file, before the proxy is asked. The
+// message is Node's own (`ENOENT: no such file or directory, stat '…'`), as v1 printed it, not
+// the platform wrapper's.
 const localIso = Effect.fn("client.localIso")(function* (iso: string) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
@@ -43,6 +48,7 @@ const localIso = Effect.fn("client.localIso")(function* (iso: string) {
   return absolute;
 });
 
+// Bytes go to the file with -o, else raw to stdout without ending it.
 const emit = Effect.fn("client.emit")(function* (output: Option.Option<string>, bytes: Uint8Array) {
   if (Option.isSome(output)) {
     const fs = yield* FileSystem.FileSystem;
@@ -74,12 +80,15 @@ export const start = Effect.fn("client.start")(function* (input: StartInput) {
     });
   }
   if (input.resume) {
+    // --iso names which minted disk to boot; the iso itself is neither attached nor read, so
+    // a local path is sent as given (made absolute) without checking that the file exists.
     const iso = Domain.isIsoUrl(input.iso) ? input.iso : path.resolve(input.iso);
     const started = yield* proxy.start(
       Contract.StartBody.make({ iso, agent: input.agentId, mode: "resume" }),
     );
     return yield* Console.log(started.id);
   }
+  // Fresh boots the iso itself: a local file must exist, and is named to the server absolute.
   const iso = Domain.isIsoUrl(input.iso) ? input.iso : yield* localIso(input.iso);
   const body = Option.match(input.disk, {
     onNone: () => Contract.StartBody.make({ iso, agent: input.agentId }),
@@ -349,485 +358,339 @@ type ActionName = keyof typeof byName;
 const isActionName = (name: string): name is ActionName =>
   Object.prototype.hasOwnProperty.call(byName, name);
 
-type Mode = "value" | "switch" | "repeat";
+type AnyFlag = Flag.Flag<unknown>;
 
-type Field = {
-  readonly key: string;
-  readonly names: ReadonlyArray<string>;
-  readonly mode: Mode;
+type FlagSpec = {
+  readonly name: string;
+  readonly aliases: ReadonlyArray<string>;
+  readonly boolean: boolean;
 };
 
-const fail = (message: string): Result.Result<never, Errors.CommandError> =>
-  Result.fail(Errors.CommandError.make({ message }));
+// Flag.parse names a terminal and a process spawner in its type. These flags never prompt
+// and never spawn, so both stay unused.
+const unusedTerminal = Terminal.make({
+  columns: Effect.succeed(0),
+  rows: Effect.succeed(0),
+  readInput: Effect.die("client flags do not read the terminal"),
+  readLine: Effect.die("client flags do not read the terminal"),
+  display: () => Effect.die("client flags do not display on a terminal"),
+});
 
-const shown = (name: string, short: boolean): string => (short ? `-${name}` : `--${name}`);
+const unusedSpawner = ChildProcessSpawner.make(() =>
+  Effect.die("client flags do not spawn a process"),
+);
 
-const readFlags = (
+const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
+
+const tagOf = (value: object): string | undefined =>
+  "_tag" in value && typeof value._tag === "string" ? value._tag : undefined;
+
+const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+// The flag's name, aliases and boolean-ness live on the Single node inside the combinators.
+// Eight hops is past every combinator we apply; the bound stops a cycle from spinning.
+const specOf = (flag: AnyFlag): FlagSpec | undefined => {
+  let current: object = flag;
+  for (let hop = 0; hop < 8; hop += 1) {
+    if (tagOf(current) === "Single") {
+      if (!("name" in current) || typeof current.name !== "string") {
+        return undefined;
+      }
+      const aliases = "aliases" in current && isStringArray(current.aliases) ? current.aliases : [];
+      const primitive =
+        "primitiveType" in current && isObject(current.primitiveType)
+          ? current.primitiveType
+          : undefined;
+      return {
+        name: current.name,
+        aliases,
+        boolean: primitive !== undefined && tagOf(primitive) === "Boolean",
+      };
+    }
+    if (!("param" in current) || !isObject(current.param)) {
+      return undefined;
+    }
+    current = current.param;
+  }
+  return undefined;
+};
+
+// The words Flag.boolean accepts, decoded with the same schema the flag uses.
+const booleanWord = (value: string): boolean =>
+  Exit.isSuccess(Schema.decodeUnknownExit(EffectConfig.Boolean)(value));
+
+const reject = (message: string) => Errors.CommandError.make({ message });
+
+// Words before the first flag are the action. What follows is parsed by the same Flag
+// values the ./client command declares.
+const collect = Effect.fn("client.collect")(function* (
   tokens: ReadonlyArray<string>,
-  fields: ReadonlyArray<Field>,
-): Result.Result<ReadonlyMap<string, ReadonlyArray<string>>, Errors.CommandError> => {
-  const byFlag = new Map<string, Field>();
-  for (const field of fields) {
-    for (const name of field.names) {
-      byFlag.set(name, field);
+  declared: ReadonlyArray<AnyFlag>,
+) {
+  const specs: Array<FlagSpec> = [];
+  for (const flag of [...declared, EnvFile.envFile.flag]) {
+    const spec = specOf(flag);
+    if (spec === undefined) {
+      return yield* Effect.die("unreadable flag");
+    }
+    specs.push(spec);
+  }
+  const byLong = new Map<string, FlagSpec>();
+  const byShort = new Map<string, FlagSpec>();
+  for (const spec of specs) {
+    byLong.set(spec.name, spec);
+    for (const alias of spec.aliases) {
+      byLong.set(alias, spec);
+      if (alias.length === 1) {
+        byShort.set(alias, spec);
+      }
     }
   }
-  const values = new Map<string, Array<string>>();
+  const values: { [key: string]: Array<string> } = {};
+  const push = (name: string, value: string) => {
+    const current = values[name] ?? [];
+    values[name] = [...current, value];
+  };
+  const readValue = (
+    spec: FlagSpec,
+    inline: string | undefined,
+    index: number,
+    shown: string,
+  ):
+    | { readonly _tag: "Value"; readonly value: string; readonly index: number }
+    | { readonly _tag: "Fail"; readonly message: string } => {
+    if (inline !== undefined) {
+      return { _tag: "Value", value: inline, index };
+    }
+    if (spec.boolean) {
+      const next = tokens[index];
+      if (next !== undefined && !next.startsWith("-") && booleanWord(next)) {
+        return { _tag: "Value", value: next, index: index + 1 };
+      }
+      return { _tag: "Value", value: "true", index };
+    }
+    const next = tokens[index];
+    if (next === undefined || next.startsWith("-")) {
+      return { _tag: "Fail", message: `missing value for ${shown}` };
+    }
+    return { _tag: "Value", value: next, index: index + 1 };
+  };
+
   let index = 0;
   while (index < tokens.length) {
     const token = tokens[index] ?? "";
-    if (!token.startsWith("-")) {
-      return fail(`unexpected argument ${token}`);
-    }
-    const short = !token.startsWith("--");
-    const body = short ? token.slice(1) : token.slice(2);
-    const eq = body.indexOf("=");
-    const name = eq === -1 ? body : body.slice(0, eq);
-    const inline = eq === -1 ? undefined : body.slice(eq + 1);
-    if (name === "") {
-      return fail(`unknown flag ${token}`);
-    }
-    const field = byFlag.get(name);
-    if (field === undefined) {
-      return fail(`unknown flag ${shown(name, short)}`);
+    if (!token.startsWith("-") || token === "-") {
+      return yield* reject(`unexpected argument ${token}`);
     }
     index += 1;
-    let value = inline;
-    if (value === undefined) {
-      if (field.mode === "switch") {
-        value = "true";
-      } else {
-        const next = tokens[index];
-        if (next === undefined || next.startsWith("-")) {
-          return fail(`missing value for ${shown(name, short)}`);
-        }
-        value = next;
-        index += 1;
+    if (token.startsWith("--")) {
+      const body = token.slice(2);
+      const eq = body.indexOf("=");
+      const rawName = eq === -1 ? body : body.slice(0, eq);
+      const inline = eq === -1 ? undefined : body.slice(eq + 1);
+      if (rawName === "") {
+        return yield* reject(`unknown flag ${token}`);
       }
+      const negatedName = rawName.startsWith("no-") ? rawName.slice(3) : undefined;
+      const negated = negatedName === undefined ? undefined : byLong.get(negatedName);
+      if (negated?.boolean === true) {
+        if (inline !== undefined) {
+          return yield* reject(`--no-${negated.name} does not take a value`);
+        }
+        const next = tokens[index];
+        if (next !== undefined && !next.startsWith("-") && booleanWord(next)) {
+          return yield* reject(`--no-${negated.name} does not take a value`);
+        }
+        push(negated.name, "false");
+        continue;
+      }
+      const spec = byLong.get(rawName);
+      if (spec === undefined) {
+        return yield* reject(`unknown flag --${rawName}`);
+      }
+      const read = readValue(spec, inline, index, `--${spec.name}`);
+      if (read._tag === "Fail") {
+        return yield* reject(read.message);
+      }
+      index = read.index;
+      push(spec.name, read.value);
+      continue;
     }
-    const list = values.get(field.key) ?? [];
-    if (field.mode !== "repeat" && list.length > 0) {
-      return fail(`duplicate flag --${field.key}`);
+    const body = token.slice(1);
+    const eq = body.indexOf("=");
+    const chars = eq === -1 ? body : body.slice(0, eq);
+    const inline = eq === -1 ? undefined : body.slice(eq + 1);
+    if (chars.length !== 1) {
+      return yield* reject(`unknown flag -${chars[0] ?? ""}`);
     }
-    list.push(value);
-    values.set(field.key, list);
+    const spec = byShort.get(chars);
+    if (spec === undefined) {
+      return yield* reject(`unknown flag -${chars}`);
+    }
+    const read = readValue(spec, inline, index, `-${chars}`);
+    if (read._tag === "Fail") {
+      return yield* reject(read.message);
+    }
+    index = read.index;
+    push(spec.name, read.value);
   }
-  return Result.succeed(values);
-};
-
-const first = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-  key: string,
-): string | undefined => values.get(key)?.[0];
-
-const requireText = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-  key: string,
-): Result.Result<string, Errors.CommandError> => {
-  const value = first(values, key);
-  if (value === undefined || value === "") {
-    return fail(`missing --${key}`);
-  }
-  return Result.succeed(value);
-};
-
-const fromExit = <A>(
-  exit: Exit.Exit<A, Schema.SchemaError>,
-  flag: string,
-): Result.Result<A, Errors.CommandError> => {
-  if (Exit.isFailure(exit)) {
-    return fail(`--${flag}: ${Render.headline(Cause.squash(exit.cause))}`);
-  }
-  return Result.succeed(exit.value);
-};
-
-const text = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-  key: string,
-): Result.Result<string, Errors.CommandError> => {
-  const raw = requireText(values, key);
-  if (Result.isFailure(raw)) {
-    return fail(raw.failure.message);
-  }
-  return fromExit(Schema.decodeUnknownExit(Schema.NonEmptyString)(raw.success), key);
-};
-
-const optionalText = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-  key: string,
-): Result.Result<Option.Option<string>, Errors.CommandError> => {
-  const value = first(values, key);
-  if (value === undefined) {
-    return Result.succeed(Option.none());
-  }
-  return Result.succeed(Option.some(value));
-};
-
-const point = Schema.Number.check(
-  Schema.isBetween({ minimum: 0, maximum: 1 }, { message: "must be in 0..1" }),
-);
-
-const fromPoint = Schema.Number.check(
-  Schema.isBetween(
-    { minimum: 0, maximum: 1 },
-    { message: "mouse drag: --from-x and --from-y must be in 0..1" },
-  ),
-);
-
-const toPoint = Schema.Number.check(
-  Schema.isBetween(
-    { minimum: 0, maximum: 1 },
-    { message: "mouse drag: --to-x and --to-y must be in 0..1" },
-  ),
-);
-
-const ticksSchema = Schema.Number.check(
-  Schema.isBetween(
-    { minimum: 1, maximum: 100 },
-    { message: "mouse scroll: --ticks must be in 1..100" },
-  ),
-);
-
-const numberOf = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-  key: string,
-  schema: typeof point,
-): Result.Result<number, Errors.CommandError> => {
-  const raw = requireText(values, key);
-  if (Result.isFailure(raw)) {
-    return fail(raw.failure.message);
-  }
-  const value = Number(raw.success);
-  if (!Number.isFinite(value)) {
-    return fail(`--${key} is not a number`);
-  }
-  return fromExit(Schema.decodeUnknownExit(schema)(value), key);
-};
-
-const sharedFields: ReadonlyArray<Field> = [
-  { key: "agent-id", names: ["agent-id"], mode: "value" },
-  { key: "server-url", names: ["server-url"], mode: "value" },
-];
-
-const sessionField: Field = { key: "session-id", names: ["session-id"], mode: "value" };
-
-const outputField: Field = { key: "output", names: ["output", "o"], mode: "value" };
-
-const buttonField: Field = { key: "button", names: ["button"], mode: "value" };
-
-const modifierField: Field = { key: "modifier", names: ["modifier"], mode: "repeat" };
-
-const pointFields: ReadonlyArray<Field> = [
-  ...sharedFields,
-  sessionField,
-  { key: "x", names: ["x"], mode: "value" },
-  { key: "y", names: ["y"], mode: "value" },
-];
-
-const serverUrlOf = Effect.fn("client.serverUrl")(function* (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-) {
-  const given = first(values, "server-url");
-  if (given !== undefined && given !== "") {
-    return given;
-  }
-  return yield* Config.serverUrl.pipe(Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL));
+  // --env-file is accepted so it is not an unknown flag. The process already loaded its
+  // environment; the value is not applied again.
+  return values;
 });
 
-const sharedOf = Effect.fn("client.shared")(function* (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-) {
-  const agent = text(values, "agent-id");
-  if (Result.isFailure(agent)) {
-    return yield* agent.failure;
-  }
+const take = <A>(flag: Flag.Flag<A>, flags: { readonly [key: string]: ReadonlyArray<string> }) =>
+  flag.parse({ flags, arguments: [] }).pipe(
+    Effect.map((parsed) => parsed[1]),
+    Effect.mapError((error) => Errors.CommandError.make({ message: error.message })),
+    Effect.provideService(Terminal.Terminal, unusedTerminal),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, unusedSpawner),
+  );
+
+const sharedFlags: ReadonlyArray<AnyFlag> = [Flags.shared.agentId, Flags.shared.serverUrl];
+
+const sharedOf = Effect.fn("client.shared")(function* (flags: {
+  readonly [key: string]: ReadonlyArray<string>;
+}) {
   return {
-    agentId: agent.success,
-    serverUrl: yield* serverUrlOf(values),
+    agentId: yield* take(Flags.shared.agentId, flags),
+    serverUrl: yield* take(Flags.shared.serverUrl, flags),
   } satisfies Shared;
 });
 
-const fieldsOf = (
+const runStart = Effect.fn("client.call.start")(function* (
   tokens: ReadonlyArray<string>,
-  fields: ReadonlyArray<Field>,
-): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, Errors.CommandError> =>
-  Effect.fromResult(readFlags(tokens, fields));
-
-const sessionOf = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-): Result.Result<string, Errors.CommandError> => text(values, "session-id");
-
-const pointOf = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-): Result.Result<{ readonly x: number; readonly y: number }, Errors.CommandError> => {
-  const x = numberOf(values, "x", point);
-  if (Result.isFailure(x)) {
-    return fail(x.failure.message);
-  }
-  const y = numberOf(values, "y", point);
-  if (Result.isFailure(y)) {
-    return fail(y.failure.message);
-  }
-  return Result.succeed({ x: x.success, y: y.success });
-};
-
-const buttonOf = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-): Result.Result<Domain.ClickButton, Errors.CommandError> => {
-  const raw = first(values, "button") ?? "left";
-  return fromExit(Schema.decodeUnknownExit(Domain.ClickButton)(raw), "button");
-};
-
-const modifiersOf = (
-  values: ReadonlyMap<string, ReadonlyArray<string>>,
-): Result.Result<ReadonlyArray<Domain.MouseModifier>, Errors.CommandError> => {
-  const raw = values.get("modifier") ?? [];
-  const modifiers: Array<Domain.MouseModifier> = [];
-  for (const value of raw) {
-    const one = fromExit(Schema.decodeUnknownExit(Domain.MouseModifier)(value), "modifier");
-    if (Result.isFailure(one)) {
-      return fail(one.failure.message);
-    }
-    modifiers.push(one.success);
-  }
-  return Result.succeed(modifiers);
-};
-
-const runStart = Effect.fn("client.call.start")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [
-    ...sharedFields,
-    { key: "iso", names: ["iso"], mode: "value" },
-    { key: "disk", names: ["disk"], mode: "value" },
-    { key: "resume", names: ["resume"], mode: "switch" },
-  ]);
-  const shared = yield* sharedOf(values);
-  const disk = optionalText(values, "disk");
-  if (Result.isFailure(disk)) {
-    return yield* disk.failure;
-  }
-  return yield* start({
-    ...shared,
-    iso: first(values, "iso") ?? Flags.DEFAULT_ISO,
-    disk: disk.success,
-    resume: first(values, "resume") === "true",
+  action: typeof start,
+) {
+  const flags = yield* collect(tokens, [...sharedFlags, Flags.iso, Flags.disk, Flags.resume]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    iso: yield* take(Flags.iso, flags),
+    disk: yield* take(Flags.disk, flags),
+    resume: yield* take(Flags.resume, flags),
   });
 });
 
-const runReserve = Effect.fn("client.call.reserve")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [
-    ...sharedFields,
-    { key: "server", names: ["server"], mode: "value" },
-  ]);
-  const shared = yield* sharedOf(values);
-  const raw = first(values, "server");
-  const server =
-    raw === undefined
-      ? Option.none<Domain.ServerUrl>()
-      : Option.some(
-          yield* Effect.fromResult(
-            fromExit(Schema.decodeUnknownExit(Domain.ServerUrl)(raw), "server"),
-          ),
-        );
-  return yield* reserve({
-    ...shared,
-    server,
+const runReserve = Effect.fn("client.call.reserve")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof reserve,
+) {
+  const flags = yield* collect(tokens, [...sharedFlags, Flags.server]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    server: yield* take(Flags.server, flags),
   });
 });
 
 const runRelinquish = Effect.fn("client.call.relinquish")(function* (
   tokens: ReadonlyArray<string>,
+  action: typeof relinquish,
 ) {
-  const values = yield* fieldsOf(tokens, sharedFields);
-  return yield* relinquish(yield* sharedOf(values));
+  const flags = yield* collect(tokens, sharedFlags);
+  return yield* action(yield* sharedOf(flags));
 });
 
-const captureFields: ReadonlyArray<Field> = [...sharedFields, sessionField, outputField];
+const outputFlag = Flags.output("output");
 
 const runCapture = Effect.fn("client.call.capture")(function* (
   tokens: ReadonlyArray<string>,
   action: typeof getImage | typeof getSerial,
 ) {
-  const values = yield* fieldsOf(tokens, captureFields);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const output = optionalText(values, "output");
-  if (Result.isFailure(output)) {
-    return yield* output.failure;
-  }
-  return yield* action({ ...shared, sessionId: sessionId.success, output: output.success });
-});
-
-const runSendKeys = Effect.fn("client.call.sendKeys")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [
-    ...sharedFields,
-    sessionField,
-    { key: "keys", names: ["keys"], mode: "value" },
-    { key: "encoding", names: ["encoding"], mode: "value" },
-  ]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const keys = requireText(values, "keys");
-  if (Result.isFailure(keys)) {
-    return yield* keys.failure;
-  }
-  return yield* sendKeys({
-    ...shared,
-    sessionId: sessionId.success,
-    keys: keys.success,
-    encoding: first(values, "encoding") ?? Flags.DEFAULT_ENCODING,
+  const flags = yield* collect(tokens, [...sharedFlags, Flags.sessionId, outputFlag]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    output: yield* take(outputFlag, flags),
   });
 });
 
-const runMove = Effect.fn("client.call.mouseMove")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, pointFields);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const at = pointOf(values);
-  if (Result.isFailure(at)) {
-    return yield* at.failure;
-  }
-  return yield* mouseMove({ ...shared, sessionId: sessionId.success, ...at.success });
+const runSendKeys = Effect.fn("client.call.sendKeys")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof sendKeys,
+) {
+  const flags = yield* collect(tokens, [
+    ...sharedFlags,
+    Flags.sessionId,
+    Flags.keys,
+    Flags.encoding,
+  ]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    keys: yield* take(Flags.keys, flags),
+    encoding: yield* take(Flags.encoding, flags),
+  });
 });
 
-const clickFields: ReadonlyArray<Field> = [...pointFields, buttonField, modifierField];
+const pointFlags: ReadonlyArray<AnyFlag> = [...sharedFlags, Flags.sessionId, Flags.x, Flags.y];
+
+const runMove = Effect.fn("client.call.mouseMove")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof mouseMove,
+) {
+  const flags = yield* collect(tokens, pointFlags);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    x: yield* take(Flags.x, flags),
+    y: yield* take(Flags.y, flags),
+  });
+});
 
 const runClick = Effect.fn("client.call.mouseClick")(function* (
   tokens: ReadonlyArray<string>,
   action: typeof mouseClick | typeof mouseDoubleClick,
 ) {
-  const values = yield* fieldsOf(tokens, clickFields);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const at = pointOf(values);
-  if (Result.isFailure(at)) {
-    return yield* at.failure;
-  }
-  const button = buttonOf(values);
-  if (Result.isFailure(button)) {
-    return yield* button.failure;
-  }
-  const modifier = modifiersOf(values);
-  if (Result.isFailure(modifier)) {
-    return yield* modifier.failure;
-  }
+  const flags = yield* collect(tokens, [...pointFlags, Flags.button, Flags.modifier]);
   return yield* action({
-    ...shared,
-    sessionId: sessionId.success,
-    ...at.success,
-    button: button.success,
-    modifier: modifier.success,
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    x: yield* take(Flags.x, flags),
+    y: yield* take(Flags.y, flags),
+    button: yield* take(Flags.button, flags),
+    modifier: yield* take(Flags.modifier, flags),
   });
 });
 
-const runScroll = Effect.fn("client.call.mouseScroll")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [
-    ...pointFields,
-    { key: "direction", names: ["direction"], mode: "value" },
-    { key: "ticks", names: ["ticks"], mode: "value" },
-  ]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const at = pointOf(values);
-  if (Result.isFailure(at)) {
-    return yield* at.failure;
-  }
-  const direction = (() => {
-    const raw = requireText(values, "direction");
-    if (Result.isFailure(raw)) {
-      return fail(raw.failure.message);
-    }
-    return fromExit(Schema.decodeUnknownExit(Domain.ScrollDirection)(raw.success), "direction");
-  })();
-  if (Result.isFailure(direction)) {
-    return yield* direction.failure;
-  }
-  const rawTicks = first(values, "ticks");
-  const ticks =
-    rawTicks === undefined
-      ? Result.succeed(1)
-      : (() => {
-          const parsed = numberOf(values, "ticks", ticksSchema);
-          if (Result.isFailure(parsed) || Number.isInteger(parsed.success)) {
-            return parsed;
-          }
-          return fail("mouse scroll: --ticks must be in 1..100");
-        })();
-  if (Result.isFailure(ticks)) {
-    return yield* ticks.failure;
-  }
-  return yield* mouseScroll({
-    ...shared,
-    sessionId: sessionId.success,
-    ...at.success,
-    direction: direction.success,
-    ticks: ticks.success,
+const runScroll = Effect.fn("client.call.mouseScroll")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof mouseScroll,
+) {
+  const flags = yield* collect(tokens, [...pointFlags, Flags.direction, Flags.ticks]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    x: yield* take(Flags.x, flags),
+    y: yield* take(Flags.y, flags),
+    direction: yield* take(Flags.direction, flags),
+    ticks: yield* take(Flags.ticks, flags),
   });
 });
 
-const runDrag = Effect.fn("client.call.mouseDrag")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [
-    ...sharedFields,
-    sessionField,
-    { key: "from-x", names: ["from-x"], mode: "value" },
-    { key: "from-y", names: ["from-y"], mode: "value" },
-    { key: "to-x", names: ["to-x"], mode: "value" },
-    { key: "to-y", names: ["to-y"], mode: "value" },
-    buttonField,
-    modifierField,
+const runDrag = Effect.fn("client.call.mouseDrag")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof mouseDrag,
+) {
+  const flags = yield* collect(tokens, [
+    ...sharedFlags,
+    Flags.sessionId,
+    Flags.fromX,
+    Flags.fromY,
+    Flags.toX,
+    Flags.toY,
+    Flags.button,
+    Flags.modifier,
   ]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const fromX = numberOf(values, "from-x", fromPoint);
-  if (Result.isFailure(fromX)) {
-    return yield* fromX.failure;
-  }
-  const fromY = numberOf(values, "from-y", fromPoint);
-  if (Result.isFailure(fromY)) {
-    return yield* fromY.failure;
-  }
-  const toX = numberOf(values, "to-x", toPoint);
-  if (Result.isFailure(toX)) {
-    return yield* toX.failure;
-  }
-  const toY = numberOf(values, "to-y", toPoint);
-  if (Result.isFailure(toY)) {
-    return yield* toY.failure;
-  }
-  const button = buttonOf(values);
-  if (Result.isFailure(button)) {
-    return yield* button.failure;
-  }
-  const modifier = modifiersOf(values);
-  if (Result.isFailure(modifier)) {
-    return yield* modifier.failure;
-  }
-  return yield* mouseDrag({
-    ...shared,
-    sessionId: sessionId.success,
-    fromX: fromX.success,
-    fromY: fromY.success,
-    toX: toX.success,
-    toY: toY.success,
-    button: button.success,
-    modifier: modifier.success,
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    fromX: yield* take(Flags.fromX, flags),
+    fromY: yield* take(Flags.fromY, flags),
+    toX: yield* take(Flags.toX, flags),
+    toY: yield* take(Flags.toY, flags),
+    button: yield* take(Flags.button, flags),
+    modifier: yield* take(Flags.modifier, flags),
   });
 });
 
@@ -835,119 +698,83 @@ const runButton = Effect.fn("client.call.mouseButton")(function* (
   tokens: ReadonlyArray<string>,
   action: typeof mouseHold | typeof mouseRelease,
 ) {
-  const values = yield* fieldsOf(tokens, [...pointFields, buttonField]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const at = pointOf(values);
-  if (Result.isFailure(at)) {
-    return yield* at.failure;
-  }
-  const button = buttonOf(values);
-  if (Result.isFailure(button)) {
-    return yield* button.failure;
-  }
+  const flags = yield* collect(tokens, [...pointFlags, Flags.button]);
   return yield* action({
-    ...shared,
-    sessionId: sessionId.success,
-    ...at.success,
-    button: button.success,
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    x: yield* take(Flags.x, flags),
+    y: yield* take(Flags.y, flags),
+    button: yield* take(Flags.button, flags),
   });
 });
 
 const runIntentStart = Effect.fn("client.call.intentStart")(function* (
   tokens: ReadonlyArray<string>,
+  action: typeof intentStart,
 ) {
-  const values = yield* fieldsOf(tokens, [
-    ...sharedFields,
-    sessionField,
-    { key: "test-result-id", names: ["test-result-id"], mode: "value" },
-    { key: "message", names: ["message"], mode: "value" },
+  const flags = yield* collect(tokens, [
+    ...sharedFlags,
+    Flags.sessionId,
+    Flags.testResultId,
+    Flags.message,
   ]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const testResultId = text(values, "test-result-id");
-  if (Result.isFailure(testResultId)) {
-    return yield* testResultId.failure;
-  }
-  const message = text(values, "message");
-  if (Result.isFailure(message)) {
-    return yield* message.failure;
-  }
-  return yield* intentStart({
-    ...shared,
-    sessionId: sessionId.success,
-    testResultId: testResultId.success,
-    message: message.success,
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    testResultId: yield* take(Flags.testResultId, flags),
+    message: yield* take(Flags.message, flags),
   });
 });
 
-const runIntentEnd = Effect.fn("client.call.intentEnd")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [...sharedFields, sessionField]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  return yield* intentEnd({ ...shared, sessionId: sessionId.success });
-});
-
-const runStop = Effect.fn("client.call.stop")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [
-    ...sharedFields,
-    sessionField,
-    { key: "status", names: ["status"], mode: "value" },
-    { key: "reason", names: ["reason"], mode: "value" },
-  ]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  const rawStatus = first(values, "status");
-  const status =
-    rawStatus === undefined
-      ? Option.none<Domain.StopStatus>()
-      : Option.some(
-          yield* Effect.fromResult(
-            fromExit(Schema.decodeUnknownExit(Domain.StopStatus)(rawStatus), "status"),
-          ),
-        );
-  const reason = optionalText(values, "reason");
-  if (Result.isFailure(reason)) {
-    return yield* reason.failure;
-  }
-  return yield* stop({
-    ...shared,
-    sessionId: sessionId.success,
-    status,
-    reason: reason.success,
+const runIntentEnd = Effect.fn("client.call.intentEnd")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof intentEnd,
+) {
+  const flags = yield* collect(tokens, [...sharedFlags, Flags.sessionId]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
   });
 });
 
-const runSave = Effect.fn("client.call.save")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [...sharedFields, sessionField]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  return yield* save({ ...shared, sessionId: sessionId.success });
+const runStop = Effect.fn("client.call.stop")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof stop,
+) {
+  const flags = yield* collect(tokens, [
+    ...sharedFlags,
+    Flags.sessionId,
+    Flags.status,
+    Flags.reason,
+  ]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+    status: yield* take(Flags.status, flags),
+    reason: yield* take(Flags.reason, flags),
+  });
 });
 
-const runFollow = Effect.fn("client.call.follow")(function* (tokens: ReadonlyArray<string>) {
-  const values = yield* fieldsOf(tokens, [...sharedFields, sessionField]);
-  const shared = yield* sharedOf(values);
-  const sessionId = sessionOf(values);
-  if (Result.isFailure(sessionId)) {
-    return yield* sessionId.failure;
-  }
-  return yield* follow({ ...shared, sessionId: sessionId.success });
+const runSave = Effect.fn("client.call.save")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof save,
+) {
+  const flags = yield* collect(tokens, [...sharedFlags, Flags.sessionId]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+  });
+});
+
+const runFollow = Effect.fn("client.call.follow")(function* (
+  tokens: ReadonlyArray<string>,
+  action: typeof follow,
+) {
+  const flags = yield* collect(tokens, [...sharedFlags, Flags.sessionId]);
+  return yield* action({
+    ...(yield* sharedOf(flags)),
+    sessionId: yield* take(Flags.sessionId, flags),
+  });
 });
 
 const actionOf = (
@@ -966,6 +793,51 @@ const actionOf = (
   return { name: words.join(" "), tokens: args.slice(index) };
 };
 
+const dispatch = Effect.fn("client.dispatch")(function* (
+  name: ActionName,
+  tokens: ReadonlyArray<string>,
+) {
+  switch (name) {
+    case "start":
+      return yield* runStart(tokens, byName[name]);
+    case "reserve":
+      return yield* runReserve(tokens, byName[name]);
+    case "relinquish":
+      return yield* runRelinquish(tokens, byName[name]);
+    case "get-image":
+      return yield* runCapture(tokens, byName[name]);
+    case "get-serial":
+      return yield* runCapture(tokens, byName[name]);
+    case "send-keys":
+      return yield* runSendKeys(tokens, byName[name]);
+    case "mouse move":
+      return yield* runMove(tokens, byName[name]);
+    case "mouse click":
+      return yield* runClick(tokens, byName[name]);
+    case "mouse double-click":
+      return yield* runClick(tokens, byName[name]);
+    case "mouse scroll":
+      return yield* runScroll(tokens, byName[name]);
+    case "mouse drag":
+      return yield* runDrag(tokens, byName[name]);
+    case "mouse hold":
+      return yield* runButton(tokens, byName[name]);
+    case "mouse release":
+      return yield* runButton(tokens, byName[name]);
+    case "intent start":
+      return yield* runIntentStart(tokens, byName[name]);
+    case "intent end":
+      return yield* runIntentEnd(tokens, byName[name]);
+    case "stop":
+      return yield* runStop(tokens, byName[name]);
+    case "save":
+      return yield* runSave(tokens, byName[name]);
+    case "follow":
+      return yield* runFollow(tokens, byName[name]);
+  }
+  return yield* Errors.CommandError.make({ message: "unknown action" });
+});
+
 // Find the action by the words the model wrote, then call that function.
 export const call = Effect.fn("client.call")(function* (args: ReadonlyArray<string>) {
   const { name, tokens } = actionOf(args);
@@ -973,43 +845,5 @@ export const call = Effect.fn("client.call")(function* (args: ReadonlyArray<stri
     const label = name === "" ? "missing action" : `unknown action ${name}`;
     return yield* Errors.CommandError.make({ message: label });
   }
-  switch (name) {
-    case "start":
-      return yield* runStart(tokens);
-    case "reserve":
-      return yield* runReserve(tokens);
-    case "relinquish":
-      return yield* runRelinquish(tokens);
-    case "get-image":
-      return yield* runCapture(tokens, getImage);
-    case "get-serial":
-      return yield* runCapture(tokens, getSerial);
-    case "send-keys":
-      return yield* runSendKeys(tokens);
-    case "mouse move":
-      return yield* runMove(tokens);
-    case "mouse click":
-      return yield* runClick(tokens, mouseClick);
-    case "mouse double-click":
-      return yield* runClick(tokens, mouseDoubleClick);
-    case "mouse scroll":
-      return yield* runScroll(tokens);
-    case "mouse drag":
-      return yield* runDrag(tokens);
-    case "mouse hold":
-      return yield* runButton(tokens, mouseHold);
-    case "mouse release":
-      return yield* runButton(tokens, mouseRelease);
-    case "intent start":
-      return yield* runIntentStart(tokens);
-    case "intent end":
-      return yield* runIntentEnd(tokens);
-    case "stop":
-      return yield* runStop(tokens);
-    case "save":
-      return yield* runSave(tokens);
-    case "follow":
-      return yield* runFollow(tokens);
-  }
-  return yield* Errors.CommandError.make({ message: "unknown action" });
+  return yield* dispatch(name, tokens);
 });
