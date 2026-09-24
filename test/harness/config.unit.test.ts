@@ -12,6 +12,7 @@ const valid = () => ({
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",
   stepLimit: 200,
+  harness: { defaultRetry: "1 second" },
 });
 
 const file = (
@@ -49,7 +50,7 @@ const denied = PlatformError.systemError({
 
 describe("oligarchy.json", () => {
   it.effect(
-    "decodes the model per action, the base URL, the timeouts, the ceiling and the step limit",
+    "decodes the model per action, the base URL, the timeouts, the ceiling, the step limit and the harness",
     () =>
       Effect.gen(function* () {
         const config = yield* HarnessConfig.load.pipe(
@@ -60,6 +61,7 @@ describe("oligarchy.json", () => {
         expect(Duration.toMillis(config.timeouts.header)).toBe(Duration.toMillis("3 minutes"));
         expect(Duration.toMillis(config.timeouts.chunk)).toBe(Duration.toMillis("3 minutes"));
         expect(Duration.toMillis(config.runCeiling)).toBe(Duration.toMillis("1.5 hours"));
+        expect(Duration.toMillis(config.harness.defaultRetry)).toBe(Duration.toMillis("1 second"));
         expect(config.stepLimit).toBe(200);
       }),
   );
@@ -74,6 +76,7 @@ describe("oligarchy.json", () => {
       expect(Duration.toMillis(config.timeouts.header)).toBe(Duration.toMillis("3 minutes"));
       expect(Duration.toMillis(config.timeouts.chunk)).toBe(Duration.toMillis("3 minutes"));
       expect(Duration.toMillis(config.runCeiling)).toBe(Duration.toMillis("1.5 hours"));
+      expect(Duration.toMillis(config.harness.defaultRetry)).toBe(Duration.toMillis("1 second"));
       expect(config.stepLimit).toBeGreaterThanOrEqual(1);
       expect(Duration.toMillis(config.runCeiling)).toBeGreaterThan(
         Duration.toMillis(config.timeouts.header),
@@ -148,6 +151,27 @@ describe("oligarchy.json", () => {
       const chunk = yield* refuse(chunkAtCeiling);
       expect(chunk.message).toContain('["timeouts"]["chunk"]');
       expect(chunk.message).toContain("runCeiling");
+
+      const { harness: _dropped, ...withoutHarness } = valid();
+      const missingHarness = yield* refuse(withoutHarness);
+      expect(missingHarness.message).toContain('["harness"]');
+
+      const missingRetry = yield* refuse({ ...valid(), harness: {} });
+      expect(missingRetry.message).toContain('["harness"]["defaultRetry"]');
+
+      const zeroRetry = valid();
+      zeroRetry.harness.defaultRetry = "0 seconds";
+      const retry = yield* refuse(zeroRetry);
+      expect(retry.message).toContain('["harness"]["defaultRetry"]');
+
+      const retryAtCeiling = valid();
+      retryAtCeiling.harness.defaultRetry = "1.5 hours";
+      const longRetry = yield* refuse(retryAtCeiling);
+      expect(longRetry.message).toContain('["harness"]["defaultRetry"]');
+      expect(longRetry.message).toContain("runCeiling");
+
+      const flatRetry = yield* refuse({ ...valid(), defaultRetry: "1 second" });
+      expect(flatRetry.message).toContain('["defaultRetry"]');
 
       const withToken = { ...valid(), token: "secret-token" };
       const token = yield* refuse(withToken);

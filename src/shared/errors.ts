@@ -379,6 +379,19 @@ export class ToolError extends Schema.TaggedError<ToolError>("@oligarchy/shared/
   { message: Schema.String },
 ) {}
 
+// OpenRouter answered and refused the request: a 4xx other than 429. The status is the HTTP
+// status; the message is the body's.
+export class OpenRouterRefusal extends Schema.TaggedError<OpenRouterRefusal>(
+  "@oligarchy/shared/errors/OpenRouterRefusal",
+)("OpenRouterRefusal", { status: Schema.Int, message: Schema.String }) {}
+
+// OpenRouter did not produce a completion: nothing was listening, the header or chunk timeout
+// fired, a 429 or 5xx could not be retried inside the run ceiling, or the stream died. A refused
+// request is OpenRouterRefusal, not this.
+export class OpenRouterUnreachable extends Schema.TaggedError<OpenRouterUnreachable>(
+  "@oligarchy/shared/errors/OpenRouterUnreachable",
+)("OpenRouterUnreachable", { message: Schema.String, cause: Schema.Defect() }) {}
+
 export class DatabaseError extends Schema.TaggedError<DatabaseError>(
   "@oligarchy/shared/errors/DatabaseError",
 )("DatabaseError", {

@@ -10,5 +10,8 @@
     "chunk": "3 minutes"
   },
   "runCeiling": "1.5 hours",
-  "stepLimit": 200
+  "stepLimit": 200,
+  "harness": {
+    "defaultRetry": "1 second"
+  }
 }
