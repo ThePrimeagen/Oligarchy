@@ -294,7 +294,7 @@ describe("run happy path", () => {
         const left = (row: string | undefined): string => (row ?? "").slice(2, 28);
         const first = yield* rows(setup);
         expect(left(first[6])).toContain(View.spinnerAt(0));
-        expect(left(first[6])).toContain("45 s ago");
+        expect(left(first[6])).toContain("45s");
         expect(left(first[6])).not.toContain("drive");
         expect(first[0]).toBe(machinesTop("read 0 s ago"));
         yield* TestClock.adjust("80 millis");
@@ -302,7 +302,7 @@ describe("run happy path", () => {
         const next = yield* rows(setup);
         expect(left(next[6])).toContain(View.spinnerAt(View.SPIN_MS));
         expect(left(next[6])).not.toContain(View.spinnerAt(0));
-        expect(left(next[6])).toContain("45 s ago");
+        expect(left(next[6])).toContain("45s");
         expect(next[0]).toBe(machinesTop("read 0 s ago"));
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);

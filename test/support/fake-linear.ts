@@ -22,6 +22,7 @@ export type LinearCall =
   | { readonly method: "clearReady"; readonly identifier: string }
   | { readonly method: "moveToErrored"; readonly identifier: string; readonly message: string }
   | { readonly method: "moveToInProgress"; readonly identifier: string }
+  | { readonly method: "moveToInReview"; readonly identifier: string }
   | { readonly method: "moveToNeedsReview"; readonly identifier: string }
   | { readonly method: "moveToFailed"; readonly identifier: string }
   | { readonly method: "moveToSucceeded"; readonly identifier: string }
@@ -96,6 +97,7 @@ export const fakeLinear = (
       record({ method: "moveToErrored", identifier, message }, Effect.void),
     moveToInProgress: (identifier) =>
       record({ method: "moveToInProgress", identifier }, Effect.void),
+    moveToInReview: (identifier) => record({ method: "moveToInReview", identifier }, Effect.void),
     moveToNeedsReview: (identifier) =>
       record({ method: "moveToNeedsReview", identifier }, Effect.void),
     moveToFailed: (identifier) => record({ method: "moveToFailed", identifier }, Effect.void),
@@ -117,6 +119,7 @@ export const fakeLinear = (
     clearReady: overrides.clearReady ?? defaults.clearReady,
     moveToErrored: overrides.moveToErrored ?? defaults.moveToErrored,
     moveToInProgress: overrides.moveToInProgress ?? defaults.moveToInProgress,
+    moveToInReview: overrides.moveToInReview ?? defaults.moveToInReview,
     moveToNeedsReview: overrides.moveToNeedsReview ?? defaults.moveToNeedsReview,
     moveToFailed: overrides.moveToFailed ?? defaults.moveToFailed,
     moveToSucceeded: overrides.moveToSucceeded ?? defaults.moveToSucceeded,

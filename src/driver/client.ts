@@ -21,8 +21,12 @@ const joined = (chunks: ReadonlyArray<Uint8Array>): Uint8Array => {
 };
 
 // stdout is the text a command prints. bytes is the same stdout undecoded: get-image
-// prints a PNG, which text would mangle.
-export type Ran = Tools.CommandOutput & { readonly bytes: Uint8Array };
+// prints a PNG, which text would mangle. malformed is the client refusing the words before
+// any request: an unknown action, an unknown flag, a value its flag rejects.
+export type Ran = Tools.CommandOutput & {
+  readonly bytes: Uint8Array;
+  readonly malformed: boolean;
+};
 
 const written = (args: ReadonlyArray<unknown>): Uint8Array =>
   encoder.encode(`${args.map(String).join(" ")}\n`);
@@ -68,10 +72,10 @@ const capturingStdio = (stdout: Array<Uint8Array>, stderr: Array<Uint8Array>) =>
 const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<string>) {
   const stdout: Array<Uint8Array> = [];
   const stderr: Array<Uint8Array> = [];
-  const exitCode = yield* Effect.gen(function* () {
+  const { exitCode, malformed } = yield* Effect.gen(function* () {
     const exit = yield* Effect.exit(Actions.call(args));
     if (Exit.isSuccess(exit)) {
-      return 0;
+      return { exitCode: 0, malformed: false };
     }
     if (Cause.hasInterruptsOnly(exit.cause)) {
       return yield* Effect.interrupt;
@@ -83,10 +87,14 @@ const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<s
       failure.value._tag === "UserError"
     ) {
       stderr.push(encoder.encode(`${failure.value.userMessage}\n`));
-      return 1;
+      return { exitCode: 1, malformed: true };
     }
     yield* Render.reportFailure(exit.cause);
-    return 1;
+    // The client's CommandError is its parse of the words; the guest answers in other errors.
+    return {
+      exitCode: 1,
+      malformed: Option.isSome(failure) && failure.value._tag === "CommandError",
+    };
   }).pipe(
     Effect.provideService(Console.Console, capturingConsole(stdout, stderr)),
     Effect.provideService(Stdio.Stdio, capturingStdio(stdout, stderr)),
@@ -96,6 +104,7 @@ const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<s
     stdout: text(stdout),
     stderr: text(stderr),
     bytes: joined(stdout),
+    malformed,
   } satisfies Ran;
 });
 

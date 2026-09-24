@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { Result } from "effect";
+import { Option, Result } from "effect";
 import * as Prompt from "../../src/driver/prompt.ts";
 import * as Reply from "../../src/driver/reply.ts";
 
@@ -15,7 +15,15 @@ const FILLED = {
   TEST_PROOF: "The screen is locked.",
   REASONS: "open the menu: menu is up",
   CLIENT_TOOLS: "# Client\n\n./client start --agent-id OLI-1",
+  RESPONSE: Option.some(CLIENT),
 };
+
+const LAST_RESPONSE = `<last-response>
+Your last response was
+<tool-call>
+{{RESPONSE}}
+</tool-call>
+</last-response>`;
 
 const file = (): string =>
   readFileSync(new URL("../../prompts/custom-harness-driving-agent.html", import.meta.url), "utf8");
@@ -31,6 +39,7 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).toContain("{{TEST_PROOF}}");
     expect(text).toContain("{{REASONS}}");
     expect(text).toContain("{{CLIENT_TOOLS}}");
+    expect(text).toContain(LAST_RESPONSE);
     expect(Result.isSuccess(Reply.parse(CLIENT))).toBe(true);
     expect(Result.isSuccess(Reply.parse(EXAMPLE))).toBe(true);
     const done = Reply.parse(DONE);
@@ -46,6 +55,20 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).not.toContain("This is step");
     expect(text).not.toContain("step-status");
     expect(text).not.toMatch(/"completed"|"continue"/);
+  });
+
+  it("tells the model to move the mouse, then validate the pointer on the next image, before clicking", () => {
+    const text = file();
+    expect(text).toContain(
+      "Move the mouse to the location you want to click, then take an image and validate the pointer is in the correct location before clicking.",
+    );
+  });
+
+  it("tells the model a click and a double-click take no point and a drag names only its end", () => {
+    const text = file();
+    expect(text).toMatch(/mouse click[^<]*mouse double-click[^<]*no --x or --y/);
+    expect(text).toMatch(/mouse drag[^<]*only --to-x and --to-y/);
+    expect(text).toMatch(/where the pointer is/);
   });
 
   it("tells the model the first step is 1, step N is the Nth ActionList line, and one step keeps its number", () => {
@@ -77,6 +100,26 @@ describe("custom-harness-driving-agent.html", () => {
     expect(rendered).toContain("./client start --agent-id OLI-1");
     expect(rendered).not.toContain("{{");
     expect(rendered).toContain(EXAMPLE);
+  });
+
+  it("shows the model its last response", () => {
+    const rendered = Prompt.render({ ...FILLED, RESPONSE: Option.some("hello") });
+    expect(rendered).toContain(
+      "<last-response>\nYour last response was\n<tool-call>\nhello\n</tool-call>\n</last-response>",
+    );
+  });
+
+  it("leaves the last response out when there is none (unhappy)", () => {
+    const rendered = Prompt.render({ ...FILLED, RESPONSE: Option.none() });
+    expect(rendered).not.toContain("last-response");
+    expect(rendered).not.toContain("Your last response was");
+    expect(rendered).not.toContain("{{");
+    expect(rendered).toContain("open the menu: menu is up");
+  });
+
+  it("leaves a placeholder that arrives inside the last response (unhappy)", () => {
+    const rendered = Prompt.render({ ...FILLED, RESPONSE: Option.some("{{TEST_PROOF}}") });
+    expect(rendered).toContain("<tool-call>\n{{TEST_PROOF}}\n</tool-call>");
   });
 
   it("leaves a placeholder that arrives inside a value", () => {

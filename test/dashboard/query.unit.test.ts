@@ -580,21 +580,17 @@ describe("versionStats unhappy path", () => {
 });
 
 const timed = (
+  id: string,
   status: "passed" | "failed",
-  finishedAt: Date,
+  finishedAt: number,
   durationMs: number,
-  definitionId = 1,
-): TestResultOutcome =>
-  outcome(status, "grok-4.6", definitionId, {
-    createdAt: new Date(finishedAt.getTime() - durationMs),
-    finishedAt,
-  });
+): DefinitionRunSource => source(id, status, finishedAt, { durationMs });
 
 describe("durationChart happy path", () => {
   it("keeps the newest 50 passed or failed runs, then sorts them shortest duration first", () => {
-    const olderShort = timed("passed", at("2026-09-01T00:00:00Z"), 1_000);
-    const newerLong = timed("failed", at("2026-09-01T00:10:00Z"), 4_000);
-    const newestMid = timed("passed", at("2026-09-01T00:20:00Z"), 2_000);
+    const olderShort = timed("older", "passed", 1, 1_000);
+    const newerLong = timed("newer", "failed", 2, 4_000);
+    const newestMid = timed("newest", "passed", 3, 2_000);
     expect(durationChart([newerLong, olderShort, newestMid])).toEqual({
       bars: [
         { ms: 1_000, succeeded: true },
@@ -605,31 +601,12 @@ describe("durationChart happy path", () => {
     });
   });
 
-  it("uses the session's duration when the session has both stamps", () => {
-    const row = outcome("passed", "grok-4.6", 1, {
-      createdAt: at("2026-09-01T00:00:00Z"),
-      finishedAt: at("2026-09-01T00:10:00Z"),
-      sessionStartedAt: at("2026-09-01T00:01:00Z"),
-      sessionEndedAt: at("2026-09-01T00:03:00Z"),
-    });
-    expect(durationChart([row])).toEqual({
-      bars: [{ ms: 120_000, succeeded: true }],
-      percentiles: {
-        p10: 120_000,
-        p25: 120_000,
-        p50: 120_000,
-        p75: 120_000,
-        p90: 120_000,
-        p99: 120_000,
-      },
-    });
-  });
-
   it("drops the oldest run once more than 50 have a duration", () => {
     const rows = Array.from({ length: 51 }, (_, index) =>
       timed(
+        `run-${String(index)}`,
         index % 2 === 0 ? "passed" : "failed",
-        at(`2026-09-01T00:${String(index).padStart(2, "0")}:00Z`),
+        index + 1,
         (index + 1) * 1_000,
       ),
     );
@@ -654,35 +631,27 @@ describe("durationChart unhappy path", () => {
     expect(durationChart([])).toEqual({ bars: [], percentiles: undefined });
     expect(
       durationChart([
-        outcome("pending", "grok-4.6", 1, { finishedAt: null }),
-        outcome("running", "grok-4.6", 1, { finishedAt: null }),
-        outcome("aborted", "grok-4.6", 1, {
-          createdAt: at("2026-09-01T00:00:00Z"),
-          finishedAt: at("2026-09-01T00:01:00Z"),
-        }),
-        outcome("timed_out", "grok-4.6", 1, {
-          createdAt: at("2026-09-01T00:00:00Z"),
-          finishedAt: at("2026-09-01T00:01:00Z"),
-        }),
-        outcome("passed", "grok-4.6", 1, { finishedAt: null }),
+        source("pending", "pending", 1),
+        source("running", "running", 2),
+        source("aborted", "aborted", 3, { durationMs: 60_000 }),
+        source("timed", "timed_out", 4, { durationMs: 60_000 }),
+        source("untimed-pass", "passed", 5),
+        source("untimed-fail", "failed", 6, { reason: "driver gave up" }),
       ]),
     ).toEqual({ bars: [], percentiles: undefined });
   });
 
-  it("omits a run whose finish is before its start", () => {
+  it("charts only the timed runs when some verdicts have no duration", () => {
     expect(
       durationChart([
-        outcome("passed", "grok-4.6", 1, {
-          createdAt: at("2026-09-01T00:02:00Z"),
-          finishedAt: at("2026-09-01T00:01:00Z"),
-        }),
-        outcome("failed", "grok-4.6", 1, {
-          sessionStartedAt: at("2026-09-01T00:02:00Z"),
-          sessionEndedAt: at("2026-09-01T00:01:00Z"),
-          finishedAt: null,
-        }),
+        source("untimed", "passed", 3),
+        timed("timed", "failed", 2, 5_000),
+        source("aborted", "aborted", 1, { durationMs: 1_000 }),
       ]),
-    ).toEqual({ bars: [], percentiles: undefined });
+    ).toEqual({
+      bars: [{ ms: 5_000, succeeded: false }],
+      percentiles: { p10: 5_000, p25: 5_000, p50: 5_000, p75: 5_000, p90: 5_000, p99: 5_000 },
+    });
   });
 });
 

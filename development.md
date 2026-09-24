@@ -460,7 +460,8 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   one that start prints. It then runs `./ctrl test start` with that id, the result id, and the
   model, which marks the result running. Each turn is one back and forth: the
   `custom-harness-driving-agent.html` prompt, filled with the past reasons, the looked-up
-  definition and proof, and the client tools, then the task. The reply is one line: the tool call
+  definition and proof, the client tools, and the model's last reply as it wrote it (left out on
+  the first ask, which has none), then the task. The reply is one line: the tool call
   JSON. `client` runs that action and carries a `step` (a whole number, the first step 1; step N
   is the Nth ActionList line) and a `reason`; there is no step-status. The past reasons name the step each action carried, because
   each turn asks the model afresh. `Done` tells the harness the task is finished. The model's args
@@ -472,13 +473,25 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   headline. A mint's last act is shutting the guest down, so a failed `get-image` on a mint tells
   the model to call `Done`; a reply that is anything else ends the drive as if it had. A command
   answering `unknown session` fails the loop at once: the session is gone and every later command
-  would answer the same. A failure after the session exists, including an interrupt, stops
+  would answer the same. The harness remembers where the pointer is: where
+  the last mouse action that exited 0 left it (a move, scroll, hold, or release at its point, a
+  drag at its end). The model's `mouse click` and `mouse double-click` name no `--x` or `--y` and
+  its `mouse drag` names only `--to-x` and `--to-y`, so it moves, sees the pointer on an image,
+  and only then presses; the harness fills the point in before it calls the client function,
+  which still takes it (`client.md` documents that CLI; the harness prompt tells the model the
+  difference). A click or drag that names the point, or that comes before any mouse action, is a
+  bad reply. A failure after the session exists, including an interrupt, stops
   it with `--status failed` and closes the result failed even when that stop fails, and the loop
   still exits 1 with the original reason. A database url that is not a url fails as a command
   error carrying the database message, before the model is asked. It appends
   one JSON line to `--debug-log` per step (the loop counter and the step), and exits 0 only when
-  the harness closed the result. An OpenRouter failure, a reply that is not that one tool call,
-  the step limit, or the run ceiling exits 1 and the reason is the failure. A ticket with no
+  the harness closed the result. A bad reply goes back to the model as a past step and it is
+  asked again: one that is not that one tool call, a command the harness refuses (`start`,
+  `stop`, `save`, `intent`), or one the client refuses before any request (an unknown action,
+  flag, or value). Three in a row fail the loop with `model could not respond correctly`,
+  quoting each reply and its reason; a command that reaches the guest, even one the guest
+  refuses, starts the count again. An OpenRouter failure, three bad replies, the step limit, or
+  the run ceiling exits 1 and the reason is the failure. A ticket with no
   result, or a result with no definition, fails before start and does not ask the model. The
   action itself is the client function for that action (`mouse click` is `mouseClick`), called in
   this process. The driver does not run the client CLI and does not spawn `./client`. Intents

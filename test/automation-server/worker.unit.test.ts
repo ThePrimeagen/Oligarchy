@@ -533,36 +533,69 @@ describe("dispatch happy path", () => {
     }),
   );
 
-  it.effect("a diagnose job posts the diagnosing prompt and succeeds on 200", () =>
+  it.effect(
+    "a diagnose job moves to In Review, posts the diagnosing prompt and succeeds on 200",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedVerdict(fixed, "passed");
+        seedDiagnose(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+        // A diagnose reserves as one: the client takes a slot of its own and no guest.
+        expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
+          ticket: TICKET,
+          action: "diagnose",
+        });
+        expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
+          prompt: DIAGNOSE_PROMPT,
+          ticket: TICKET,
+        });
+        expect(FakeLog.texts(fixed.log)).toEqual([
+          `dispatching diagnose; ${URL}; ${MODEL}`,
+          "diagnose succeeded",
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
+        expect(fixed.linear.calls.filter((call) => call.method.startsWith("moveTo"))).toEqual([
+          { method: "moveToInReview", identifier: TICKET },
+          { method: "moveToSucceeded", identifier: TICKET },
+        ]);
+      }),
+  );
+
+  it.effect("a reserved diagnose does not start /run until Linear is In Review", () =>
     Effect.gen(function* () {
-      const fixed = harness();
+      const moving = yield* Deferred.make<void>();
+      const releaseMove = yield* Deferred.make<void>();
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToInReview: (identifier) =>
+              Effect.gen(function* () {
+                expect(identifier).toBe(TICKET);
+                yield* Deferred.succeed(moving, undefined);
+                yield* Deferred.await(releaseMove);
+              }),
+          },
+        }),
+      );
       seedResult(fixed.tests);
       seedVerdict(fixed, "passed");
       seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
+      yield* Deferred.await(moving);
+      expect(fixed.automation.jobs[0]?.status).toBe("running");
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`]);
+      expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+      yield* Deferred.succeed(releaseMove, undefined);
       yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
-      // A diagnose reserves as one: the client takes a slot of its own and no guest.
-      expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({
-        ticket: TICKET,
-        action: "diagnose",
-      });
-      expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
-        prompt: DIAGNOSE_PROMPT,
-        ticket: TICKET,
-      });
-      expect(FakeLog.texts(fixed.log)).toEqual([
-        `dispatching diagnose; ${URL}; ${MODEL}`,
-        "diagnose succeeded",
-      ]);
-      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
-      expect(fixed.linear.calls.filter((call) => call.method === "moveToInProgress")).toEqual([]);
-      expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual([]);
-      expect(verdictMoves(fixed.linear)).toEqual([
-        { method: "moveToSucceeded", identifier: TICKET },
-      ]);
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
     }),
   );
 
@@ -1465,6 +1498,56 @@ describe("dispatch unhappy path", () => {
         expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
           cleared(TICKET),
         ]);
+        expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+      });
+    },
+  );
+
+  it.effect(
+    "a move to In Review that fails three times releases the reservation and errors the diagnose",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "moveToInReview",
+        message: `linear: moving ${TICKET} to In Review failed`,
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToInReview: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests);
+        seedDiagnose(fixed.automation);
+        const clientId = seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          action: "diagnose",
+          status: "errored",
+          reason: refused.message,
+          serverId: clientId,
+        });
+        expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+          `POST ${URL}/reserve`,
+          `POST ${URL}/abort`,
+        ]);
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `move to In Review failed; ${URL}`,
+            agentId: TICKET,
+            cause: refused,
+          }),
+          expect.objectContaining({ text: `diagnose errored; ${refused.message}` }),
+        ]);
+        expect(verdictMoves(fixed.linear)).toEqual([]);
         expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
       });
     },

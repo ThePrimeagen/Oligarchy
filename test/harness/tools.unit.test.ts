@@ -36,6 +36,9 @@ describe("driver tools", () => {
     expect(client.function.description).toBe(guide);
     expect(client.function.description).toContain("## Synopsis");
     expect(client.function.description).toContain("## The loop");
+    expect(client.function.description).toContain(
+      "Move the mouse to the location you want to click, then take an image and validate the pointer is in the correct location before clicking.",
+    );
     expect(client.function.parameters).toMatchObject({
       type: "object",
       additionalProperties: false,

@@ -21,6 +21,7 @@ import * as Tests from "../db/tests.ts";
 import * as HarnessConfig from "../harness/config.ts";
 import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
+import * as Pointer from "../harness/pointer.ts";
 import * as Tools from "../harness/tools.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
@@ -140,12 +141,25 @@ const brief = (text: string): string => {
   return joined.slice(0, BRIEF);
 };
 
+const firstLine = (output: string): string =>
+  output
+    .split("\n")
+    .find((line) => line.trim() !== "")
+    ?.trim() ?? "";
+
 // The qemu server no longer has the session: every later command answers the same, so there is
 // nothing left for the model to try.
 const sessionGone = (output: string): string | undefined => {
-  const headline = output.split("\n").find((line) => line.trim() !== "");
-  return headline?.trim().startsWith("unknown session") === true ? headline.trim() : undefined;
+  const headline = firstLine(output);
+  return headline.startsWith("unknown session") ? headline : undefined;
 };
+
+// Three in a row: the model cannot answer in the tool's shape, and asking again only spends
+// the run. A command that reaches the guest, even one the guest refuses, starts the count again.
+const BAD_REPLY_LIMIT = 3;
+// Each bad reply is quoted in the failure, which is the result's reason: a model can answer
+// with a page of prose.
+const QUOTED_REPLY = 200;
 
 const decision = (did: string, outcome: string): string => {
   const rest = brief(outcome);
@@ -196,14 +210,19 @@ const loadRun = Effect.fn("Driver.loadRun")(function* (agentId: string) {
 });
 
 const HARNESS_OWNED = new Set(["start", "stop", "save"]);
-
 export const run = Effect.fn("Driver.run")(function* (input: Input) {
   const startedAt = yield* Clock.currentTimeMillis;
   const facts = yield* loadRun(input.agentId);
   const decisions: Array<string> = [];
   let turns = 0;
+  // The bad replies since the last command that reached the guest, each with its reason.
+  let misses: Array<string> = [];
+  // The model is asked fresh each turn, so it sees what it answered last, as it wrote it.
+  let lastResponse: Option.Option<string> = Option.none();
   // The last get-image's PNG. Any other guest action may change the screen, so it drops it.
   let screen: Uint8Array | undefined;
+  // Where the last mouse action that succeeded left the pointer. A click presses there.
+  let pointer: Option.Option<Pointer.Point> = Option.none();
   // A mint's image failed: the guest is off. The model gets one turn to call Done.
   let machineOff = false;
   // Step N's intent is the Nth ActionList line. Step 1 opens with the session, and only a reply
@@ -330,6 +349,16 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           return failed;
         });
 
+        const miss = Effect.fn("Driver.miss")(function* (turn: number, why: string, reply: string) {
+          misses.push(`${why} (replied ${brief(reply).slice(0, QUOTED_REPLY)})`);
+          if (misses.length < BAD_REPLY_LIMIT) {
+            return yield* Effect.void;
+          }
+          const message = `model could not respond correctly: ${String(BAD_REPLY_LIMIT)} bad replies in a row: ${misses.join("; ")}`;
+          yield* log(input, turn, "failure", message);
+          return yield* Effect.fail(commandError(message));
+        });
+
         const first = yield* openStep(0);
         if (first !== undefined) {
           decisions.push(decision("step 1", first));
@@ -355,6 +384,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             TEST_PROOF: facts.proof,
             REASONS: reasons,
             CLIENT_TOOLS: Tools.clientGuide.trimEnd(),
+            RESPONSE: lastResponse,
           });
           yield* log(input, turn, "request", input.model);
           const answer = yield* OpenRouter.complete({
@@ -386,11 +416,21 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             defaultRetry: input.config.harness.defaultRetry,
             startedAtMillis: startedAt,
           }).pipe(Effect.tapError((error) => log(input, turn, "failure", Render.headline(error))));
-          yield* log(input, turn, "assistant", answer.content ?? "");
-          const parsed = Reply.parse(answer.content ?? "");
+          const text = answer.content ?? "";
+          yield* log(input, turn, "assistant", text);
+          lastResponse = Option.some(text);
+          const parsed = Reply.parse(text);
           if (Result.isFailure(parsed)) {
-            yield* log(input, turn, "failure", parsed.failure.message);
-            return yield* Effect.fail(commandError(parsed.failure.message));
+            // Nothing is left to drive, so any reply ends it, as Done would.
+            if (machineOff) {
+              yield* log(input, turn, "stop", "machine-off");
+              return { reason: "machine-off" } satisfies Stopped;
+            }
+            const why = parsed.failure.message;
+            yield* log(input, turn, "refusal", why);
+            decisions.push(decision("reply refused", `${why}: ${text}`));
+            yield* miss(turn, why, text);
+            continue;
           }
           const reply = parsed.success;
           if (reply._tag === "Done") {
@@ -408,12 +448,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           if (Result.isFailure(planned)) {
             yield* log(input, turn, "refusal", planned.failure.message);
             decisions.push(decision(said, planned.failure.message));
+            yield* miss(turn, planned.failure.message, text);
             continue;
           }
           if (HARNESS_OWNED.has(planned.success.args[0] ?? "")) {
             const message = "client: the harness starts and stops the session";
             yield* log(input, turn, "refusal", message);
             decisions.push(decision(said, message));
+            yield* miss(turn, message, text);
             continue;
           }
           turns = turn;
@@ -425,9 +467,17 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           if (Result.isFailure(owned)) {
             yield* log(input, turn, "refusal", owned.failure.message);
             decisions.push(decision(said, owned.failure.message));
+            yield* miss(turn, owned.failure.message, text);
             continue;
           }
-          const guest = { bin: planned.success.bin, args: owned.success };
+          const pointed = Pointer.placed(owned.success, pointer);
+          if (Result.isFailure(pointed)) {
+            yield* log(input, turn, "refusal", pointed.failure.message);
+            decisions.push(decision(said, pointed.failure.message));
+            yield* miss(turn, pointed.failure.message, text);
+            continue;
+          }
+          const guest = { bin: planned.success.bin, args: pointed.success };
 
           if (reply.step !== step || !intentOpen) {
             if (reply.step !== step) {
@@ -446,6 +496,9 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
 
           const ran = yield* Client.run(guest);
           yield* log(input, turn, "command", `${shown(guest)} exit ${String(ran.exitCode)}`);
+          if (ran.exitCode === 0) {
+            pointer = Pointer.after(guest.args, pointer);
+          }
           const imaging = guest.args[0] === "get-image";
           const shot = imaging && ran.exitCode === 0 && ran.bytes.length > 0;
           screen = shot ? ran.bytes : undefined;
@@ -468,6 +521,11 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
               : `IMAGE HAS FAILED, MACHINE IS SHUT DOWN\n${outcome}`;
           }
           decisions.push(decision(said, outcome));
+          if (ran.malformed) {
+            yield* miss(turn, firstLine(printed), text);
+          } else {
+            misses = [];
+          }
         }
       }),
     (booted, exit) =>

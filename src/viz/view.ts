@@ -476,6 +476,10 @@ const size = (bytes: number): string =>
 const ago = (stamp: Date | null, queriedAt: Date, drift: number): string =>
   stamp === null ? "—" : `${Text.age(queriedAt.getTime() - stamp.getTime() + drift)} ago`;
 
+// The green (or blue) countup beside a running job: how long it has run, as "1m 13s".
+const count = (stamp: Date | null, queriedAt: Date, drift: number): string =>
+  stamp === null ? "—" : Text.count(queriedAt.getTime() - stamp.getTime() + drift);
+
 // Exactly `width` columns of pieces: the piece that crosses the edge is cut with an ellipsis and
 // the rest dropped, or spaces fill what is left.
 const clip = (pieces: Text.Row, width: number): Text.Row => {
@@ -668,8 +672,8 @@ const tabsRow = (view: View): Text.Row => {
 
 // A job row: the marker column and a space, then six columns with a gap between each. A live
 // job has no finish and no reason yet, so neither has a column. The action column is ten: that
-// holds "59 min ago", the longest minute reading, which is what a running row shows there. The
-// header stays "action" because a waiting row still names drive or diagnose in that cell.
+// holds "9h 59m 59s", the longest countup that still fits, which is what a running row shows
+// there. The header stays "action" because a waiting row still names drive or diagnose in that cell.
 const JOB_WIDTHS = { ticket: 9, test: 18, action: 10, status: 12, queued: 11, started: 11 };
 
 const jobHeader: Text.Row = [
@@ -708,6 +712,7 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Tex
   const running = job.status === "running";
   const color = ACTION_COLOR[job.action];
   const started = ago(job.startedAt, job.queriedAt, drift);
+  const counted = count(job.startedAt, job.queriedAt, drift);
   const place = running ? stepPlace(job, job.intent === null ? [] : [job.intent]) : null;
   return [
     selected,
@@ -717,7 +722,7 @@ const jobRow = (job: Job, selected: Text.Piece, drift: number, now: number): Tex
     Text.value(Text.fit(job.test, JOB_WIDTHS.test)),
     Text.GAP,
     running
-      ? Text.paint(color, Text.fit(place ?? started, JOB_WIDTHS.action))
+      ? Text.paint(color, Text.fit(place ?? counted, JOB_WIDTHS.action))
       : Text.label(Text.fit(job.action, JOB_WIDTHS.action)),
     Text.GAP,
     Text.paint(
@@ -1269,16 +1274,16 @@ const automationRows = (
       return [marker(on, true), Text.SPACE, Text.strong(Text.fit(entry.machine.name ?? "—", 16))];
     }
     const job = jobsOn(snapshot, entry.machine)[entry.job.value];
-    // Twenty-six columns: the indent, the marker, the ticket, then the spinner and either the
-    // step (n/total) or how long it has run. "59 min ago" is ten and fills what is left; clip
-    // bounds the line. The selected client's open follow wins over the polled intent, and a
-    // follow with nothing still open shows the elapsed time rather than a stale poll.
+    // Twenty-seven columns: the indent, the marker, the ticket, then the spinner, the step
+    // (n/total) when there is one, and how long it has run. "1/2 10m 31s" fills what is left;
+    // clip bounds the line. The selected client's open follow wins over the polled intent, and
+    // a follow with nothing still open shows no step rather than a stale poll.
     const color = ACTION_COLOR[job.action];
     const follow = Option.getOrNull(view.session);
     // The open follow has every intent still on screen, so a repeated line is the copy
     // those intents have reached. Only a newest intent that is still open counts: the
     // server refuses a second start, and an older one left marked running is not the step.
-    // A follow with nothing still open keeps the elapsed time.
+    // A follow with nothing still open shows no step.
     let messages: ReadonlyArray<string> = job.intent === null ? [] : [job.intent];
     if (
       on &&
@@ -1299,6 +1304,7 @@ const automationRows = (
       messages = open ? said : [];
     }
     const place = stepPlace(job, messages);
+    const counted = count(job.startedAt, job.queriedAt, drift);
     return [
       Text.muted("  "),
       marker(on, true),
@@ -1307,7 +1313,7 @@ const automationRows = (
       Text.SPACE,
       Text.paint(color, spinnerAt(now)),
       Text.SPACE,
-      Text.paint(color, place ?? ago(job.startedAt, job.queriedAt, drift)),
+      Text.paint(color, place === null ? counted : `${place} ${counted}`),
     ];
   });
   // Keep the marked row on screen, the window growing down from it.
@@ -1320,7 +1326,7 @@ const automationRows = (
   const png = Option.flatMap(view.session, (follow) => follow.png);
   const top = Math.floor(height / 2);
   const bottom = height - top;
-  const afterClient = inner - 29;
+  const afterClient = inner - 30;
   const logWidth = Math.floor((afterClient - 3) / 2);
   const graphWidth = afterClient - 3 - logWidth;
   const plotted = usage(series?.samples ?? [], graphWidth, top);
@@ -1328,7 +1334,7 @@ const automationRows = (
   const intent = intentPane(view, bottom, logWidth);
   const rows = Array.from({ length: height }, (_, row) => {
     const line = left[from + row] ?? [Text.SPACE];
-    const client = clip(line, 26);
+    const client = clip(line, 27);
     if (row < top) {
       return [
         ...client,
@@ -1547,7 +1553,7 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
           image: Option.map(laid.image, (placed) => ({
             png: placed.png,
             top: 2 + PAGES.length + Math.floor(height / 2),
-            left: 2 + 26 + 3 + placed.logWidth + 3,
+            left: 2 + 27 + 3 + placed.logWidth + 3,
             columns: placed.columns,
             height: height - Math.floor(height / 2),
           })),

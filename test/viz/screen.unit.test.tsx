@@ -864,7 +864,7 @@ describe("screen unhappy path", () => {
       const truncated = [
         "OLI-61",
         `${"a".repeat(17)}…`,
-        "45 s ago",
+        "45s",
         `${View.spinnerAt(READ_AT)} running`,
         "3 min ago",
         "45 s ago",
@@ -901,7 +901,7 @@ describe("screen unhappy path", () => {
         const cleaned = [
           "OLI-61",
           "one two [31m t  c",
-          "45 s ago",
+          "45s",
           `${View.spinnerAt(READ_AT)} running`,
           "3 min ago",
           "45 s ago",
@@ -1483,7 +1483,7 @@ describe("running job rows", () => {
     () =>
       Effect.gen(function* () {
         const rows = yield* styled(shown(SNAPSHOT));
-        const elapsed = pad("45 s ago", 10);
+        const elapsed = pad("45s", 10);
         for (const index of [8, 16]) {
           expect(styleOf(rows[index], status(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
           expect(styleOf(rows[index], elapsed)).toEqual([View.DRIVE_COLOR, PLAIN]);
@@ -1495,12 +1495,27 @@ describe("running job rows", () => {
         expect(tickets[6]).toBe(box(job("▸", RUNNING)));
         const clients = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
         expect(strip(clients[6])).toContain(View.spinnerAt(READ_AT));
-        expect(strip(clients[6])).toContain("45 s ago");
+        expect(strip(clients[6])).toContain("45s");
         expect(strip(clients[6])).not.toContain("drive");
         const painted = yield* styled(shown(SNAPSHOT, { tab: "automation" }));
         expect(styleOf(painted[6], View.spinnerAt(READ_AT))).toEqual([View.DRIVE_COLOR, PLAIN]);
-        expect(styleOf(painted[6], "45 s ago")).toEqual([View.DRIVE_COLOR, PLAIN]);
+        expect(styleOf(painted[6], "45s")).toEqual([View.DRIVE_COLOR, PLAIN]);
       }),
+  );
+
+  it.effect("a running job's green countup reads minutes and seconds, with no ago", () =>
+    Effect.gen(function* () {
+      const snapshot: View.Snapshot = {
+        ...SNAPSHOT,
+        queue: { ...EMPTY_QUEUE, running: [{ ...running, startedAt: ago(73) }] },
+      };
+      const rows = yield* styled(shown(snapshot));
+      expect(styleOf(rows[8], pad("1m 13s", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[8], pad("1 min ago", 11))).toEqual([SUBTLE, PLAIN]);
+      const clients = yield* styled(shown(snapshot, { tab: "automation" }));
+      expect(styleOf(clients[6], "1m 13s")).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(textOf(clients[6])).not.toContain("ago");
+    }),
   );
 
   it.effect(
@@ -1511,12 +1526,12 @@ describe("running job rows", () => {
         const queue = yield* styled(shown(snapshot));
         const diagnose = queue.find((row) => textOf(row).includes("OLI-65"));
         expect(styleOf(diagnose, status(READ_AT))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
-        expect(styleOf(diagnose, pad("45 s ago", 10))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(styleOf(diagnose, pad("45s", 10))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
         expect(textOf(diagnose)).not.toContain("diagnose");
         const clients = yield* styled(shown(snapshot, { tab: "automation" }));
         const client = clients.find((row) => textOf(row).includes("OLI-65"));
         expect(styleOf(client, View.spinnerAt(READ_AT))).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
-        expect(styleOf(client, "45 s ago")).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
+        expect(styleOf(client, "45s")).toEqual([View.DIAGNOSE_COLOR, PLAIN]);
         expect(textOf(client)).not.toContain("diagnose");
         const tickets = yield* draw(shown(snapshot, { tab: "tickets" }));
         expect(tickets[7]).toBe(box(job(" ", DIAGNOSING)));
@@ -1575,7 +1590,7 @@ describe("running job rows", () => {
       const rows = yield* styled(shown(SNAPSHOT), later);
       expect(View.spinnerAt(later)).not.toBe(View.spinnerAt(READ_AT));
       expect(styleOf(rows[16], status(later))).toEqual([View.DRIVE_COLOR, PLAIN]);
-      expect(styleOf(rows[16], pad("45 s ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[16], pad("45s", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
     }),
   );
 
@@ -1587,7 +1602,7 @@ describe("running job rows", () => {
           queue: { ...EMPTY_QUEUE, running: [{ ...running, startedAt: ago(59 * 60) }] },
         }),
       );
-      expect(styleOf(rows[16], pad("59 min ago", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
+      expect(styleOf(rows[16], pad("59m 0s", 10))).toEqual([View.DRIVE_COLOR, PLAIN]);
       expect(textOf(rows[16])).not.toContain("…");
       expect(textOf(rows[16])).not.toContain("drive");
     }),
@@ -1781,7 +1796,7 @@ describe("session pane", () => {
     }),
   );
 
-  it.effect("a running client shows its step in place of how long it has run", () =>
+  it.effect("a running client shows its step and how long it has run", () =>
     Effect.gen(function* () {
       const instruction = `<ActionList>
 * Press Super+Escape. The System menu opens.
@@ -1800,9 +1815,18 @@ describe("session pane", () => {
           { tab: "automation" },
         ),
       );
-      const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
-      expect(side(drawn[6])).toContain("1/2");
-      expect(side(drawn[6])).not.toContain("45 s ago");
+      const side = (row: string | undefined): string => (row ?? "").slice(2, 29);
+      expect(side(drawn[6])).toContain("1/2 45s");
+      const longer = yield* draw(
+        shown(
+          {
+            ...SNAPSHOT,
+            queue: { ...EMPTY_QUEUE, running: [{ ...stepped, startedAt: ago(631) }] },
+          },
+          { tab: "automation" },
+        ),
+      );
+      expect(side(longer[6])).toContain("1/2 10m 31s");
       const tickets = yield* draw(
         shown({ ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } }, { tab: "tickets" }),
       );
@@ -1889,7 +1913,7 @@ describe("session pane", () => {
         ),
       );
       const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
-      expect(side(drawn[6])).toContain("45 s ago");
+      expect(side(drawn[6])).toContain("45s");
       expect(side(drawn[6])).not.toContain("/3");
     }),
   );
@@ -1909,7 +1933,7 @@ describe("session pane", () => {
         ),
       );
       const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
-      expect(side(clients[6])).toContain("45 s ago");
+      expect(side(clients[6])).toContain("45s");
       expect(side(clients[6])).not.toContain("1/1");
       const done = Follow.apply(
         Follow.apply(
@@ -1937,7 +1961,7 @@ describe("session pane", () => {
           },
         ),
       );
-      expect(side(selected[6])).toContain("45 s ago");
+      expect(side(selected[6])).toContain("45s");
     }),
   );
 

@@ -417,7 +417,8 @@ const closeJob = Effect.fn("closeJob")(function* (
     yield* reportErrored(job, ticket, outcome.reason);
   }
   // The harness owns both halves. A drive or mint that completed goes to Needs Review. A
-  // diagnose that succeeded goes to Succeeded or Failed from the verdict. Errored already
+  // diagnose, In Review while it ran, that succeeded goes to Succeeded or Failed from the
+  // verdict. Errored already
   // went to Errored, and aborted stays where it was.
   if (ticket !== null && outcome.status === "completed") {
     const linear = yield* Linear.Linear;
@@ -508,8 +509,8 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
 // Jobs launch one reservation at a time, round robin from where the last one stopped.
 // The next reservation is not sent until this one has answered, so two reservation
 // responses are never in flight. The row stays pending until a client has reserved;
-// pending -> running names that client. A drive or mint is then moved to In Progress,
-// three attempts, and only then does /run start. A diagnose is not moved here. A move
+// pending -> running names that client. A drive or mint is then moved to In Progress and a
+// diagnose to In Review, three attempts, and only then does /run start. A move
 // that still fails gives the reservation back and errors the
 // job: Linear did not move, so the run never started. The move does not hold the next
 // reservation, and neither does /run. A 503 or 409
@@ -664,34 +665,34 @@ export const dispatch = Effect.fn("dispatch")(function* (models: {
           const placement = placed.placement;
           yield* Effect.forkIn(
             Effect.gen(function* () {
-              // A diagnose is not moved to In Progress. The harness moves it when the job succeeds.
-              if (job.action !== "diagnose") {
-                const linear = yield* Linear.Linear;
-                const moved = yield* linear.moveToInProgress(placement.ticket).pipe(
-                  Effect.retry(Schedule.recurs(2)),
-                  Effect.interruptible,
-                  Effect.matchCause({
-                    onSuccess: () => ({ _tag: "moved" as const }),
-                    onFailure: (cause) =>
-                      Cause.hasInterruptsOnly(cause)
-                        ? { _tag: "interrupted" as const }
-                        : { _tag: "failed" as const, cause },
-                  }),
-                );
-                if (moved._tag === "interrupted") {
-                  return yield* stopAtShutdown(job, placement);
-                }
-                if (moved._tag === "failed") {
-                  const error = Cause.squash(moved.cause);
-                  yield* log.error(`move to In Progress failed; ${placement.url}`, {
-                    location: Log.Locations.automation,
-                    agentId: placement.ticket,
-                    cause: error,
-                  });
-                  yield* releaseReservation(placement.url, placement.ticket);
-                  yield* closeJob(job, { status: "errored", reason: detail(error) });
-                  return yield* Effect.void;
-                }
+              const linear = yield* Linear.Linear;
+              const diagnosing = job.action === "diagnose";
+              const column = diagnosing ? Linear.IN_REVIEW_STATE : Linear.IN_PROGRESS_STATE;
+              const move = diagnosing ? linear.moveToInReview : linear.moveToInProgress;
+              const moved = yield* move(placement.ticket).pipe(
+                Effect.retry(Schedule.recurs(2)),
+                Effect.interruptible,
+                Effect.matchCause({
+                  onSuccess: () => ({ _tag: "moved" as const }),
+                  onFailure: (cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? { _tag: "interrupted" as const }
+                      : { _tag: "failed" as const, cause },
+                }),
+              );
+              if (moved._tag === "interrupted") {
+                return yield* stopAtShutdown(job, placement);
+              }
+              if (moved._tag === "failed") {
+                const error = Cause.squash(moved.cause);
+                yield* log.error(`move to ${column} failed; ${placement.url}`, {
+                  location: Log.Locations.automation,
+                  agentId: placement.ticket,
+                  cause: error,
+                });
+                yield* releaseReservation(placement.url, placement.ticket);
+                yield* closeJob(job, { status: "errored", reason: detail(error) });
+                return yield* Effect.void;
               }
               yield* log.info(
                 `dispatching ${job.action}; ${placement.url}; ${models[job.action]}`,

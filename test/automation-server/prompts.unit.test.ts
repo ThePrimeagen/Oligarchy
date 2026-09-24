@@ -72,6 +72,9 @@ describe("drive happy path", () => {
       expect(text).toContain("any crashes or erroneous behavior must be reported");
       expect(text).toContain("Any crash or erroneous behavior must be reported");
       expect(text).toContain("always take a screen shot of every step");
+      expect(text).toContain(
+        "Move the mouse to the location you want to click, then take an image and validate the pointer is in the correct location before clicking.",
+      );
       expect(text).toContain("best effort to complete the ticket");
       expect(text).not.toContain("In Progress");
       expect(text).not.toContain("Needs Review");
@@ -132,7 +135,10 @@ describe("diagnose happy path", () => {
         expect(text).toContain("## session");
         expect(text).toContain("Post-run reviewer");
         expect(text).toContain("./ctrl diagnose");
-        expect(text).not.toContain("In Review");
+        // The harness moves the ticket on the board; the reviewer never does.
+        for (const column of ["In Review", "Needs Review", "In Progress", "Succeeded"]) {
+          expect(text).not.toContain(column);
+        }
         expect(text).not.toContain("Done");
         expect(text.toLowerCase()).not.toContain("label");
       }),

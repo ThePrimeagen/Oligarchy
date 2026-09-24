@@ -271,7 +271,7 @@ export const job = (marker: "▸" | " ", columns: Readonly<Parameters<typeof job
 export const RUNNING = [
   "OLI-61",
   "lock-screen",
-  "45 s ago",
+  "45s",
   `${View.spinnerAt(READ_AT)} running`,
   "3 min ago",
   "45 s ago",
@@ -279,7 +279,7 @@ export const RUNNING = [
 export const DIAGNOSING = [
   "OLI-65",
   "wifi",
-  "45 s ago",
+  "45s",
   `${View.spinnerAt(READ_AT)} running`,
   "3 min ago",
   "45 s ago",

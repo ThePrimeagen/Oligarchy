@@ -9,6 +9,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Option,
   PlatformError,
   Redacted,
 } from "effect";
@@ -960,7 +961,9 @@ describe("driver loop", () => {
     "a run that fails with a step's intent open sends no intent end; the stop cancels it (unhappy)",
     () =>
       Effect.gen(function* () {
-        const recorder = routed(answers(sendKeys("press the key", 1), notACall()));
+        const recorder = routed(
+          answers(sendKeys("press the key", 1), notACall(), notACall(), notACall()),
+        );
         const error = yield* Effect.flip(
           run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
         );
@@ -1107,30 +1110,164 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect("a reply that is not one tool call fails the loop and stops the session", () =>
+  it.effect(
+    "three replies in a row that are not one tool call fail the loop, name the replies, and stop the session (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(notACall);
+        const log: Array<string> = [];
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), log),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("model could not respond correctly");
+          expect(error.message).toContain("3 bad replies in a row");
+          expect(error.message).toContain("reply:");
+          expect(error.message).toContain("hello");
+        }
+        expect(modelRequests(recorder.requests)).toHaveLength(3);
+        expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+        expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
+          status: "failed",
+          reason: expect.stringContaining("model could not respond correctly"),
+        });
+        const closed = events(log).find(
+          (event) => event.kind === "command" && event.text.startsWith('./ctrl "test-results"'),
+        );
+        expect(closed?.text).toContain('"failed"');
+        expect(closed?.text).toContain("model could not respond correctly");
+      }),
+  );
+
+  it.effect("a reply that is not JSON is refused into the next ask and the model asks again", () =>
     Effect.gen(function* () {
-      const recorder = routed(() =>
-        sse([
-          frame({ choices: [{ delta: { content: "hello" }, finish_reason: null }] }),
-          frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
-          "[DONE]",
-        ]),
-      );
+      const recorder = routed(answers(notACall(), done()));
       const log: Array<string> = [];
-      const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), log));
+      const { stopped: outcome } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        log,
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(modelRequests(recorder.requests)).toHaveLength(2);
+      expect(past(recorder.requests, 1)).toContain("reply refused");
+      expect(past(recorder.requests, 1)).toContain("hello");
+      expect(events(log).some((event) => event.kind === "refusal")).toBe(true);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+    }),
+  );
+
+  it.effect("each ask after the first shows the model the reply it gave last", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(sendKeys("press a"), done()));
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      const asks = modelRequests(recorder.requests);
+      expect(systemText(asks[0]?.body)).not.toContain("Your last response was");
+      expect(systemText(asks[1]?.body)).toContain(
+        `Your last response was\n<tool-call>\n${JSON.stringify({
+          name: "client",
+          arguments: { step: 1, reason: "press a", args: ["send-keys", "--keys", "a"] },
+        })}\n</tool-call>`,
+      );
+    }),
+  );
+
+  it.effect("the ask after a reply that is not JSON shows the model that reply (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(notACall(), done()));
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(systemText(modelRequests(recorder.requests)[1]?.body)).toContain(
+        "Your last response was\n<tool-call>\nhello\n</tool-call>",
+      );
+    }),
+  );
+
+  it.effect("a command that runs between bad replies starts the count of three again", () =>
+    Effect.gen(function* () {
+      const recorder = routed(
+        answers(notACall(), notACall(), sendKeys(), notACall(), notACall(), done()),
+      );
+      const { stopped: outcome } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(modelRequests(recorder.requests)).toHaveLength(6);
+      expect(guestPaths(recorder.requests)).toEqual([
+        "/start",
+        "/intent/start",
+        "/send-keys",
+        "/stop",
+      ]);
+    }),
+  );
+
+  it.effect("a command the guest refuses is a correct reply and starts the count again", () =>
+    Effect.gen(function* () {
+      const recorder = routed(
+        answers(notACall(), notACall(), sendKeys(), notACall(), notACall(), done()),
+        (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          return url.pathname === "/send-keys"
+            ? FakeHttp.json({ error: "keyboard is busy" }, 409)
+            : FakeHttp.json({ ok: "true" });
+        },
+      );
+      const { stopped: outcome } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(modelRequests(recorder.requests)).toHaveLength(6);
+      expect(past(recorder.requests, 3)).toContain("keyboard is busy");
+    }),
+  );
+
+  it.effect("three refused commands in a row fail the loop and name each refusal (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = routed(
+        answers(speak("boot", "start --resume"), intentCall(), speak("halt", "stop")),
+      );
+      const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), []));
       expect(error._tag).toBe("CommandError");
       if (error._tag === "CommandError") {
-        expect(error.message).toContain("reply:");
-        expect(error.message).not.toContain("3 lines");
+        expect(error.message).toContain("model could not respond correctly");
+        expect(error.message).toContain("the harness starts and stops the session");
+        expect(error.message).toContain("the harness opens and closes intents");
       }
+      expect(modelRequests(recorder.requests)).toHaveLength(3);
       expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
-      expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
-        status: "failed",
-      });
-      expect(log.join("")).toContain("test-results");
-      expect(log.join("")).toContain("--status");
-      expect(log.join("")).toContain("failed");
     }),
+  );
+
+  it.effect(
+    "an unknown action and an unknown flag count toward the three with a reply that is not JSON (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(notACall(), speak("spin", "frobnicate"), speak("press", "send-keys --nope")),
+        );
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("model could not respond correctly");
+          expect(error.message).toContain("hello");
+          expect(error.message).toContain("unknown action frobnicate");
+          expect(error.message).toContain("unknown flag --nope");
+        }
+        expect(modelRequests(recorder.requests)).toHaveLength(3);
+        expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+      }),
   );
 
   it.effect("a refused OpenRouter request exits with the reason and stops the session", () =>
@@ -1457,6 +1594,142 @@ describe("driver loop", () => {
     }),
   );
 
+  describe("mouse move", () => {
+    const tick = (count: number) =>
+      Effect.gen(function* () {
+        for (let i = 0; i < count; i++) {
+          yield* TestClock.adjust(100);
+        }
+      });
+    const moveTo = () => speak("point at Lock", "mouse move --x 0.5 --y 0.5");
+
+    // Each move sleeps on the test clock, so the run is forked and the clock walked past them.
+    const driven = (recorder: ReturnType<typeof routed>, log: Array<string> = []) =>
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          Effect.exit(run(config(), recorder.layer, () => ({ exitCode: 0 }), log)),
+        );
+        yield* tick(60);
+        return yield* Fiber.join(fiber);
+      });
+    const bodiesAt = (requests: ReadonlyArray<FakeHttp.Recorded>, path: string) =>
+      guestRequests(requests)
+        .filter((request) => new URL(request.url).pathname === path)
+        .map((request): unknown => JSON.parse(request.body ?? "{}"));
+    const click = () => speak("press Lock", "mouse click");
+
+    it.effect("a click lands where the last mouse move left the pointer", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(speak("point at Lock", "mouse move --x 0.25 --y 0.75"), click(), done()),
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit) && exit.value.stopped).toEqual({ reason: "result-closed" });
+        expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
+          expect.objectContaining({ x: 0.25, y: 0.75, button: "left" }),
+        ]);
+      }),
+    );
+
+    it.effect(
+      "a click before any mouse move is refused back to the model and reaches no guest (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(answers(click(), done()));
+          const exit = yield* driven(recorder);
+          expect(Exit.isSuccess(exit)).toBe(true);
+          expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+          expect(past(recorder.requests, 1)).toContain(
+            "mouse click: no mouse move yet; mouse move to the point first",
+          );
+        }),
+    );
+
+    it.effect("a click that names its own point is refused and reaches no guest (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(moveTo(), speak("press Lock", "mouse click --x 0.1 --y 0.1"), done()),
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([]);
+        expect(past(recorder.requests, 2)).toContain(
+          "mouse click: takes no --x or --y; it clicks where the pointer is",
+        );
+      }),
+    );
+
+    it.effect(
+      "a drag starts where the pointer is, and the next click lands where the drag ended",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(
+            answers(
+              speak("grab the window", "mouse move --x 0.25 --y 0.75"),
+              speak("move the window", "mouse drag --to-x 0.9 --to-y 0.1"),
+              click(),
+              done(),
+            ),
+          );
+          const exit = yield* driven(recorder);
+          expect(Exit.isSuccess(exit)).toBe(true);
+          expect(bodiesAt(recorder.requests, "/mouse/drag")).toEqual([
+            expect.objectContaining({ from: { x: 0.25, y: 0.75 }, to: { x: 0.9, y: 0.1 } }),
+          ]);
+          expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
+            expect.objectContaining({ x: 0.9, y: 0.1 }),
+          ]);
+        }),
+    );
+
+    it.effect("a move the guest refuses leaves the pointer where it was (unhappy)", () =>
+      Effect.gen(function* () {
+        let moves = 0;
+        const recorder = routed(
+          answers(
+            speak("point at Lock", "mouse move --x 0.25 --y 0.75"),
+            speak("point at Cancel", "mouse move --x 0.9 --y 0.9"),
+            click(),
+            done(),
+          ),
+          (url) => {
+            if (url.pathname === "/start") {
+              return FakeHttp.json({ id: SESSION });
+            }
+            if (url.pathname === "/mouse/move") {
+              moves += 1;
+              return moves === 2
+                ? FakeHttp.json({ error: "qemu: closed" }, 502)
+                : FakeHttp.json({ ok: "true" });
+            }
+            return FakeHttp.json({ ok: "true" });
+          },
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
+          expect.objectContaining({ x: 0.25, y: 0.75 }),
+        ]);
+      }),
+    );
+
+    it.effect(
+      "three clicks in a row before any mouse move fail the loop as bad replies (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(answers(click(), click(), click(), done()));
+          const exit = yield* driven(recorder);
+          const error = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
+          expect(Option.getOrUndefined(error)).toMatchObject({
+            _tag: "CommandError",
+            message: expect.stringContaining("model could not respond correctly"),
+          });
+          expect(modelRequests(recorder.requests)).toHaveLength(3);
+          expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([]);
+        }),
+    );
+  });
+
   it.effect(
     "a failed get-image sends no image and keeps the failure in the next ask (unhappy)",
     () =>
@@ -1579,6 +1852,35 @@ describe("driver loop", () => {
           step: 2,
           kind: "stop",
         });
+      }),
+  );
+
+  it.effect(
+    "a mint whose guest is off answers a reply that is not JSON by ending the drive and saving (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(getImage(), notACall()),
+          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+        );
+        const log: Array<string> = [];
+        const { stopped: outcome, spawner } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          log,
+          { seed: { name: "mint", serverUrl: "" } },
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(modelRequests(recorder.requests)).toHaveLength(2);
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/image",
+          "/save",
+        ]);
+        expect(spawner.spawned[1]?.args).toContain("success");
+        expect(events(log).some((event) => event.text === "machine-off")).toBe(true);
       }),
   );
 

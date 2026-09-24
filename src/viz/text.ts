@@ -54,3 +54,19 @@ export const age = (ms: number): string => {
   }
   return `${String(Math.floor(hours / 24))} d`;
 };
+
+// A running job's countup: seconds, then minutes and seconds ("10m 31s"), then hours and
+// minutes ("1h 5m"). A stamp just ahead of the read is 0s.
+export const count = (ms: number): string => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const seconds = total % 60;
+  const minutes = Math.floor(total / 60) % 60;
+  const hours = Math.floor(total / 3600);
+  if (hours > 0) {
+    return `${String(hours)}h ${String(minutes)}m`;
+  }
+  if (minutes > 0) {
+    return `${String(minutes)}m ${String(seconds)}s`;
+  }
+  return `${String(seconds)}s`;
+};

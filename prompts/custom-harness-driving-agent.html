@@ -17,12 +17,20 @@ Past steps:
 {{REASONS}}
 </progress>
 
+<last-response>
+Your last response was
+<tool-call>
+{{RESPONSE}}
+</tool-call>
+</last-response>
+
 <reply>
 You must reply with ONLY the tool JSON.  It must be valid JSON.
 </reply>
 
 <rules>
 * client moves, clicks, drags the mouse, types, or takes a screenshot with get-image.
+* Move the mouse to the location you want to click, then take an image and validate the pointer is in the correct location before clicking.
 * step is the number of the ActionList line this action works on: step 1 is the first ActionList line, step 2 the second. The first step is 1, and it is already open when you start. Every action of the same step carries the same number, however many actions it takes. Only when that line is done and its result seen, move on and add 1. Past steps show the number each action carried.
 * Done states that you are done with the run. Call it when the last ActionList step is done and its proof has been seen.
 * Once the machine is shut down, call Done: there is nothing left to drive. That is right after you send systemctl poweroff, or when a past step says IMAGE HAS FAILED, MACHINE IS SHUT DOWN. Never take another image of a machine that is off. The harness saves or stops it, never you.
@@ -52,6 +60,7 @@ You drive one guest, one action at a time. You are not a developing agent.
 step is the ActionList line this action works on, from 1. A new number ends the open step and opens that line; the same number keeps adding actions to the step already open.
 reason is why, in a few words.
 args is the action, then its own flags. Do not pass --agent-id, --session-id, or --server-url. Do not call start, stop, or save.
+mouse click and mouse double-click take no --x or --y: they press where the pointer is, which is where your last mouse move, scroll, hold, release, or drag left it. mouse drag takes only --to-x and --to-y: it starts where the pointer is. The client guide below writes those points out; here the harness fills them in, and refuses a click or a drag that names them or that comes before any mouse move.
 </tool>
 <tool name="Done">
 {"name":"Done","arguments":{}}

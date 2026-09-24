@@ -25,8 +25,10 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
-// Where the automation server puts a ticket once a client has reserved it, before /run.
+// Where the automation server puts a ticket once a client has reserved it, before /run: a
+// drive or mint goes to In Progress, a diagnose to In Review.
 export const IN_PROGRESS_STATE = "In Progress";
+export const IN_REVIEW_STATE = "In Review";
 // Where the automation server puts a ticket the system failed, with a comment saying how.
 export const ERRORED_STATE = "Errored";
 // A diagnose's verdict is a column, not a job status. Failed is the diagnosis that did not
@@ -215,6 +217,7 @@ export type LinearService = {
     message: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToInProgress: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToInReview: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   // The close half of the board. No comment rides along: the column is the record.
   readonly moveToNeedsReview: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
@@ -426,9 +429,9 @@ const makeLinear = (
     });
 
     // Looked up on their own, not in stateIds: `test run` and `mint` must not need the columns
-    // the automation server closes onto.
+    // the automation server moves a ticket through.
     const moveByName = (
-      operation: "moveToNeedsReview" | "moveToFailed" | "moveToSucceeded",
+      operation: "moveToInReview" | "moveToNeedsReview" | "moveToFailed" | "moveToSucceeded",
       stateName: string,
     ) =>
       Effect.fn(`Linear.${operation}`)(function* (identifier: string) {
@@ -451,6 +454,7 @@ const makeLinear = (
         );
       });
 
+    const moveToInReview = moveByName("moveToInReview", IN_REVIEW_STATE);
     const moveToNeedsReview = moveByName("moveToNeedsReview", NEEDS_REVIEW_STATE);
     const moveToFailed = moveByName("moveToFailed", FAILED_STATE);
     const moveToSucceeded = moveByName("moveToSucceeded", SUCCEEDED_STATE);
@@ -633,6 +637,7 @@ const makeLinear = (
       clearReady,
       moveToErrored,
       moveToInProgress,
+      moveToInReview,
       moveToNeedsReview,
       moveToFailed,
       moveToSucceeded,

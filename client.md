@@ -352,6 +352,8 @@ Coordinates are fractions of the last screenshot: `0` is the top or left edge, `
 
 Hyprland as Omarchy ships it focuses the window under the pointer. `mouse move` onto the window you mean to type into, then send keys. Window-manager chords (`<M-Enter>`, `<M-2>`, `<M-w>`) land no matter what has focus; plain text lands wherever the pointer says.
 
+Move the mouse to the location you want to click, then take an image and validate the pointer is in the correct location before clicking.
+
 The verbs, in the order to reach for them: `mouse click` (a greeter or installer button), `mouse double-click` (launch), `mouse click --button right` (a menu), `mouse scroll`, `mouse drag`, and a `--modifier` on a click or a drag (`shift` extends a selection; on Omarchy, `super` with a left drag moves a window and with a right drag resizes one). Each of those presses and releases within one command.
 
 `mouse hold` and `mouse release` are the halves those verbs are made of. Use them only when none of the verbs can do the job: a button that must stay held while you type, or a path one drag cannot describe. A held button stays down until you release it or the session ends, so send the release.
