@@ -108,3 +108,68 @@ export const bracket = (
 // stop and save end the session. The harness, not the model, closes the result then.
 export const closesResult = (command: Tools.CommandLine, exitCode: number): boolean =>
   exitCode === 0 && (command.args[0] === "stop" || command.args[0] === "save");
+
+// The model names the action and that action's own flags. These three are the harness's:
+// the ticket, the server this run was filed against, and the session start printed.
+const HELD = ["agent-id", "session-id", "server-url"] as const;
+
+const NEEDS_SESSION = new Set([
+  "send-keys",
+  "mouse",
+  "get-image",
+  "get-serial",
+  "follow",
+  "stop",
+  "save",
+]);
+
+export type Held = {
+  readonly agentId: string;
+  readonly serverUrl: string;
+  readonly sessionId: string;
+};
+
+const dropHeld = (args: ReadonlyArray<string>): Array<string> => {
+  const kept: Array<string> = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) {
+      continue;
+    }
+    const equals = HELD.find((name) => arg.startsWith(`--${name}=`));
+    if (equals !== undefined) {
+      continue;
+    }
+    const bare = HELD.find((name) => arg === `--${name}`);
+    if (bare === undefined) {
+      kept.push(arg);
+      continue;
+    }
+    const next = args[index + 1];
+    if (next !== undefined && !next.startsWith("-")) {
+      index += 1;
+    }
+  }
+  return kept;
+};
+
+// A copy of the three flags on the reply is dropped. The harness's values are what run.
+// A run with no stored server has nothing to route, so --server-url is left off.
+export const owned = (
+  args: ReadonlyArray<string>,
+  held: Held,
+): Result.Result<ReadonlyArray<string>, Errors.ToolError> => {
+  const action = dropHeld(args);
+  const name = actionName(action);
+  const needsSession = name !== undefined && NEEDS_SESSION.has(name);
+  if (needsSession && held.sessionId === "") {
+    return fail("client: the harness has no session");
+  }
+  return Result.succeed([
+    ...action,
+    "--agent-id",
+    held.agentId,
+    ...(held.serverUrl === "" ? [] : ["--server-url", held.serverUrl]),
+    ...(needsSession ? ["--session-id", held.sessionId] : []),
+  ]);
+};

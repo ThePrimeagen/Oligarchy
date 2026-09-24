@@ -92,10 +92,11 @@ export type DriveMission = {
 
 // The task the model can see. It has no Linear tool and it does not call ./ctrl or intent.
 export const missionText = (mission: DriveMission): string => {
+  // Agent, session, and server belong to the harness. The model sees the action and its own flags.
   const start =
     mission.action === "mint"
-      ? `./client start --agent-id ${mission.ticket} --server-url ${mission.serverUrl} --iso ${mission.iso}`
-      : `./client start --agent-id ${mission.ticket} --server-url ${mission.serverUrl} --iso ${mission.iso} --resume`;
+      ? `./client start --iso ${mission.iso}`
+      : `./client start --iso ${mission.iso} --resume`;
   return [
     "<mission>",
     `<name>${mission.name}</name>`,

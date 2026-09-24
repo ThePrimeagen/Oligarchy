@@ -165,6 +165,7 @@ const runJson = (prompt: string, ticket = "OLI-42") =>
     testResultId: RESULT,
     testDefinition: prompt,
     testProof: "none",
+    serverUrl: "",
   });
 
 const lines = (output: string): ReadonlyArray<string> =>
@@ -373,6 +374,8 @@ describeWithDatabase("automation client POST /run", () => {
                 prompt: "do the work",
                 testDefinition: "do the work",
                 testProof: "none",
+                agentId: "OLI-42",
+                serverUrl: "",
                 action: "drive",
                 testResultId: RESULT,
               }),

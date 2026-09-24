@@ -102,20 +102,22 @@ const speak = (_status: "continue" | "complete", did: string, action: string): R
 const stopped = (_content: string): Response => done();
 
 const sendKeys = (did: string | null = "lock the screen") =>
-  speak(
-    "continue",
-    did ?? "send-keys",
-    `send-keys --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --keys a`,
-  );
+  speak("continue", did ?? "send-keys", "send-keys --keys a");
 
-const start = () =>
-  speak("continue", "boot", "start --agent-id OLI-1 --iso https://example.com/omarchy.iso");
+const start = () => speak("continue", "boot", "start --iso https://example.com/omarchy.iso");
 
-const resumed = () =>
-  speak("continue", "boot", "start --agent-id OLI-1 --server-url http://127.0.0.1:9 --resume");
+const resumed = () => speak("continue", "boot", "start --resume");
 
-const stop = () =>
-  speak("continue", "halt", `stop --agent-id OLI-1 --session-id ${SESSION} --status succeeded`);
+const stop = () => speak("continue", "halt", "stop --status succeeded");
+
+const answers = (...replies: ReadonlyArray<Response>) => {
+  let calls = 0;
+  return () => {
+    const reply = replies[calls] ?? replies[replies.length - 1];
+    calls += 1;
+    return reply ?? stopped("done");
+  };
+};
 
 const intentCall = () => speak("continue", "bad", "intent start --message lock");
 
@@ -218,6 +220,8 @@ const run = (
     readonly prompt?: string;
     readonly testDefinition?: string;
     readonly testProof?: string;
+    readonly agentId?: string;
+    readonly serverUrl?: string;
   },
 ) =>
   Effect.gen(function* () {
@@ -229,6 +233,8 @@ const run = (
       prompt,
       testDefinition: options?.testDefinition ?? prompt,
       testProof: options?.testProof ?? "none",
+      agentId: options?.agentId ?? "OLI-1",
+      serverUrl: options?.serverUrl ?? "http://127.0.0.1:9",
       testResultId: RESULT,
       debugLog: LOG,
       config: parsed,
@@ -252,11 +258,17 @@ describe("driver loop", () => {
     "brackets a guest action with intent start and end, then stops when the model does",
     () =>
       Effect.gen(function* () {
-        let calls = 0;
-        const recorder = routed(() => {
-          calls += 1;
-          return calls === 1 ? sendKeys() : stopped("done");
-        });
+        const recorder = routed(
+          answers(
+            start(),
+            speak(
+              "continue",
+              "lock the screen",
+              "send-keys --agent-id WRONG --session-id bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb --server-url http://stolen.example --keys a",
+            ),
+            stopped("done"),
+          ),
+        );
         const log: Array<string> = [];
         const { stopped: outcome, spawner } = yield* run(
           config(),
@@ -265,13 +277,14 @@ describe("driver loop", () => {
           log,
         );
         expect(outcome).toEqual({ reason: "model-stopped" });
-        expect(spawner.spawned).toEqual([]);
+        expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
         expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
           "/intent/start",
           "/send-keys",
           "/intent/end",
         ]);
-        const opened = guestRequests(recorder.requests)[0];
+        const opened = guestRequests(recorder.requests)[1];
         expect(opened?.url.startsWith("http://127.0.0.1:9/intent/start")).toBe(true);
         expect(opened?.headers.authorization).toBe(`Bearer ${TOKEN}`);
         expect(JSON.parse(opened?.body ?? "{}")).toEqual({
@@ -280,13 +293,14 @@ describe("driver loop", () => {
           test_result_id: RESULT,
           message: "lock the screen",
         });
-        expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
+        expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
           id: SESSION,
           agent: "OLI-1",
           keys: "a",
         });
+        expect(guestRequests(recorder.requests)[2]?.url).not.toContain("stolen.example");
 
-        expect(modelRequests(recorder.requests)).toHaveLength(2);
+        expect(modelRequests(recorder.requests)).toHaveLength(3);
         const first = modelRequests(recorder.requests)[0];
         expect(first?.url).toBe(MODEL_URL);
         expect(first?.headers.authorization).toBe(`Bearer ${TOKEN}`);
@@ -309,8 +323,10 @@ describe("driver loop", () => {
         expect(system).not.toContain("{{");
         expect(past(recorder.requests, 0)).toBe("none");
         expect(askText(recorder.requests, 1)).toBe("Lock the screen.");
+        expect(askText(recorder.requests, 2)).toBe("Lock the screen.");
         expect(systemText(modelRequests(recorder.requests)[1]?.body)).toContain("This is step 2.");
-        expect(past(recorder.requests, 1)).toContain("lock the screen");
+        expect(past(recorder.requests, 1)).toContain(SESSION);
+        expect(past(recorder.requests, 2)).toContain("lock the screen");
         expect(JSON.parse(modelRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
           messages: [{ role: "system" }, { role: "user" }],
         });
@@ -321,7 +337,7 @@ describe("driver loop", () => {
         expect(kinds).toContain("command");
         expect(kinds[kinds.length - 1]).toBe("stop");
         expect(events(log).at(-1)?.text).toBe("model-stopped");
-        expect(events(log).some((event) => event.kind === "intent" && event.step === 1)).toBe(true);
+        expect(events(log).some((event) => event.kind === "intent" && event.step === 2)).toBe(true);
         expect(log.join("")).not.toContain(TOKEN);
       }),
   );
@@ -377,7 +393,7 @@ describe("driver loop", () => {
         return calls === 1 ? start() : stopped("done");
       });
       const log: Array<string> = [];
-      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log, { serverUrl: "" });
       const lines = events(log);
       const started = lines.find((event) => event.kind === "start");
       expect(started?.text).not.toContain("resume");
@@ -465,12 +481,15 @@ describe("driver loop", () => {
 
   it.effect("closes the result when stop exits 0 and does not ask the model again", () =>
     Effect.gen(function* () {
-      const recorder = routed(() => stop());
+      const recorder = routed(answers(start(), stop()));
       const log: Array<string> = [];
       const { stopped: outcome, spawner } = yield* run(
         config(),
         recorder.layer,
         (_command, args) => {
+          if (args[1] === "start") {
+            return { exitCode: 0, stdout: "" };
+          }
           expect(args).toEqual([
             "test-results",
             "--agent-id",
@@ -485,10 +504,10 @@ describe("driver loop", () => {
         log,
       );
       expect(outcome).toEqual({ reason: "result-closed" });
-      expect(modelRequests(recorder.requests)).toHaveLength(1);
-      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
-      expect(guestPaths(recorder.requests)).toEqual(["/stop"]);
-      expect(JSON.parse(guestRequests(recorder.requests)[0]?.body ?? "{}")).toMatchObject({
+      expect(modelRequests(recorder.requests)).toHaveLength(2);
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
         id: SESSION,
         agent: "OLI-1",
         status: "succeeded",
@@ -499,11 +518,10 @@ describe("driver loop", () => {
 
   it.effect("a failed stop closes the result failed, with the reason", () =>
     Effect.gen(function* () {
-      const recorder = routed(() =>
-        speak(
-          "continue",
-          "the installer hung",
-          `stop --agent-id OLI-1 --session-id ${SESSION} --status failed --reason "installer hung"`,
+      const recorder = routed(
+        answers(
+          start(),
+          speak("continue", "the installer hung", `stop --status failed --reason "installer hung"`),
         ),
       );
       const { spawner } = yield* run(
@@ -512,8 +530,8 @@ describe("driver loop", () => {
         () => ({ exitCode: 0, stdout: "" }),
         [],
       );
-      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
-      expect(spawner.spawned[0]?.args).toEqual([
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
+      expect(spawner.spawned[1]?.args).toEqual([
         "test-results",
         "--agent-id",
         "OLI-1",
@@ -529,9 +547,7 @@ describe("driver loop", () => {
 
   it.effect("a save closes the result as a success", () =>
     Effect.gen(function* () {
-      const recorder = routed(() =>
-        speak("continue", "kept the disk", `save --agent-id OLI-1 --session-id ${SESSION}`),
-      );
+      const recorder = routed(answers(start(), speak("continue", "kept the disk", "save")));
       const { stopped: outcome, spawner } = yield* run(
         config(),
         recorder.layer,
@@ -539,10 +555,10 @@ describe("driver loop", () => {
         [],
       );
       expect(outcome).toEqual({ reason: "result-closed" });
-      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
-      expect(spawner.spawned[0]?.args).toContain("success");
-      expect(modelRequests(recorder.requests)).toHaveLength(1);
-      expect(guestPaths(recorder.requests)).toEqual(["/save"]);
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
+      expect(spawner.spawned[1]?.args).toContain("success");
+      expect(modelRequests(recorder.requests)).toHaveLength(2);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/save"]);
     }),
   );
 
@@ -550,7 +566,7 @@ describe("driver loop", () => {
     "a test-results failure is a loop failure and does not ask the model again (unhappy)",
     () =>
       Effect.gen(function* () {
-        const recorder = routed(() => stop());
+        const recorder = routed(answers(start(), stop()));
         const error = yield* Effect.flip(
           run(config(), recorder.layer, () => ({ exitCode: 1, stderr: "result is aborted\n" }), []),
         );
@@ -558,68 +574,59 @@ describe("driver loop", () => {
         if (error._tag === "CommandError") {
           expect(error.message).toContain("aborted");
         }
-        expect(modelRequests(recorder.requests)).toHaveLength(1);
+        expect(modelRequests(recorder.requests)).toHaveLength(2);
       }),
   );
 
-  it.effect("a stop without --agent-id does not close the result (unhappy)", () =>
+  it.effect("a stop before the harness has a session does not close the result (unhappy)", () =>
     Effect.gen(function* () {
-      let calls = 0;
-      const recorder = routed(() => {
-        calls += 1;
-        return calls === 1
-          ? speak("continue", "halt", `stop --session-id ${SESSION} --status succeeded`)
-          : stopped("done");
-      });
+      const recorder = routed(answers(stop(), stopped("done")));
       const { stopped: outcome, spawner } = yield* run(
         config(),
         recorder.layer,
         () => {
-          expect.fail("closing without --agent-id does not run ./ctrl");
+          expect.fail("a stop with no session does not run ./ctrl");
         },
         [],
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned).toEqual([]);
       expect(guestRequests(recorder.requests)).toEqual([]);
-      expect(past(recorder.requests, 1)).toContain("--agent-id");
+      expect(past(recorder.requests, 1)).toContain("no session");
     }),
   );
 
   it.effect("does not run the guest command when intent start fails", () =>
     Effect.gen(function* () {
-      let calls = 0;
-      const recorder = routed(
-        () => {
-          calls += 1;
-          return calls === 1 ? sendKeys(null) : stopped("stopped");
-        },
-        (url) =>
-          url.pathname === "/intent/start"
-            ? FakeHttp.json({ error: "Cannot start one intent when one's already running." }, 400)
-            : FakeHttp.json({ ok: "true" }),
-      );
+      const recorder = routed(answers(start(), sendKeys(null), stopped("stopped")), (url) => {
+        if (url.pathname === "/start") {
+          return FakeHttp.json({ id: SESSION });
+        }
+        return url.pathname === "/intent/start"
+          ? FakeHttp.json({ error: "Cannot start one intent when one's already running." }, 400)
+          : FakeHttp.json({ ok: "true" });
+      });
       const log: Array<string> = [];
       const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
-      expect(spawner.spawned).toEqual([]);
-      expect(guestPaths(recorder.requests)).toEqual(["/intent/start"]);
-      expect(past(recorder.requests, 1)).toContain("already running");
-      expect(past(recorder.requests, 1)).not.toContain("typed");
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start"]);
+      expect(past(recorder.requests, 2)).toContain("already running");
+      expect(past(recorder.requests, 2)).not.toContain("typed");
     }),
   );
 
   it.effect("closes the intent when the guest command fails", () =>
     Effect.gen(function* () {
-      let calls = 0;
       const recorder = routed(
-        () => {
-          calls += 1;
-          return calls === 1 ? sendKeys("press the key") : stopped("stopped");
-        },
-        (url) =>
-          url.pathname === "/send-keys"
+        answers(start(), sendKeys("press the key"), stopped("stopped")),
+        (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          return url.pathname === "/send-keys"
             ? FakeHttp.json({ error: "keys refused" }, 400)
-            : FakeHttp.json({ ok: "true" }),
+            : FakeHttp.json({ ok: "true" });
+        },
       );
       const { stopped: outcome } = yield* run(
         config(),
@@ -628,28 +635,38 @@ describe("driver loop", () => {
         [],
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
-      expect(guestPaths(recorder.requests)).toEqual(["/intent/start", "/send-keys", "/intent/end"]);
-      expect(past(recorder.requests, 1)).toContain("keys refused");
+      expect(guestPaths(recorder.requests)).toEqual([
+        "/start",
+        "/intent/start",
+        "/send-keys",
+        "/intent/end",
+      ]);
+      expect(past(recorder.requests, 2)).toContain("keys refused");
     }),
   );
 
   it.effect("keeps the command output when intent end fails", () =>
     Effect.gen(function* () {
-      let calls = 0;
       const recorder = routed(
-        () => {
-          calls += 1;
-          return calls === 1 ? sendKeys("press the key") : stopped("stopped");
-        },
-        (url) =>
-          url.pathname === "/intent/end"
+        answers(start(), sendKeys("press the key"), stopped("stopped")),
+        (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          return url.pathname === "/intent/end"
             ? FakeHttp.json({ error: "no intent open" }, 400)
-            : FakeHttp.json({ ok: "true" }),
+            : FakeHttp.json({ ok: "true" });
+        },
       );
       yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
-      expect(guestPaths(recorder.requests)).toEqual(["/intent/start", "/send-keys", "/intent/end"]);
-      expect(past(recorder.requests, 1)).toContain("intent end failed");
-      expect(past(recorder.requests, 1)).toContain("no intent open");
+      expect(guestPaths(recorder.requests)).toEqual([
+        "/start",
+        "/intent/start",
+        "/send-keys",
+        "/intent/end",
+      ]);
+      expect(past(recorder.requests, 2)).toContain("intent end failed");
+      expect(past(recorder.requests, 2)).toContain("no intent open");
     }),
   );
 
@@ -784,6 +801,8 @@ describe("driver loop", () => {
         prompt: "Lock the screen.",
         testDefinition: "Lock the screen.",
         testProof: "none",
+        agentId: "OLI-1",
+        serverUrl: "http://127.0.0.1:9",
         testResultId: RESULT,
         debugLog: LOG,
         config: parsed,

@@ -457,6 +457,7 @@ describe("dispatch happy path", () => {
           testResultId: RESULT_ID,
           testDefinition: DRIVE_PROMPT,
           testProof: "none",
+          serverUrl: "",
         });
         expect(FakeLog.texts(fixed.log)).toEqual([
           `dispatching drive; ${URL}; ${MODEL}`,
@@ -491,6 +492,9 @@ describe("dispatch happy path", () => {
         expect(posted.testResultId).toBe(RESULT_ID);
         expect(posted.testDefinition).toBe("Lock the screen from the menu.");
         expect(posted.testProof).toBe("The screen is locked.");
+        expect(posted.serverUrl).toBe("http://127.0.0.1:42069");
+        expect(posted.prompt).not.toContain("--agent-id");
+        expect(posted.prompt).not.toContain("--server-url");
       }),
   );
 
@@ -511,6 +515,7 @@ describe("dispatch happy path", () => {
       expect(posted.prompt).not.toContain("--resume");
       expect(posted.testDefinition).toBe("Install Omarchy.");
       expect(posted.testProof).toBe("The screen is locked.");
+      expect(posted.serverUrl).toBe("http://127.0.0.1:42069");
     }),
   );
 
@@ -554,6 +559,7 @@ describe("dispatch happy path", () => {
         testResultId: RESULT_ID,
         testDefinition: DIAGNOSE_PROMPT,
         testProof: "none",
+        serverUrl: "",
       });
       expect(FakeLog.texts(fixed.log)).toEqual([
         `dispatching diagnose; ${URL}; ${MODEL}`,
@@ -2788,7 +2794,7 @@ describe("a running job left by the last automation server", () => {
           http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
         ).toEqual([
           `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
-          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", testResultId: waitingResult, testDefinition: `drive OLI-45 as ${MODEL}`, testProof: "none" })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", testResultId: waitingResult, testDefinition: `drive OLI-45 as ${MODEL}`, testProof: "none", serverUrl: "" })}`,
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
@@ -3646,6 +3652,7 @@ const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
             resultOf(ticket),
             promptOf(ticket),
             "none",
+            "",
           ),
         ),
       );

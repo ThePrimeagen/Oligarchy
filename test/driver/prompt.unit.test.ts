@@ -5,10 +5,10 @@ import * as Prompt from "../../src/driver/prompt.ts";
 import * as Reply from "../../src/driver/reply.ts";
 
 const CLIENT =
-  '{"name":"client","arguments":{"reason":"why, in a few words","args":["start","--agent-id","OLI-1"]}}';
+  '{"name":"client","arguments":{"reason":"why, in a few words","args":["start","--resume"]}}';
 const DONE = '{"name":"Done","arguments":{}}';
 const EXAMPLE =
-  '{"name":"client","arguments":{"reason":"type the password","args":["send-keys","--agent-id","OLI-1","--server-url","https://qemu.example.com","--session-id","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","--keys","prime<ENTER>"]}}';
+  '{"name":"client","arguments":{"reason":"type the password","args":["send-keys","--keys","prime<ENTER>"]}}';
 
 const FILLED = {
   TEST_DEFINITION: "Lock the screen from the menu.",

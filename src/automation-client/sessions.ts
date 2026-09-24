@@ -239,6 +239,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       testResultId: string,
       testDefinition: string,
       testProof: string,
+      serverUrl: string,
     ) {
       // Read before consume: the reservation is what says drive, diagnose, or mint,
       // and consume removes it. A missing one fails in consume and spawns nothing.
@@ -273,6 +274,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
                 prompt,
                 testDefinition,
                 testProof,
+                agentId: ticket,
+                serverUrl,
                 action: action === "mint" ? "mint" : "drive",
                 testResultId,
               });

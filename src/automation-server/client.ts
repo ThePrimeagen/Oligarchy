@@ -105,6 +105,7 @@ export const run = Effect.fn("run")(function* (
   testResultId: string,
   testDefinition: string,
   testProof: string,
+  serverUrl: string,
 ) {
   const client = yield* makeClient(url);
   return yield* client.Runs.run({
@@ -114,6 +115,7 @@ export const run = Effect.fn("run")(function* (
       testResultId,
       testDefinition,
       testProof,
+      serverUrl,
     }),
   }).pipe(
     Effect.catch((error) => {

@@ -198,6 +198,10 @@ export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/R
   // prompt as the definition and "none" as the proof. A diagnose carries them and does not read them.
   testDefinition: Schema.String,
   testProof: Schema.String,
+  // The qemu server this run's guest is on. Empty when the run has no stored server;
+  // the driver then omits --server-url. The agent is the ticket. The session is the one
+  // start prints. The model does not send any of the three.
+  serverUrl: Schema.String,
 }) {}
 
 // What an automation client is asked to hold for a ticket: a mint and a drive take a guest slot

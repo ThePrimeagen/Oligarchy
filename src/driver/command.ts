@@ -28,6 +28,14 @@ const flags = {
     Flag.withSchema(Schema.String),
     Flag.withDescription("Test proof the harness prompt fills"),
   ),
+  agentId: Flag.string("agent-id").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.withDescription("Ticket the harness passes as --agent-id"),
+  ),
+  serverUrl: Flag.string("server-url").pipe(
+    Flag.withSchema(Schema.String),
+    Flag.withDescription("QEMU server the harness passes as --server-url; empty omits it"),
+  ),
   debugLog: Flag.string("debug-log").pipe(
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("File that receives one JSON line per step"),
@@ -53,6 +61,8 @@ export const makeDriverCommand = <E, R>(
         prompt: input.prompt,
         testDefinition: input.testDefinition,
         testProof: input.testProof,
+        agentId: input.agentId,
+        serverUrl: input.serverUrl,
         testResultId: input.testResultId,
         debugLog: input.debugLog,
         config,

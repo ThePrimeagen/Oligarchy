@@ -132,7 +132,9 @@ describe("mission text", () => {
       const text = Prompts.missionText({ action: "drive", ...mission });
       expect(text).toContain("--resume");
       expect(text).toContain("Press Super+Escape.");
-      expect(text).toContain(TICKET);
+      expect(text).not.toContain("--agent-id");
+      expect(text).not.toContain("--server-url");
+      expect(text).not.toContain("--session-id");
       expect(text).not.toContain("intent start");
       expect(text).not.toContain("./ctrl");
     }),

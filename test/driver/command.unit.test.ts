@@ -29,6 +29,10 @@ const FLAGS = [
   PROMPT,
   "--test-proof",
   "none",
+  "--agent-id",
+  "OLI-1",
+  "--server-url",
+  "http://127.0.0.1:9",
   "--debug-log",
   LOG,
   "--test-result-id",
@@ -120,6 +124,8 @@ describe("driver command", () => {
       expect(seen.input?.prompt).toBe(PROMPT);
       expect(seen.input?.testDefinition).toBe(PROMPT);
       expect(seen.input?.testProof).toBe("none");
+      expect(seen.input?.agentId).toBe("OLI-1");
+      expect(seen.input?.serverUrl).toBe("http://127.0.0.1:9");
       expect(seen.input?.debugLog).toBe(LOG);
       expect(seen.input?.testResultId).toBe(RESULT);
       expect(seen.input?.config.stepLimit).toBeGreaterThanOrEqual(1);
@@ -152,6 +158,8 @@ describe("driver command", () => {
         "prompt",
         "test-definition",
         "test-proof",
+        "agent-id",
+        "server-url",
         "debug-log",
         "test-result-id",
       ]) {
@@ -201,6 +209,10 @@ describe("driver command", () => {
           PROMPT,
           "--test-proof",
           "none",
+          "--agent-id",
+          "OLI-1",
+          "--server-url",
+          "",
           "--debug-log",
           LOG,
           "--test-result-id",
@@ -227,6 +239,10 @@ describe("driver command", () => {
             PROMPT,
             "--test-proof",
             "none",
+            "--agent-id",
+            "OLI-1",
+            "--server-url",
+            "",
             "--debug-log",
             LOG,
             "--test-result-id",
@@ -250,6 +266,8 @@ describe("driver command", () => {
       expect(stdout).toContain("--prompt");
       expect(stdout).toContain("--test-definition");
       expect(stdout).toContain("--test-proof");
+      expect(stdout).toContain("--agent-id");
+      expect(stdout).toContain("--server-url");
       expect(stdout).toContain("--debug-log");
       expect(stdout).toContain("--test-result-id");
       expect(seen.input).toBeUndefined();

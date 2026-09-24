@@ -80,6 +80,7 @@ type Placement = {
   readonly ticket: string;
   readonly testDefinition: string;
   readonly testProof: string;
+  readonly serverUrl: string;
 };
 
 type PlaceResult =
@@ -167,9 +168,14 @@ const place = Effect.fn("place")(function* (
   });
   // The harness prompt fills these beside the task. They are the stored wording when the
   // definition is still there, and the task itself with no separate proof when it is not.
+  // The harness holds the server. A run with no stored definition has nothing to route.
   const carried = Option.match(facts, {
-    onNone: () => ({ testDefinition: prompt, testProof: "none" }),
-    onSome: (fact) => ({ testDefinition: fact.instruction, testProof: fact.proof }),
+    onNone: () => ({ testDefinition: prompt, testProof: "none", serverUrl: "" }),
+    onSome: (fact) => ({
+      testDefinition: fact.instruction,
+      testProof: fact.proof,
+      serverUrl: fact.serverUrl,
+    }),
   });
   // A drive resumes the run's iso. A mint boots fresh. A missing row reserves fresh rather
   // than failing a drive the definition lookup cannot see.
@@ -721,6 +727,7 @@ export const dispatch = Effect.fn("dispatch")(function* (models: {
                   job.resultId,
                   placement.testDefinition,
                   placement.testProof,
+                  placement.serverUrl,
                 ),
               ).pipe(
                 Effect.andThen(judge(job)),

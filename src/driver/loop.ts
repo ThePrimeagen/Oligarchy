@@ -18,6 +18,8 @@ export type Input = {
   readonly prompt: string;
   readonly testDefinition: string;
   readonly testProof: string;
+  readonly agentId: string;
+  readonly serverUrl: string;
   readonly testResultId: string;
   readonly debugLog: string;
   readonly config: HarnessConfig.AppConfig;
@@ -149,6 +151,8 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   const startedAt = yield* Clock.currentTimeMillis;
   const decisions: Array<string> = [];
   let turns = 0;
+  // start prints this. Later actions do not: the model is not given the session.
+  let sessionId = "";
 
   while (true) {
     const now = yield* Clock.currentTimeMillis;
@@ -208,7 +212,17 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       decisions.push(decision(reply.reason, planned.failure.message));
       continue;
     }
-    const command = planned.success;
+    const stamped = Intent.owned(planned.success.args, {
+      agentId: input.agentId,
+      serverUrl: input.serverUrl,
+      sessionId,
+    });
+    if (Result.isFailure(stamped)) {
+      yield* log(input.debugLog, step, "refusal", stamped.failure.message);
+      decisions.push(decision(reply.reason, stamped.failure.message));
+      continue;
+    }
+    const command = { bin: planned.success.bin, args: stamped.success };
     let outcome = "";
 
     if (command.args[0] === "start") {
@@ -226,23 +240,24 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         "command",
         `${shown(command)} exit ${String(started.exitCode)}`,
       );
-      const sessionId = (started.stdout.split("\n")[0] ?? "").trim();
       outcome = Tools.toolContent(started);
-      if (started.exitCode === 0 && sessionId !== "") {
+      const startedId = (started.stdout.split("\n")[0] ?? "").trim();
+      if (started.exitCode === 0 && startedId !== "") {
+        sessionId = startedId;
         const markRunning = {
           bin: "./ctrl",
           args: [
             "test",
             "start",
             "--session-id",
-            sessionId,
+            startedId,
             "--test-result-id",
             input.testResultId,
             "--model",
             input.model,
           ],
         };
-        yield* log(input.debugLog, step, "running", sessionId);
+        yield* log(input.debugLog, step, "running", startedId);
         const marked = yield* runCommand(markRunning).pipe(
           Effect.catchTag("CommandError", (error) =>
             Effect.succeed({ exitCode: 1, stdout: "", stderr: `${error.message}\n` }),
@@ -310,20 +325,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     const ran = yield* Client.run(command);
     yield* log(input.debugLog, step, "command", `${shown(command)} exit ${String(ran.exitCode)}`);
     if (Intent.closesResult(command, ran.exitCode)) {
-      // A drive or mint stop/save is the harness closing the result.
-      const agent = Intent.flag(command.args, "agent-id");
-      if (agent === undefined) {
-        const missing = "client: closing the result needs --agent-id";
-        yield* log(input.debugLog, step, "failure", missing);
-        return yield* Effect.fail(commandError(missing));
-      }
+      // A drive or mint stop/save is the harness closing the result. The agent is the ticket.
       const closed = verdictOf(command);
       const mark = {
         bin: "./ctrl",
         args: [
           "test-results",
           "--agent-id",
-          agent,
+          input.agentId,
           "--id",
           input.testResultId,
           "--status",

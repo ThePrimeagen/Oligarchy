@@ -42,6 +42,7 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
             payload.testResultId,
             payload.testDefinition,
             payload.testProof,
+            payload.serverUrl,
           );
           return ok;
         }),

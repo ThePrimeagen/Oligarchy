@@ -459,9 +459,11 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   tool call JSON. `client` runs that action; `Done` leaves the loop successfully and runs nothing. It appends one JSON line to `--debug-log` per step (the loop
   counter and the step), and exits 0 only when the reply is `Done` or the harness closed the
   result. An OpenRouter failure, a reply that is not that one tool call, the step limit, or the
-  run ceiling exits 1 and the reason is the failure. A `start` is the model's command,
-  including `--resume` and `--server-url` when it passed them; the log names `resume` and
-  `routing <url>` only then. When
+  run ceiling exits 1 and the reason is the failure. A `start` is the model's action,
+  including `--resume` when it passed that flag. The harness adds `--agent-id` and, when this
+  run has a server, `--server-url`; the log names `resume` when the model passed it and
+  `routing <url>` when a server was added. The model's args are the action and its own flags.
+  When
   that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
   the test result id, and the model, which marks the result running. The action itself is the
   client function for that action (`mouse click` is `mouseClick`), called in this process. The

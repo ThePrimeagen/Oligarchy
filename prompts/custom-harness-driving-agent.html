@@ -22,6 +22,7 @@ Past steps:
 You MUST use a tool. The reply is one line, the tool call JSON, and nothing else.
 client runs one ./client command from the client tools. Done leaves the loop successfully and runs nothing.
 Do not call intent. The harness opens and closes intents, and it marks a started session running.
+Do not pass --agent-id, --session-id, or --server-url. The harness adds them.
 </reply>
 
 <rules>
@@ -37,14 +38,14 @@ Given this context, your response should look like the tool call below. One line
 The lock screen is up. The password is prime. Type the password and press enter.
 </context>
 
-{"name":"client","arguments":{"reason":"type the password","args":["send-keys","--agent-id","OLI-1","--server-url","https://qemu.example.com","--session-id","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","--keys","prime<ENTER>"]}}
+{"name":"client","arguments":{"reason":"type the password","args":["send-keys","--keys","prime<ENTER>"]}}
 </example>
 
 <tools>
 <tool name="client">
-{"name":"client","arguments":{"reason":"why, in a few words","args":["start","--agent-id","OLI-1"]}}
+{"name":"client","arguments":{"reason":"why, in a few words","args":["start","--resume"]}}
 reason is why, in a few words. It is the intent message.
-args is the action, then its flags, as the guide writes them.
+args is the action, then its own flags. Do not pass --agent-id, --session-id, or --server-url.
 </tool>
 <tool name="Done">
 {"name":"Done","arguments":{}}

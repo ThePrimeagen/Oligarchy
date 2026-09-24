@@ -15,6 +15,8 @@ export const args = (input: {
   readonly prompt: string;
   readonly testDefinition: string;
   readonly testProof: string;
+  readonly agentId: string;
+  readonly serverUrl: string;
   readonly action: "drive" | "mint";
   readonly testResultId: string;
 }): ReadonlyArray<string> => [
@@ -26,6 +28,10 @@ export const args = (input: {
   input.testDefinition,
   "--test-proof",
   input.testProof,
+  "--agent-id",
+  input.agentId,
+  "--server-url",
+  input.serverUrl,
   "--debug-log",
   debugLog(input.testResultId),
   "--test-result-id",

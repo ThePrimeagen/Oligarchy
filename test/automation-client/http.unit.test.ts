@@ -134,6 +134,7 @@ const run = (
         testResultId: RESULT,
         testDefinition: prompt,
         testProof: "none",
+        serverUrl: "",
       }),
       "application/json",
     ),
@@ -324,6 +325,8 @@ describe("POST /run happy path", () => {
             prompt: "fix the bug",
             testDefinition: "fix the bug",
             testProof: "none",
+            agentId: TICKET,
+            serverUrl: "",
             action: "drive",
             testResultId: RESULT,
           }),
@@ -407,6 +410,7 @@ describe("POST /run authentication and decoding", () => {
               testResultId: RESULT,
               testDefinition: "do the work",
               testProof: "none",
+              serverUrl: "",
             }),
             "application/json",
           ),
@@ -432,6 +436,7 @@ describe("POST /run authentication and decoding", () => {
               testResultId: RESULT,
               testDefinition: "do the work",
               testProof: "none",
+              serverUrl: "",
             }),
             "application/json",
           ),
@@ -461,6 +466,7 @@ describe("POST /run authentication and decoding", () => {
               testResultId: RESULT,
               testDefinition: "do the work",
               testProof: "none",
+              serverUrl: "",
             }),
             "application/json",
           ),
@@ -472,6 +478,8 @@ describe("POST /run authentication and decoding", () => {
           prompt: "do the work",
           testDefinition: "do the work",
           testProof: "none",
+          agentId: TICKET,
+          serverUrl: "",
           action: "drive",
           testResultId: RESULT,
         }),
@@ -493,6 +501,7 @@ describe("POST /run authentication and decoding", () => {
               ticket: TICKET,
               testDefinition: "do the work",
               testProof: "none",
+              serverUrl: "",
             }),
             "application/json",
           ),
@@ -518,6 +527,7 @@ describe("POST /run authentication and decoding", () => {
               ticket: TICKET,
               testResultId: RESULT,
               testProof: "none",
+              serverUrl: "",
             }),
             "application/json",
           ),
@@ -543,6 +553,7 @@ describe("POST /run authentication and decoding", () => {
               ticket: TICKET,
               testResultId: RESULT,
               testDefinition: "do the work",
+              serverUrl: "",
             }),
             "application/json",
           ),
@@ -550,6 +561,32 @@ describe("POST /run authentication and decoding", () => {
         expect(response.status).toBe(400);
         const body = decodeErrorBody(yield* response.json);
         expect(body.error).toContain("testProof");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("a body without serverUrl is 400 and spawns nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/run", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({
+              prompt: "do the work",
+              ticket: TICKET,
+              testResultId: RESULT,
+              testDefinition: "do the work",
+              testProof: "none",
+            }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("serverUrl");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toEqual([]);
     }),
