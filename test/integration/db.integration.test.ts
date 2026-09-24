@@ -1538,10 +1538,9 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    // The driver moves its ticket to Needs Review before its drive job closes, so a diagnose is
-    // pending while the same result's drive still runs. One running job per result outranks the
-    // diagnose's place at the front: that diagnose waits, the next drive does not, and the
-    // diagnose is the first claim once its drive is closed.
+    // A diagnose can be pending while the same result's drive still runs. One running job per
+    // result outranks the diagnose's place at the front: that diagnose waits, the next drive does
+    // not, and the diagnose is the first claim once its drive is closed.
     scoped.effect(
       "AutomationStore skips a pending diagnose whose result's drive still runs, takes the oldest other drive, and claims the diagnose first once that drive is closed",
       () =>

@@ -504,8 +504,8 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
 // The next reservation is not sent until this one has answered, so two reservation
 // responses are never in flight. The row stays pending until a client has reserved;
 // pending -> running names that client. A drive or mint is then moved to In Progress,
-// three attempts, and only then does /run start. A diagnose is left for its driver to
-// move to In Review. A move that still fails gives the reservation back and errors the
+// three attempts, and only then does /run start. A diagnose is not moved here. A move
+// that still fails gives the reservation back and errors the
 // job: Linear did not move, so the run never started. The move does not hold the next
 // reservation, and neither does /run. A 503 or 409
 // from a client is ordinary and the next client
@@ -655,7 +655,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           const placement = placed.placement;
           yield* Effect.forkIn(
             Effect.gen(function* () {
-              // A diagnose starts from Needs Review. Its driver moves it to In Review.
+              // A diagnose is not moved to In Progress. The harness moves it when the job succeeds.
               if (job.action !== "diagnose") {
                 const linear = yield* Linear.Linear;
                 const moved = yield* linear.moveToInProgress(placement.ticket).pipe(

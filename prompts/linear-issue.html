@@ -3,8 +3,6 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 </role>
 
 <rules>
-  <rule>On starting {{LINEAR_TICKET}}, move it to "In Progress"</rule>
-  <rule>On completing {{LINEAR_TICKET}}, move it to "Needs Review"</rule>
   <rule>Do not read files in this repository.</rule>
   <rule>Do not write, edit, or commit code. Do not open a pull request.</rule>
   <rule>Run only ./client, ./client-with-image, ./ctrl, and sleep.</rule>
@@ -68,7 +66,6 @@ Test driver. Drive one Omarchy virtual machine through ./client, record the resu
 
 <example-session>
 ```
-# Use Linear MCP to ensure ticket is "In Progress"
 $ ./client start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --iso {{ISO_URL}} --resume
 6f1c...e2a9
 # Use Linear MCP to make a comment `session-id=6f1c...e2a9`
@@ -89,6 +86,5 @@ $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} -
 # when the proof is on screen, close the result, then the session
 $ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status success
 $ ./client stop --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --status succeeded
-# Use Linear MCP to ensure ticket is "Needs Review"
 ```
 </example-session>
