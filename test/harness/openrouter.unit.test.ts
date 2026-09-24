@@ -402,6 +402,60 @@ describe("OpenRouter client", () => {
     }),
   );
 
+  it.effect("a 429 whose body never arrives fails at the chunk timeout", () =>
+    Effect.gen(function* () {
+      const layer = Layer.succeed(HttpClient.HttpClient)(
+        HttpClient.make((request) => {
+          const response = HttpClientResponse.fromWeb(
+            request,
+            new Response(null, { status: 429, headers: { "retry-after": "7200" } }),
+          );
+          Object.defineProperty(response, "text", {
+            configurable: true,
+            get: () => Effect.never,
+          });
+          return Effect.succeed(response);
+        }),
+      );
+      const fiber = yield* Effect.forkScoped(
+        run(layer, { chunk: Duration.minutes(3), header: Duration.minutes(3) }),
+      );
+      yield* TestClock.adjust("2 minutes");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("1 minute");
+      const error = yield* Effect.flip(Fiber.join(fiber));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterUnreachable",
+        message: "openrouter: no chunk within chunk timeout",
+      });
+    }),
+  );
+
+  it.effect("a tool call with a negative index is not a completion", () =>
+    Effect.gen(function* () {
+      const layer = FakeHttp.respondWith(() =>
+        sse([
+          frame(
+            choice(
+              {
+                tool_calls: [
+                  { index: -1, id: "call-1", function: { name: "client", arguments: "{}" } },
+                ],
+              },
+              "tool_calls",
+            ),
+          ),
+          "[DONE]",
+        ]),
+      );
+      const error = yield* Effect.flip(run(layer));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterUnreachable",
+        message: "openrouter: invalid response",
+      });
+    }),
+  );
+
   it.effect("a provider error inside the stream is unreachable and is not a tool call", () =>
     Effect.gen(function* () {
       const layer = FakeHttp.respondWith(() =>

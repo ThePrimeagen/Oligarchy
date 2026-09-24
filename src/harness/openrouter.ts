@@ -182,12 +182,13 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
 
   const readEvents = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
-      const calls: Array<PartialCall | undefined> = [];
       let content: string | null = null;
       let sawTerminal = false;
 
+      const callsByIndex = new Map<number, PartialCall>();
+
       const absorb = (delta: typeof ToolCallDelta.Type): void => {
-        const existing = calls[delta.index];
+        const existing = callsByIndex.get(delta.index);
         const call = existing ?? { id: undefined, name: undefined, arguments: "" };
         if (delta.id !== undefined && delta.id !== "") {
           call.id = delta.id;
@@ -200,7 +201,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         if (args !== undefined) {
           call.arguments = `${call.arguments}${args}`;
         }
-        calls[delta.index] = call;
+        callsByIndex.set(delta.index, call);
       };
 
       const failPayload = (payload: typeof ErrorPayload.Type) =>
@@ -242,6 +243,9 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
             return yield* Effect.void;
           }
           for (const call of toolCalls) {
+            if (call.index < 0) {
+              return yield* unreachable("openrouter: invalid response", null);
+            }
             absorb(call);
           }
           return yield* Effect.void;
@@ -322,10 +326,8 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       }
 
       const toolCalls: Array<History.AssistantTurn["toolCalls"][number]> = [];
-      for (const call of calls) {
-        if (call === undefined) {
-          continue;
-        }
+      const ordered = [...callsByIndex.entries()].sort(([left], [right]) => left - right);
+      for (const [, call] of ordered) {
         if (call.id === undefined) {
           return yield* unreachable("openrouter: a tool call has no id", null);
         }
@@ -337,9 +339,20 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       return { content, toolCalls };
     });
 
+  // Headers are already in. The body is the next chunk: a 429 or a refusal that never
+  // finishes writing must fail here, not hold the run out to its ceiling.
+  const readText = (response: HttpClientResponse.HttpClientResponse) =>
+    response.text.pipe(
+      Effect.timeoutOrElse({
+        duration: options.timeouts.chunk,
+        orElse: () => Effect.fail(chunkTimeout),
+      }),
+      Effect.mapError((error) => (error._tag === "OpenRouterUnreachable" ? error : invalid(error))),
+    );
+
   const retryOrGiveUp = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
-      const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
+      const text = yield* readText(response);
       const now = yield* Clock.currentTimeMillis;
       const header = Option.getOrUndefined(Headers.get(response.headers, "retry-after"));
       const delay = retryDelay(header, now);
@@ -357,8 +370,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
     });
 
   const refuse = (response: HttpClientResponse.HttpClientResponse) =>
-    response.text.pipe(
-      Effect.orElseSucceed(() => ""),
+    readText(response).pipe(
       Effect.flatMap((text) =>
         Effect.fail(
           Errors.OpenRouterRefusal.make({
@@ -399,13 +411,8 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
 
   return yield* attempt.pipe(
     Effect.retry({
-      while: (error) => error._tag === "RetryWait",
+      while: (error): error is RetryWait => error._tag === "RetryWait",
       schedule: retrySchedule,
     }),
-    Effect.mapError((error) =>
-      error._tag === "RetryWait"
-        ? unreachable("openrouter: retry-after would pass the run ceiling", null)
-        : error,
-    ),
   );
 });
