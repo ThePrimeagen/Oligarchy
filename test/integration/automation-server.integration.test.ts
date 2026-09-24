@@ -256,14 +256,14 @@ const jobsFor = async (resultId: string) => {
 };
 
 describe("automation server startup refusals", () => {
-  it.live("--help exits 0 and lists --port and --model", () =>
+  it.live("--help exits 0 and lists --port", () =>
     Effect.promise(async () => {
       const process = spawnAutomationServer(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-server");
       expect(process.stdout()).toContain("--port");
-      expect(process.stdout()).toContain("--model");
+      expect(process.stdout()).not.toContain("--model");
       expect(process.stdout()).not.toContain("--jobs");
       expect(process.stdout()).not.toContain("--max-jobs");
       expect(process.stdout()).not.toContain("--diagnostics-port");
@@ -281,12 +281,11 @@ describe("automation server startup refusals", () => {
     }),
   );
 
-  it.live("a --model without a provider exits 1 with the rule", () =>
+  it.live("a --model flag exits 1 and does not listen", () =>
     Effect.promise(async () => {
       const process = spawnAutomationServer(["--model", "muse-spark-1.3"]);
       const { code } = await process.exited;
       expect(code).toBe(1);
-      expect(process.stderr()).toContain("model must be provider/model");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -392,7 +391,7 @@ describeServing("automation server serving", () => {
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; running agents as openrouter/meta/muse-spark-1.3-contributor`,
+        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; drive meta/muse-spark-1.3-contributor; diagnose meta/muse-spark-1.3-contributor; mint meta/muse-spark-1.3-contributor`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -723,7 +722,7 @@ const serveClient = (
     });
   });
 
-const MODEL = "openrouter/deepseek/deepseek-v4.1-flash";
+const MODEL = "meta/muse-spark-1.3-contributor";
 
 const readBody = (req: IncomingMessage): Promise<string> =>
   new Promise((resolve) => {
@@ -831,7 +830,7 @@ const ticketOf = (body: string): string | undefined => {
 
 describeServing("automation server dispatch", () => {
   it.live(
-    "a live client that closes the result and answers 200 marks the drive completed; the body carries --model",
+    "a live client that closes the result and answers 200 marks the drive completed; the prompt names the configured model and the body does not",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -851,19 +850,19 @@ describeServing("automation server dispatch", () => {
         await seedJob(resultId, "drive");
         await seedLiveClient(client.url);
         const port = await freePort();
-        const process = spawnAutomationServer(["--port", String(port), "--model", MODEL]);
+        const process = spawnAutomationServer(["--port", String(port)]);
         try {
           await process.waitFor(/automation server listening/);
           const job = await waitForJob(resultId, "completed");
           expect(job).toMatchObject({ action: "drive", status: "completed", reason: null });
           // The queue is shared with every integration file that ran before: a pending job one of
           // them left is dispatched here too, so this ticket's body is found by its ticket.
-          const parsed: Array<{ prompt: string; model: string }> = bodies.map((text) =>
+          const parsed: Array<{ prompt: string; model?: string }> = bodies.map((text) =>
             JSON.parse(text),
           );
           const body = parsed.find((candidate) => candidate.prompt.includes(linearId));
           expect(body, bodies.join("\n")).toBeDefined();
-          expect(body?.model).toBe(MODEL);
+          expect(body?.model).toBeUndefined();
           expect(body?.prompt).toContain(MODEL);
           expect(process.stdout()).toContain(`dispatching drive; ${client.url}; ${MODEL}`);
         } finally {
@@ -1438,7 +1437,6 @@ describeServing("automation server restart", () => {
             JSON.stringify({
               prompt: "do the work",
               ticket: linearId,
-              model: MODEL,
               testResultId: resultId,
             }),
           );

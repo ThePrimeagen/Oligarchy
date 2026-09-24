@@ -13,6 +13,7 @@ import {
 } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Cli from "../cli.ts";
+import * as HarnessConfig from "../harness/config.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import type * as Domain from "../shared/domain.ts";
@@ -210,18 +211,15 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     const run = Effect.fn("Sessions.run")(function* (
       ticket: string,
       prompt: string,
-      model: string,
       testResultId: string,
     ) {
       // Read before consume: the reservation is what says drive, diagnose, or mint,
       // and consume removes it. A missing one fails in consume and spawns nothing.
       // A diagnose still runs under OpenCode. A drive or mint is the harness.
+      // The model is oligarchy.json's for that action. This process does not take one.
       const action = (yield* Ref.get(slots)).reserved.get(ticket)?.action ?? "drive";
       const diagnose = action === "diagnose";
       const bin = diagnose ? OpenCode.BIN : Driver.BIN;
-      const args = diagnose
-        ? OpenCode.args(prompt, model)
-        : Driver.args({ prompt, model, testResultId });
       const env = diagnose ? OpenCode.ENV : {};
       const ceiling = diagnose ? OpenCode.CEILING : Driver.CEILING;
       const exceeded = diagnose
@@ -235,6 +233,20 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           yield* Effect.acquireRelease(consume(ticket), () =>
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
+          const args = diagnose
+            ? OpenCode.args(
+                prompt,
+                (yield* HarnessConfig.load.pipe(
+                  Effect.mapError((error) =>
+                    Errors.RunFailed.make({ message: error.message, cause: error }),
+                  ),
+                )).models.diagnose,
+              )
+            : Driver.args({
+                prompt,
+                action: action === "mint" ? "mint" : "drive",
+                testResultId,
+              });
           const handle = yield* Cli.spawn(bin, args, env);
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)

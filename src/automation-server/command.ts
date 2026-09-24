@@ -5,29 +5,25 @@ import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as Client from "../db/client.ts";
 import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
+import * as HarnessConfig from "../harness/config.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
 
-// The paid contributor model oligarchy.json names. A server started without --model
-// runs that, which is what ./driver sends to OpenRouter.
-const DEFAULT_MODEL = "openrouter/meta/muse-spark-1.3-contributor";
-
-// What main.ts hands the command: the listener as a layer for its port, the model every job runs
-// as, and the signal a server error raises after listen.
+// What main.ts hands the command: the listener as a layer for its port, the models oligarchy.json
+// names, and the signal a server error raises after listen.
 export type AutomationServer<RServe> = {
   readonly serve: (
     port: number,
-    model: string,
+    models: HarnessConfig.AppConfig["models"],
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
-type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
+type StartupError = Errors.DatabaseError | Errors.CommandError | HttpServerError.ServeError;
 
 // A ServeError says nothing itself; the bind or accept error it wraps does.
 const detail = (error: StartupError): string =>
@@ -41,19 +37,14 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
         Flag.withDefault(DEFAULT_PORT),
         Flag.withDescription("Listen port"),
       ),
-      model: Flag.string("model").pipe(
-        Flag.withSchema(Domain.ModelId),
-        Flag.withDefault(DEFAULT_MODEL),
-        Flag.withDescription(
-          "The OpenRouter model every drive and diagnose runs as, provider/model; the harness records it on the result",
-        ),
-      ),
     },
-    ({ port, model }) =>
+    ({ port }) =>
       Effect.gen(function* () {
         const log = yield* Log.Log;
         const database = yield* Client.Database;
         const startup = Effect.gen(function* () {
+          // The file is the model. A missing one fails here, before the database and before listen.
+          const config = yield* HarnessConfig.load;
           // Queue rows live in Postgres: fail at startup, not on the first webhook.
           yield* database.ping.pipe(
             Effect.mapError((error) =>
@@ -65,7 +56,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
             ),
           );
           return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, model)),
+            Layer.launch(server.serve(port, config.models)),
             Deferred.await(server.serverFailed),
           );
         });

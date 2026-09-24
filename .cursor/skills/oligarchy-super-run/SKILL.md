@@ -51,7 +51,7 @@ every server that already holds the disk is at its `--max-jobs`.
 `reset.sh` wipes all of the first five for a fresh batch. Nothing else deletes them.
 </WriteableFiles>
 <Runs>
-<model>openrouter/meta/muse-spark-1.3-contributor</model>
+<model>meta/muse-spark-1.3-contributor</model>
 <count>100 COUNTED</count>
 <test>lock-screen</test>
 <fleet>
@@ -167,7 +167,6 @@ start_fleet() {
     >"$P/automation-client-3.log" 2>&1 & echo "automation-client-3 $!" | tee -a "$P/pids"
 
   setsid ./automation-server --port 54321 \
-    --model openrouter/meta/muse-spark-1.3-contributor \
     >"$P/automation-server.log" 2>&1 & echo "automation-server $!" | tee -a "$P/pids"
 }
 start_fleet
@@ -201,7 +200,7 @@ Each `AGENT_LOOP_TICK_superrun` you **do this work** (the sleep loop does not):
 # RETIRE n|…  → if ANALYZE is also printed, wait for the subagent, then:
 /tmp/superrun/retire.sh "$N" COUNTED   # or INFRA
 # STUCK no-drive-job → stop refill; diagnose (automation-server log); fix; retire.sh N INFRA
-# STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model openrouter/meta/muse-spark-1.3-contributor
+# STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model meta/muse-spark-1.3-contributor
 #        or retire INFRA. cannot re-enqueue diagnose
 # LEDGER refill=yes → /tmp/superrun/new.sh muse
 # LEDGER remaining=0 → no new.sh; drain until active is empty

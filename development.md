@@ -107,7 +107,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./client-with-image`,
   `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
   fleet starters (`./start-server-proxy-client <max-jobs>` runs the proxy on `:55555` and one qemu
-  server; `./start-automation-server-client <max-jobs> [model]` runs the automation server on
+  server; `./start-automation-server-client <max-jobs>` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
   other), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
