@@ -46,33 +46,49 @@ const sse = (frames: ReadonlyArray<string>): Response =>
     headers: { "content-type": "text/event-stream" },
   });
 
-const speak = (status: "continue" | "complete", did: string, action: string): Response =>
+const call = (body: unknown): Response =>
   sse([
     frame({
-      choices: [{ delta: { content: `${status}\n${did}\n${action}` }, finish_reason: null }],
+      choices: [{ delta: { content: JSON.stringify(body) }, finish_reason: null }],
     }),
     frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
     "[DONE]",
   ]);
 
-const stopped = (content: string): Response => speak("complete", content, "done");
+const client = (reason: string, args: ReadonlyArray<string>): Response =>
+  call({ name: "client", arguments: { reason, args } });
 
-const sendKeys = (did: string | null = "lock the screen") =>
-  speak(
-    "continue",
-    did ?? "send-keys",
-    `send-keys --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --keys a`,
-  );
+const done = (): Response => call({ name: "Done", arguments: {} });
 
-const start = () => speak("continue", "boot", "start --agent-id OLI-1");
+const sendKeys = (reason: string | null = "lock the screen") =>
+  client(reason ?? "send-keys", [
+    "send-keys",
+    "--agent-id",
+    "OLI-1",
+    "--session-id",
+    SESSION,
+    "--server-url",
+    "http://127.0.0.1:9",
+    "--keys",
+    "a",
+  ]);
+
+const start = () => client("boot", ["start", "--agent-id", "OLI-1"]);
 
 const resumed = () =>
-  speak("continue", "boot", "start --agent-id OLI-1 --server-url http://127.0.0.1:9 --resume");
+  client("boot", [
+    "start",
+    "--agent-id",
+    "OLI-1",
+    "--server-url",
+    "http://127.0.0.1:9",
+    "--resume",
+  ]);
 
 const stop = () =>
-  speak("continue", "halt", `stop --agent-id OLI-1 --session-id ${SESSION} --status succeeded`);
+  client("halt", ["stop", "--agent-id", "OLI-1", "--session-id", SESSION, "--status", "succeeded"]);
 
-const intentCall = () => speak("continue", "bad", "intent start --message lock");
+const intentCall = () => client("bad", ["intent", "start", "--message", "lock"]);
 
 type Script = FakeSpawner.Script;
 
@@ -149,7 +165,7 @@ describe("driver loop", () => {
         let calls = 0;
         const recorder = FakeHttp.recordRequests(() => {
           calls += 1;
-          return calls === 1 ? sendKeys() : stopped("done");
+          return calls === 1 ? sendKeys() : done();
         });
         const log: Array<string> = [];
         const { stopped: outcome, spawner } = yield* run(
@@ -185,14 +201,16 @@ describe("driver loop", () => {
         const first = recorder.requests[0];
         expect(first?.url).toBe(URL);
         expect(first?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-        expect(JSON.parse(first?.body ?? "{}")).toMatchObject({
+        const request = JSON.parse(first?.body ?? "{}");
+        expect(request).toMatchObject({
           model: MODEL,
           tools: [],
           messages: [
-            { role: "system", content: expect.stringContaining("./client start") },
+            { role: "system", content: expect.stringContaining("You MUST use a tool") },
             { role: "user", content: "Lock the screen." },
           ],
         });
+        expect(request.messages[0].content).toContain("./client start");
         const again = userText(recorder.requests[1]?.body);
         expect(again).toContain("Lock the screen.");
         expect(again).toContain("lock the screen: typed");
@@ -216,7 +234,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? resumed() : stopped("done");
+        return calls === 1 ? resumed() : done();
       });
       const log: Array<string> = [];
       const { stopped: outcome, spawner } = yield* run(
@@ -262,7 +280,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? start() : stopped("done");
+        return calls === 1 ? start() : done();
       });
       const log: Array<string> = [];
       yield* run(
@@ -289,7 +307,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? resumed() : stopped("done");
+        return calls === 1 ? resumed() : done();
       });
       const log: Array<string> = [];
       const { spawner } = yield* run(
@@ -309,7 +327,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? start() : stopped("done");
+        return calls === 1 ? start() : done();
       });
       const log: Array<string> = [];
       const { stopped: outcome, spawner } = yield* run(
@@ -336,7 +354,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? start() : stopped("done");
+        return calls === 1 ? start() : done();
       });
       const { stopped: outcome, spawner } = yield* run(
         config(),
@@ -361,7 +379,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? intentCall() : stopped("stopped");
+        return calls === 1 ? intentCall() : done();
       });
       const log: Array<string> = [];
       const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
@@ -405,11 +423,17 @@ describe("driver loop", () => {
   it.effect("a failed stop closes the result failed, with the reason", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>
-        speak(
-          "continue",
-          "the installer hung",
-          `stop --agent-id OLI-1 --session-id ${SESSION} --status failed --reason "installer hung"`,
-        ),
+        client("the installer hung", [
+          "stop",
+          "--agent-id",
+          "OLI-1",
+          "--session-id",
+          SESSION,
+          "--status",
+          "failed",
+          "--reason",
+          "installer hung",
+        ]),
       );
       const { spawner } = yield* run(
         config(),
@@ -434,7 +458,7 @@ describe("driver loop", () => {
   it.effect("a save closes the result as a success", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>
-        speak("continue", "kept the disk", `save --agent-id OLI-1 --session-id ${SESSION}`),
+        client("kept the disk", ["save", "--agent-id", "OLI-1", "--session-id", SESSION]),
       );
       const { stopped: outcome, spawner } = yield* run(
         config(),
@@ -475,7 +499,7 @@ describe("driver loop", () => {
   it.effect("a stop without --agent-id does not close the result (unhappy)", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>
-        speak("continue", "halt", `stop --session-id ${SESSION} --status succeeded`),
+        client("halt", ["stop", "--session-id", SESSION, "--status", "succeeded"]),
       );
       const error = yield* Effect.flip(
         run(
@@ -501,7 +525,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? sendKeys(null) : stopped("stopped");
+        return calls === 1 ? sendKeys(null) : done();
       });
       const log: Array<string> = [];
       const { spawner } = yield* run(
@@ -551,7 +575,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? sendKeys("press the key") : stopped("stopped");
+        return calls === 1 ? sendKeys("press the key") : done();
       });
       const { spawner } = yield* run(
         config(),
@@ -582,7 +606,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? start() : stopped("done");
+        return calls === 1 ? start() : done();
       });
       yield* run(
         config(),
@@ -596,7 +620,29 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect("a reply that is not three lines fails the loop and runs nothing", () =>
+  it.effect("Done leaves the loop and runs nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => done());
+      const log: Array<string> = [];
+      let ran = 0;
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => {
+          ran += 1;
+          return { exitCode: 0 };
+        },
+        log,
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(ran).toBe(0);
+      expect(spawner.spawned).toEqual([]);
+      expect(recorder.requests).toHaveLength(1);
+      expect(events(log).at(-1)).toMatchObject({ kind: "stop", text: "model-stopped" });
+    }),
+  );
+
+  it.effect("a reply that is not one tool call fails the loop and runs nothing", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>
         sse([
@@ -605,10 +651,23 @@ describe("driver loop", () => {
           "[DONE]",
         ]),
       );
-      const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), []));
+      let ran = 0;
+      const error = yield* Effect.flip(
+        run(
+          config(),
+          recorder.layer,
+          () => {
+            ran += 1;
+            return { exitCode: 0 };
+          },
+          [],
+        ),
+      );
+      expect(ran).toBe(0);
       expect(error._tag).toBe("CommandError");
       if (error._tag === "CommandError") {
-        expect(error.message).toContain("3");
+        expect(error.message).toContain("reply:");
+        expect(error.message).not.toContain("3 lines");
       }
     }),
   );
@@ -734,7 +793,7 @@ describe("driver loop", () => {
 
   it.effect("a debug log that cannot be written fails the loop", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => stopped("done"));
+      const recorder = FakeHttp.recordRequests(() => done());
       const error = yield* Effect.flip(
         run(config(), recorder.layer, () => ({ exitCode: 0 }), [], Effect.fail(denied)),
       );

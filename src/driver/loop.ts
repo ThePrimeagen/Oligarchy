@@ -193,16 +193,16 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       return yield* Effect.fail(commandError(parsed.failure.message));
     }
     const reply = parsed.success;
-    if (reply.status === "complete") {
+    if (reply._tag === "Done") {
       yield* log(input.debugLog, step, "stop", "model-stopped");
       return { reason: "model-stopped" } satisfies Stopped;
     }
 
     turns = step;
-    const planned = Reply.command(reply.action);
+    const planned = Reply.command(reply);
     if (Result.isFailure(planned)) {
       yield* log(input.debugLog, step, "refusal", planned.failure.message);
-      decisions.push(decision(reply.did, planned.failure.message));
+      decisions.push(decision(reply.reason, planned.failure.message));
       continue;
     }
     const command = planned.success;
@@ -255,15 +255,15 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           outcome = `${outcome}\n${Tools.toolContent(marked)}`;
         }
       }
-      decisions.push(decision(reply.did, outcome));
+      decisions.push(decision(reply.reason, outcome));
       continue;
     }
 
-    const message = Intent.intentMessage(reply.did, command.args);
+    const message = Intent.intentMessage(reply.reason, command.args);
     const bracketed = Intent.bracket(command, input.testResultId, message);
     if (Result.isFailure(bracketed)) {
       yield* log(input.debugLog, step, "refusal", bracketed.failure.message);
-      decisions.push(decision(reply.did, bracketed.failure.message));
+      decisions.push(decision(reply.reason, bracketed.failure.message));
       continue;
     }
 
@@ -277,7 +277,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         `${shown(bracketed.success.start)} exit ${String(opened.exitCode)}`,
       );
       if (opened.exitCode !== 0) {
-        decisions.push(decision(reply.did, Tools.toolContent(opened)));
+        decisions.push(decision(reply.reason, Tools.toolContent(opened)));
         continue;
       }
       // A spawn or log failure still has to close the intent this start opened.
@@ -300,7 +300,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         ended.exitCode === 0
           ? Tools.toolContent(ran)
           : `${Tools.toolContent(ran)}\nintent end failed\n${Tools.toolContent(ended)}`;
-      decisions.push(decision(reply.did, outcome));
+      decisions.push(decision(reply.reason, outcome));
       continue;
     }
 
@@ -339,6 +339,6 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       yield* log(input.debugLog, step, "stop", "result-closed");
       return { reason: "result-closed" } satisfies Stopped;
     }
-    decisions.push(decision(reply.did, Tools.toolContent(ran)));
+    decisions.push(decision(reply.reason, Tools.toolContent(ran)));
   }
 });

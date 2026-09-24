@@ -455,13 +455,13 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
 - `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
   the `openrouter-driving-agent.html` prompt, the task, and the decisions so far, one line each. The
-  reply is three lines: `complete` or `continue`, what the agent did in a few words, and the
-  action. `continue` runs that action; `complete` records the action taken and does not run it
-  again. It appends one JSON line to `--debug-log` per step (the loop counter and the step), and
-  exits 0 only when the reply is `complete` or the harness closed the result. An OpenRouter
-  failure, a reply that is not those three lines, the step limit, or the run ceiling exits 1 and
-  the reason is the failure. A `start` is the model's command, including `--resume` and
-  `--server-url` when it passed them; the log names `resume` and `routing <url>` only then. When
+  reply is one line: the tool call JSON. `client` runs that action; `Done` leaves the loop
+  successfully and runs nothing. It appends one JSON line to `--debug-log` per step (the loop
+  counter and the step), and exits 0 only when the reply is `Done` or the harness closed the
+  result. An OpenRouter failure, a reply that is not that one tool call, the step limit, or the
+  run ceiling exits 1 and the reason is the failure. A `start` is the model's command,
+  including `--resume` and `--server-url` when it passed them; the log names `resume` and
+  `routing <url>` only then. When
   that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
   the test result id, and the model, which marks the result running. Before a guest action
   (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and
