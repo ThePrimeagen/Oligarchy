@@ -8,6 +8,7 @@ const besideModule = (relative: string): string =>
 // guide cannot stop a rendering whose template does not embed it.
 const GUIDES: Readonly<Record<string, string>> = {
   CTRL_DIAGNOSE_MD: besideModule("../../ctrl-diagnose.md"),
+  CLIENT_TOOLS: besideModule("../../prompts/client-tools.md"),
 };
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
@@ -65,6 +66,22 @@ const render = Effect.fn("Prompts.render")(function* (
 // `model` is the OpenCode model the agent runs as, and so the one it is told to record.
 export const drive = Effect.fn("Prompts.drive")(function* (ticket: string, model: string) {
   return yield* render("driving-agent.html", { LINEAR_TICKET: ticket, MODEL: model });
+});
+
+// The OpenRouter driver's prompt, filled again each step. The harness already holds the agent,
+// the session, and the server, so those are not template values. Past steps are one reason per line.
+export const openRouterDrive = Effect.fn("Prompts.openRouterDrive")(function* (
+  definition: string,
+  proof: string,
+  reasons: ReadonlyArray<string>,
+  step: number,
+) {
+  return yield* render("openrouter-driving-agent.html", {
+    TEST_DEFINITION: definition,
+    TEST_PROOF: proof,
+    REASONS: Arr.join(reasons, "\n"),
+    STEP: String(step),
+  });
 });
 
 export const diagnose = Effect.fn("Prompts.diagnose")(function* (

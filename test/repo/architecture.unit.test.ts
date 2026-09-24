@@ -42,8 +42,6 @@ const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ["src/session/image.ts", "node:zlib"],
   ["src/automation-server/signature.ts", "node:crypto"],
   ["src/harness/tools.ts", "node:fs"],
-  // The OpenRouter driving prompt is read once, the same way client.md is.
-  ["src/driver/prompt.ts", "node:fs"],
 ]);
 
 // Files allowed to call `Effect.run*`, each with the calls it may make.

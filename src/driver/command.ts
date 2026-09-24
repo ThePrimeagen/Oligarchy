@@ -1,4 +1,4 @@
-import { Console, Effect, Schema } from "effect";
+import { Console, Effect, Option, Schema } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import * as Config from "../config.ts";
@@ -14,7 +14,11 @@ const flags = {
   ),
   prompt: Flag.string("prompt").pipe(
     Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("The user prompt"),
+    Flag.withDescription("The test definition"),
+  ),
+  proof: Flag.string("proof").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.withDescription("The proof that closes the test"),
   ),
   debugLog: Flag.string("debug-log").pipe(
     Flag.withSchema(Schema.NonEmptyString),
@@ -23,6 +27,19 @@ const flags = {
   testResultId: Flag.string("test-result-id").pipe(
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("Test result id passed to intent start"),
+  ),
+  agentId: Flag.string("agent-id").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.withDescription("Calling agent's id"),
+  ),
+  serverUrl: Flag.string("server-url").pipe(
+    Flag.withSchema(Domain.ServerUrl),
+    Flag.withDescription("QEMU server URL"),
+  ),
+  sessionId: Flag.string("session-id").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.optional,
+    Flag.withDescription("Session id, when the guest is already up"),
   ),
 };
 
@@ -38,9 +55,13 @@ export const makeDriverCommand = <E, R>(
       const token = yield* Config.openRouterToken;
       const stopped = yield* run({
         model: input.model,
-        prompt: input.prompt,
+        definition: input.prompt,
+        proof: input.proof,
         testResultId: input.testResultId,
         debugLog: input.debugLog,
+        agentId: input.agentId,
+        serverUrl: input.serverUrl,
+        sessionId: Option.getOrUndefined(input.sessionId),
         config,
         token,
       });
@@ -48,7 +69,7 @@ export const makeDriverCommand = <E, R>(
     }),
   ).pipe(
     Command.withDescription(
-      "Run the harness loop for one prompt and one model: each reply is complete or continue, what the agent did, and the action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
+      "Run the harness loop for one prompt and one model: each reply is one drive tool call, a reason, whether the step completes, and a typed action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
     ),
     EnvFile.withEnvFile,
   );

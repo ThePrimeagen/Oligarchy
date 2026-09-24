@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Fiber, FileSystem, Layer, PlatformError, Redacted } from "effect";
@@ -46,33 +47,43 @@ const sse = (frames: ReadonlyArray<string>): Response =>
     headers: { "content-type": "text/event-stream" },
   });
 
-const speak = (status: "continue" | "complete", did: string, action: string): Response =>
+const drive = (body: unknown): Response =>
   sse([
     frame({
-      choices: [{ delta: { content: `${status}\n${did}\n${action}` }, finish_reason: null }],
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "call-1",
+                function: { name: "drive", arguments: JSON.stringify(body) },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
     }),
-    frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+    frame({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
     "[DONE]",
   ]);
 
-const stopped = (content: string): Response => speak("complete", content, "done");
+const reply = (completes: boolean, reason: string, action: unknown): Response =>
+  drive({ completes, reason, action });
 
-const sendKeys = (did: string | null = "lock the screen") =>
-  speak(
-    "continue",
-    did ?? "send-keys",
-    `send-keys --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --keys a`,
-  );
+const stopped = (reason = "done"): Response => reply(true, reason, { _tag: "save" });
 
-const start = () => speak("continue", "boot", "start --agent-id OLI-1");
+const sendKeys = (reason = "lock the screen") =>
+  reply(false, reason, { _tag: "send-keys", keys: "a" });
 
-const resumed = () =>
-  speak("continue", "boot", "start --agent-id OLI-1 --server-url http://127.0.0.1:9 --resume");
+const start = () => reply(false, "boot", { _tag: "start" });
 
-const stop = () =>
-  speak("continue", "halt", `stop --agent-id OLI-1 --session-id ${SESSION} --status succeeded`);
+const resumed = () => reply(false, "boot", { _tag: "start", resume: true });
 
-const intentCall = () => speak("continue", "bad", "intent start --message lock");
+const stop = () => reply(false, "halt", { _tag: "stop", status: "succeeded" });
+
+const reserve = () => reply(false, "give it back", { _tag: "reserve" });
 
 type Script = FakeSpawner.Script;
 
@@ -89,6 +100,7 @@ const capturingFs = (
         log.push(data);
       });
     },
+    readFileString: (path) => Effect.sync(() => readFileSync(path, "utf8")),
   });
 
 const events = (log: ReadonlyArray<string>): ReadonlyArray<DriverLog.Event> =>
@@ -97,19 +109,21 @@ const events = (log: ReadonlyArray<string>): ReadonlyArray<DriverLog.Event> =>
 const fields = (value: unknown): value is { readonly [key: string]: unknown } =>
   typeof value === "object" && value !== null;
 
-const userText = (body: string | undefined): string => {
+const messageText = (body: string | undefined, role: string): string => {
   const value: unknown = JSON.parse(body ?? "{}");
   if (!fields(value) || !Array.isArray(value.messages)) {
     return "";
   }
   for (const message of value.messages) {
-    if (!fields(message) || message.role !== "user" || typeof message.content !== "string") {
+    if (!fields(message) || message.role !== role || typeof message.content !== "string") {
       continue;
     }
     return message.content;
   }
   return "";
 };
+
+const systemText = (body: string | undefined): string => messageText(body, "system");
 
 const denied = PlatformError.systemError({
   _tag: "PermissionDenied",
@@ -126,15 +140,20 @@ const run = (
   script: Script,
   log: Array<string>,
   write?: Effect.Effect<void, PlatformError.PlatformError>,
+  session?: { readonly id: string | undefined },
 ) =>
   Effect.gen(function* () {
     const parsed = yield* app;
     const spawner = FakeSpawner.fakeSpawner(script);
     const stoppedRun = yield* Loop.run({
       model: MODEL,
-      prompt: "Lock the screen.",
+      definition: "Lock the screen.",
+      proof: "The lock screen is showing.",
       testResultId: RESULT,
       debugLog: LOG,
+      agentId: "OLI-1",
+      serverUrl: "http://127.0.0.1:9",
+      sessionId: session === undefined ? SESSION : session.id,
       config: parsed,
       token: Redacted.make(TOKEN),
     }).pipe(Effect.provide(Layer.mergeAll(capturingFs(log, write), http, spawner.layer)));
@@ -185,17 +204,31 @@ describe("driver loop", () => {
         const first = recorder.requests[0];
         expect(first?.url).toBe(URL);
         expect(first?.headers.authorization).toBe(`Bearer ${TOKEN}`);
-        expect(JSON.parse(first?.body ?? "{}")).toMatchObject({
+        const firstBody = JSON.parse(first?.body ?? "{}");
+        expect(firstBody).toMatchObject({
           model: MODEL,
-          tools: [],
+          tool_choice: { type: "function", function: { name: "drive" } },
           messages: [
-            { role: "system", content: expect.stringContaining("./client start") },
-            { role: "user", content: "Lock the screen." },
+            { role: "system", content: expect.stringContaining("fractions of the screenshot") },
+            { role: "user", content: "Take this step." },
           ],
         });
-        const again = userText(recorder.requests[1]?.body);
+        expect(firstBody.messages[0].content).toContain("Lock the screen.");
+        expect(firstBody.messages[0].content).toContain("The lock screen is showing.");
+        expect(firstBody.messages[0].content).toContain("This is step 1.");
+        expect(firstBody.messages[0].content).toContain("Past steps:");
+        expect(firstBody.tools).toMatchObject([{ type: "function", function: { name: "drive" } }]);
+        const toolText = JSON.stringify(firstBody.tools);
+        expect(toolText).not.toContain("agentId");
+        expect(toolText).not.toContain("sessionId");
+        expect(toolText).not.toContain("serverUrl");
+        expect(toolText).not.toContain("testResultId");
+        expect(first?.headers["anthropic-beta"]).toBeUndefined();
+        expect(firstBody.messages[0].content).not.toContain(RESULT);
+        const again = systemText(recorder.requests[1]?.body);
         expect(again).toContain("Lock the screen.");
-        expect(again).toContain("lock the screen: typed");
+        expect(again).toContain("This is step 2.");
+        expect(again).toContain("lock the screen");
         expect(JSON.parse(recorder.requests[1]?.body ?? "{}")).toMatchObject({
           messages: [{ role: "system" }, { role: "user" }],
         });
@@ -253,7 +286,7 @@ describe("driver loop", () => {
         kind: "running",
         text: SESSION,
       });
-      expect(userText(recorder.requests[1]?.body)).toContain(SESSION);
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
     }),
   );
 
@@ -279,8 +312,45 @@ describe("driver loop", () => {
       const lines = events(log);
       const started = lines.find((event) => event.kind === "start");
       expect(started?.text).not.toContain("resume");
-      expect(started?.text).not.toContain("routing");
+      expect(started?.text).toContain("routing http://127.0.0.1:9");
       expect(lines.find((event) => event.kind === "running")?.text).toBe(SESSION);
+    }),
+  );
+
+  it.effect("a start's session id is what the next guest action runs against", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        if (calls === 1) {
+          return start();
+        }
+        if (calls === 2) {
+          return sendKeys("type the password");
+        }
+        return stopped();
+      });
+      const { spawner } = yield* run(
+        config(),
+        recorder.layer,
+        (command, args) => {
+          if (command === "./ctrl") {
+            return { exitCode: 0 };
+          }
+          if (args[0] === "start") {
+            return { exitCode: 0, stdout: `${SESSION}\n` };
+          }
+          return { exitCode: 0, stdout: "typed\n" };
+        },
+        [],
+        undefined,
+        { id: undefined },
+      );
+      const typed = spawner.spawned.find((child) => child.args[0] === "send-keys");
+      expect(typed?.args).toContain("--session-id");
+      expect(typed?.args).toContain(SESSION);
+      expect(typed?.args).toContain("--keys");
+      expect(typed?.args).toContain("a");
     }),
   );
 
@@ -300,7 +370,7 @@ describe("driver loop", () => {
       );
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
       expect(events(log).some((event) => event.kind === "running")).toBe(false);
-      expect(userText(recorder.requests[1]?.body)).toContain("no reservation");
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
     }),
   );
 
@@ -325,8 +395,7 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client", "./ctrl"]);
-      expect(userText(recorder.requests[1]?.body)).toContain(SESSION);
-      expect(userText(recorder.requests[1]?.body)).toContain("not pending");
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
       expect(events(log).find((event) => event.kind === "running")?.text).toBe(SESSION);
     }),
   );
@@ -351,23 +420,79 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
-      expect(userText(recorder.requests[1]?.body)).toContain("./ctrl");
-      expect(userText(recorder.requests[1]?.body)).toContain("ENOENT");
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
     }),
   );
 
-  it.effect("does not intent start, reserve, or a refused intent call", () =>
+  it.effect(
+    "a successful relinquish forgets the session, so the next guest action is not run",
+    () =>
+      Effect.gen(function* () {
+        let calls = 0;
+        const recorder = FakeHttp.recordRequests(() => {
+          calls += 1;
+          if (calls === 1) {
+            return reply(false, "give it back", { _tag: "relinquish" });
+          }
+          if (calls === 2) {
+            return sendKeys("type");
+          }
+          return stopped();
+        });
+        const seen: Array<string> = [];
+        const { stopped: outcome } = yield* run(
+          config(),
+          recorder.layer,
+          (_command, args) => {
+            seen.push(args[0] ?? "");
+            return { exitCode: 0 };
+          },
+          [],
+        );
+        expect(outcome).toEqual({ reason: "model-stopped" });
+        expect(seen).toEqual(["relinquish"]);
+        expect(systemText(recorder.requests[2]?.body)).toContain("give it back\ntype");
+      }),
+  );
+
+  it.effect("a failed relinquish keeps the session", () =>
     Effect.gen(function* () {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? intentCall() : stopped("stopped");
+        if (calls === 1) {
+          return reply(false, "give it back", { _tag: "relinquish" });
+        }
+        if (calls === 2) {
+          return sendKeys("type");
+        }
+        return stopped();
       });
-      const log: Array<string> = [];
-      const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
-      expect(spawner.spawned).toEqual([]);
-      expect(events(log).some((event) => event.kind === "refusal")).toBe(true);
-      expect(userText(recorder.requests[1]?.body)).toContain("intent");
+      const { spawner } = yield* run(
+        config(),
+        recorder.layer,
+        (_command, args) => {
+          if (args[0] === "relinquish") {
+            return { exitCode: 1, stderr: "no reservation\n" };
+          }
+          return { exitCode: 0, stdout: "typed\n" };
+        },
+        [],
+      );
+      const typed = spawner.spawned.find((child) => child.args[0] === "send-keys");
+      expect(typed?.args).toContain(SESSION);
+    }),
+  );
+
+  it.effect("does not intent-bracket reserve", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? reserve() : stopped("stopped");
+      });
+      const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(spawner.spawned.map((child) => child.args[0])).toEqual(["reserve"]);
     }),
   );
 
@@ -396,7 +521,7 @@ describe("driver loop", () => {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? sendKeys(null) : stopped("stopped");
+        return calls === 1 ? sendKeys() : stopped("stopped");
       });
       const log: Array<string> = [];
       const { spawner } = yield* run(
@@ -410,8 +535,8 @@ describe("driver loop", () => {
         log,
       );
       expect(spawner.spawned).toHaveLength(1);
-      expect(userText(recorder.requests[1]?.body)).toContain("already running");
-      expect(userText(recorder.requests[1]?.body)).not.toContain("typed");
+      expect(systemText(recorder.requests[1]?.body)).toContain("lock the screen");
+      expect(systemText(recorder.requests[1]?.body)).not.toContain("typed");
     }),
   );
 
@@ -467,8 +592,8 @@ describe("driver loop", () => {
         "send-keys",
         "intent",
       ]);
-      expect(userText(recorder.requests[1]?.body)).toContain("typed");
-      expect(userText(recorder.requests[1]?.body)).toContain("no intent open");
+      expect(systemText(recorder.requests[1]?.body)).toContain("press the key");
+      expect(systemText(recorder.requests[1]?.body)).not.toContain("no intent open");
     }),
   );
 
@@ -485,13 +610,13 @@ describe("driver loop", () => {
         () => ({ exitCode: 0, stdout: `${"x".repeat(2_000)}\n` }),
         [],
       );
-      const again = userText(recorder.requests[1]?.body);
-      expect(again).toContain("x".repeat(100));
-      expect(again).not.toContain("x".repeat(501));
+      const again = systemText(recorder.requests[1]?.body);
+      expect(again).toContain("boot");
+      expect(again).not.toContain("x".repeat(100));
     }),
   );
 
-  it.effect("a reply that is not three lines fails the loop and runs nothing", () =>
+  it.effect("a reply that is not one drive call fails the loop and runs nothing", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>
         sse([
@@ -503,8 +628,107 @@ describe("driver loop", () => {
       const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), []));
       expect(error._tag).toBe("CommandError");
       if (error._tag === "CommandError") {
-        expect(error.message).toContain("3");
+        expect(error.message).toContain("drive");
       }
+    }),
+  );
+
+  it.effect("a drive call that names a session runs nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        drive({
+          completes: false,
+          reason: "type",
+          action: { _tag: "send-keys", keys: "a", sessionId: SESSION },
+        }),
+      );
+      const seen: Array<string> = [];
+      const error = yield* Effect.flip(
+        run(
+          config(),
+          recorder.layer,
+          (_command, args) => {
+            seen.push(args[0] ?? "");
+            return { exitCode: 0 };
+          },
+          [],
+        ),
+      );
+      expect(error._tag).toBe("CommandError");
+      if (error._tag === "CommandError") {
+        expect(error.message).toContain("sessionId");
+      }
+      expect(seen).toEqual([]);
+    }),
+  );
+
+  it.effect("an update_screenshot runs nothing and the loop goes to the next step", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1
+          ? reply(false, "look again", { _tag: "update_screenshot" })
+          : stopped("done");
+      });
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(spawner.spawned).toEqual([]);
+      const again = systemText(recorder.requests[1]?.body);
+      expect(again).toContain("This is step 2.");
+      expect(again).toContain("look again");
+      expect(again).not.toContain(`${LOG}.png`);
+    }),
+  );
+
+  it.effect("an update_screenshot with no session still goes to the next step", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? reply(false, "look again", { _tag: "update_screenshot" }) : stopped();
+      });
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+        undefined,
+        { id: undefined },
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(spawner.spawned).toEqual([]);
+      expect(systemText(recorder.requests[1]?.body)).toContain("look again");
+    }),
+  );
+
+  it.effect("a guest action before a session is a refusal and is not run", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? sendKeys() : stopped();
+      });
+      const seen: Array<string> = [];
+      const { stopped: outcome } = yield* run(
+        config(),
+        recorder.layer,
+        (_command, args) => {
+          seen.push(args[0] ?? "");
+          return { exitCode: 0 };
+        },
+        [],
+        undefined,
+        { id: undefined },
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(seen).toEqual([]);
+      expect(systemText(recorder.requests[1]?.body)).toContain("lock the screen");
     }),
   );
 
@@ -583,9 +807,13 @@ describe("driver loop", () => {
       });
       const fiber = yield* Loop.run({
         model: MODEL,
-        prompt: "Lock the screen.",
+        definition: "Lock the screen.",
+        proof: "The lock screen is showing.",
         testResultId: RESULT,
         debugLog: LOG,
+        agentId: "OLI-1",
+        serverUrl: "http://127.0.0.1:9",
+        sessionId: SESSION,
         config: parsed,
         token: Redacted.make(TOKEN),
       }).pipe(

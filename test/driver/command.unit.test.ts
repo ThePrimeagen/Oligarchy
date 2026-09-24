@@ -18,17 +18,27 @@ const MODEL = "openrouter/test-model";
 const RESULT = "22222222-2222-4222-8222-222222222222";
 const TOKEN = "super-secret-token";
 const PROMPT = "Lock the screen.";
+const PROOF = "The lock screen is showing.";
 const LOG = "/tmp/driver-debug.log";
+
+const AGENT = "OLI-1";
+const SERVER = "http://127.0.0.1:9";
 
 const FLAGS = [
   "--model",
   MODEL,
   "--prompt",
   PROMPT,
+  "--proof",
+  PROOF,
   "--debug-log",
   LOG,
   "--test-result-id",
   RESULT,
+  "--agent-id",
+  AGENT,
+  "--server-url",
+  SERVER,
 ];
 
 const TerminalStub = Layer.succeed(Terminal.Terminal)(
@@ -99,9 +109,13 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       yield* run(FLAGS, seen);
       expect(seen.input?.model).toBe(MODEL);
-      expect(seen.input?.prompt).toBe(PROMPT);
+      expect(seen.input?.definition).toBe(PROMPT);
+      expect(seen.input?.proof).toBe(PROOF);
       expect(seen.input?.debugLog).toBe(LOG);
       expect(seen.input?.testResultId).toBe(RESULT);
+      expect(seen.input?.agentId).toBe(AGENT);
+      expect(seen.input?.serverUrl).toBe(SERVER);
+      expect(seen.input?.sessionId).toBeUndefined();
       expect(seen.input?.config.stepLimit).toBeGreaterThanOrEqual(1);
       expect(Redacted.value(seen.input?.token ?? Redacted.make(""))).toBe(TOKEN);
       expect(yield* TestConsole.logLines).toEqual(["model-stopped"]);
@@ -127,7 +141,15 @@ describe("driver command", () => {
 
   it.effect("a missing flag is a usage error that does not start the loop", () =>
     Effect.gen(function* () {
-      for (const flag of ["model", "prompt", "debug-log", "test-result-id"]) {
+      for (const flag of [
+        "model",
+        "prompt",
+        "proof",
+        "debug-log",
+        "test-result-id",
+        "agent-id",
+        "server-url",
+      ]) {
         const seen: Seen = { input: undefined };
         const args = FLAGS.filter(
           (arg, index) => arg !== `--${flag}` && FLAGS[index - 1] !== `--${flag}`,
@@ -149,7 +171,22 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       const error = yield* Effect.flip(
         run(
-          ["--model", "muse", "--prompt", PROMPT, "--debug-log", LOG, "--test-result-id", RESULT],
+          [
+            "--model",
+            "muse",
+            "--prompt",
+            PROMPT,
+            "--proof",
+            PROOF,
+            "--debug-log",
+            LOG,
+            "--test-result-id",
+            RESULT,
+            "--agent-id",
+            AGENT,
+            "--server-url",
+            SERVER,
+          ],
           seen,
         ),
       );
@@ -167,8 +204,12 @@ describe("driver command", () => {
       const stdout = (yield* TestConsole.logLines).join("\n");
       expect(stdout).toContain("--model");
       expect(stdout).toContain("--prompt");
+      expect(stdout).toContain("--proof");
       expect(stdout).toContain("--debug-log");
       expect(stdout).toContain("--test-result-id");
+      expect(stdout).toContain("--agent-id");
+      expect(stdout).toContain("--server-url");
+      expect(stdout).toContain("--session-id");
       expect(seen.input).toBeUndefined();
     }),
   );
@@ -191,6 +232,26 @@ describe("driver command", () => {
         message: "OPENROUTER_API_KEY is not set",
       });
       expect(seen.input).toBeUndefined();
+    }),
+  );
+
+  it.effect("a session id is passed through, and a bad server url is a usage error", () =>
+    Effect.gen(function* () {
+      const seen: Seen = { input: undefined };
+      yield* run([...FLAGS, "--session-id", "6f1c8c2e-1b2a-4d3e-8f4a-9c0b1a2d3e4f"], seen);
+      expect(seen.input?.sessionId).toBe("6f1c8c2e-1b2a-4d3e-8f4a-9c0b1a2d3e4f");
+
+      const bad: Seen = { input: undefined };
+      const error = yield* Effect.flip(
+        run(
+          FLAGS.map((arg) => (arg === SERVER ? "not-a-url" : arg)),
+          bad,
+        ),
+      );
+      expect(error._tag).toBe("ShowHelp");
+      const stderr = yield* TestConsole.errorLines;
+      expect(stderr.join("\n")).toContain("http");
+      expect(bad.input).toBeUndefined();
     }),
   );
 });
