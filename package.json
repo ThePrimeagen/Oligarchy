@@ -5,12 +5,14 @@
     "client": "src/client/main.ts",
     "ctrl": "src/ctrl/main.ts",
     "dig": "src/dig/main.ts",
+    "driver": "src/driver/main.ts",
     "session": "src/session/main.ts",
     "viz": "src/viz/main.ts"
   },
   "type": "module",
   "scripts": {
     "client": "bun --no-env-file src/client/main.ts",
+    "driver": "bun --no-env-file src/driver/main.ts",
     "ctrl": "bun --no-env-file --preload ./src/observability/instrument.ts src/ctrl/main.ts",
     "session": "bun --no-env-file src/session/main.ts",
     "viz": "bun --no-env-file --preload ./src/viz/preload.ts src/viz/main.ts",

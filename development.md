@@ -17,13 +17,15 @@ exist.
   npm. Every executable is a `#!/bin/sh` wrapper running `bun --no-env-file` on the process's
   `main.ts` as written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
   `./automation-client` and `./ctrl` add `--preload ./src/observability/instrument.ts`), and the
-  session REPL spawns its children the same way. The one exception is `./client`: a driving agent
-  calls it many times per task, so it runs `bun build --target=bun --bytecode` of its entry from
-  `node_modules/.cache/oligarchy/client/`, rebuilt when a source, `bun.lock` or the wrapper is
-  newer than either cached file or one is missing, and when the build fails prints its output and
-  one line saying so on stderr, then runs the sources
-  (`test/integration/client.integration.test.ts` pins all three). A stack trace from the bundle
-  names the bundle; `bun run client` runs the sources for one that names them. `--no-env-file`
+  session REPL spawns its children the same way. The exceptions are `./client` and `./driver`. A
+  driving agent calls `./client` many times per task, so it runs `bun build --target=bun --bytecode`
+  of its entry from `node_modules/.cache/oligarchy/client/`, rebuilt when a source, `bun.lock` or
+  the wrapper is newer than either cached file or one is missing, and when the build fails prints
+  its output and one line saying so on stderr, then runs the sources
+  (`test/integration/client.integration.test.ts` pins all three). `./driver` is that same wrapper
+  for `src/driver/main.ts`, cached under `node_modules/.cache/oligarchy/driver/`. A stack trace from
+  the bundle names the bundle; `bun run client` and `bun run driver` run the sources for one that
+  names them. `--no-env-file`
   because Bun's own loader would
   read `.env.local` and `.env.<NODE_ENV>` as well and expand `$` inside values, ahead of
   `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks,
@@ -102,7 +104,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 
 ## Layout
 
-- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./client-with-image`,
+- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./client-with-image`,
   `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
   fleet starters (`./start-server-proxy-client <max-jobs>` runs the proxy on `:55555` and one qemu
   server; `./start-automation-server-client <max-jobs> [model]` runs the automation server on
@@ -451,6 +453,21 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   retries an HTTP 429 or 5xx only when `retry-after` fits inside the run ceiling. A missing or
   malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`. A refused
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
+- `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
+  the `openrouter-driving-agent.html` prompt, the task, and the decisions so far, one line each. The
+  reply is three lines: `complete` or `continue`, what the agent did in a few words, and the
+  action. `continue` runs that action; `complete` records the action taken and does not run it
+  again. It appends one JSON line to `--debug-log` per step (the loop counter and the step), and
+  exits 0 only when the reply is `complete` or the harness closed the result. An OpenRouter
+  failure, a reply that is not those three lines, the step limit, or the run ceiling exits 1 and
+  the reason is the failure. A `start` is the model's command, including `--resume` and
+  `--server-url` when it passed them; the log names `resume` and `routing <url>` only then. When
+  that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
+  the test result id, and the model, which marks the result running. Before a guest action
+  (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and
+  `./client intent end` after that command returns. `start`, `reserve`, `relinquish`, `stop`, and
+  `save` are not guest actions. A `stop` or `save` that exits 0 is the harness closing the result,
+  and the model is not called again. The OpenRouter token is `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 
