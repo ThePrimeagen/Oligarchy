@@ -129,28 +129,23 @@ describe("drive call", () => {
     ]);
   });
 
-  it("reads a wait as a get-image, and the loop is what adds the screenshot path", () => {
+  it("reads update_screenshot and does not make it a client command", () => {
     const parsed = call({
       reason: "look again",
       completes: false,
-      action: { _tag: "wait" },
+      action: { _tag: "update_screenshot" },
     });
     expect(Result.isSuccess(parsed)).toBe(true);
     if (Result.isFailure(parsed)) {
       return;
     }
     expect(parsed.success.completes).toBe(false);
-    const args = line(parsed.success.action).args;
-    expect(args).toEqual([
-      "get-image",
-      "--agent-id",
-      "OLI-1",
-      "--server-url",
-      "http://127.0.0.1:9",
-      "--session-id",
-      SESSION,
-    ]);
-    expect(args).not.toContain("-o");
+    expect(parsed.success.reason).toBe("look again");
+    const refused = Reply.command(parsed.success.action, connection);
+    expect(Result.isFailure(refused)).toBe(true);
+    if (Result.isFailure(refused)) {
+      expect(refused.failure.message).toContain("not a command");
+    }
   });
 
   it("refuses a point outside 0..1, an empty reason, a bad tool, and JSON that is not an object", () => {
@@ -262,23 +257,6 @@ describe("drive call", () => {
     expect(line(boot.success.action, undefined).args[0]).toBe("start");
   });
 
-  it("refuses a wait when the harness has no session", () => {
-    const parsed = call({
-      reason: "look again",
-      completes: false,
-      action: { _tag: "wait" },
-    });
-    expect(Result.isSuccess(parsed)).toBe(true);
-    if (Result.isFailure(parsed)) {
-      return;
-    }
-    const refused = Reply.command(parsed.success.action, { ...connection, sessionId: undefined });
-    expect(Result.isFailure(refused)).toBe(true);
-    if (Result.isFailure(refused)) {
-      expect(refused.failure.message).toContain("session");
-    }
-  });
-
   it("publishes the drive tool with the point bounds and no connection fields", () => {
     expect(Reply.TOOL.function.name).toBe("drive");
     const text = JSON.stringify(Reply.TOOL.function.parameters);
@@ -288,7 +266,7 @@ describe("drive call", () => {
     expect(text).toContain("double-click");
     expect(text).toContain("completes");
     expect(text).toContain("reason");
-    expect(text).toContain("wait");
+    expect(text).toContain("update_screenshot");
     expect(text).not.toContain("agentId");
     expect(text).not.toContain("sessionId");
     expect(text).not.toContain("serverUrl");

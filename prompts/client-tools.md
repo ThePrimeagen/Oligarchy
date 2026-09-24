@@ -4,7 +4,7 @@ One JSON object.
 
 - `reason` is why, in a few words.
 - `completes` is `true` or `false`. `true` ends the run and does not run the action. `false` runs it.
-- `action._tag` is the action: `send-keys`, `move`, `click`, `double-click`, `scroll`, `drag`, `hold`, `release`, `get-image`, `get-serial`, `start`, `stop`, `save`, `reserve`, `relinquish`, `follow`, `wait`.
+- `action._tag` is the action: `send-keys`, `move`, `click`, `double-click`, `scroll`, `drag`, `hold`, `release`, `get-image`, `get-serial`, `start`, `stop`, `save`, `reserve`, `relinquish`, `follow`, `update_screenshot`.
 
 You do not send the agent, the session, or the server.
 
@@ -38,6 +38,6 @@ Modifiers: `<C-c>` control, `<A-x>` alt, `<S-x>` shift, `<M-x>` meta. Combine th
 `stop` takes optional `status` (`succeeded`, `failed`, `aborted`, `completed`) and `reason`.
 `save`, `reserve`, `relinquish`, and `follow` take nothing.
 
-## wait
+## update_screenshot
 
-Waits 100 milliseconds, takes a screenshot, and the loop continues. It takes nothing.
+Goes to the next step. It takes nothing.

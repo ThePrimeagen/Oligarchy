@@ -664,120 +664,48 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect(
-    "a wait sleeps 100 milliseconds, screenshots beside the debug log, and the loop continues",
-    () =>
-      Effect.gen(function* () {
-        let calls = 0;
-        const recorder = FakeHttp.recordRequests(() => {
-          calls += 1;
-          return calls === 1 ? reply(false, "look again", { _tag: "wait" }) : stopped("done");
-        });
-        const log: Array<string> = [];
-        const spawner = FakeSpawner.fakeSpawner((_command, args) => {
-          if (args[0] === "intent" && args[1] === "start") {
-            return {};
-          }
-          return { exitCode: 0 };
-        });
-        const parsed = yield* config();
-        const fiber = yield* Loop.run({
-          model: MODEL,
-          definition: "Lock the screen.",
-          proof: "The lock screen is showing.",
-          testResultId: RESULT,
-          debugLog: LOG,
-          agentId: "OLI-1",
-          serverUrl: "http://127.0.0.1:9",
-          sessionId: SESSION,
-          config: parsed,
-          token: Redacted.make(TOKEN),
-        }).pipe(
-          Effect.provide(Layer.mergeAll(capturingFs(log), recorder.layer, spawner.layer)),
-          Effect.forkScoped,
-        );
-        const opened = yield* spawner.nextSpawn;
-        expect(opened.args[0]).toBe("intent");
-        expect(opened.args[1]).toBe("start");
-        expect(opened.args).toContain("look again");
-        yield* opened.exit(0);
-        for (let i = 0; i < 40; i++) {
-          if (log.some((line) => line.includes("intent") && line.includes("exit 0"))) {
-            break;
-          }
-          yield* Effect.yieldNow;
-        }
-        for (let i = 0; i < 10; i++) {
-          yield* Effect.yieldNow;
-        }
-        expect(spawner.spawned).toHaveLength(1);
-        yield* TestClock.adjust("99 millis");
-        expect(spawner.spawned).toHaveLength(1);
-        yield* TestClock.adjust("1 millis");
-        const shot = yield* spawner.nextSpawn;
-        expect(shot.command).toBe("./client");
-        expect(shot.args[0]).toBe("get-image");
-        expect(shot.args).toContain("-o");
-        expect(shot.args).toContain(`${LOG}.png`);
-        expect(shot.args).toContain("--session-id");
-        expect(shot.args).toContain(SESSION);
-        const ended = yield* spawner.nextSpawn;
-        expect(ended.args[0]).toBe("intent");
-        expect(ended.args[1]).toBe("end");
-        const outcome = yield* Fiber.join(fiber);
-        expect(outcome).toEqual({ reason: "model-stopped" });
-        const again = systemText(recorder.requests[1]?.body);
-        expect(again).toContain("This is step 2.");
-        expect(again).toContain(JSON.stringify(["look again"]));
-      }),
-  );
-
-  it.effect("a wait before a session is a refusal and does not sleep", () =>
+  it.effect("an update_screenshot runs nothing and the loop goes to the next step", () =>
     Effect.gen(function* () {
       let calls = 0;
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
-        return calls === 1 ? reply(false, "look again", { _tag: "wait" }) : stopped();
+        return calls === 1
+          ? reply(false, "look again", { _tag: "update_screenshot" })
+          : stopped("done");
       });
-      const seen: Array<string> = [];
       const { stopped: outcome, spawner } = yield* run(
         config(),
         recorder.layer,
-        (_command, args) => {
-          seen.push(args[0] ?? "");
-          return { exitCode: 0 };
-        },
+        () => ({ exitCode: 0 }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(spawner.spawned).toEqual([]);
+      const again = systemText(recorder.requests[1]?.body);
+      expect(again).toContain("This is step 2.");
+      expect(again).toContain(JSON.stringify(["look again"]));
+      expect(again).not.toContain(`${LOG}.png`);
+    }),
+  );
+
+  it.effect("an update_screenshot with no session still goes to the next step", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? reply(false, "look again", { _tag: "update_screenshot" }) : stopped();
+      });
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
         [],
         undefined,
         { id: undefined },
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
-      expect(seen).toEqual([]);
       expect(spawner.spawned).toEqual([]);
       expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["look again"]));
-    }),
-  );
-
-  it.effect("a wait whose intent start fails does not sleep or screenshot", () =>
-    Effect.gen(function* () {
-      let calls = 0;
-      const recorder = FakeHttp.recordRequests(() => {
-        calls += 1;
-        return calls === 1 ? reply(false, "look again", { _tag: "wait" }) : stopped("stopped");
-      });
-      const { spawner } = yield* run(
-        config(),
-        recorder.layer,
-        (_command, args) => {
-          expect(args[0]).toBe("intent");
-          expect(args[1]).toBe("start");
-          return { exitCode: 1, stderr: "Cannot start one intent when one's already running.\n" };
-        },
-        [],
-      );
-      expect(spawner.spawned.map((child) => child.args[0])).toEqual(["intent"]);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["look again"]));
-      expect(systemText(recorder.requests[1]?.body)).not.toContain(`${LOG}.png`);
     }),
   );
 

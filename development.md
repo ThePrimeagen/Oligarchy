@@ -469,9 +469,9 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   only then, and `routing <url>` from the driver's server. When that start exits 0 and prints a
   session id, the harness runs `./ctrl test start` with that id, the test result id, and the
   model, which marks the result running. Before a guest action (`send-keys`, `mouse`,
-  `get-image`, `get-serial`, `follow`, `wait`) it runs `./client intent start`, and `./client intent end`
-  after that command returns. A `wait` sleeps 100 milliseconds, then `./client get-image` writes
-  the PNG beside the debug log, and the loop continues. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest
+  `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and `./client intent end`
+  after that command returns. An `update_screenshot` runs nothing. The loop goes to the next step.
+  `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest
   actions. A `stop` or `save` that exits 0 is the harness closing the result, and the model is
   not called again. The OpenRouter token is `OPENROUTER_API_KEY`.
 

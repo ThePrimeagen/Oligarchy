@@ -21,8 +21,8 @@ describe("openrouter-driving-agent.html", () => {
       expect(text).toContain("completes is true");
       expect(text).toContain("reason is why");
       expect(text).toContain("When completes is true the action is not run");
-      expect(text).toContain("100 milliseconds");
-      expect(text).toContain("wait");
+      expect(text).toContain("update_screenshot");
+      expect(text).toContain("Goes to the next step");
       expect(text).toContain("fractions of the screenshot");
       expect(text).toContain("from 0 to 1");
       expect(text).toContain("send-keys");

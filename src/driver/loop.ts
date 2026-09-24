@@ -163,8 +163,11 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }
 
     turns = step;
-    // wait is a screenshot after 100ms, the same gap client-with-image leaves for the guest to paint.
-    const waiting = reply.action._tag === "wait";
+    // The action runs nothing. The loop goes to the next step.
+    if (reply.action._tag === "update_screenshot") {
+      reasons.push(reply.reason);
+      continue;
+    }
     const planned = Reply.command(reply.action, {
       agentId: input.agentId,
       serverUrl: input.serverUrl,
@@ -175,10 +178,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       reasons.push(reply.reason);
       continue;
     }
-    const screenshot = `${input.debugLog}.png`;
-    const command = waiting
-      ? { bin: planned.success.bin, args: [...planned.success.args, "-o", screenshot] }
-      : planned.success;
+    const command = planned.success;
 
     if (command.args[0] === "start") {
       const routing = Intent.flag(command.args, "server-url");
@@ -251,9 +251,6 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       }
       // A spawn or log failure still has to close the intent this start opened.
       const closeIntent = runCommand(bracketed.success.end).pipe(Effect.ignore);
-      if (waiting) {
-        yield* Effect.sleep("100 millis");
-      }
       const ran = yield* runCommand(command).pipe(Effect.tapError(() => closeIntent));
       yield* log(
         input.debugLog,

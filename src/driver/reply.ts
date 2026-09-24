@@ -62,8 +62,8 @@ export const Action = Schema.TaggedUnion({
   reserve: {},
   relinquish: {},
   follow: {},
-  // The loop waits 100ms and writes the screenshot. This is that screenshot's command.
-  wait: {},
+  // Not a client command. The loop goes to the next step.
+  update_screenshot: {},
 }).annotate({ identifier: "@oligarchy/driver/reply/Action" });
 export type Action = typeof Action.Type;
 
@@ -144,6 +144,9 @@ export const command = (
   action: Action,
   connection: Connection,
 ): Result.Result<Tools.CommandLine, Errors.ToolError> => {
+  if (action._tag === "update_screenshot") {
+    return fail("client: update_screenshot is not a command");
+  }
   const sessionId = connection.sessionId;
   if (needsSession(action) && sessionId === undefined) {
     return fail("client: this action needs a session");
@@ -231,7 +234,7 @@ export const command = (
     reserve: () => ["reserve", ...shared],
     relinquish: () => ["relinquish", ...shared],
     follow: () => ["follow", ...shared],
-    wait: () => ["get-image", ...shared],
+    update_screenshot: () => [],
   });
   return Result.succeed({ bin: "./client", args });
 };
