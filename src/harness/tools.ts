@@ -7,7 +7,7 @@ import * as Errors from "../shared/errors.ts";
 // definition, read here so a new command is not copied into this module.
 // Intent, and marking a result started or completed, are the harness's. The
 // model is not given ./ctrl.
-const guide = readFileSync(new URL("../../client.md", import.meta.url), "utf8");
+export const clientGuide = readFileSync(new URL("../../client.md", import.meta.url), "utf8");
 
 export type CommandLine = {
   readonly bin: "./client" | "./client-with-image";
@@ -67,7 +67,7 @@ const parameters: ToolParameters = {
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     type: "function",
-    function: { name: "client", description: guide, parameters },
+    function: { name: "client", description: clientGuide, parameters },
   },
 ];
 

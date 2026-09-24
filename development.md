@@ -453,18 +453,21 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   retries an HTTP 429 or 5xx only when `retry-after` fits inside the run ceiling. A missing or
   malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`. A refused
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
-- `./driver` runs that loop for one prompt and one model. It runs each command the model asks
-  for, appends one JSON line to `--debug-log` per step (the loop counter and the step), and exits
-  0 only when the model stopped calling tools or the harness closed the result. An OpenRouter
-  failure, the step limit, or the run ceiling exits 1 and the reason is the failure. A `start` is
-  the model's command, including `--resume` and `--server-url` when it passed them; the log names
-  `resume` and `routing <url>` only then. When that start exits 0 and prints a session id, the
-  harness runs `./ctrl test start` with that id, the test result id, and the model, which marks
-  the result running. Before a guest action (`send-keys`, `mouse`, `get-image`, `get-serial`,
-  `follow`) it runs `./client intent start`, and `./client intent end` after that command returns.
-  `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A `stop` or `save`
-  that exits 0 is the harness closing the result, and the model is not called again. The OpenRouter
-  token is `OPENROUTER_API_KEY`.
+- `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
+  the `OpenRouterDrivingAgent` prompt, the task, and the decisions so far, one line each. The
+  reply is three lines: `complete` or `continue`, what the agent did in a few words, and the
+  action. `continue` runs that action; `complete` records the action taken and does not run it
+  again. It appends one JSON line to `--debug-log` per step (the loop counter and the step), and
+  exits 0 only when the reply is `complete` or the harness closed the result. An OpenRouter
+  failure, a reply that is not those three lines, the step limit, or the run ceiling exits 1 and
+  the reason is the failure. A `start` is the model's command, including `--resume` and
+  `--server-url` when it passed them; the log names `resume` and `routing <url>` only then. When
+  that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
+  the test result id, and the model, which marks the result running. Before a guest action
+  (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and
+  `./client intent end` after that command returns. `start`, `reserve`, `relinquish`, `stop`, and
+  `save` are not guest actions. A `stop` or `save` that exits 0 is the harness closing the result,
+  and the model is not called again. The OpenRouter token is `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 

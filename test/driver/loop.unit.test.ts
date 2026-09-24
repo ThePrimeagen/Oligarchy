@@ -46,79 +46,33 @@ const sse = (frames: ReadonlyArray<string>): Response =>
     headers: { "content-type": "text/event-stream" },
   });
 
-const toolCall = (id: string, argumentsText: string, content: string | null): Response =>
+const speak = (status: "continue" | "complete", did: string, action: string): Response =>
   sse([
     frame({
-      choices: [
-        {
-          delta: {
-            content,
-            tool_calls: [
-              {
-                index: 0,
-                id,
-                type: "function",
-                function: { name: "client", arguments: argumentsText },
-              },
-            ],
-          },
-          finish_reason: null,
-        },
-      ],
+      choices: [{ delta: { content: `${status}\n${did}\n${action}` }, finish_reason: null }],
     }),
-    frame({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
-    "[DONE]",
-  ]);
-
-const stopped = (content: string): Response =>
-  sse([
-    frame({ choices: [{ delta: { content }, finish_reason: null }] }),
     frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
     "[DONE]",
   ]);
 
-const sendKeys = (content: string | null = "lock the screen") =>
-  toolCall(
-    "keys",
-    JSON.stringify({
-      args: [
-        "send-keys",
-        "--agent-id",
-        "OLI-1",
-        "--session-id",
-        SESSION,
-        "--server-url",
-        "http://127.0.0.1:9",
-        "--keys",
-        "a",
-      ],
-    }),
-    content,
+const stopped = (content: string): Response => speak("complete", content, "done");
+
+const sendKeys = (did: string | null = "lock the screen") =>
+  speak(
+    "continue",
+    did ?? "send-keys",
+    `send-keys --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --keys a`,
   );
 
-const start = () =>
-  toolCall("boot", JSON.stringify({ args: ["start", "--agent-id", "OLI-1"] }), null);
+const start = () => speak("continue", "boot", "start --agent-id OLI-1");
 
 const resumed = () =>
-  toolCall(
-    "boot",
-    JSON.stringify({
-      args: ["start", "--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9", "--resume"],
-    }),
-    null,
-  );
+  speak("continue", "boot", "start --agent-id OLI-1 --server-url http://127.0.0.1:9 --resume");
 
 const stop = () =>
-  toolCall(
-    "halt",
-    JSON.stringify({
-      args: ["stop", "--agent-id", "OLI-1", "--session-id", SESSION, "--status", "succeeded"],
-    }),
-    null,
-  );
+  speak("continue", "halt", `stop --agent-id OLI-1 --session-id ${SESSION} --status succeeded`);
 
-const intentCall = () =>
-  toolCall("bad", JSON.stringify({ args: ["intent", "start", "--message", "lock"] }), null);
+const intentCall = () => speak("continue", "bad", "intent start --message lock");
 
 type Script = FakeSpawner.Script;
 
@@ -143,13 +97,13 @@ const events = (log: ReadonlyArray<string>): ReadonlyArray<DriverLog.Event> =>
 const fields = (value: unknown): value is { readonly [key: string]: unknown } =>
   typeof value === "object" && value !== null;
 
-const toolText = (body: string | undefined): string => {
+const userText = (body: string | undefined): string => {
   const value: unknown = JSON.parse(body ?? "{}");
   if (!fields(value) || !Array.isArray(value.messages)) {
     return "";
   }
   for (const message of value.messages) {
-    if (!fields(message) || message.role !== "tool" || typeof message.content !== "string") {
+    if (!fields(message) || message.role !== "user" || typeof message.content !== "string") {
       continue;
     }
     return message.content;
@@ -233,13 +187,18 @@ describe("driver loop", () => {
         expect(first?.headers.authorization).toBe(`Bearer ${TOKEN}`);
         expect(JSON.parse(first?.body ?? "{}")).toMatchObject({
           model: MODEL,
-          tools: [{ function: { name: "client" } }],
+          tools: [],
           messages: [
-            { content: expect.stringContaining("intent") },
-            { content: "Lock the screen." },
+            { role: "system", content: expect.stringContaining("./client start") },
+            { role: "user", content: "Lock the screen." },
           ],
         });
-        expect(toolText(recorder.requests[1]?.body)).toBe("typed\n");
+        const again = userText(recorder.requests[1]?.body);
+        expect(again).toContain("Lock the screen.");
+        expect(again).toContain("lock the screen: typed");
+        expect(JSON.parse(recorder.requests[1]?.body ?? "{}")).toMatchObject({
+          messages: [{ role: "system" }, { role: "user" }],
+        });
 
         const kinds = events(log).map((event) => event.kind);
         expect(kinds).toContain("request");
@@ -294,7 +253,7 @@ describe("driver loop", () => {
         kind: "running",
         text: SESSION,
       });
-      expect(toolText(recorder.requests[1]?.body)).toBe(`${SESSION}\n`);
+      expect(userText(recorder.requests[1]?.body)).toContain(SESSION);
     }),
   );
 
@@ -341,7 +300,7 @@ describe("driver loop", () => {
       );
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
       expect(events(log).some((event) => event.kind === "running")).toBe(false);
-      expect(toolText(recorder.requests[1]?.body)).toContain("no reservation");
+      expect(userText(recorder.requests[1]?.body)).toContain("no reservation");
     }),
   );
 
@@ -366,8 +325,8 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client", "./ctrl"]);
-      expect(toolText(recorder.requests[1]?.body)).toContain(SESSION);
-      expect(toolText(recorder.requests[1]?.body)).toContain("not pending");
+      expect(userText(recorder.requests[1]?.body)).toContain(SESSION);
+      expect(userText(recorder.requests[1]?.body)).toContain("not pending");
       expect(events(log).find((event) => event.kind === "running")?.text).toBe(SESSION);
     }),
   );
@@ -392,8 +351,8 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
-      expect(toolText(recorder.requests[1]?.body)).toContain("./ctrl");
-      expect(toolText(recorder.requests[1]?.body)).toContain("ENOENT");
+      expect(userText(recorder.requests[1]?.body)).toContain("./ctrl");
+      expect(userText(recorder.requests[1]?.body)).toContain("ENOENT");
     }),
   );
 
@@ -408,7 +367,7 @@ describe("driver loop", () => {
       const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
       expect(spawner.spawned).toEqual([]);
       expect(events(log).some((event) => event.kind === "refusal")).toBe(true);
-      expect(toolText(recorder.requests[1]?.body)).toContain("intent");
+      expect(userText(recorder.requests[1]?.body)).toContain("intent");
     }),
   );
 
@@ -451,8 +410,8 @@ describe("driver loop", () => {
         log,
       );
       expect(spawner.spawned).toHaveLength(1);
-      expect(toolText(recorder.requests[1]?.body)).toContain("already running");
-      expect(toolText(recorder.requests[1]?.body)).not.toContain("typed");
+      expect(userText(recorder.requests[1]?.body)).toContain("already running");
+      expect(userText(recorder.requests[1]?.body)).not.toContain("typed");
     }),
   );
 
@@ -508,8 +467,44 @@ describe("driver loop", () => {
         "send-keys",
         "intent",
       ]);
-      expect(toolText(recorder.requests[1]?.body)).toContain("typed");
-      expect(toolText(recorder.requests[1]?.body)).toContain("no intent open");
+      expect(userText(recorder.requests[1]?.body)).toContain("typed");
+      expect(userText(recorder.requests[1]?.body)).toContain("no intent open");
+    }),
+  );
+
+  it.effect("a long command output is clipped in the next ask", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? start() : stopped("done");
+      });
+      yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0, stdout: `${"x".repeat(2_000)}\n` }),
+        [],
+      );
+      const again = userText(recorder.requests[1]?.body);
+      expect(again).toContain("x".repeat(100));
+      expect(again).not.toContain("x".repeat(501));
+    }),
+  );
+
+  it.effect("a reply that is not three lines fails the loop and runs nothing", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        sse([
+          frame({ choices: [{ delta: { content: "hello" }, finish_reason: null }] }),
+          frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+          "[DONE]",
+        ]),
+      );
+      const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), []));
+      expect(error._tag).toBe("CommandError");
+      if (error._tag === "CommandError") {
+        expect(error.message).toContain("3");
+      }
     }),
   );
 
