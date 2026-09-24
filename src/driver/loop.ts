@@ -8,6 +8,7 @@ import * as Tools from "../harness/tools.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
+import * as Client from "./client.ts";
 import * as Log from "./log.ts";
 import * as Prompt from "./prompt.ts";
 import * as Reply from "./reply.ts";
@@ -199,7 +200,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         ...(routing === undefined ? [] : [`routing ${routing}`]),
       ].join(" ");
       yield* log(input.debugLog, step, "start", noted);
-      const started = yield* runCommand(command);
+      const started = yield* Client.run(command);
       yield* log(
         input.debugLog,
         step,
@@ -252,7 +253,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
 
     if (bracketed.success._tag === "guest") {
       yield* log(input.debugLog, step, "intent", message);
-      const opened = yield* runCommand(bracketed.success.start);
+      const opened = yield* Client.run(bracketed.success.start);
       yield* log(
         input.debugLog,
         step,
@@ -263,16 +264,16 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         decisions.push(decision(reply.did, Tools.toolContent(opened)));
         continue;
       }
-      // A spawn or log failure still has to close the intent this start opened.
-      const closeIntent = runCommand(bracketed.success.end).pipe(Effect.ignore);
-      const ran = yield* runCommand(command).pipe(Effect.tapError(() => closeIntent));
+      // A log failure still has to close the intent this start opened.
+      const closeIntent = Client.run(bracketed.success.end).pipe(Effect.ignore);
+      const ran = yield* Client.run(command);
       yield* log(
         input.debugLog,
         step,
         "command",
         `${shown(command)} exit ${String(ran.exitCode)}`,
       ).pipe(Effect.tapError(() => closeIntent));
-      const ended = yield* runCommand(bracketed.success.end);
+      const ended = yield* Client.run(bracketed.success.end);
       yield* log(
         input.debugLog,
         step,
@@ -287,7 +288,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       continue;
     }
 
-    const ran = yield* runCommand(command);
+    const ran = yield* Client.run(command);
     yield* log(input.debugLog, step, "command", `${shown(command)} exit ${String(ran.exitCode)}`);
     if (Intent.closesResult(command, ran.exitCode)) {
       yield* log(input.debugLog, step, "stop", "result-closed");
