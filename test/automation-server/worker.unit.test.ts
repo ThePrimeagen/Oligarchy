@@ -37,6 +37,7 @@ const TICKET = "OLI-42";
 const TICKET_B = "OLI-43";
 const RESULT_ID = "22222222-2222-4222-8222-222222222222";
 const RESULT_B = "33333333-3333-4333-8333-333333333333";
+const SESSION_ID = "66666666-6666-4666-8666-666666666666";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
 const STATS = {
@@ -147,10 +148,16 @@ const reserving =
 const erroredMoves = (linear: FakeLinear.FakeLinear) =>
   linear.calls.filter((call) => call.method === "moveToErrored");
 
+const verdictMoves = (linear: FakeLinear.FakeLinear) =>
+  linear.calls.filter(
+    (call) => call.method === "moveToFailed" || call.method === "moveToSucceeded",
+  );
+
 type Harness = {
   readonly automation: Stores.FakeAutomationStore;
   readonly servers: Stores.FakeServerStore;
   readonly sessions: Stores.FakeSessionStore;
+  readonly diagnosis: Stores.FakeDiagnosisStore;
   readonly tests: Stores.FakeTestStore;
   readonly log: FakeLog.FakeLog;
   readonly linear: FakeLinear.FakeLinear;
@@ -164,11 +171,33 @@ const harness = (
   automation,
   servers: Stores.fakeServerStore(),
   sessions: Stores.fakeSessionStore(),
+  diagnosis: Stores.fakeDiagnosisStore(),
   tests: Stores.fakeTestStore(),
   log: FakeLog.fakeLog(),
   linear,
   pins: new Map(),
 });
+
+// The diagnosing agent writes this during /run, on the drive's session, before the job closes.
+const seedVerdict = (
+  fixed: Harness,
+  verdict: "passed" | "failed",
+  resultId = RESULT_ID,
+  sessionId = SESSION_ID,
+) => {
+  const result = fixed.tests.results.find((row) => row.id === resultId);
+  if (result !== undefined) {
+    result.sessionId = sessionId;
+  }
+  fixed.diagnosis.diagnoses.push({
+    sessionId,
+    verdict,
+    errorType: verdict === "failed" ? "guest-crash" : null,
+    summary: "the proof",
+    model: MODEL,
+    createdAt: new Date(),
+  });
+};
 
 const cleared = (identifier: string) => ({ method: "clearReady" as const, identifier });
 
@@ -201,6 +230,7 @@ const layers = (
     fixed.automation.layer,
     fixed.servers.layer,
     fixed.sessions.layer,
+    fixed.diagnosis.layer,
     fixed.tests.layer,
     fixed.log.layer,
     fixed.linear.layer,
@@ -406,8 +436,10 @@ describe("dispatch happy path", () => {
           `dispatching drive; ${URL}; ${MODEL}`,
           "drive completed",
         ]);
-        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+        expect(fixed.linear.calls).toEqual([
+          { method: "moveToInProgress", identifier: TICKET },
           cleared(TICKET),
+          { method: "moveToNeedsReview", identifier: TICKET },
         ]);
         expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       }),
@@ -423,6 +455,11 @@ describe("dispatch happy path", () => {
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs[0]?.status).toBe("completed");
+      expect(fixed.linear.calls).toEqual([
+        { method: "moveToInProgress", identifier: TICKET },
+        cleared(TICKET),
+        { method: "moveToNeedsReview", identifier: TICKET },
+      ]);
     }),
   );
 
@@ -430,6 +467,7 @@ describe("dispatch happy path", () => {
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
+      seedVerdict(fixed, "passed");
       seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
@@ -452,6 +490,10 @@ describe("dispatch happy path", () => {
       ]);
       expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
       expect(fixed.linear.calls.filter((call) => call.method === "moveToInProgress")).toEqual([]);
+      expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual([]);
+      expect(verdictMoves(fixed.linear)).toEqual([
+        { method: "moveToSucceeded", identifier: TICKET },
+      ]);
     }),
   );
 
@@ -763,6 +805,240 @@ describe("dispatch happy path", () => {
   });
 });
 
+describe("the harness closes the board", () => {
+  it.effect("a mint that ran to its end moves the ticket to Needs Review", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "mint");
+      fixed.pins.set(RESULT_ID, "http://127.0.0.1:55332");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        action: "mint",
+        status: "completed",
+        reason: null,
+      });
+      expect(fixed.linear.calls).toEqual([
+        { method: "moveToInProgress", identifier: TICKET },
+        cleared(TICKET),
+        { method: "moveToNeedsReview", identifier: TICKET },
+      ]);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        `dispatching mint; ${URL}; ${MODEL}`,
+        "mint completed",
+      ]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a Needs Review move that fails three times leaves the job completed and reports the failure (unhappy)",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "stateIds",
+        message: "linear: no state named Needs Review",
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToNeedsReview: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "completed");
+        yield* eventually(() => attempts === 3, "three Needs Review attempts");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: "move to Needs Review failed: linear: no state named Needs Review",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
+      });
+    },
+  );
+
+  it.effect("a finished drive with no ticket is completed and not moved (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, null, "passed");
+      seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+      yield* start(fixed, FakeHttp.die);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
+      expect(fixed.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("a diagnose whose verdict is failed moves the ticket to Failed", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedVerdict(fixed, "failed");
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs[0]).toMatchObject({ action: "diagnose", status: "succeeded" });
+      expect(verdictMoves(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+      expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual([]);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        `dispatching diagnose; ${URL}; ${MODEL}`,
+        "diagnose succeeded",
+      ]);
+    }),
+  );
+
+  it.effect("a diagnose with no session logs the missing verdict and does not move (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* eventually(
+        () => FakeLog.texts(fixed.log).some((text) => text.startsWith("diagnose verdict")),
+        "the missing verdict",
+      );
+      expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+      expect(verdictMoves(fixed.linear)).toEqual([]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `diagnose verdict missing; ${RESULT_ID}`,
+          agentId: TICKET,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("a diagnose whose session has no verdict logs that and does not move (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      const result = fixed.tests.results[0];
+      if (result !== undefined) {
+        result.sessionId = SESSION_ID;
+      }
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* eventually(
+        () => FakeLog.texts(fixed.log).some((text) => text.startsWith("diagnose verdict")),
+        "the missing verdict",
+      );
+      expect(verdictMoves(fixed.linear)).toEqual([]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `diagnose verdict missing; ${SESSION_ID}`,
+          agentId: TICKET,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a diagnosis read that fails three times leaves the job succeeded and does not move (unhappy)",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "getDiagnosis",
+        message: "Failed query: getDiagnosis",
+        cause: new Error("connection reset"),
+      });
+      let reads = 0;
+      const diagnosis = Stores.fakeDiagnosisStore({
+        getDiagnosis: () =>
+          Effect.sync(() => {
+            reads += 1;
+          }).pipe(Effect.andThen(Effect.fail(failure))),
+      });
+      return Effect.gen(function* () {
+        const fixed = { ...harness(), diagnosis };
+        seedResult(fixed.tests, TICKET, "failed");
+        const result = fixed.tests.results[0];
+        if (result !== undefined) {
+          result.sessionId = SESSION_ID;
+        }
+        seedDiagnose(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* eventually(() => reads === 3, "three diagnosis reads");
+        expect(reads).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+        expect(verdictMoves(fixed.linear)).toEqual([]);
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `diagnose verdict read failed; ${SESSION_ID}: connection reset`,
+            agentId: TICKET,
+            cause: failure,
+          }),
+        ]);
+      });
+    },
+  );
+
+  it.effect(
+    "a move to Succeeded that fails three times leaves the job succeeded and reports the failure (unhappy)",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "moveToSucceeded",
+        message: `linear: moving ${TICKET} to Succeeded failed`,
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToSucceeded: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests, TICKET, "passed");
+        seedVerdict(fixed, "passed");
+        seedDiagnose(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* eventually(() => attempts === 3, "three Succeeded attempts");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `move to Succeeded failed: linear: moving ${TICKET} to Succeeded failed`,
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
+      });
+    },
+  );
+});
+
 describe("a drive that returns with its result still open", () => {
   it.effect(
     "running: the job and the result are errored with the reason, and the ticket moves to Errored",
@@ -789,6 +1065,9 @@ describe("a drive that returns with its result still open", () => {
         expect(erroredMoves(fixed.linear)).toEqual([
           { method: "moveToErrored", identifier: TICKET, message: `drive errored; ${reason}` },
         ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual(
+          [],
+        );
       }),
   );
 
@@ -1033,6 +1312,7 @@ describe("a diagnose is dispatched only after its drive completed", () => {
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
+      seedVerdict(fixed, "passed");
       seedJob(fixed.automation, "diagnose");
       seedJob(fixed.automation, "drive");
       seedLiveClient(fixed.servers);
@@ -1181,6 +1461,7 @@ describe("dispatch unhappy path", () => {
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests, TICKET, "failed");
+      seedVerdict(fixed, "failed");
       seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(
@@ -1193,6 +1474,7 @@ describe("dispatch unhappy path", () => {
       expect(erroredMoves(fixed.linear)).toEqual([
         { method: "moveToErrored", identifier: TICKET, message: `diagnose errored; ${reason}` },
       ]);
+      expect(verdictMoves(fixed.linear)).toEqual([]);
     }),
   );
 
@@ -2383,13 +2665,14 @@ describe("a running job left by the last automation server", () => {
           },
           { method: "moveToInProgress", identifier: TICKET_B },
           cleared(TICKET_B),
+          { method: "moveToNeedsReview", identifier: TICKET_B },
         ]);
         expect(FakeLog.texts(fixed.log)).toContain(`drive errored; ${RESTARTED}`);
       }),
   );
 
   it.effect(
-    "a drive or mint whose result the driver closed has finished: it is closed completed, and nothing is sent, moved, or reported",
+    "a drive or mint whose result the driver closed has finished: it is closed completed, moved to Needs Review, and nothing is sent or reported",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -2438,10 +2721,14 @@ describe("a running job left by the last automation server", () => {
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
+          { method: "moveToNeedsReview", identifier: TICKET },
           cleared(TICKET_B),
+          { method: "moveToNeedsReview", identifier: TICKET_B },
           cleared("OLI-44"),
+          { method: "moveToNeedsReview", identifier: "OLI-44" },
           { method: "moveToInProgress", identifier: "OLI-45" },
           cleared("OLI-45"),
+          { method: "moveToNeedsReview", identifier: "OLI-45" },
         ]);
         expect(sentryErrors(fixed.log)).toEqual([]);
         expect(FakeLog.texts(fixed.log)).toEqual(

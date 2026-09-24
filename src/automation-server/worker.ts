@@ -1,6 +1,7 @@
 import { Cause, Effect, Option, Result, Schedule, Schema, Scope } from "effect";
 import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
+import * as Diagnosis from "../db/diagnosis.ts";
 import * as Servers from "../db/servers.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
@@ -312,6 +313,63 @@ const reportErrored = Effect.fn("reportErrored")(function* (
   );
 });
 
+// Three attempts, then a line. The job is already closed; a board that will not move does not
+// reopen it.
+const moveTicket = Effect.fn("moveTicket")(function* (
+  ticket: string,
+  column: string,
+  move: Effect.Effect<void, Errors.LinearError>,
+) {
+  const log = yield* Log.Log;
+  yield* move.pipe(
+    Effect.retry(Schedule.recurs(2)),
+    Effect.catchTag("LinearError", (error) =>
+      log.error(`move to ${column} failed: ${detail(error)}`, {
+        location: Log.Locations.automation,
+        agentId: ticket,
+        cause: error,
+      }),
+    ),
+  );
+});
+
+// The diagnosing agent writes the verdict on the drive's session before it exits. Passed is
+// Succeeded and failed is Failed. No session, no row, or a read that will not land is a line:
+// guessing a column would be a lie, and the job is already succeeded.
+const reportDiagnosis = Effect.fn("reportDiagnosis")(function* (
+  job: Automation.AutomationJobRow,
+  ticket: string,
+  sessionId: string | null,
+) {
+  const log = yield* Log.Log;
+  const attr = { location: Log.Locations.automation, agentId: ticket };
+  if (sessionId === null) {
+    yield* log.error(`diagnose verdict missing; ${job.resultId}`, attr);
+    return;
+  }
+  const diagnosis = yield* Diagnosis.DiagnosisStore;
+  const read = yield* diagnosis
+    .getDiagnosis(sessionId)
+    .pipe(Effect.retry(Schedule.recurs(2)), Effect.result);
+  if (Result.isFailure(read)) {
+    yield* log.error(`diagnose verdict read failed; ${sessionId}: ${detail(read.failure)}`, {
+      ...attr,
+      cause: read.failure,
+    });
+    return;
+  }
+  if (Option.isNone(read.success)) {
+    yield* log.error(`diagnose verdict missing; ${sessionId}`, attr);
+    return;
+  }
+  const linear = yield* Linear.Linear;
+  if (read.success.value.verdict === "passed") {
+    yield* moveTicket(ticket, Linear.SUCCEEDED_STATE, linear.moveToSucceeded(ticket));
+    return;
+  }
+  yield* moveTicket(ticket, Linear.FAILED_STATE, linear.moveToFailed(ticket));
+});
+
 // True when this call closed the row. Three attempts at the write; a row that still will not
 // close stays running for an operator to mark, and the line names the status it should have.
 const closeJob = Effect.fn("closeJob")(function* (
@@ -345,6 +403,17 @@ const closeJob = Effect.fn("closeJob")(function* (
   }
   if (outcome.status === "errored") {
     yield* reportErrored(job, ticket, outcome.reason);
+  }
+  // The harness owns both halves. A drive or mint that completed goes to Needs Review. A
+  // diagnose that succeeded goes to Succeeded or Failed from the verdict. Errored already
+  // went to Errored, and aborted stays where it was.
+  if (ticket !== null && outcome.status === "completed") {
+    const linear = yield* Linear.Linear;
+    yield* moveTicket(ticket, Linear.NEEDS_REVIEW_STATE, linear.moveToNeedsReview(ticket));
+  }
+  if (ticket !== null && outcome.status === "succeeded" && job.action === "diagnose") {
+    const sessionId = Option.isSome(result) ? result.value.sessionId : null;
+    yield* reportDiagnosis(job, ticket, sessionId);
   }
   return true;
 });

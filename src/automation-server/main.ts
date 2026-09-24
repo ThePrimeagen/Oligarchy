@@ -12,6 +12,7 @@ import * as Config from "../config.ts";
 import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
+import * as Diagnosis from "../db/diagnosis.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
 import * as Sessions from "../db/sessions.ts";
@@ -98,6 +99,7 @@ const MainLive = Layer.mergeAll(
   Automation.AutomationStore.layer,
   Servers.ServerStore.layer,
   Sessions.SessionStore.layer,
+  Diagnosis.DiagnosisStore.layer,
   SetupRequests.SetupRequestStore.layer,
   LinearLive,
 ).pipe(

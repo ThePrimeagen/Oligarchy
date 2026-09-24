@@ -29,6 +29,11 @@ export const NEEDS_REVIEW_STATE = "Needs Review";
 export const IN_PROGRESS_STATE = "In Progress";
 // Where the automation server puts a ticket the system failed, with a comment saying how.
 export const ERRORED_STATE = "Errored";
+// A diagnose's verdict is a column, not a job status. Failed is the diagnosis that did not
+// land; Succeeded is the one that did. Looked up by name, like Errored, so filing a ticket
+// does not require the column to exist.
+export const FAILED_STATE = "Failed";
+export const SUCCEEDED_STATE = "Succeeded";
 // A ticket in Automation Needed that already has its pending job. The watch's list leaves
 // these out, so a restart does not keep a map of tickets that are waiting to run.
 export const READY_LABEL = "ready";
@@ -210,6 +215,10 @@ export type LinearService = {
     message: string,
   ) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToInProgress: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  // The close half of the board. No comment rides along: the column is the record.
+  readonly moveToNeedsReview: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToSucceeded: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -416,6 +425,36 @@ const makeLinear = (
       );
     });
 
+    // Looked up on their own, not in stateIds: `test run` and `mint` must not need the columns
+    // the automation server closes onto.
+    const moveByName = (
+      operation: "moveToNeedsReview" | "moveToFailed" | "moveToSucceeded",
+      stateName: string,
+    ) =>
+      Effect.fn(`Linear.${operation}`)(function* (identifier: string) {
+        const team = yield* teamId;
+        const stateId = yield* stateNamed(team, stateName);
+        yield* request(
+          operation,
+          ISSUE_UPDATE_MUTATION,
+          { id: identifier, input: { stateId } },
+          IssueUpdate,
+        ).pipe(
+          Effect.filterOrFail(
+            (updated) => updated.issueUpdate.success,
+            () =>
+              Errors.LinearError.make({
+                operation,
+                message: `linear: moving ${identifier} to ${stateName} failed`,
+              }),
+          ),
+        );
+      });
+
+    const moveToNeedsReview = moveByName("moveToNeedsReview", NEEDS_REVIEW_STATE);
+    const moveToFailed = moveByName("moveToFailed", FAILED_STATE);
+    const moveToSucceeded = moveByName("moveToSucceeded", SUCCEEDED_STATE);
+
     // Looked up on its own, not in stateIds: `test run` and `mint` must not need an Errored
     // column.
     const moveToErrored = Effect.fn("Linear.moveToErrored")(function* (
@@ -594,6 +633,9 @@ const makeLinear = (
       clearReady,
       moveToErrored,
       moveToInProgress,
+      moveToNeedsReview,
+      moveToFailed,
+      moveToSucceeded,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,
