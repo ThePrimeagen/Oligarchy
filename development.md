@@ -104,8 +104,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 
 ## Layout
 
-- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./client-with-image`,
-  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
+- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./ctrl`,
+  `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
   fleet starters (`./start-server-proxy-client <max-jobs>` runs the proxy on `:55555` and one qemu
   server; `./start-automation-server-client <max-jobs> [model]` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
@@ -466,8 +466,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the test result id, and the model, which marks the result running. The action itself is the
   client command's handlers, called in this process. Before a guest action (`send-keys`, `mouse`,
   `get-image`, `get-serial`, `follow`) the driver calls `intent start`, and `intent end` after the
-  action returns. `./client-with-image` is that action and then `get-image`. `start`, `reserve`,
-  `relinquish`, `stop`, and `save` are not guest actions. A `stop` or `save` that exits 0 is the
+  action returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A `stop` or `save` that exits 0 is the
   harness closing the result, and the model is not called again. The OpenRouter token is
   `OPENROUTER_API_KEY`.
 

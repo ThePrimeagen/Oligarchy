@@ -4,35 +4,34 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 31 |
-| [Synopsis](#synopsis) | 37 |
-| [client-with-image](#client-with-image) | 69 |
-| [start](#start) | 86 |
-| [reserve](#reserve) | 108 |
-| [relinquish](#relinquish) | 121 |
-| [get-image](#get-image) | 133 |
-| [get-serial](#get-serial) | 148 |
-| [send-keys](#send-keys) | 163 |
-| [mouse move](#mouse-move) | 179 |
-| [mouse click](#mouse-click) | 194 |
-| [mouse double-click](#mouse-double-click) | 213 |
-| [mouse scroll](#mouse-scroll) | 225 |
-| [mouse drag](#mouse-drag) | 242 |
-| [mouse hold](#mouse-hold) | 260 |
-| [mouse release](#mouse-release) | 276 |
-| [intent start](#intent-start) | 292 |
-| [intent end](#intent-end) | 308 |
-| [stop](#stop) | 322 |
-| [save](#save) | 338 |
-| [Keys](#keys) | 354 |
-| [Mouse](#mouse) | 366 |
-| [The loop](#the-loop) | 376 |
+| [Important](#important) | 30 |
+| [Synopsis](#synopsis) | 36 |
+| [start](#start) | 69 |
+| [reserve](#reserve) | 91 |
+| [relinquish](#relinquish) | 104 |
+| [get-image](#get-image) | 116 |
+| [get-serial](#get-serial) | 131 |
+| [send-keys](#send-keys) | 146 |
+| [mouse move](#mouse-move) | 162 |
+| [mouse click](#mouse-click) | 177 |
+| [mouse double-click](#mouse-double-click) | 196 |
+| [mouse scroll](#mouse-scroll) | 208 |
+| [mouse drag](#mouse-drag) | 225 |
+| [mouse hold](#mouse-hold) | 243 |
+| [mouse release](#mouse-release) | 259 |
+| [intent start](#intent-start) | 275 |
+| [intent end](#intent-end) | 291 |
+| [stop](#stop) | 305 |
+| [save](#save) | 321 |
+| [Keys](#keys) | 337 |
+| [Mouse](#mouse) | 349 |
+| [The loop](#the-loop) | 359 |
 
 ## Important
 
 If you are the client, or an agent driving the client: do not look at code. Only use the client. Never consider the code, never read the code, never have opinions about the code. Run the client and do the task that was given — specified in Linear, or given to you manually.
 
-`./client` drives the guest. `./client-with-image` is the same action plus a screenshot to `CLIENT_IMAGE`. Recording the test result is `./ctrl`, described in its own guide.
+`./client` drives the guest. A screenshot is `./client get-image`. Recording the test result is `./ctrl`, described in its own guide.
 
 ## Synopsis
 
@@ -66,23 +65,6 @@ The action comes first. Every value is a flag; there are no positional arguments
 - `--env-file <path>` — optional, on every action. Also read this file. A variable already in the environment wins; this file fills what is still unset; `.env` fills what both lack. A driving agent does not pass it.
 
 `start` prints a session id; every action on the machine takes it as `--session-id`, and `reserve` and `relinquish`, which are about the agent and not a machine, take none. A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./client <action> --help` prints that action's flags. If no command arrives for ten minutes, the qemu server kills the session.
-
-## client-with-image
-
-```
-./client-with-image <action> --agent-id <agent> [--server-url <url>] ...
-```
-
-The same arguments as `./client`, then a screenshot. Prefer this over calling `./client` and `./client get-image` as two steps.
-
-- `CLIENT_IMAGE` — the PNG path. Required. Missing means exit 1, `CLIENT_IMAGE is not set`.
-- After the action succeeds, waits 100 ms, then writes the guest display to `CLIENT_IMAGE`.
-- The action's stdout is unchanged (`start` still prints the session id). `--session-id` comes from the flags, or from that printed id.
-- A failed action does not take a screenshot. `stop` and `save` do not either: the session is already gone. Nor does `relinquish`: whatever it held is gone.
-
-```bash
-CLIENT_IMAGE=screen.png ./client-with-image send-keys --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9 --keys "hello<ENTER>"
-```
 
 ## start
 
@@ -378,7 +360,7 @@ The verbs, in the order to reach for them: `mouse click` (a greeter or installer
 
 Every guest action — keys, mouse, images — runs inside an intent: start one that says what you are about to do, do the work, end it. Only `start`, `relinquish`, `./ctrl`, `stop`, and `save` sit outside one.
 
-Send keys or mouse, wait about three seconds, take an image, read it, decide. That is the whole method. `./client-with-image` is the action plus the image, with 100 ms in between; set `CLIENT_IMAGE` to the PNG path you will open. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
+Send keys or mouse, wait about three seconds, take an image with `./client get-image -o <file>`, read it, decide. That is the whole method. Never sleep more than ten seconds between actions. When something genuinely slow is running, keep taking images instead of trusting a long sleep.
 
 Never type into a screen you have not seen. When the state is uncertain, the first action is always an image, never a key.
 

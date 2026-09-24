@@ -72,20 +72,16 @@ const tokens = (action: string): Result.Result<ReadonlyArray<string>, Errors.Too
   return Result.succeed(args);
 };
 
-// Line 3 is one ./client command. A leading ./client or ./client-with-image selects the bin.
+// Line 3 is one ./client command. A leading ./client is the bin and is not an argument.
 export const command = (action: string): Result.Result<Tools.CommandLine, Errors.ToolError> => {
   const split = tokens(action);
   if (Result.isFailure(split)) {
     return fail(split.failure.message);
   }
   const [head, ...rest] = split.success;
-  const image = head === "./client-with-image";
-  const args = head === "./client" || image ? rest : split.success;
+  const args = head === "./client" ? rest : split.success;
   return Tools.commandLine({
     name: "client",
-    arguments: JSON.stringify({
-      ...(image ? { withImage: true } : {}),
-      args,
-    }),
+    arguments: JSON.stringify({ args }),
   });
 };

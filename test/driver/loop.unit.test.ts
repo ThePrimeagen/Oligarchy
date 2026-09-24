@@ -77,26 +77,6 @@ const stop = () =>
 
 const intentCall = () => speak("continue", "bad", "intent start --message lock");
 
-const withImage = () =>
-  speak(
-    "continue",
-    "lock the screen",
-    `./client-with-image send-keys --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --keys a`,
-  );
-
-const IMAGE = "/tmp/driver-shot.png";
-
-const png = new Uint8Array([137, 80, 78, 71]);
-
-const imageResponse = (): Response =>
-  new Response(png, {
-    status: 200,
-    headers: {
-      "content-type": "image/png",
-      "x-image-url": "https://oligarchy.example/images/1",
-    },
-  });
-
 const isModel = (url: URL): boolean => url.origin === "https://openrouter.ai";
 
 const routed = (
@@ -124,7 +104,6 @@ type Script = FakeSpawner.Script;
 const capturingFs = (
   log: Array<string>,
   write?: Effect.Effect<void, PlatformError.PlatformError>,
-  files?: Map<string, Uint8Array>,
 ) =>
   FileSystem.layerNoop({
     writeFileString: (_path, data) => {
@@ -135,14 +114,6 @@ const capturingFs = (
         log.push(data);
       });
     },
-    ...(files === undefined
-      ? {}
-      : {
-          writeFile: (path: string, data: Uint8Array) =>
-            Effect.sync(() => {
-              files.set(path, data);
-            }),
-        }),
   });
 
 const events = (log: ReadonlyArray<string>): ReadonlyArray<DriverLog.Event> =>
@@ -182,7 +153,6 @@ const run = (
   options?: {
     readonly write?: Effect.Effect<void, PlatformError.PlatformError>;
     readonly env?: Record<string, string>;
-    readonly files?: Map<string, Uint8Array>;
   },
 ) =>
   Effect.gen(function* () {
@@ -198,7 +168,7 @@ const run = (
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          capturingFs(log, options?.write, options?.files),
+          capturingFs(log, options?.write),
           http,
           spawner.layer,
           NodePath.layer,
@@ -685,86 +655,18 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect("client-with-image screenshots after the action and not when it fails", () =>
-    Effect.gen(function* () {
-      let calls = 0;
-      const files = new Map<string, Uint8Array>();
-      const recorder = routed(
-        () => {
-          calls += 1;
-          return calls === 1 ? withImage() : stopped("done");
-        },
-        (url) => (url.pathname === "/image" ? imageResponse() : FakeHttp.json({ ok: "true" })),
-      );
-      const fiber = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
-        env: { OLIGARCHY_TOKEN: TOKEN, CLIENT_IMAGE: IMAGE },
-        files,
-      }).pipe(Effect.forkScoped);
-      yield* TestClock.adjust("100 millis");
-      const { stopped: outcome } = yield* Fiber.join(fiber);
-      expect(outcome).toEqual({ reason: "model-stopped" });
-      expect(guestPaths(recorder.requests)).toEqual([
-        "/intent/start",
-        "/send-keys",
-        "/image",
-        "/intent/end",
-      ]);
-      const shot = guestRequests(recorder.requests)[2];
-      const shotUrl = new URL(shot?.url ?? "");
-      expect(shotUrl.origin).toBe("http://127.0.0.1:9");
-      expect(shotUrl.searchParams.get("id")).toBe(SESSION);
-      expect(shotUrl.searchParams.get("agent")).toBe("OLI-1");
-      expect([...(files.get(IMAGE) ?? [])]).toEqual([...png]);
-
-      let failed = 0;
-      const refused = routed(
-        () => {
-          failed += 1;
-          return failed === 1 ? withImage() : stopped("done");
-        },
-        (url) =>
-          url.pathname === "/send-keys"
-            ? FakeHttp.json({ error: "keys refused" }, 400)
-            : FakeHttp.json({ ok: "true" }),
-      );
-      const second = yield* run(config(), refused.layer, () => ({ exitCode: 0 }), [], {
-        env: { OLIGARCHY_TOKEN: TOKEN, CLIENT_IMAGE: IMAGE },
-      });
-      expect(second.stopped).toEqual({ reason: "model-stopped" });
-      expect(guestPaths(refused.requests)).toEqual(["/intent/start", "/send-keys", "/intent/end"]);
-      expect(askText(refused.requests, 1)).toContain("keys refused");
-    }),
-  );
-
-  it.effect("client-with-image does not screenshot a stop", () =>
-    Effect.gen(function* () {
-      const recorder = routed(() =>
-        speak(
-          "continue",
-          "halt",
-          `./client-with-image stop --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --status succeeded`,
-        ),
-      );
-      const { stopped: outcome } = yield* run(
-        config(),
-        recorder.layer,
-        () => ({ exitCode: 0 }),
-        [],
-        {
-          env: { OLIGARCHY_TOKEN: TOKEN, CLIENT_IMAGE: IMAGE },
-        },
-      );
-      expect(outcome).toEqual({ reason: "result-closed" });
-      expect(guestPaths(recorder.requests)).toEqual(["/stop"]);
-    }),
-  );
-
-  it.effect("client-with-image without CLIENT_IMAGE does not run the action", () =>
+  it.effect("a ./client-with-image action is an unknown command and takes no screenshot", () =>
     Effect.gen(function* () {
       let calls = 0;
       const recorder = routed(() => {
         calls += 1;
-        return calls === 1 ? withImage() : stopped("done");
+        return calls === 1
+          ? speak(
+              "continue",
+              "lock the screen",
+              `./client-with-image send-keys --agent-id OLI-1 --session-id ${SESSION} --server-url http://127.0.0.1:9 --keys a`,
+            )
+          : stopped("done");
       });
       const { stopped: outcome } = yield* run(
         config(),
@@ -773,8 +675,8 @@ describe("driver loop", () => {
         [],
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
-      expect(guestPaths(recorder.requests)).toEqual(["/intent/start", "/intent/end"]);
-      expect(askText(recorder.requests, 1)).toContain("CLIENT_IMAGE is not set");
+      expect(guestRequests(recorder.requests)).toEqual([]);
+      expect(askText(recorder.requests, 1)).toContain("./client-with-image");
     }),
   );
 

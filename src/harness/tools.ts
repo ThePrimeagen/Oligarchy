@@ -10,7 +10,7 @@ import * as Errors from "../shared/errors.ts";
 export const clientGuide = readFileSync(new URL("../../client.md", import.meta.url), "utf8");
 
 export type CommandLine = {
-  readonly bin: "./client" | "./client-with-image";
+  readonly bin: "./client";
   readonly args: ReadonlyArray<string>;
 };
 
@@ -25,10 +25,6 @@ type ToolParameters = {
   readonly additionalProperties: false;
   readonly required: ReadonlyArray<"args">;
   readonly properties: {
-    readonly withImage: {
-      readonly type: "boolean";
-      readonly description: string;
-    };
     readonly args: {
       readonly type: "array";
       readonly items: { readonly type: "string" };
@@ -51,11 +47,6 @@ const parameters: ToolParameters = {
   additionalProperties: false,
   required: ["args"],
   properties: {
-    withImage: {
-      type: "boolean",
-      description:
-        "Run ./client-with-image instead of ./client: the same action, then a screenshot.",
-    },
     args: {
       type: "array",
       items: { type: "string" },
@@ -72,7 +63,6 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
 ];
 
 const ClientArguments = Schema.Struct({
-  withImage: Schema.optionalKey(Schema.Boolean),
   args: Schema.Array(Schema.String),
 });
 
@@ -101,7 +91,7 @@ export const commandLine = (call: {
     return fail("client: the harness opens and closes intents");
   }
   return Result.succeed({
-    bin: decoded.value.withImage === true ? "./client-with-image" : "./client",
+    bin: "./client",
     args: [...decoded.value.args],
   });
 };

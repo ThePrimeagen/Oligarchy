@@ -1,11 +1,9 @@
 import {
   Cause,
   Console,
-  Duration,
   Effect,
   Exit,
   Option,
-  Result,
   Runtime,
   Sink,
   Stdio,
@@ -18,30 +16,12 @@ import * as CliOutput from "effect/unstable/cli/CliOutput";
 import * as Command from "effect/unstable/cli/Command";
 import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
 import * as ClientCommand from "../client/command.ts";
-import * as Config from "../config.ts";
-import * as Intent from "../harness/intent.ts";
 import * as Tools from "../harness/tools.ts";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
 
-// client-with-image waits this long so the guest can paint before the screenshot.
-const SCREEN = Duration.millis(100);
-
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-const append = (first: string, second: string): string => {
-  if (first === "") {
-    return second;
-  }
-  if (second === "") {
-    return first;
-  }
-  if (first.endsWith("\n")) {
-    return `${first}${second}`;
-  }
-  return `${first}\n${second}`;
-};
 
 const text = (chunks: ReadonlyArray<Uint8Array>): string =>
   chunks.map((chunk) => decoder.decode(chunk)).join("");
@@ -138,54 +118,6 @@ const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<s
   } satisfies Tools.CommandOutput;
 });
 
-// client.md: the action, then a screenshot to CLIENT_IMAGE. stop, save and relinquish leave
-// nothing on screen. A failed action does not take one either.
-const runWithImage = Effect.fn("Driver.runWithImage")(function* (args: ReadonlyArray<string>) {
-  const image = yield* Effect.result(Config.required("CLIENT_IMAGE"));
-  if (Result.isFailure(image)) {
-    return {
-      exitCode: 1,
-      stdout: "",
-      stderr: "CLIENT_IMAGE is not set\n",
-    } satisfies Tools.CommandOutput;
-  }
-  const ran = yield* runClient(args);
-  if (ran.exitCode !== 0) {
-    return ran;
-  }
-  const action = args[0];
-  if (action === "stop" || action === "save" || action === "relinquish") {
-    return ran;
-  }
-  const session = Intent.flag(args, "session-id") ?? (ran.stdout.split("\n")[0] ?? "").trim();
-  if (session === "") {
-    return ran;
-  }
-  yield* Effect.sleep(SCREEN);
-  const agent = Intent.flag(args, "agent-id");
-  const server = Intent.flag(args, "server-url");
-  const shot = yield* runClient([
-    "get-image",
-    ...(agent === undefined ? [] : ["--agent-id", agent]),
-    "--session-id",
-    session,
-    "-o",
-    image.success,
-    ...(server === undefined ? [] : ["--server-url", server]),
-  ]);
-  if (shot.exitCode === 0) {
-    return ran;
-  }
-  return {
-    exitCode: shot.exitCode,
-    stdout: append(ran.stdout, shot.stdout),
-    stderr: append(ran.stderr, shot.stderr),
-  } satisfies Tools.CommandOutput;
-});
-
 export const run = Effect.fn("Driver.client")(function* (command: Tools.CommandLine) {
-  if (command.bin === "./client-with-image") {
-    return yield* runWithImage(command.args);
-  }
   return yield* runClient(command.args);
 });

@@ -54,16 +54,25 @@ describe("reply", () => {
     expect(command.success.args).toEqual(["send-keys", "--keys", "hello world"]);
   });
 
-  it("takes ./client-with-image as the bin", () => {
-    const command = Reply.command(
-      `./client-with-image get-image --agent-id OLI-1 --session-id ${SESSION}`,
-    );
-    expect(Result.isSuccess(command)).toBe(true);
-    if (Result.isFailure(command)) {
+  it("strips a leading ./client and leaves any other token in the arguments", () => {
+    const client = Reply.command(`./client get-image --agent-id OLI-1 --session-id ${SESSION}`);
+    expect(Result.isSuccess(client)).toBe(true);
+    if (Result.isFailure(client)) {
       return;
     }
-    expect(command.success.bin).toBe("./client-with-image");
-    expect(command.success.args[0]).toBe("get-image");
+    expect(client.success).toEqual({
+      bin: "./client",
+      args: ["get-image", "--agent-id", "OLI-1", "--session-id", SESSION],
+    });
+    const wrapped = Reply.command(
+      `./client-with-image get-image --agent-id OLI-1 --session-id ${SESSION}`,
+    );
+    expect(Result.isSuccess(wrapped)).toBe(true);
+    if (Result.isFailure(wrapped)) {
+      return;
+    }
+    expect(wrapped.success.bin).toBe("./client");
+    expect(wrapped.success.args[0]).toBe("./client-with-image");
   });
 
   it("refuses a reply that is not three lines, a bad status, or an empty line", () => {
