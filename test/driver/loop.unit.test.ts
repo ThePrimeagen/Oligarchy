@@ -86,8 +86,8 @@ const call = (body: unknown): Response =>
     "[DONE]",
   ]);
 
-const client = (reason: string, args: ReadonlyArray<string>): Response =>
-  call({ name: "client", arguments: { reason, args } });
+const client = (reason: string, args: ReadonlyArray<string>, step = 1): Response =>
+  call({ name: "client", arguments: { step, reason, args } });
 
 const done = (): Response => call({ name: "Done", arguments: {} });
 
@@ -123,10 +123,18 @@ const tokens = (action: string): ReadonlyArray<string> => {
   return args;
 };
 
-const speak = (did: string, action: string): Response => client(did, tokens(action));
+const speak = (did: string, action: string, step = 1): Response =>
+  client(did, tokens(action), step);
 
-const sendKeys = (did: string | null = "lock the screen") =>
-  speak(did ?? "send-keys", "send-keys --keys a");
+const sendKeys = (did: string | null = "lock the screen", step = 1) =>
+  speak(did ?? "send-keys", "send-keys --keys a", step);
+
+const notACall = (): Response =>
+  sse([
+    frame({ choices: [{ delta: { content: "hello" }, finish_reason: null }] }),
+    frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+    "[DONE]",
+  ]);
 
 const answers = (...replies: ReadonlyArray<Response>) => {
   let calls = 0;
@@ -504,7 +512,6 @@ describe("driver loop", () => {
           "/start",
           "/intent/start",
           "/send-keys",
-          "/intent/end",
           "/stop",
         ]);
         expect(JSON.parse(guestRequests(recorder.requests)[0]?.body ?? "{}")).toEqual({
@@ -518,15 +525,16 @@ describe("driver loop", () => {
           id: SESSION,
           agent: "OLI-1",
           test_result_id: RESULT,
-          message: "lock the screen",
+          message: "step 1",
         });
+        expect(opened?.url.startsWith(`${SERVER}/intent/start`)).toBe(true);
         expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
           id: SESSION,
           agent: "OLI-1",
           keys: "a",
         });
         expect(guestRequests(recorder.requests)[2]?.url).not.toContain("stolen.example");
-        expect(JSON.parse(guestRequests(recorder.requests)[4]?.body ?? "{}")).toMatchObject({
+        expect(JSON.parse(guestRequests(recorder.requests)[3]?.body ?? "{}")).toMatchObject({
           id: SESSION,
           agent: "OLI-1",
           status: "succeeded",
@@ -534,7 +542,6 @@ describe("driver loop", () => {
 
         expect(modelRequests(recorder.requests)).toHaveLength(2);
         const system = systemText(modelRequests(recorder.requests)[0]?.body);
-        expect(system).not.toMatch(/step \d/i);
         expect(system).toContain("<def>\nLock it from the menu.\n</def>");
         expect(system).toContain("<proof>\nThe screen is locked.\n</proof>");
         expect(system).not.toContain("not this");
@@ -543,7 +550,7 @@ describe("driver loop", () => {
         expect(askText(recorder.requests, 0)).toBe(
           "<instruction>not this</instruction><proof>not this either</proof>",
         );
-        expect(past(recorder.requests, 1)).toContain("lock the screen");
+        expect(past(recorder.requests, 1)).toContain("step 1: lock the screen");
         expect(past(recorder.requests, 0)).not.toContain(SESSION);
 
         const started = events(log).find((event) => event.kind === "start");
@@ -554,7 +561,11 @@ describe("driver loop", () => {
           kind: "running",
           text: SESSION,
         });
-        expect(events(log).some((event) => event.kind === "intent" && event.step === 1)).toBe(true);
+        expect(events(log).find((event) => event.kind === "intent")).toEqual({
+          step: 0,
+          kind: "intent",
+          text: "step 1",
+        });
         expect(events(log).at(-1)).toMatchObject({ kind: "stop", text: "result-closed" });
         expect(log.join("")).not.toContain(TOKEN);
       }),
@@ -576,7 +587,7 @@ describe("driver loop", () => {
         iso: ISO,
         agent: "OLI-1",
       });
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/save"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/save"]);
       expect(spawner.spawned[1]?.args).toContain("success");
       const started = events(log).find((event) => event.kind === "start");
       expect(started?.text).not.toContain("resume");
@@ -651,8 +662,8 @@ describe("driver loop", () => {
         log,
       );
       expect(outcome).toEqual({ reason: "result-closed" });
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
-      expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+      expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
         status: "succeeded",
       });
       expect(past(recorder.requests, 1)).toContain("the harness starts and stops");
@@ -666,7 +677,7 @@ describe("driver loop", () => {
       const recorder = routed(answers(intentCall(), done()));
       const log: Array<string> = [];
       yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(events(log).some((event) => event.kind === "refusal")).toBe(true);
       expect(past(recorder.requests, 1)).toContain("intent");
     }),
@@ -688,108 +699,286 @@ describe("driver loop", () => {
       }),
   );
 
-  it.effect("does not run the guest command when intent start fails", () =>
-    Effect.gen(function* () {
-      const recorder = routed(answers(sendKeys(null), done()), (url) => {
-        if (url.pathname === "/start") {
-          return FakeHttp.json({ id: SESSION });
-        }
-        return url.pathname === "/intent/start"
-          ? FakeHttp.json({ error: "Cannot start one intent when one's already running." }, 400)
-          : FakeHttp.json({ ok: "true" });
-      });
-      const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
-      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
-      expect(past(recorder.requests, 1)).toContain("already running");
-    }),
+  it.effect(
+    "a step whose intent will not open runs no guest action, and its failure is in every ask (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(sendKeys(null), done()), (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          return url.pathname === "/intent/start"
+            ? FakeHttp.json({ error: "Cannot start one intent when one's already running." }, 400)
+            : FakeHttp.json({ ok: "true" });
+        });
+        const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/intent/start",
+          "/stop",
+        ]);
+        expect(past(recorder.requests, 0)).toContain("already running");
+        expect(past(recorder.requests, 1)).toContain("step 1: send-keys");
+      }),
   );
 
-  it.effect("closes the intent when the guest command fails", () =>
-    Effect.gen(function* () {
-      const recorder = routed(answers(sendKeys("press the key"), done()), (url) => {
-        if (url.pathname === "/start") {
-          return FakeHttp.json({ id: SESSION });
-        }
-        return url.pathname === "/send-keys"
-          ? FakeHttp.json({ error: "keys refused" }, 400)
-          : FakeHttp.json({ ok: "true" });
-      });
-      const { stopped: outcome } = yield* run(
-        config(),
-        recorder.layer,
-        () => ({ exitCode: 0 }),
-        [],
-      );
-      expect(outcome).toEqual({ reason: "result-closed" });
-      expect(guestPaths(recorder.requests)).toEqual([
-        "/start",
-        "/intent/start",
-        "/send-keys",
-        "/intent/end",
-        "/stop",
-      ]);
-      expect(past(recorder.requests, 1)).toContain("keys refused");
-    }),
+  it.effect(
+    "a failed guest command keeps its step's intent open for the next action (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        let presses = 0;
+        const recorder = routed(
+          answers(sendKeys("press the key", 1), sendKeys("press it again", 1), done()),
+          (url) => {
+            if (url.pathname === "/start") {
+              return FakeHttp.json({ id: SESSION });
+            }
+            if (url.pathname === "/send-keys") {
+              presses += 1;
+              return presses === 1
+                ? FakeHttp.json({ error: "keys refused" }, 400)
+                : FakeHttp.json({ ok: "true" });
+            }
+            return FakeHttp.json({ ok: "true" });
+          },
+        );
+        const { stopped: outcome } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          [],
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/send-keys",
+          "/send-keys",
+          "/stop",
+        ]);
+        expect(past(recorder.requests, 1)).toContain("keys refused");
+      }),
   );
 
-  it.effect("keeps the command output when intent end fails", () =>
-    Effect.gen(function* () {
-      const recorder = routed(answers(sendKeys("press the key"), done()), (url) => {
-        if (url.pathname === "/start") {
-          return FakeHttp.json({ id: SESSION });
-        }
-        return url.pathname === "/intent/end"
-          ? FakeHttp.json({ error: "no intent open" }, 400)
-          : FakeHttp.json({ ok: "true" });
-      });
-      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
-      expect(guestPaths(recorder.requests)).toEqual([
-        "/start",
-        "/intent/start",
-        "/send-keys",
-        "/intent/end",
-        "/stop",
-      ]);
-      expect(past(recorder.requests, 1)).toContain("intent end failed");
-      expect(past(recorder.requests, 1)).toContain("no intent open");
-    }),
+  it.effect(
+    "an intent end that fails at a step change stays in the next ask, and the new step still opens (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        let ends = 0;
+        const recorder = routed(
+          answers(sendKeys("press the key", 1), sendKeys("look again", 2), done()),
+          (url) => {
+            if (url.pathname === "/start") {
+              return FakeHttp.json({ id: SESSION });
+            }
+            if (url.pathname === "/intent/end") {
+              ends += 1;
+              return ends === 1
+                ? FakeHttp.json({ error: "no intent open" }, 400)
+                : FakeHttp.json({ ok: "true" });
+            }
+            return FakeHttp.json({ ok: "true" });
+          },
+        );
+        const { stopped: outcome } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          [],
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/send-keys",
+          "/intent/end",
+          "/intent/start",
+          "/send-keys",
+          "/stop",
+        ]);
+        expect(past(recorder.requests, 2)).toContain("intent end failed");
+        expect(past(recorder.requests, 2)).toContain("no intent open");
+        expect(past(recorder.requests, 2)).toContain("step 2: look again");
+      }),
   );
 
-  it.effect("every action is its own intent, opened with that action's reason", () =>
+  it.effect(
+    "step 1 opens with the first ActionList line; only a new step ends it and opens the next line; Done leaves the last to the stop",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            sendKeys("open the menu", 1),
+            sendKeys("click lock", 1),
+            sendKeys("check it locked", 2),
+            done(),
+          ),
+        );
+        const log: Array<string> = [];
+        const { stopped: outcome } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          log,
+          {
+            seed: {
+              instruction:
+                "<ActionList>\n* Open the menu and click Lock.\n* Check the screen is locked.\n* any crashes or erroneous behavior must be reported\n</ActionList>",
+            },
+          },
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/send-keys",
+          "/send-keys",
+          "/intent/end",
+          "/intent/start",
+          "/send-keys",
+          "/stop",
+        ]);
+        expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
+          message: "Open the menu and click Lock.",
+        });
+        expect(JSON.parse(guestRequests(recorder.requests)[5]?.body ?? "{}")).toMatchObject({
+          message: "Check the screen is locked.",
+        });
+        expect(modelRequests(recorder.requests)).toHaveLength(4);
+        const opened = events(log).findIndex((event) => event.kind === "intent");
+        const asked = events(log).findIndex((event) => event.kind === "request");
+        expect(opened).toBeGreaterThan(-1);
+        expect(opened).toBeLessThan(asked);
+        const steps = past(recorder.requests, 3);
+        expect(steps).toContain("step 1: open the menu");
+        expect(steps).toContain("step 1: click lock");
+        expect(steps).toContain("step 2: check it locked");
+      }),
+  );
+
+  it.effect("a step past the ActionList opens an intent named by its number (unhappy)", () =>
     Effect.gen(function* () {
-      const recorder = routed(answers(sendKeys("open the menu"), sendKeys("click lock"), done()));
-      const { stopped: outcome } = yield* run(
-        config(),
-        recorder.layer,
-        () => ({ exitCode: 0 }),
-        [],
-      );
-      expect(outcome).toEqual({ reason: "result-closed" });
-      expect(guestPaths(recorder.requests)).toEqual([
-        "/start",
-        "/intent/start",
-        "/send-keys",
-        "/intent/end",
-        "/intent/start",
-        "/send-keys",
-        "/intent/end",
-        "/stop",
-      ]);
+      const recorder = routed(answers(sendKeys("open it", 1), sendKeys("look past it", 2), done()));
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+        seed: { instruction: "<ActionList>\n* Open the menu.\n</ActionList>" },
+      });
       expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
-        message: "open the menu",
+        message: "Open the menu.",
       });
       expect(JSON.parse(guestRequests(recorder.requests)[4]?.body ?? "{}")).toMatchObject({
-        message: "click lock",
+        message: "step 2",
       });
-      for (const index of [0, 1, 2]) {
-        expect(systemText(modelRequests(recorder.requests)[index]?.body)).not.toMatch(/step \d/i);
-      }
     }),
   );
 
   it.effect(
-    "a failed intent start runs no action and the next action opens its own intent (unhappy)",
+    "opens and ends step intents by calling the client's intent functions; no ./client line is built for them",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(sendKeys("open it", 1), sendKeys("check it", 2), done()));
+        const log: Array<string> = [];
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/send-keys",
+          "/intent/end",
+          "/intent/start",
+          "/send-keys",
+          "/stop",
+        ]);
+        const commands = events(log)
+          .filter((event) => event.kind === "command")
+          .map((event) => event.text);
+        expect(commands.some((text) => text.includes('"intent"'))).toBe(false);
+        expect(commands.filter((text) => text === "intent start ok")).toHaveLength(2);
+        expect(commands.filter((text) => text === "intent end ok")).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "a run with no stored server opens its intents on SERVER_URL, the server start used",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(done()));
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+          seed: { serverUrl: "" },
+          env: { OLIGARCHY_TOKEN: TOKEN, SERVER_URL: "http://10.9.9.9:4" },
+        });
+        const [started, opened] = guestRequests(recorder.requests);
+        expect(started?.url.startsWith("http://10.9.9.9:4/start")).toBe(true);
+        expect(opened?.url.startsWith("http://10.9.9.9:4/intent/start")).toBe(true);
+      }),
+  );
+
+  it.effect(
+    "an unreachable server on intent start runs no action and puts the failure in the next ask (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const model = answers(sendKeys("press the key", 1), done());
+        const recorder = FakeHttp.recordRequests((request, url) => {
+          if (isModel(url)) {
+            return model();
+          }
+          if (url.pathname === "/intent/start") {
+            return Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request,
+                  cause: new Error("connect ECONNREFUSED 127.0.0.1:9"),
+                }),
+              }),
+            );
+          }
+          return url.pathname === "/start"
+            ? FakeHttp.json({ id: SESSION })
+            : FakeHttp.json({ ok: "true" });
+        });
+        const log: Array<string> = [];
+        const { stopped: outcome } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          log,
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/intent/start",
+          "/stop",
+        ]);
+        expect(past(recorder.requests, 0)).toContain("ECONNREFUSED");
+        expect(past(recorder.requests, 1)).toContain("step 1: press the key");
+        expect(log.join("")).not.toContain(TOKEN);
+      }),
+  );
+
+  it.effect(
+    "a run that fails with a step's intent open sends no intent end; the stop cancels it (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(sendKeys("press the key", 1), notACall()));
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
+        );
+        expect(error._tag).toBe("CommandError");
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/send-keys",
+          "/stop",
+        ]);
+        expect(JSON.parse(guestRequests(recorder.requests)[3]?.body ?? "{}")).toMatchObject({
+          status: "failed",
+        });
+      }),
+  );
+
+  it.effect(
+    "step 1's intent that fails to open is opened by that step's next action, and later actions share it (unhappy)",
     () =>
       Effect.gen(function* () {
         let opens = 0;
@@ -814,10 +1003,10 @@ describe("driver loop", () => {
           "/intent/start",
           "/intent/start",
           "/send-keys",
-          "/intent/end",
+          "/send-keys",
           "/stop",
         ]);
-        expect(past(recorder.requests, 1)).toContain("intent refused");
+        expect(past(recorder.requests, 0)).toContain("intent refused");
       }),
   );
 
@@ -868,7 +1057,7 @@ describe("driver loop", () => {
           expect(error.message).toContain("reply:");
           expect(error.message).not.toContain("guest already gone");
         }
-        expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+        expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
         expect(log.join("")).toContain("test-results");
         expect(log.join("")).toContain("--status");
         expect(log.join("")).toContain("failed");
@@ -934,8 +1123,8 @@ describe("driver loop", () => {
         expect(error.message).toContain("reply:");
         expect(error.message).not.toContain("3 lines");
       }
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
-      expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+      expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
         status: "failed",
       });
       expect(log.join("")).toContain("test-results");
@@ -960,7 +1149,7 @@ describe("driver loop", () => {
         expect(error.status).toBe(402);
         expect(error.message).toBe("no credits");
       }
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(
         events(log).some((event) => event.kind === "failure" && event.text.includes("no credits")),
       ).toBe(true);
@@ -988,7 +1177,7 @@ describe("driver loop", () => {
       const log: Array<string> = [];
       const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), log));
       expect(error._tag).toBe("OpenRouterUnreachable");
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(events(log).some((event) => event.kind === "failure")).toBe(true);
       expect(log.join("")).not.toContain(TOKEN);
     }),
@@ -1058,7 +1247,7 @@ describe("driver loop", () => {
         expect(error.message).toContain("run ceiling");
       }
       expect(modelRequests(recorder.requests)).toHaveLength(0);
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(log.join("")).not.toContain(TOKEN);
     }),
   );
@@ -1087,12 +1276,7 @@ describe("driver loop", () => {
         [],
       );
       expect(outcome).toEqual({ reason: "result-closed" });
-      expect(guestPaths(recorder.requests)).toEqual([
-        "/start",
-        "/intent/start",
-        "/intent/end",
-        "/stop",
-      ]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(past(recorder.requests, 1)).toContain("--nope");
     }),
   );
@@ -1115,7 +1299,7 @@ describe("driver loop", () => {
         [],
       );
       expect(outcome).toEqual({ reason: "result-closed" });
-      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(past(recorder.requests, 1)).toContain("./client-with-image");
     }),
   );
@@ -1279,7 +1463,7 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), done()),
-          withScreen(() => FakeHttp.json({ error: "unknown session" }, 404)),
+          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
         );
         const { stopped: outcome } = yield* run(
           config(),
@@ -1289,7 +1473,7 @@ describe("driver loop", () => {
         );
         expect(outcome).toEqual({ reason: "result-closed" });
         expect(imagesAt(recorder.requests, 1)).toEqual([]);
-        expect(past(recorder.requests, 1)).toContain("unknown session");
+        expect(past(recorder.requests, 1)).toContain("qemu: closed");
       }),
   );
 
@@ -1299,9 +1483,11 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), done()),
-          withScreen(() => FakeHttp.json({ error: "unknown session" }, 404)),
+          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
         );
         yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(modelRequests(recorder.requests)).toHaveLength(2);
+        expect(guestPaths(recorder.requests).at(-1)).toBe("/stop");
         expect(past(recorder.requests, 1)).toContain("IMAGE HAS FAILED, MACHINE IS SHUT DOWN");
       }),
   );
@@ -1328,6 +1514,164 @@ describe("driver loop", () => {
       expect(imagesAt(recorder.requests, 1)).toEqual([PNG_URL]);
       expect(imagesAt(recorder.requests, 2)).toEqual([]);
     }),
+  );
+
+  it.effect(
+    "a mint whose image fails after the shutdown is told to call Done, and its Done saves",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(getImage(), done()),
+          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+        );
+        const log: Array<string> = [];
+        const { stopped: outcome, spawner } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          log,
+          { seed: { name: "mint", serverUrl: "" } },
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(modelRequests(recorder.requests)).toHaveLength(2);
+        expect(past(recorder.requests, 1)).toContain("MACHINE IS SHUT DOWN");
+        expect(past(recorder.requests, 1)).toContain("call Done");
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/image",
+          "/save",
+        ]);
+        expect(spawner.spawned[1]?.args).toContain("success");
+        expect(events(log).find((event) => event.kind === "stop" && event.step > 0)).toMatchObject({
+          step: 2,
+          text: "model-stopped",
+        });
+      }),
+  );
+
+  it.effect(
+    "a mint that acts again instead of calling Done after the shutdown is ended by the harness and saved (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(getImage(), getImage(), getImage()),
+          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+        );
+        const log: Array<string> = [];
+        const { stopped: outcome, spawner } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          log,
+          { seed: { name: "mint", serverUrl: "" } },
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(modelRequests(recorder.requests)).toHaveLength(2);
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/image",
+          "/save",
+        ]);
+        expect(spawner.spawned[1]?.args).toContain("success");
+        expect(events(log).find((event) => event.text === "machine-off")).toMatchObject({
+          step: 2,
+          kind: "stop",
+        });
+      }),
+  );
+
+  it.effect(
+    "an unknown session ends the loop failed at once and does not ask the model again (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), getImage(), getImage()), (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          return url.pathname === "/image"
+            ? FakeHttp.json({ error: `unknown session "${SESSION}"` }, 404)
+            : FakeHttp.json({ ok: "true" });
+        });
+        const log: Array<string> = [];
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), log),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain(`unknown session "${SESSION}"`);
+        }
+        expect(modelRequests(recorder.requests)).toHaveLength(1);
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/image",
+          "/stop",
+        ]);
+        const closed = events(log).find(
+          (event) => event.kind === "command" && event.text.startsWith('./ctrl "test-results"'),
+        );
+        expect(closed?.text).toContain('"failed"');
+      }),
+  );
+
+  it.effect(
+    "an unknown session when step 1's intent opens fails the loop before the model is asked (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage()), (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          return url.pathname === "/intent/start"
+            ? FakeHttp.json({ error: `unknown session "${SESSION}"` }, 404)
+            : FakeHttp.json({ ok: "true" });
+        });
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain(`unknown session "${SESSION}"`);
+        }
+        expect(modelRequests(recorder.requests)).toHaveLength(0);
+        expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+      }),
+  );
+
+  it.effect(
+    "a mint whose save fails after the guest is off closes the result failed with save's headline (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), done()), (url) => {
+          if (url.pathname === "/start") {
+            return FakeHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/image") {
+            return FakeHttp.json({ error: "exchange failed" }, 502);
+          }
+          return url.pathname === "/save"
+            ? FakeHttp.json({ error: "guest did not power off within 2 minutes" }, 500)
+            : FakeHttp.json({ ok: "true" });
+        });
+        const log: Array<string> = [];
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), log, {
+            seed: { name: "mint", serverUrl: "" },
+          }),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("guest did not power off within 2 minutes");
+        }
+        expect(modelRequests(recorder.requests)).toHaveLength(2);
+        const closed = events(log).find(
+          (event) => event.kind === "command" && event.text.startsWith('./ctrl "test-results"'),
+        );
+        expect(closed?.text).toContain('"failed"');
+        expect(closed?.text).toContain("guest did not power off within 2 minutes");
+      }),
   );
 
   it.effect("get-image --output writes a file and sends no image (unhappy)", () =>

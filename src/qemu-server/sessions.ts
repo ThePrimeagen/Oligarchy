@@ -945,10 +945,15 @@ const make = (maxJobs: number, selfUrl?: string) =>
 
     // A dead QEMU is noticed by the next exchange failing. That is the system failing, not the
     // driver's verdict, so the session ends errored here and its driver's next request is 404.
-    // The caller still gets the exchange's own failure.
+    // The caller still gets the exchange's own failure. A fresh guest that exited 0 powered itself
+    // off, the way a mint shuts Omarchy down before save; that session stays for save or stop.
     const endIfGone = (live: LiveSession): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (yield* live.qemu.running) {
+          return;
+        }
+        const code = yield* live.qemu.exited;
+        if (code === 0 && live.mode !== "resume") {
           return;
         }
         const owned = yield* Ref.modify(sessions, (map) =>
@@ -957,7 +962,6 @@ const make = (maxJobs: number, selfUrl?: string) =>
         if (!owned) {
           return;
         }
-        const code = yield* live.qemu.exited;
         const reason = `qemu exited ${code === null ? "on a signal" : String(code)}`;
         const captured = yield* captureDebugLog(live);
         yield* killLogged(live, "errored cleanup failed", live.agent);

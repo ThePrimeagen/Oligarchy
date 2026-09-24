@@ -5,10 +5,10 @@ import * as Prompt from "../../src/driver/prompt.ts";
 import * as Reply from "../../src/driver/reply.ts";
 
 const CLIENT =
-  '{"name":"client","arguments":{"reason":"why, in a few words","args":["get-image"]}}';
+  '{"name":"client","arguments":{"step":1,"reason":"why, in a few words","args":["get-image"]}}';
 const DONE = '{"name":"Done","arguments":{}}';
 const EXAMPLE =
-  '{"name":"client","arguments":{"reason":"type the password","args":["send-keys","--keys","prime<ENTER>"]}}';
+  '{"name":"client","arguments":{"step":1,"reason":"type the password","args":["send-keys","--keys","prime<ENTER>"]}}';
 
 const FILLED = {
   TEST_DEFINITION: "Lock the screen from the menu.",
@@ -40,12 +40,32 @@ describe("custom-harness-driving-agent.html", () => {
     }
   });
 
-  it("has no step number and no step-status for the model to track (unhappy)", () => {
+  it("has no step-status and no harness-filled step; the model names its own step (unhappy)", () => {
     const text = file();
     expect(text).not.toContain("{{STEP}}");
     expect(text).not.toContain("This is step");
     expect(text).not.toContain("step-status");
     expect(text).not.toMatch(/"completed"|"continue"/);
+  });
+
+  it("tells the model the first step is 1, step N is the Nth ActionList line, and one step keeps its number", () => {
+    const text = file();
+    expect(text).toMatch(/first step is 1/i);
+    expect(text).not.toMatch(/first step is 0/i);
+    expect(text).toMatch(/ActionList line/);
+    expect(text).toMatch(/same step[^<]*same number/i);
+  });
+
+  it("tells the model to call Done once the machine is shut down", () => {
+    const text = file();
+    expect(text).toMatch(/shut down[^<]*call Done/i);
+    expect(text).toContain("IMAGE HAS FAILED, MACHINE IS SHUT DOWN");
+  });
+
+  it("names no tool the reply parser refuses (unhappy)", () => {
+    const text = file();
+    expect(text).not.toContain("update_screenshot");
+    expect(Result.isFailure(Reply.parse('{"name":"update_screenshot","arguments":{}}'))).toBe(true);
   });
 
   it("fills the definition, the proof, the reasons, and the client tools", () => {

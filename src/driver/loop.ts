@@ -1,6 +1,7 @@
 import {
   Cause,
   Clock,
+  Config as EffectConfig,
   Console,
   Duration,
   Effect,
@@ -13,6 +14,9 @@ import {
 } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Actions from "../client/actions.ts";
+import type * as ProxyClient from "../client/proxy-client.ts";
+import * as Config from "../config.ts";
 import * as Tests from "../db/tests.ts";
 import * as HarnessConfig from "../harness/config.ts";
 import * as Intent from "../harness/intent.ts";
@@ -21,6 +25,7 @@ import * as Tools from "../harness/tools.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
+import * as Steps from "../viz/steps.ts";
 import * as Client from "./client.ts";
 import * as Log from "./log.ts";
 import * as Prompt from "./prompt.ts";
@@ -37,7 +42,7 @@ export type Input = {
 };
 
 export type Stopped = {
-  readonly reason: "model-stopped" | "result-closed";
+  readonly reason: "model-stopped" | "machine-off" | "result-closed";
 };
 
 export type Failure = Errors.CommandError | Errors.OpenRouterRefusal | Errors.OpenRouterUnreachable;
@@ -135,6 +140,13 @@ const brief = (text: string): string => {
   return joined.slice(0, BRIEF);
 };
 
+// The qemu server no longer has the session: every later command answers the same, so there is
+// nothing left for the model to try.
+const sessionGone = (output: string): string | undefined => {
+  const headline = output.split("\n").find((line) => line.trim() !== "");
+  return headline?.trim().startsWith("unknown session") === true ? headline.trim() : undefined;
+};
+
 const decision = (did: string, outcome: string): string => {
   const rest = brief(outcome);
   if (rest === "" || rest === did) {
@@ -192,6 +204,23 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   let turns = 0;
   // The last get-image's PNG. Any other guest action may change the screen, so it drops it.
   let screen: Uint8Array | undefined;
+  // A mint's image failed: the guest is off. The model gets one turn to call Done.
+  let machineOff = false;
+  // Step N's intent is the Nth ActionList line. Step 1 opens with the session, and only a reply
+  // naming another step ends it and opens that one; the stop or save closes the last.
+  const steps = Steps.stepsOf(facts.instruction);
+  let step = 1;
+  // Not while that step's intent start has failed.
+  let intentOpen = false;
+  // A run with no stored server leaves --server-url off its commands, so the client uses
+  // SERVER_URL or its default; the intents go to that same server.
+  const serverUrl =
+    facts.serverUrl !== ""
+      ? facts.serverUrl
+      : yield* Config.serverUrl.pipe(
+          EffectConfig.withDefault(Config.DEFAULT_SERVER_URL),
+          Effect.mapError((error) => commandError(`SERVER_URL: ${Render.headline(error)}`)),
+        );
 
   // acquireUseRelease keeps the stop uninterruptible: an interrupt during the model
   // loop still stops the session start already opened. A start that never prints an id
@@ -262,6 +291,50 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           decisions.push(decision("start", Tools.toolContent(marked)));
         }
 
+        const held = { agentId: input.agentId, serverUrl, sessionId };
+        const failure = Effect.match({
+          onFailure: (error: Errors.MissingVariable | ProxyClient.Failure) =>
+            Render.headline(error),
+          onSuccess: () => undefined,
+        });
+
+        const endStep = Effect.fn("Driver.endStep")(function* (turn: number) {
+          if (!intentOpen) {
+            return undefined;
+          }
+          intentOpen = false;
+          const failed = yield* failure(Actions.intentEnd(held));
+          yield* log(input, turn, "command", `intent end ${failed ?? "ok"}`);
+          return failed === undefined
+            ? undefined
+            : decision(`step ${String(step)}`, `intent end failed\n${failed}`);
+        });
+
+        // The failure text when the intent did not open, so no guest action runs outside one.
+        const openStep = Effect.fn("Driver.openStep")(function* (turn: number) {
+          const message = steps[step - 1] ?? `step ${String(step)}`;
+          yield* log(input, turn, "intent", message);
+          const failed = yield* failure(
+            Actions.intentStart({ ...held, testResultId: facts.resultId, message }),
+          );
+          yield* log(input, turn, "command", `intent start ${failed ?? "ok"}`);
+          if (failed === undefined) {
+            intentOpen = true;
+            return undefined;
+          }
+          const gone = sessionGone(failed);
+          if (gone !== undefined) {
+            yield* log(input, turn, "failure", gone);
+            return yield* Effect.fail(commandError(gone));
+          }
+          return failed;
+        });
+
+        const first = yield* openStep(0);
+        if (first !== undefined) {
+          decisions.push(decision("step 1", first));
+        }
+
         while (true) {
           const now = yield* Clock.currentTimeMillis;
           if (turns >= input.config.stepLimit) {
@@ -324,17 +397,23 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             yield* log(input, turn, "stop", "model-stopped");
             return { reason: "model-stopped" } satisfies Stopped;
           }
+          if (machineOff) {
+            yield* log(input, turn, "stop", "machine-off");
+            return { reason: "machine-off" } satisfies Stopped;
+          }
 
+          // The model is asked fresh each turn, so the past steps carry the number it repeats.
+          const said = `step ${String(reply.step)}: ${reply.reason}`;
           const planned = Reply.command(reply);
           if (Result.isFailure(planned)) {
             yield* log(input, turn, "refusal", planned.failure.message);
-            decisions.push(decision(reply.reason, planned.failure.message));
+            decisions.push(decision(said, planned.failure.message));
             continue;
           }
           if (HARNESS_OWNED.has(planned.success.args[0] ?? "")) {
             const message = "client: the harness starts and stops the session";
             yield* log(input, turn, "refusal", message);
-            decisions.push(decision(reply.reason, message));
+            decisions.push(decision(said, message));
             continue;
           }
           turns = turn;
@@ -345,67 +424,50 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           });
           if (Result.isFailure(owned)) {
             yield* log(input, turn, "refusal", owned.failure.message);
-            decisions.push(decision(reply.reason, owned.failure.message));
+            decisions.push(decision(said, owned.failure.message));
             continue;
           }
           const guest = { bin: planned.success.bin, args: owned.success };
 
-          const message = Intent.intentMessage(reply.reason, guest.args);
-          const bracketed = Intent.bracket(guest, facts.resultId, message);
-          if (Result.isFailure(bracketed)) {
-            yield* log(input, turn, "refusal", bracketed.failure.message);
-            decisions.push(decision(reply.reason, bracketed.failure.message));
-            continue;
-          }
-
-          let intentEnd: Tools.CommandLine | undefined;
-          if (bracketed.success._tag === "guest") {
-            yield* log(input, turn, "intent", message);
-            const opened = yield* Client.run(bracketed.success.start);
-            yield* log(
-              input,
-              turn,
-              "command",
-              `${shown(bracketed.success.start)} exit ${String(opened.exitCode)}`,
-            );
-            if (opened.exitCode !== 0) {
-              decisions.push(decision(reply.reason, Tools.toolContent(opened)));
+          if (reply.step !== step || !intentOpen) {
+            if (reply.step !== step) {
+              const unclosed = yield* endStep(turn);
+              if (unclosed !== undefined) {
+                decisions.push(unclosed);
+              }
+              step = reply.step;
+            }
+            const unopened = yield* openStep(turn);
+            if (unopened !== undefined) {
+              decisions.push(decision(said, unopened));
               continue;
             }
-            intentEnd = bracketed.success.end;
           }
 
-          // A log failure still has to close the intent this start opened.
-          const closeIntent =
-            intentEnd === undefined ? Effect.void : Client.run(intentEnd).pipe(Effect.ignore);
           const ran = yield* Client.run(guest);
-          yield* log(input, turn, "command", `${shown(guest)} exit ${String(ran.exitCode)}`).pipe(
-            Effect.tapError(() => closeIntent),
-          );
+          yield* log(input, turn, "command", `${shown(guest)} exit ${String(ran.exitCode)}`);
           const imaging = guest.args[0] === "get-image";
           const shot = imaging && ran.exitCode === 0 && ran.bytes.length > 0;
           screen = shot ? ran.bytes : undefined;
+          const printed = Tools.toolContent(ran);
+          const gone = sessionGone(printed);
+          if (gone !== undefined) {
+            yield* log(input, turn, "failure", gone);
+            return yield* Effect.fail(commandError(gone));
+          }
           // Without this a failed get-image reads as nothing, and the model asks for it forever.
-          let outcome = Tools.toolContent(ran);
+          // A mint's last act is powering the guest off, so its failed image is the end of the
+          // drive, and Done is what lets the harness save the disk.
+          let outcome = printed;
           if (shot) {
             outcome = "took a screenshot";
           } else if (imaging && ran.exitCode !== 0) {
-            outcome = `IMAGE HAS FAILED, MACHINE IS SHUT DOWN\n${outcome}`;
+            machineOff = facts.mint;
+            outcome = facts.mint
+              ? `IMAGE HAS FAILED, MACHINE IS SHUT DOWN. Nothing is left to drive: call Done, and the harness saves the disk.\n${outcome}`
+              : `IMAGE HAS FAILED, MACHINE IS SHUT DOWN\n${outcome}`;
           }
-          if (intentEnd === undefined) {
-            decisions.push(decision(reply.reason, outcome));
-            continue;
-          }
-          const ended = yield* Client.run(intentEnd);
-          yield* log(input, turn, "command", `${shown(intentEnd)} exit ${String(ended.exitCode)}`);
-          decisions.push(
-            decision(
-              reply.reason,
-              ended.exitCode === 0
-                ? outcome
-                : `${outcome}\nintent end failed\n${Tools.toolContent(ended)}`,
-            ),
-          );
+          decisions.push(decision(said, outcome));
         }
       }),
     (booted, exit) =>
@@ -442,7 +504,10 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           }
           return yield* Effect.void;
         });
-        const closeResult = Effect.gen(function* () {
+        const closeResult = Effect.fn("Driver.closeResult")(function* (
+          ok: boolean,
+          why: string | undefined,
+        ) {
           const mark = {
             bin: "./ctrl",
             args: [
@@ -452,8 +517,8 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
               "--id",
               facts.resultId,
               "--status",
-              failed ? "failed" : "success",
-              ...(reason === undefined || reason === "" ? [] : ["--reason", reason]),
+              ok ? "success" : "failed",
+              ...(why === undefined || why === "" ? [] : ["--reason", why]),
             ],
           };
           const marked = yield* runCommand(mark);
@@ -478,7 +543,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
               `stop: ${Render.headline(Cause.squash(stopped.cause))}`,
             ).pipe(Effect.ignore);
           }
-          const closed = yield* Effect.exit(closeResult);
+          const closed = yield* Effect.exit(closeResult(false, reason));
           if (Exit.isFailure(closed)) {
             yield* log(
               input,
@@ -490,11 +555,22 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           if (Exit.isSuccess(stopped)) {
             yield* log(input, 0, "stop", "session-stopped").pipe(Effect.ignore);
           }
-          return;
+          return yield* Effect.void;
         }
-        yield* stopGuest;
-        yield* closeResult;
-        yield* log(input, 0, "stop", "result-closed");
+        // A save that keeps nothing is the result's failure, and the result is never left open.
+        const ended = yield* Effect.exit(stopGuest);
+        if (Exit.isFailure(ended)) {
+          const why = Render.headline(Cause.squash(ended.cause));
+          yield* closeResult(false, why).pipe(
+            Effect.catch((error) =>
+              log(input, 0, "failure", `test-results: ${Render.headline(error)}`),
+            ),
+            Effect.ignore,
+          );
+          return yield* Effect.failCause(ended.cause);
+        }
+        yield* closeResult(true, undefined);
+        return yield* log(input, 0, "stop", "result-closed");
       }),
   );
   return { reason: "result-closed" } satisfies Stopped;

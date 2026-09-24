@@ -4,8 +4,8 @@ import * as Reply from "../../src/driver/reply.ts";
 
 const line = (body: unknown): string => JSON.stringify(body);
 
-const client = (reason: string, args: ReadonlyArray<string>): string =>
-  line({ name: "client", arguments: { reason, args } });
+const client = (reason: string, args: ReadonlyArray<string>, step = 1): string =>
+  line({ name: "client", arguments: { step, reason, args } });
 
 const done = (): string => line({ name: "Done", arguments: {} });
 
@@ -21,17 +21,15 @@ const parsedClient = (text: string): Extract<Reply.Reply, { readonly _tag: "clie
 describe("reply", () => {
   it("reads one line: a client tool call, and runs its args", () => {
     const parsed = parsedClient(
-      client("booted the guest", [
-        "start",
-        "--agent-id",
-        "OLI-1",
-        "--server-url",
-        "http://127.0.0.1:9",
-        "--resume",
-      ]),
+      client(
+        "booted the guest",
+        ["start", "--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9", "--resume"],
+        3,
+      ),
     );
     expect(parsed).toEqual({
       _tag: "client",
+      step: 3,
       reason: "booted the guest",
       args: ["start", "--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9", "--resume"],
     });
@@ -74,9 +72,33 @@ describe("reply", () => {
     expect(quoted.success.args[quoted.success.args.length - 1]).toBe('say "hi"');
   });
 
-  it("reads a client call with no step-status; the reply has no step to report", () => {
-    const parsed = parsedClient(client("open the menu", ["send-keys", "--keys", "a"]));
-    expect(Object.keys(parsed).sort()).toEqual(["_tag", "args", "reason"]);
+  it("reads the first step as 1, and a client call carries its step and no step-status", () => {
+    const parsed = parsedClient(client("open the menu", ["send-keys", "--keys", "a"], 1));
+    expect(parsed.step).toBe(1);
+    expect(Object.keys(parsed).sort()).toEqual(["_tag", "args", "reason", "step"]);
+  });
+
+  it("refuses a client call without a step (unhappy)", () => {
+    const parsed = Reply.parse(
+      line({ name: "client", arguments: { reason: "boot", args: ["get-image"] } }),
+    );
+    if (Result.isSuccess(parsed)) {
+      expect.fail("a client call without a step parsed");
+    }
+    expect(parsed.failure.message.startsWith("reply:")).toBe(true);
+    expect(parsed.failure.message).toContain("step");
+  });
+
+  it("refuses a step that is not a whole number from 1 up (unhappy)", () => {
+    for (const step of [0, -1, 1.5, "1", null]) {
+      const parsed = Reply.parse(
+        line({ name: "client", arguments: { step, reason: "boot", args: ["get-image"] } }),
+      );
+      if (Result.isSuccess(parsed)) {
+        expect.fail(`step ${JSON.stringify(step)} parsed`);
+      }
+      expect(parsed.failure.message.startsWith("reply:")).toBe(true);
+    }
   });
 
   it("refuses a step-status; there are no steps to complete or continue (unhappy)", () => {
@@ -84,7 +106,7 @@ describe("reply", () => {
       const parsed = Reply.parse(
         line({
           name: "client",
-          arguments: { reason: "boot", "step-status": status, args: ["get-image"] },
+          arguments: { step: 1, reason: "boot", "step-status": status, args: ["get-image"] },
         }),
       );
       if (Result.isSuccess(parsed)) {
@@ -103,13 +125,16 @@ describe("reply", () => {
       "",
       line({
         name: "client",
-        arguments: { reason: "boot", args: ["start"], token: "secret-token" },
+        arguments: { step: 1, reason: "boot", args: ["start"], token: "secret-token" },
       }),
-      line({ name: "client", arguments: { reason: "boot", args: ["start"], withImage: true } }),
+      line({
+        name: "client",
+        arguments: { step: 1, reason: "boot", args: ["start"], withImage: true },
+      }),
       line({ name: "bash", arguments: { args: ["ls"] } }),
-      line({ name: "client", arguments: { reason: "   ", args: ["start"] } }),
-      line({ name: "client", arguments: { reason: "boot", args: [] } }),
-      line({ name: "Done", arguments: { reason: "finished" } }),
+      line({ name: "client", arguments: { step: 1, reason: "   ", args: ["start"] } }),
+      line({ name: "client", arguments: { step: 1, reason: "boot", args: [] } }),
+      line({ name: "Done", arguments: { step: 1, reason: "finished" } }),
       line({ name: "Done", arguments: [] }),
       line({ name: "Done", arguments: 1 }),
       line({ name: "done", arguments: {} }),
@@ -130,7 +155,7 @@ describe("reply", () => {
     const secret = Reply.parse(
       line({
         name: "client",
-        arguments: { reason: "boot", args: ["start"], token: "secret-token" },
+        arguments: { step: 1, reason: "boot", args: ["start"], token: "secret-token" },
       }),
     );
     if (Result.isSuccess(secret)) {
@@ -139,7 +164,10 @@ describe("reply", () => {
     expect(secret.failure.message).toContain("token");
     expect(secret.failure.message).not.toContain("secret-token");
     const image = Reply.parse(
-      line({ name: "client", arguments: { reason: "boot", args: ["start"], withImage: true } }),
+      line({
+        name: "client",
+        arguments: { step: 1, reason: "boot", args: ["start"], withImage: true },
+      }),
     );
     if (Result.isSuccess(image)) {
       expect.fail("withImage parsed");
@@ -152,13 +180,15 @@ describe("reply", () => {
     expect(unknown.failure.message).toContain("Done");
     expect(unknown.failure.message).toContain("client");
     const blank = Reply.parse(
-      line({ name: "client", arguments: { reason: "  ", args: ["start"] } }),
+      line({ name: "client", arguments: { step: 1, reason: "  ", args: ["start"] } }),
     );
     if (Result.isSuccess(blank)) {
       expect.fail("a blank reason parsed");
     }
     expect(blank.failure.message).toContain("reason");
-    const empty = Reply.parse(line({ name: "client", arguments: { reason: "boot", args: [] } }));
+    const empty = Reply.parse(
+      line({ name: "client", arguments: { step: 1, reason: "boot", args: [] } }),
+    );
     if (Result.isSuccess(empty)) {
       expect.fail("an empty action parsed");
     }

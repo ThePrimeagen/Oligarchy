@@ -461,13 +461,18 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   model, which marks the result running. Each turn is one back and forth: the
   `custom-harness-driving-agent.html` prompt, filled with the past reasons, the looked-up
   definition and proof, and the client tools, then the task. The reply is one line: the tool call
-  JSON. `client` runs that action and carries a `reason`; there is no step number and no
-  step-status. `Done` tells the harness the task is finished. The model's args
+  JSON. `client` runs that action and carries a `step` (a whole number, the first step 1; step N
+  is the Nth ActionList line) and a `reason`; there is no step-status. The past reasons name the step each action carried, because
+  each turn asks the model afresh. `Done` tells the harness the task is finished. The model's args
   are the action and its own flags. It does not call `start`, `stop`, or `save`, and it does not
   pass `--agent-id`, `--session-id`, or `--server-url`. The log names `resume` when the looked-up
   run resumes and `routing <url>` when a server was added. When the model calls `Done`, the harness
   stops the session (`save` when the definition is mint, otherwise `stop --status succeeded`) and
-  runs `./ctrl test-results`. A failure after the session exists, including an interrupt, stops
+  runs `./ctrl test-results`; a save or stop that fails there closes the result failed with its
+  headline. A mint's last act is shutting the guest down, so a failed `get-image` on a mint tells
+  the model to call `Done`; a reply that is anything else ends the drive as if it had. A command
+  answering `unknown session` fails the loop at once: the session is gone and every later command
+  would answer the same. A failure after the session exists, including an interrupt, stops
   it with `--status failed` and closes the result failed even when that stop fails, and the loop
   still exits 1 with the original reason. A database url that is not a url fails as a command
   error carrying the database message, before the model is asked. It appends
@@ -476,10 +481,16 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the step limit, or the run ceiling exits 1 and the reason is the failure. A ticket with no
   result, or a result with no definition, fails before start and does not ask the model. The
   action itself is the client function for that action (`mouse click` is `mouseClick`), called in
-  this process. The driver does not run the client CLI and does not spawn `./client`. Before a
-  guest action (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) the driver calls
-  `intent start` with that reply's `reason`, and `intent end` after the action returns. The step
-  limit counts tool calls. `start`, `reserve`, `relinquish`,
+  this process. The driver does not run the client CLI and does not spawn `./client`. Intents
+  are the harness's, so it calls the client's `intentStart` and `intentEnd` functions directly with
+  the run's agent, session, and server (`SERVER_URL` or the client's default when the run has
+  none), and builds no command line for them. They change only with the step: once the result is
+  marked running, the driver starts the intent with the first ActionList line (`step 1` when there
+  is none), and before an action whose `step` differs from the current one it ends that intent and
+  starts one with line N of that step (`step N` past the list). An action repeating the step runs under the intent already open, so one
+  step's actions stay together. A step whose intent start failed runs no action; its next action
+  tries the start again. Nothing ends the last intent: the stop or save closes it. The step limit
+  counts tool calls. `start`, `reserve`, `relinquish`,
   `stop`, and `save` are not guest actions. A diagnose is not this program: it still runs under
   OpenCode. The OpenRouter token is `OPENROUTER_API_KEY`.
 

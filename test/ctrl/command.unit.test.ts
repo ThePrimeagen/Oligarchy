@@ -3384,6 +3384,102 @@ describe("session --search", () => {
 });
 
 // ---------------------------------------------------------------------------
+// session --agent-id
+// ---------------------------------------------------------------------------
+
+// The ticket names its result and the result names its session: inspection from the id a
+// reviewer has in hand.
+describe("session --agent-id", () => {
+  const ticketed = (linearId: string, sessionId: string | null): TestResultRow => ({
+    ...result(RESULT_ID, "failed", sessionId),
+    linearId,
+  });
+
+  it.effect("inspects the session the ticket's result ran in (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.sessions.sessions.push(session(OTHER_SESSION_ID, "failed", ago(50)));
+      h.stores.tests.results.push(ticketed("OLI-42", SESSION_ID));
+      const exit = yield* h.run(["session", "--agent-id", "OLI-42", "--status"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* lastJson).toMatchObject({ id: SESSION_ID, status: "succeeded" });
+      const all = yield* h.run(["session", "--agent-id", "OLI-42", "--all"]);
+      expect(Exit.isSuccess(all)).toBe(true);
+      expect(yield* lastJson).toMatchObject({
+        session: { id: SESSION_ID },
+        results: { id: RESULT_ID, linearId: "OLI-42" },
+      });
+    }),
+  );
+
+  it.effect("--session-id and SESSION_ID have no say: the ticket names the session (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.sessions.sessions.push(session(OTHER_SESSION_ID, "failed", ago(50)));
+      h.stores.tests.results.push(ticketed("OLI-42", SESSION_ID));
+      const flagged = yield* h.run([
+        "session",
+        "--agent-id",
+        "OLI-42",
+        "--session-id",
+        OTHER_SESSION_ID,
+        "--status",
+      ]);
+      expect(Exit.isSuccess(flagged)).toBe(true);
+      expect(yield* lastJson).toMatchObject({ id: SESSION_ID });
+      const fromEnv = yield* h.run(["session", "--agent-id", "OLI-42", "--status"], {
+        ...WITH_DB,
+        SESSION_ID: OTHER_SESSION_ID,
+      });
+      expect(Exit.isSuccess(fromEnv)).toBe(true);
+      expect(yield* lastJson).toMatchObject({ id: SESSION_ID });
+    }),
+  );
+
+  it.effect("rejects a ticket no result carries (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.tests.results.push(ticketed("OLI-42", SESSION_ID));
+      expect(yield* h.fail(["session", "--agent-id", "OLI-99", "--status"])).toMatchObject({
+        _tag: "CommandError",
+        message: "session: no test result for OLI-99",
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects a ticket whose result no session has run yet (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.results.push(ticketed("OLI-42", null));
+      expect(yield* h.fail(["session", "--agent-id", "OLI-42", "--status"])).toMatchObject({
+        _tag: "CommandError",
+        message: "session: OLI-42 has no session yet",
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("still needs a selector, and does not combine with --search (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      seedInspect(h);
+      h.stores.tests.results.push(ticketed("OLI-42", SESSION_ID));
+      expect(yield* h.fail(["session", "--agent-id", "OLI-42"])).toMatchObject({
+        message: expect.stringMatching(/^session: --status, --logs, .* or --all is required$/),
+      });
+      expect(yield* h.fail([...SEARCH, "--agent-id", "OLI-42"])).toMatchObject({
+        message: "session: --search takes no --agent-id",
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Environment, server url, help
 // ---------------------------------------------------------------------------
 
@@ -3718,16 +3814,16 @@ describe("SESSION_ID", () => {
         seedInspect(h);
         expect(yield* h.fail(["session", "--status"])).toMatchObject({
           _tag: "CommandError",
-          message: "session: --session-id or SESSION_ID is required",
+          message: "session: --session-id, SESSION_ID or --agent-id is required",
         });
         expect(
           yield* h.fail(["session", "--status"], { ...WITH_DB, SESSION_ID: "" }),
         ).toMatchObject({
           _tag: "CommandError",
-          message: "session: --session-id or SESSION_ID is required",
+          message: "session: --session-id, SESSION_ID or --agent-id is required",
         });
         expect(yield* h.fail(["session"])).toMatchObject({
-          message: "session: --session-id or SESSION_ID is required",
+          message: "session: --session-id, SESSION_ID or --agent-id is required",
         });
         expect(yield* stdout).toEqual([]);
       }),

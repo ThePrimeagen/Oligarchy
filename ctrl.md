@@ -16,11 +16,11 @@ Consult this table of contents first. Read only the section you need.
 | [test-results](#test-results) | 177 |
 | [session list](#session-list) | 195 |
 | [session](#session) | 211 |
-| [session --search](#session---search) | 236 |
-| [error-type new](#error-type-new) | 254 |
-| [error-type list](#error-type-list) | 269 |
-| [diagnose](#diagnose) | 283 |
-| [automation --list](#automation---list) | 302 |
+| [session --search](#session---search) | 238 |
+| [error-type new](#error-type-new) | 256 |
+| [error-type list](#error-type-list) | 271 |
+| [diagnose](#diagnose) | 285 |
+| [automation --list](#automation---list) | 304 |
 
 ## Important
 
@@ -42,7 +42,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 ./ctrl test start     --session-id <id> --test-result-id <id> --model <id>
 ./ctrl test-results   --agent-id <agent> --id <id> --status success|failed [--reason <text>]
 ./ctrl session list   [--count <n>] [--active] [--json]
-./ctrl session        --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
+./ctrl session        --session-id <id>|--agent-id <ticket> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
 ./ctrl session        --search --test-result-id <id>
 ./ctrl error-type new  --key <key> --description <text>
 ./ctrl error-type list [--json]
@@ -53,7 +53,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 The action comes first. Every value is a flag; there are no positional arguments. Flags may sit in any order after the action.
 
 - `DATABASE_URL` — read from the environment by every action; it is the only variable most of them need. `test run`, `test run testsuite`, `mint` and `test list` also read `LINEAR_API_TOKEN` and `LINEAR_TEAM`, in that order. `LINEAR_TEAM` is the Linear team those tickets are filed on. It is required and has no default, so a local run and production can name different teams. No action reads `OLIGARCHY_TOKEN`. A `.env` in the current directory fills in missing variables only. `--env-file <path>` also reads that file: the process environment wins, then the file, then `.env`. A missing variable means exit 1.
-- `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id or SESSION_ID is required`.
+- `--session-id <id>` — taken by `test start`, `session` and `diagnose`. Omitted, it is read from `SESSION_ID` in the environment; the flag wins when both are given, and an empty `SESSION_ID` counts as unset. Set it once — `SESSION_ID=$(./ctrl session --search --test-result-id <id>) && export SESSION_ID`, so a failed search stops there instead of exporting nothing — and every command that follows is about that session. Neither given is a usage error; on `session` without `--search` it is the refusal `session: --session-id, SESSION_ID or --agent-id is required`.
 - `--server-url <url>` — taken by `test run`, `test run testsuite` and `mint`: the qemu server the driving agents will talk to, a full http or https URL, stored on the run and written into every ticket. Falls back to `SERVER_URL` from the environment; there is no default. `test start` and `test-results` accept it and ignore it, so a ticket written before it went still runs; every other action refuses it as an unrecognized flag.
 
 A command that works exits 0. A command that fails exits 1 and prints the error: one headline, then the stack trace and the cause behind it. Read the headline first. `./ctrl <action> --help` prints that action's flags.
@@ -211,12 +211,13 @@ Prints the most recent sessions, newest first, one per line: the status, colored
 ## session
 
 ```
-./ctrl session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
+./ctrl session --session-id <id>|--agent-id <ticket> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
 ```
 
 Prints what is stored for one session, as JSON. At least one selector is required; one selector prints that value, several print an object keyed by them. An unknown session is a failure. Not used while driving a guest; a reviewing agent starts here, and the session id is all it needs — everything else is reached from it. With only a test result id in hand, [session --search](#session---search) finds the session first.
 
 - `--session-id <id>` — the session; `SESSION_ID` when omitted.
+- `--agent-id <ticket>` — the Linear ticket instead: the session its result ran in. It wins over `--session-id` and `SESSION_ID`. A ticket no result carries (`session: no test result for <ticket>`), or one whose result no session has started (`session: <ticket> has no session yet`), is a failure; with `--search` it is refused (`session: --search takes no --agent-id`).
 - `--status` — the session row: `{ id, config, status, reason, startedAt, endedAt }`. `status` and `reason` are the driver's verdict as `./client stop` recorded it, or `errored` with what the qemu server saw fail; `config` is what it booted.
 - `--logs` — its log lines, oldest first.
 - `--test-def` — the test definition its result ran, in the wording it ran (a later `test define` does not change it), or `null`.
@@ -231,6 +232,7 @@ Prints what is stored for one session, as JSON. At least one selector is require
 ```bash
 ./ctrl session --session-id 6f1c...e2a9 --all
 ./ctrl session --session-id 6f1c...e2a9 --debug-logs
+./ctrl session --agent-id OLI-42 --all
 ```
 
 ## session --search

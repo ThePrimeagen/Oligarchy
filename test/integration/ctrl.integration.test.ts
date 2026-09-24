@@ -450,8 +450,8 @@ describe("./ctrl without a database", () => {
         ["session", "--session-id", randomUUID(), "--test-result-id", randomUUID(), "--logs"],
         "session: --test-result-id needs --search",
       ],
-      [["session", "--status"], "session: --session-id or SESSION_ID is required"],
-      [["session"], "session: --session-id or SESSION_ID is required"],
+      [["session", "--status"], "session: --session-id, SESSION_ID or --agent-id is required"],
+      [["session"], "session: --session-id, SESSION_ID or --agent-id is required"],
     ];
     for (const [args, headline] of cases) {
       const result = await runCtrl(args, env);

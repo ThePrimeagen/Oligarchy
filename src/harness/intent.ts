@@ -1,19 +1,5 @@
 import { Result } from "effect";
-import type * as Tools from "./tools.ts";
 import * as Errors from "../shared/errors.ts";
-
-// client.md: keys, mouse and images run inside an intent. start, reserve, relinquish,
-// stop and save sit outside one. reserve names no session, so intent start cannot
-// bracket it either. Anything else is the client's to refuse.
-const GUEST = new Set(["send-keys", "mouse", "get-image", "get-serial", "follow"]);
-
-export type Bracket =
-  | { readonly _tag: "plain" }
-  | {
-      readonly _tag: "guest";
-      readonly start: Tools.CommandLine;
-      readonly end: Tools.CommandLine;
-    };
 
 const fail = (message: string): Result.Result<never, Errors.ToolError> =>
   Result.fail(Errors.ToolError.make({ message }));
@@ -52,57 +38,6 @@ export const flag = (args: ReadonlyArray<string>, name: string): string | undefi
     }
   }
   return value;
-};
-
-// The model's own words when it said what it is about to do; otherwise the action.
-export const intentMessage = (content: string | null, args: ReadonlyArray<string>): string => {
-  if (content !== null && content.trim() !== "") {
-    return content.trim();
-  }
-  const action = actionName(args) ?? "client";
-  const next = args[1];
-  if (action === "mouse" && next !== undefined && !next.startsWith("-")) {
-    return `mouse ${next}`;
-  }
-  return action;
-};
-
-export const bracket = (
-  command: Tools.CommandLine,
-  testResultId: string,
-  message: string,
-): Result.Result<Bracket, Errors.ToolError> => {
-  const name = actionName(command.args);
-  if (name === undefined || !GUEST.has(name)) {
-    return Result.succeed({ _tag: "plain" });
-  }
-  const agent = flag(command.args, "agent-id");
-  const session = flag(command.args, "session-id");
-  if (agent === undefined || session === undefined) {
-    return fail("client: a guest action needs --agent-id and --session-id");
-  }
-  if (message.trim() === "") {
-    return fail("client: an intent needs a message");
-  }
-  if (testResultId === "") {
-    return fail("client: an intent needs --test-result-id");
-  }
-  const server = flag(command.args, "server-url");
-  const shared = [
-    "--agent-id",
-    agent,
-    "--session-id",
-    session,
-    ...(server === undefined ? [] : ["--server-url", server]),
-  ];
-  return Result.succeed({
-    _tag: "guest",
-    start: {
-      bin: "./client",
-      args: ["intent", "start", ...shared, "--test-result-id", testResultId, "--message", message],
-    },
-    end: { bin: "./client", args: ["intent", "end", ...shared] },
-  });
 };
 
 // The model names the action and that action's own flags. These three are the harness's:

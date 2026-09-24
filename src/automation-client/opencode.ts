@@ -20,11 +20,14 @@ const CONFIG = JSON.stringify({
 
 export const ENV = { OPENCODE_CONFIG_CONTENT: CONFIG } as const;
 
+// oligarchy.json holds OpenRouter model ids, which the harness sends to OpenRouter as they are.
+// opencode reads the first segment of --model as its provider, so the id goes under openrouter
+// whatever it starts with: bare, meta/... would be looked up as a provider named meta.
 export const args = (prompt: string, model: string, variant: string): ReadonlyArray<string> => [
   "run",
   "--auto",
   "--model",
-  model,
+  `openrouter/${model}`,
   "--variant",
   variant,
   "--",

@@ -1296,6 +1296,70 @@ describe("sendKeys", () => {
   );
 
   it.effect(
+    "a fresh guest that powered itself off fails the image but stays for save, which keeps its disk",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          script: {
+            screendump: () =>
+              Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            yield* h.qemu.exit(id, 0);
+            expect((yield* Effect.flip(sessions.image(live)))._tag).toBe("ExchangeFailed");
+            expect(h.sessions.sessions[0]).toMatchObject({ id, status: "running" });
+            expect(yield* sessions.lookup(id, AGENT)).toBe(live);
+            yield* sessions.save(live);
+            expect(h.minted.saves).toHaveLength(1);
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "succeeded",
+              reason: `saved; minted ${ISO}`,
+            });
+          }),
+        );
+      }),
+  );
+
+  it.effect("a resumed guest that powered itself off still ends errored on a failed image", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        minted: {
+          find: () => Option.some({ disk: `${URL_ISO}.qcow2`, vars: `${URL_ISO}.OVMF_VARS.fd` }),
+        },
+        script: {
+          screendump: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+        },
+      });
+      yield* h.run(
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          yield* sessions.reserve(AGENT);
+          const id = yield* sessions.start(
+            Contract.StartBody.make({ iso: URL_ISO, agent: AGENT, mode: "resume" }),
+            "none",
+            false,
+          );
+          const live = yield* sessions.lookup(id, AGENT);
+          yield* h.qemu.exit(id, 0);
+          expect((yield* Effect.flip(sessions.image(live)))._tag).toBe("ExchangeFailed");
+          expect(h.sessions.sessions[0]).toMatchObject({
+            id,
+            status: "errored",
+            reason: "qemu exited 0",
+          });
+          expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+            _tag: "UnknownSession",
+          });
+        }),
+      );
+    }),
+  );
+
+  it.effect(
     "a gone QEMU whose row cannot be closed still answers the exchange failure and logs why",
     () =>
       Effect.gen(function* () {

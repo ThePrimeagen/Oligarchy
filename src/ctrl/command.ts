@@ -835,10 +835,24 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     return yield* Console.log(row.sessionId);
   });
 
-  // session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
+  // session --session-id <id>|--agent-id <ticket> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all
   // session --search --test-result-id <id>
+  // The ticket names its result, and the result names the session it ran in.
+  const sessionOfAgent = Effect.fn("ctrl.session.ofAgent")(function* (agentId: string) {
+    const tests = yield* Tests.TestStore;
+    const row = yield* orRefuse(
+      tests.findResultByLinearId(agentId),
+      `session: no test result for ${agentId}`,
+    );
+    if (row.sessionId === null) {
+      return yield* refuse(`session: ${agentId} has no session yet`);
+    }
+    return row.sessionId;
+  });
+
   const sessionInspect = Effect.fn("ctrl.session.inspect")(function* (input: {
     readonly sessionId: Option.Option<string>;
+    readonly agentId: Option.Option<string>;
     readonly search: boolean;
     readonly testResultId: Option.Option<string>;
     readonly status: boolean;
@@ -873,20 +887,27 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       if (selected) {
         return yield* refuse("session: --search takes no selector");
       }
+      if (Option.isSome(input.agentId)) {
+        return yield* refuse("session: --search takes no --agent-id");
+      }
       return yield* sessionSearch(resultId);
     }
     if (Option.isSome(input.testResultId)) {
       return yield* refuse("session: --test-result-id needs --search");
     }
-    const id = yield* orRefuse(
-      Effect.succeed(input.sessionId),
-      "session: --session-id or SESSION_ID is required",
-    );
+    if (Option.isNone(input.agentId) && Option.isNone(input.sessionId)) {
+      return yield* refuse("session: --session-id, SESSION_ID or --agent-id is required");
+    }
     if (!selected) {
       return yield* refuse(
         "session: --status, --logs, --test-def, --test-results, --test-run, --actions, --images, --debug-logs, --diagnosis, or --all is required",
       );
     }
+    // --agent-id names the session through its ticket: a parsed --session-id or SESSION_ID has no
+    // say in it.
+    const id = Option.isSome(input.agentId)
+      ? yield* sessionOfAgent(input.agentId.value)
+      : Option.getOrElse(input.sessionId, () => "");
     const sessions = yield* Sessions.SessionStore;
     const logs = yield* Logs.LogStore;
     const tests = yield* Tests.TestStore;
@@ -1139,6 +1160,11 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     {
       // Optional here alone: a search names its session through the result.
       sessionId: sessionIdFlag.pipe(Flag.optional),
+      agentId: Flag.string("agent-id").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.optional,
+        Flag.withDescription("Linear ticket; inspect the session its result ran in"),
+      ),
       search: toggle("search", "Print the id of the session that ran --test-result-id"),
       testResultId: Flag.string("test-result-id").pipe(
         Flag.withSchema(Schema.NonEmptyString),
@@ -1165,7 +1191,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     sessionInspect,
   ).pipe(
     Command.withDescription(
-      "session --session-id <id> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all; session --search --test-result-id <id>; or list",
+      "session --session-id <id>|--agent-id <ticket> --status|--logs|--test-def|--test-results|--test-run|--actions|--images|--debug-logs|--diagnosis|--all; session --search --test-result-id <id>; or list",
     ),
     Command.provide(withDb),
     Command.withSubcommands([sessionListCommand]),

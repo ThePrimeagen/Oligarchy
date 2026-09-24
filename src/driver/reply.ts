@@ -3,12 +3,13 @@ import type * as Tools from "../harness/tools.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 
-// One line, the tool call. client runs that action. Done finishes the task.
-// The harness stops the session.
+// One line, the tool call. client runs that action under the step it names, counted from 1.
+// Done finishes the task. The harness stops the session.
 export type Reply =
   | { readonly _tag: "Done" }
   | {
       readonly _tag: "client";
+      readonly step: number;
       readonly reason: string;
       readonly args: ReadonlyArray<string>;
     };
@@ -19,6 +20,7 @@ const fail = (message: string): Result.Result<never, Errors.ToolError> =>
 const ClientCall = Schema.Struct({
   name: Schema.Literal("client"),
   arguments: Schema.Struct({
+    step: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
     reason: Schema.String,
     args: Schema.Array(Schema.String),
   }),
@@ -69,6 +71,7 @@ export const parse = (text: string): Result.Result<Reply, Errors.ToolError> => {
   }
   return Result.succeed({
     _tag: "client",
+    step: decoded.value.arguments.step,
     reason,
     args: decoded.value.arguments.args,
   });

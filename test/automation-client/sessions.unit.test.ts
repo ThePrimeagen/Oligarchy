@@ -137,10 +137,10 @@ describe("Sessions.run happy path", () => {
   });
 
   it.effect(
-    "a diagnose reserve launches opencode with oligarchy.json's diagnose model, not ./driver",
+    "a diagnose reserve launches opencode with oligarchy.json's diagnose model under openrouter, not ./driver",
     () => {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
-      const fromFile = "openrouter/meta/muse-spark-1.3-contributor";
+      const fromFile = "meta/muse-spark-1.3-contributor";
       return Effect.gen(function* () {
         const sessions = yield* Sessions.Sessions;
         yield* sessions.reserve(TICKET, "diagnose");
@@ -152,6 +152,8 @@ describe("Sessions.run happy path", () => {
             options: { env: OpenCode.ENV },
           },
         ]);
+        const args = spawner.spawned[0]?.args ?? [];
+        expect(args[args.indexOf("--model") + 1]).toBe(`openrouter/${fromFile}`);
       }).pipe(
         Effect.provide(
           layer(

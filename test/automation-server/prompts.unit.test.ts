@@ -79,6 +79,26 @@ describe("drive happy path", () => {
       expect(text.toLowerCase()).not.toContain("set status");
     }),
   );
+
+  it.effect(
+    "driving-agent.html: Done follows the last step or a shutdown, and a ticket's save or stop is Done",
+    () =>
+      Effect.gen(function* () {
+        const text = yield* real(Prompts.drive(TICKET, MODEL));
+        expect(text).toMatch(/last ActionList step[^<]*call Done/);
+        expect(text).toMatch(/shut the machine down[^<]*call Done/);
+        expect(text).toMatch(/says save or stop[^<]*call Done/);
+      }),
+  );
+
+  it.effect(
+    "driving-agent.html: Done is not held until the proof is on screen, a proof only Done can finish (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const text = yield* real(Prompts.drive(TICKET, MODEL));
+        expect(text).not.toContain("When the proof is on screen, call Done.");
+      }),
+  );
 });
 
 describe("diagnose happy path", () => {
