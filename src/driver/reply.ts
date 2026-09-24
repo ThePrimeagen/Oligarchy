@@ -62,15 +62,17 @@ export const Action = Schema.TaggedUnion({
   reserve: {},
   relinquish: {},
   follow: {},
+  // The loop waits 100ms and writes the screenshot. This is that screenshot's command.
+  wait: {},
 }).annotate({ identifier: "@oligarchy/driver/reply/Action" });
 export type Action = typeof Action.Type;
 
 export const Reply = Schema.Struct({
-  status: Schema.Literals(["continue", "complete"]).annotate({
-    description: "continue runs the action. complete ends the run and does not run it.",
+  reason: Schema.NonEmptyString.annotate({
+    description: "Why this step, in a few words.",
   }),
-  actionTaken: Schema.NonEmptyString.annotate({
-    description: "What you did, in a few words.",
+  completes: Schema.Boolean.annotate({
+    description: "True ends the run and does not run the action. False runs it.",
   }),
   action: Action,
 }).annotate({ identifier: "@oligarchy/driver/reply/Reply" });
@@ -229,6 +231,7 @@ export const command = (
     reserve: () => ["reserve", ...shared],
     relinquish: () => ["relinquish", ...shared],
     follow: () => ["follow", ...shared],
+    wait: () => ["get-image", ...shared],
   });
   return Result.succeed({ bin: "./client", args });
 };

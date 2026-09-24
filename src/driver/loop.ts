@@ -191,12 +191,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       return yield* Effect.fail(commandError(parsed.failure.message));
     }
     const reply = parsed.success;
-    if (reply.status === "complete") {
+    if (reply.completes) {
       yield* log(input.debugLog, step, "stop", "model-stopped");
       return { reason: "model-stopped" } satisfies Stopped;
     }
 
     turns = step;
+    // wait is a screenshot after 100ms, the same gap client-with-image leaves for the guest to paint.
+    const waiting = reply.action._tag === "wait";
     const planned = Reply.command(reply.action, {
       agentId: input.agentId,
       serverUrl: input.serverUrl,
@@ -204,10 +206,13 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     });
     if (Result.isFailure(planned)) {
       yield* log(input.debugLog, step, "refusal", planned.failure.message);
-      decisions.push(decision(reply.actionTaken, planned.failure.message));
+      decisions.push(decision(reply.reason, planned.failure.message));
       continue;
     }
-    const command = planned.success;
+    const screenshot = `${input.debugLog}.png`;
+    const command = waiting
+      ? { bin: planned.success.bin, args: [...planned.success.args, "-o", screenshot] }
+      : planned.success;
     let outcome = "";
 
     if (command.args[0] === "start") {
@@ -258,15 +263,15 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           outcome = `${outcome}\n${Tools.toolContent(marked)}`;
         }
       }
-      decisions.push(decision(reply.actionTaken, outcome));
+      decisions.push(decision(reply.reason, outcome));
       continue;
     }
 
-    const message = Intent.intentMessage(reply.actionTaken, command.args);
+    const message = Intent.intentMessage(reply.reason, command.args);
     const bracketed = Intent.bracket(command, input.testResultId, message);
     if (Result.isFailure(bracketed)) {
       yield* log(input.debugLog, step, "refusal", bracketed.failure.message);
-      decisions.push(decision(reply.actionTaken, bracketed.failure.message));
+      decisions.push(decision(reply.reason, bracketed.failure.message));
       continue;
     }
 
@@ -280,11 +285,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         `${shown(bracketed.success.start)} exit ${String(opened.exitCode)}`,
       );
       if (opened.exitCode !== 0) {
-        decisions.push(decision(reply.actionTaken, Tools.toolContent(opened)));
+        decisions.push(decision(reply.reason, Tools.toolContent(opened)));
         continue;
       }
       // A spawn or log failure still has to close the intent this start opened.
       const closeIntent = runCommand(bracketed.success.end).pipe(Effect.ignore);
+      if (waiting) {
+        yield* Effect.sleep("100 millis");
+      }
       const ran = yield* runCommand(command).pipe(Effect.tapError(() => closeIntent));
       yield* log(
         input.debugLog,
@@ -299,11 +307,10 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         "command",
         `${shown(bracketed.success.end)} exit ${String(ended.exitCode)}`,
       );
+      const shot = waiting && ran.exitCode === 0 ? screenshot : Tools.toolContent(ran);
       outcome =
-        ended.exitCode === 0
-          ? Tools.toolContent(ran)
-          : `${Tools.toolContent(ran)}\nintent end failed\n${Tools.toolContent(ended)}`;
-      decisions.push(decision(reply.actionTaken, outcome));
+        ended.exitCode === 0 ? shot : `${shot}\nintent end failed\n${Tools.toolContent(ended)}`;
+      decisions.push(decision(reply.reason, outcome));
       continue;
     }
 
@@ -317,6 +324,6 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     if (command.args[0] === "relinquish" && ran.exitCode === 0) {
       sessionId = undefined;
     }
-    decisions.push(decision(reply.actionTaken, Tools.toolContent(ran)));
+    decisions.push(decision(reply.reason, Tools.toolContent(ran)));
   }
 });

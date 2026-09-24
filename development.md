@@ -456,21 +456,21 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 - `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
   the `openrouter-driving-agent.html` prompt, filled by the prompt generator with the thin
   `prompts/client-tools.md` guide, the task, and the decisions so far, one line each. The reply
-  is one `drive` tool call. Its arguments are one JSON object: `status` (`complete` or
-  `continue`), `actionTaken` (what the agent did, in a few words), and `action` (a typed client
-  action). `continue` runs that action; `complete` records the action taken and does not run it
-  again. The action does not carry the agent, the session, or the server. `./driver` takes
+  is one `drive` tool call. Its arguments are one JSON object: `reason` (why, in a few words),
+  `completes` (true ends the run and does not run the action; false runs it), and `action` (a
+  typed client action). The action does not carry the agent, the session, or the server. `./driver` takes
   `--agent-id` and `--server-url`, and `--session-id` when the guest is already up. A `start`
   that prints a session id becomes the session for the actions after it. It appends one JSON
   line to `--debug-log` per step (the loop counter and the step), and exits 0 only when the
-  reply is `complete` or the harness closed the result. An OpenRouter failure, a reply that is
+  reply has `completes` true or the harness closed the result. An OpenRouter failure, a reply that is
   not that one call, the step limit, or the run ceiling exits 1 and the reason is the failure.
   A `start` is the model's action, including `resume` when it set it; the log names `resume`
   only then, and `routing <url>` from the driver's server. When that start exits 0 and prints a
   session id, the harness runs `./ctrl test start` with that id, the test result id, and the
   model, which marks the result running. Before a guest action (`send-keys`, `mouse`,
-  `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and `./client intent end`
-  after that command returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest
+  `get-image`, `get-serial`, `follow`, `wait`) it runs `./client intent start`, and `./client intent end`
+  after that command returns. A `wait` sleeps 100 milliseconds, then `./client get-image` writes
+  the PNG beside the debug log, and the loop continues. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest
   actions. A `stop` or `save` that exits 0 is the harness closing the result, and the model is
   not called again. The OpenRouter token is `OPENROUTER_API_KEY`.
 

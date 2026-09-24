@@ -9,11 +9,11 @@ describe("openrouter-driving-agent.html", () => {
     Effect.gen(function* () {
       const text = yield* Prompts.openRouterDrive().pipe(Effect.provide(NodeFileSystem.layer));
       expect(text.includes("{{")).toBe(false);
-      expect(text).toContain("complete ends the run");
-      expect(text).toContain("continue");
-      expect(text).toContain("what you did");
-      expect(text).toContain("next action");
-      expect(text).toContain("action you took");
+      expect(text).toContain("completes is true");
+      expect(text).toContain("reason is why");
+      expect(text).toContain("When completes is true the action is not run");
+      expect(text).toContain("100 milliseconds");
+      expect(text).toContain("wait");
       expect(text).toContain("fractions of the screenshot");
       expect(text).toContain("from 0 to 1");
       expect(text).toContain("send-keys");

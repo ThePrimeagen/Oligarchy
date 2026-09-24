@@ -64,7 +64,7 @@ export const makeDriverCommand = <E, R>(
     }),
   ).pipe(
     Command.withDescription(
-      "Run the harness loop for one prompt and one model: each reply is one drive tool call, continue or complete, what the agent did, and a typed action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
+      "Run the harness loop for one prompt and one model: each reply is one drive tool call, a reason, whether the step completes, and a typed action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
     ),
     EnvFile.withEnvFile,
   );

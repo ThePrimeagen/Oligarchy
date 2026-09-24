@@ -69,22 +69,21 @@ const drive = (body: unknown): Response =>
     "[DONE]",
   ]);
 
-const reply = (status: "continue" | "complete", actionTaken: string, action: unknown): Response =>
-  drive({ status, actionTaken, action });
+const reply = (completes: boolean, reason: string, action: unknown): Response =>
+  drive({ completes, reason, action });
 
-const stopped = (actionTaken = "done"): Response =>
-  reply("complete", actionTaken, { _tag: "save" });
+const stopped = (reason = "done"): Response => reply(true, reason, { _tag: "save" });
 
-const sendKeys = (actionTaken = "lock the screen") =>
-  reply("continue", actionTaken, { _tag: "send-keys", keys: "a" });
+const sendKeys = (reason = "lock the screen") =>
+  reply(false, reason, { _tag: "send-keys", keys: "a" });
 
-const start = () => reply("continue", "boot", { _tag: "start" });
+const start = () => reply(false, "boot", { _tag: "start" });
 
-const resumed = () => reply("continue", "boot", { _tag: "start", resume: true });
+const resumed = () => reply(false, "boot", { _tag: "start", resume: true });
 
-const stop = () => reply("continue", "halt", { _tag: "stop", status: "succeeded" });
+const stop = () => reply(false, "halt", { _tag: "stop", status: "succeeded" });
 
-const reserve = () => reply("continue", "give it back", { _tag: "reserve" });
+const reserve = () => reply(false, "give it back", { _tag: "reserve" });
 
 type Script = FakeSpawner.Script;
 
@@ -427,7 +426,7 @@ describe("driver loop", () => {
         const recorder = FakeHttp.recordRequests(() => {
           calls += 1;
           if (calls === 1) {
-            return reply("continue", "give it back", { _tag: "relinquish" });
+            return reply(false, "give it back", { _tag: "relinquish" });
           }
           if (calls === 2) {
             return sendKeys("type");
@@ -456,7 +455,7 @@ describe("driver loop", () => {
       const recorder = FakeHttp.recordRequests(() => {
         calls += 1;
         if (calls === 1) {
-          return reply("continue", "give it back", { _tag: "relinquish" });
+          return reply(false, "give it back", { _tag: "relinquish" });
         }
         if (calls === 2) {
           return sendKeys("type");
@@ -632,8 +631,8 @@ describe("driver loop", () => {
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() =>
         drive({
-          status: "continue",
-          actionTaken: "type",
+          completes: false,
+          reason: "type",
           action: { _tag: "send-keys", keys: "a", sessionId: SESSION },
         }),
       );
@@ -654,6 +653,122 @@ describe("driver loop", () => {
         expect(error.message).toContain("sessionId");
       }
       expect(seen).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a wait sleeps 100 milliseconds, screenshots beside the debug log, and the loop continues",
+    () =>
+      Effect.gen(function* () {
+        let calls = 0;
+        const recorder = FakeHttp.recordRequests(() => {
+          calls += 1;
+          return calls === 1 ? reply(false, "look again", { _tag: "wait" }) : stopped("done");
+        });
+        const log: Array<string> = [];
+        const spawner = FakeSpawner.fakeSpawner((_command, args) => {
+          if (args[0] === "intent" && args[1] === "start") {
+            return {};
+          }
+          return { exitCode: 0 };
+        });
+        const parsed = yield* config();
+        const fiber = yield* Loop.run({
+          model: MODEL,
+          prompt: "Lock the screen.",
+          testResultId: RESULT,
+          debugLog: LOG,
+          agentId: "OLI-1",
+          serverUrl: "http://127.0.0.1:9",
+          sessionId: SESSION,
+          config: parsed,
+          token: Redacted.make(TOKEN),
+        }).pipe(
+          Effect.provide(Layer.mergeAll(capturingFs(log), recorder.layer, spawner.layer)),
+          Effect.forkScoped,
+        );
+        const opened = yield* spawner.nextSpawn;
+        expect(opened.args[0]).toBe("intent");
+        expect(opened.args[1]).toBe("start");
+        expect(opened.args).toContain("look again");
+        yield* opened.exit(0);
+        for (let i = 0; i < 40; i++) {
+          if (log.some((line) => line.includes("intent") && line.includes("exit 0"))) {
+            break;
+          }
+          yield* Effect.yieldNow;
+        }
+        for (let i = 0; i < 10; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(spawner.spawned).toHaveLength(1);
+        yield* TestClock.adjust("99 millis");
+        expect(spawner.spawned).toHaveLength(1);
+        yield* TestClock.adjust("1 millis");
+        const shot = yield* spawner.nextSpawn;
+        expect(shot.command).toBe("./client");
+        expect(shot.args[0]).toBe("get-image");
+        expect(shot.args).toContain("-o");
+        expect(shot.args).toContain(`${LOG}.png`);
+        expect(shot.args).toContain("--session-id");
+        expect(shot.args).toContain(SESSION);
+        const ended = yield* spawner.nextSpawn;
+        expect(ended.args[0]).toBe("intent");
+        expect(ended.args[1]).toBe("end");
+        const outcome = yield* Fiber.join(fiber);
+        expect(outcome).toEqual({ reason: "model-stopped" });
+        const again = userText(recorder.requests[1]?.body);
+        expect(again).toContain("look again");
+        expect(again).toContain(`${LOG}.png`);
+      }),
+  );
+
+  it.effect("a wait before a session is a refusal and does not sleep", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? reply(false, "look again", { _tag: "wait" }) : stopped();
+      });
+      const seen: Array<string> = [];
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        (_command, args) => {
+          seen.push(args[0] ?? "");
+          return { exitCode: 0 };
+        },
+        [],
+        undefined,
+        { id: undefined },
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(seen).toEqual([]);
+      expect(spawner.spawned).toEqual([]);
+      expect(userText(recorder.requests[1]?.body)).toContain("session");
+    }),
+  );
+
+  it.effect("a wait whose intent start fails does not sleep or screenshot", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = FakeHttp.recordRequests(() => {
+        calls += 1;
+        return calls === 1 ? reply(false, "look again", { _tag: "wait" }) : stopped("stopped");
+      });
+      const { spawner } = yield* run(
+        config(),
+        recorder.layer,
+        (_command, args) => {
+          expect(args[0]).toBe("intent");
+          expect(args[1]).toBe("start");
+          return { exitCode: 1, stderr: "Cannot start one intent when one's already running.\n" };
+        },
+        [],
+      );
+      expect(spawner.spawned.map((child) => child.args[0])).toEqual(["intent"]);
+      expect(userText(recorder.requests[1]?.body)).toContain("already running");
+      expect(userText(recorder.requests[1]?.body)).not.toContain(`${LOG}.png`);
     }),
   );
 
