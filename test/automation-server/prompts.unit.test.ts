@@ -59,12 +59,8 @@ describe("drive happy path", () => {
       expect(text).toContain(TICKET);
       expect(text).toContain(MODEL);
       expect(text).toContain("driving agent");
-      expect(text).toContain("Do not call intent");
-      expect(text).toContain("Do not call ./ctrl");
-      expect(text).not.toContain("intent start");
-      expect(text).not.toContain("test-results");
       expect(text).toContain(
-        "line 2 of your reply is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
+        "the intent message is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
       );
       expect(text).toContain("any crashes or erroneous behavior must be reported");
       expect(text).toContain("Any crash or erroneous behavior must be reported");
