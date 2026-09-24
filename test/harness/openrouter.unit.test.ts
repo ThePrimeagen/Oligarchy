@@ -27,7 +27,6 @@ const tool: Tools.ToolDefinition = {
       additionalProperties: false,
       required: ["args"],
       properties: {
-        withImage: { type: "boolean", description: "screenshot" },
         args: { type: "array", items: { type: "string" }, description: "flags" },
       },
     },

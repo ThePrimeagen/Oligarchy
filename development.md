@@ -104,8 +104,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 
 ## Layout
 
-- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./client-with-image`,
-  `./ctrl`, `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
+- The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./ctrl`,
+  `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
   fleet starters (`./start-server-proxy-client <max-jobs>` runs the proxy on `:55555` and one qemu
   server; `./start-automation-server-client <max-jobs>` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
@@ -463,13 +463,15 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the reason is the failure. A `start` is the model's command, including `--resume` and
   `--server-url` when it passed them; the log names `resume` and `routing <url>` only then. When
   that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
-  the test result id, and the model, which marks the result running. Before a guest action
-  (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and
-  `./client intent end` after that command returns. `start`, `reserve`, `relinquish`, `stop`, and
-  `save` are not guest actions. A `stop` or `save` that exits 0 is followed by `./ctrl test-results`
-  (success when the status is succeeded or completed, or the command is save; failed otherwise),
-  and the model is not called again. A diagnose is not this program: it still runs under OpenCode.
-  The OpenRouter token is `OPENROUTER_API_KEY`.
+  the test result id, and the model, which marks the result running. The action itself is the
+  client function for that action (`mouse click` is `mouseClick`), called in this process. The
+  driver does not run the client CLI and does not spawn `./client`. Before a guest action (`send-keys`, `mouse`,
+  `get-image`, `get-serial`, `follow`) the driver calls `intent start`, and `intent end` after the
+  action returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A
+  `stop` or `save` that exits 0 is followed by `./ctrl test-results` (success when the status is
+  succeeded or completed, or the command is save; failed otherwise), and the model is not called
+  again. A diagnose is not this program: it still runs under OpenCode. The OpenRouter token is
+  `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 

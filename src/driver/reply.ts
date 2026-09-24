@@ -72,7 +72,7 @@ const tokens = (action: string): Result.Result<ReadonlyArray<string>, Errors.Too
   return Result.succeed(args);
 };
 
-// Line 3 is one ./client command. A leading ./client or ./client-with-image selects the bin.
+// Line 3 is one ./client command. A leading ./client is the bin and is not an argument.
 // ./ctrl and ./session are not this loop: a diagnose still runs under OpenCode.
 export const command = (action: string): Result.Result<Tools.CommandLine, Errors.ToolError> => {
   const split = tokens(action);
@@ -83,13 +83,9 @@ export const command = (action: string): Result.Result<Tools.CommandLine, Errors
   if (head === "./ctrl" || head === "./session") {
     return fail("reply: the harness runs ./ctrl");
   }
-  const image = head === "./client-with-image";
-  const args = head === "./client" || image ? rest : split.success;
+  const args = head === "./client" ? rest : split.success;
   return Tools.commandLine({
     name: "client",
-    arguments: JSON.stringify({
-      ...(image ? { withImage: true } : {}),
-      args,
-    }),
+    arguments: JSON.stringify({ args }),
   });
 };
