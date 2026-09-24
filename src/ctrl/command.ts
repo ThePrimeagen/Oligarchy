@@ -283,6 +283,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printLines(lines);
   });
 
+  // test details --name <definition>
+  const testDetails = Effect.fn("ctrl.test.details")(function* (input: { readonly name: string }) {
+    const tests = yield* Tests.TestStore;
+    const wordings = yield* tests.listTestDefinitionHistory(Option.some(input.name));
+    if (!Arr.isReadonlyArrayNonEmpty(wordings)) {
+      return yield* noDefinitions(Option.some(input.name));
+    }
+    return yield* printLines(Render.renderTestDefinitionDetails(wordings));
+  });
+
   // test define --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
   const testDefine = Effect.fn("ctrl.test.define")(function* (input: {
     readonly name: string;
@@ -1004,6 +1014,22 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     Command.provide(withDb),
   );
 
+  const testDetailsCommand = Command.make(
+    "details",
+    {
+      name: Flag.string("name").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withDescription("Test definition name"),
+      ),
+    },
+    testDetails,
+  ).pipe(
+    Command.withDescription(
+      "Print a test's newest version, when it was added, and its description, instruction and proof",
+    ),
+    Command.provide(withDb),
+  );
+
   // test run testsuite --server-url <url> --iso <https-url> --version <version>
   //
   // Every definition, each its newest wording. A name cannot be picked; one definition is
@@ -1111,10 +1137,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     testDefinitions,
   ).pipe(
     Command.withDescription(
-      "test --list [--details] [--name <definition>] [--history]; or define, run, list, start",
+      "test --list [--details] [--name <definition>] [--history]; or define, details, run, list, start",
     ),
     Command.provide(withDb),
-    Command.withSubcommands([testDefineCommand, testRunCommand, testListCommand, testStartCommand]),
+    Command.withSubcommands([
+      testDefineCommand,
+      testDetailsCommand,
+      testRunCommand,
+      testListCommand,
+      testStartCommand,
+    ]),
   );
 
   const testResultsCommand = Command.make(

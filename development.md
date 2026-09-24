@@ -460,8 +460,11 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   one that start prints. It then runs `./ctrl test start` with that id, the result id, and the
   model, which marks the result running. Each turn is one back and forth: the
   `custom-harness-driving-agent.html` prompt, filled with the past reasons, the looked-up
-  definition and proof, the client tools, and the model's last reply as it wrote it (left out on
-  the first ask, which has none), then the task. The reply is one line: the tool call
+  definition and proof, the client tools, the model's last reply as it wrote it (left out on
+  the first ask, which has none), and, when the ask carries a screenshot, the last action other
+  than `get-image` that exited 0, named with the flags it ran with (the harness's own dropped) as
+  JSON, since that screenshot is its result (left out when no such action came before), then the
+  task. The reply is one line: the tool call
   JSON. `client` runs that action and carries a `step` (a whole number, the first step 1; step N
   is the Nth ActionList line) and a `reason`; there is no step-status. The past reasons name the step each action carried, because
   each turn asks the model afresh. `Done` tells the harness the task is finished. The model's args
@@ -480,7 +483,10 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   and only then presses; the harness fills the point in before it calls the client function,
   which still takes it (`client.md` documents that CLI; the harness prompt tells the model the
   difference). A click or drag that names the point, or that comes before any mouse action, is a
-  bad reply. A failure after the session exists, including an interrupt, stops
+  bad reply. `mouse move-up`, `move-down`, `move-left` and `move-right` are the harness's alone,
+  not the client's: each is a `mouse move` a hundredth of the screenshot from where the pointer
+  is (up lowers `y`), clamped to 0..1, so at an edge it moves nowhere rather than fail. One that
+  names `--x` or `--y`, or comes before any mouse action, is a bad reply. A failure after the session exists, including an interrupt, stops
   it with `--status failed` and closes the result failed even when that stop fails, and the loop
   still exits 1 with the original reason. A database url that is not a url fails as a command
   error carrying the database message, before the model is asked. It appends

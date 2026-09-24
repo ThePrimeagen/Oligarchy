@@ -6,7 +6,7 @@
   },
   "reasoning": {
     "drive": "minimal",
-    "diagnose": "high",
+    "diagnose": "xhigh",
     "mint": "minimal"
   },
   "openRouterBaseUrl": "https://openrouter.ai/api/v1",

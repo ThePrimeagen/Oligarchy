@@ -221,6 +221,8 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   let lastResponse: Option.Option<string> = Option.none();
   // The last get-image's PNG. Any other guest action may change the screen, so it drops it.
   let screen: Uint8Array | undefined;
+  // The last action other than get-image that succeeded: what a screenshot shows the result of.
+  let previous: Option.Option<ReadonlyArray<string>> = Option.none();
   // Where the last mouse action that succeeded left the pointer. A click presses there.
   let pointer: Option.Option<Pointer.Point> = Option.none();
   // A mint's image failed: the guest is off. The model gets one turn to call Done.
@@ -385,6 +387,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             REASONS: reasons,
             CLIENT_TOOLS: Tools.clientGuide.trimEnd(),
             RESPONSE: lastResponse,
+            PREVIOUS: screen === undefined ? Option.none() : previous,
           });
           yield* log(input, turn, "request", input.model);
           const answer = yield* OpenRouter.complete({
@@ -496,10 +499,13 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
 
           const ran = yield* Client.run(guest);
           yield* log(input, turn, "command", `${shown(guest)} exit ${String(ran.exitCode)}`);
+          const imaging = guest.args[0] === "get-image";
           if (ran.exitCode === 0) {
             pointer = Pointer.after(guest.args, pointer);
+            if (!imaging) {
+              previous = Option.some(Intent.dropHeld(guest.args));
+            }
           }
-          const imaging = guest.args[0] === "get-image";
           const shot = imaging && ran.exitCode === 0 && ran.bytes.length > 0;
           screen = shot ? ran.bytes : undefined;
           const printed = Tools.toolContent(ran);

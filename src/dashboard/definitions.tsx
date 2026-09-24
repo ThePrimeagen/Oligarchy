@@ -224,7 +224,7 @@ const PERCENTILES = [
 ] as const;
 
 // One bar per run: green passed, red failed, height the duration, shortest on the left. Every
-// wording of the name counts, like the verdicts above it. Nothing when no run was timed.
+// wording of the name counts, like the verdicts under the name. Nothing when no run was timed.
 const DurationChart: FC<{ chart: DurationChartData }> = ({ chart }) => {
   const { bars, percentiles } = chart;
   if (bars.length === 0 || percentiles === undefined) {
@@ -277,7 +277,6 @@ const Definition: FC<{
     <section>
       <h2>{group.name}</h2>
       <DefinitionRuns runs={results.runs} />
-      <DurationChart chart={results.durations} />
       {/* The class is what public/dashboard.js looks for: the button starts disabled and is
           enabled once a field differs from the wording it was rendered with. */}
       <form method="post" action="/definitions" class="definition__form">
@@ -439,9 +438,9 @@ const DefinitionList: FC<{
 };
 
 // The index is one link per name, with the search on that list. A name's own page opens on the
-// current wording's passes and fails, then its newest wording as a form, the current wording and
-// the one before it, and the last ten verdicts and the duration chart under the name. Running jobs
-// sit above the search: the box filters names already on the page,
+// current wording's passes and fails with the duration chart directly under it, then its newest
+// wording as a form, the current wording and the one before it, and the last ten verdicts under
+// the name. Running jobs sit above the search: the box filters names already on the page,
 // not the jobs in flight. On a name's page they are that name's jobs, and the block is absent
 // when none of them are running. `groups` is the index's list, absent on a name's page and when
 // the database could not be read. `running` is absent on that same failure, so it does not claim
@@ -468,7 +467,10 @@ export const DefinitionsPage: FC<{
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
       {selected === undefined ? null : (
-        <CurrentVersion tally={currentVersionTally(selected, results.tallies)} />
+        <>
+          <CurrentVersion tally={currentVersionTally(selected, results.tallies)} />
+          <DurationChart chart={results.durations} />
+        </>
       )}
       {shownRunning === null || (name !== undefined && shownRunning.length === 0) ? null : (
         <RunningTests jobs={shownRunning} definition={name} />

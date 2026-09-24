@@ -4,23 +4,24 @@ Consult this table of contents first. Read only the section you need.
 
 | Section | Line |
 |---------|-----:|
-| [Important](#important) | 25 |
-| [Synopsis](#synopsis) | 31 |
-| [test --list](#test---list) | 61 |
-| [test define](#test-define) | 79 |
-| [test run](#test-run) | 95 |
-| [test run testsuite](#test-run-testsuite) | 113 |
-| [mint](#mint) | 129 |
-| [test list](#test-list) | 148 |
-| [test start](#test-start) | 160 |
-| [test-results](#test-results) | 177 |
-| [session list](#session-list) | 195 |
-| [session](#session) | 211 |
-| [session --search](#session---search) | 238 |
-| [error-type new](#error-type-new) | 256 |
-| [error-type list](#error-type-list) | 271 |
-| [diagnose](#diagnose) | 285 |
-| [automation --list](#automation---list) | 304 |
+| [Important](#important) | 26 |
+| [Synopsis](#synopsis) | 32 |
+| [test --list](#test---list) | 63 |
+| [test define](#test-define) | 81 |
+| [test details](#test-details) | 97 |
+| [test run](#test-run) | 111 |
+| [test run testsuite](#test-run-testsuite) | 129 |
+| [mint](#mint) | 145 |
+| [test list](#test-list) | 164 |
+| [test start](#test-start) | 176 |
+| [test-results](#test-results) | 193 |
+| [session list](#session-list) | 211 |
+| [session](#session) | 227 |
+| [session --search](#session---search) | 254 |
+| [error-type new](#error-type-new) | 272 |
+| [error-type list](#error-type-list) | 287 |
+| [diagnose](#diagnose) | 301 |
+| [automation --list](#automation---list) | 320 |
 
 ## Important
 
@@ -35,6 +36,7 @@ If you are an agent driving a guest, you need two of these: [test start](#test-s
 
 ./ctrl test --list    [--details] [--name <definition>] [--history]
 ./ctrl test define    --name <definition> [--description <text>] [--instruction <text>] [--proof <text>]
+./ctrl test details   --name <definition>
 ./ctrl test run       --name <definition> --server-url <url> --iso <https-url> --version <version>
 ./ctrl test run testsuite --server-url <url> --iso <https-url> --version <version>
 ./ctrl test list
@@ -90,6 +92,20 @@ Stores a test definition, or a new wording of one, and prints it as JSON: `{ id,
 ```bash
 ./ctrl test define --name lock-screen --description "Lock the screen" --instruction "Press Super+L" --proof "The lock screen shows the clock"
 ./ctrl test define --name lock-screen --proof "The lock screen shows the clock and the user's name"
+```
+
+## test details
+
+```
+./ctrl test details --name <definition>
+```
+
+Prints one definition's newest wording: `<name> v<n>` on the first line, `added <ISO time>` on the second, then a blank line and the `description`, `instruction` and `proof`, each under its own label and separated by blank lines. `v<n>` counts as in `test --list --history`. Not used while driving a guest.
+
+- `--name <definition>` — the test. Required. A name that matches none is a failure: `test: no test definition named <name>`.
+
+```bash
+./ctrl test details --name lock-screen
 ```
 
 ## test run

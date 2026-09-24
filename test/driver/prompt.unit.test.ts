@@ -16,6 +16,7 @@ const FILLED = {
   REASONS: "open the menu: menu is up",
   CLIENT_TOOLS: "# Client\n\n./client start --agent-id OLI-1",
   RESPONSE: Option.some(CLIENT),
+  PREVIOUS: Option.none(),
 };
 
 const LAST_RESPONSE = `<last-response>
@@ -24,6 +25,11 @@ Your last response was
 {{RESPONSE}}
 </tool-call>
 </last-response>`;
+
+const PREVIOUS_MOVE = `<previous-move>
+Your previous action was {{PREVIOUS_ACTION}} with values {{PREVIOUS_VALUES}}
+And the screenshot provided is the result of your action
+</previous-move>`;
 
 const file = (): string =>
   readFileSync(new URL("../../prompts/custom-harness-driving-agent.html", import.meta.url), "utf8");
@@ -40,6 +46,7 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).toContain("{{REASONS}}");
     expect(text).toContain("{{CLIENT_TOOLS}}");
     expect(text).toContain(LAST_RESPONSE);
+    expect(text).toContain(PREVIOUS_MOVE);
     expect(Result.isSuccess(Reply.parse(CLIENT))).toBe(true);
     expect(Result.isSuccess(Reply.parse(EXAMPLE))).toBe(true);
     const done = Reply.parse(DONE);
@@ -120,6 +127,35 @@ describe("custom-harness-driving-agent.html", () => {
   it("leaves a placeholder that arrives inside the last response (unhappy)", () => {
     const rendered = Prompt.render({ ...FILLED, RESPONSE: Option.some("{{TEST_PROOF}}") });
     expect(rendered).toContain("<tool-call>\n{{TEST_PROOF}}\n</tool-call>");
+  });
+
+  it("names the previous action and its flags as JSON, the screenshot its result", () => {
+    const rendered = Prompt.render({
+      ...FILLED,
+      PREVIOUS: Option.some(["mouse", "move", "--x", "0.5", "--y", "0.5"]),
+    });
+    expect(rendered).toContain(
+      '<previous-move>\nYour previous action was mouse move with values {"x":"0.5","y":"0.5"}\nAnd the screenshot provided is the result of your action\n</previous-move>',
+    );
+    expect(rendered).not.toContain("{{");
+  });
+
+  it("leaves the previous move out when there is none (unhappy)", () => {
+    const rendered = Prompt.render({ ...FILLED, PREVIOUS: Option.none() });
+    expect(rendered).not.toContain("previous-move");
+    expect(rendered).not.toContain("Your previous action was");
+    expect(rendered).not.toContain("{{");
+    expect(rendered).toContain("Your last response was");
+  });
+
+  it("reads a --flag=value and leaves a placeholder inside a value as written (unhappy)", () => {
+    const rendered = Prompt.render({
+      ...FILLED,
+      PREVIOUS: Option.some(["send-keys", "--keys={{TEST_PROOF}}<ENTER>"]),
+    });
+    expect(rendered).toContain(
+      'Your previous action was send-keys with values {"keys":"{{TEST_PROOF}}<ENTER>"}',
+    );
   });
 
   it("leaves a placeholder that arrives inside a value", () => {

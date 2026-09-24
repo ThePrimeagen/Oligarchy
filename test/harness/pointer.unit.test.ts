@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { Option, Result } from "effect";
 import * as Pointer from "../../src/harness/pointer.ts";
 
@@ -87,6 +87,107 @@ describe("the harness's pointer", () => {
         "mouse drag: takes no --from-x or --from-y; it starts where the pointer is",
       );
     }
+  });
+
+  it("nudges the pointer a hundredth from where it is, up lowering y", () => {
+    const held = ["--agent-id", "OLI-1", "--session-id", "s"];
+    expect(placed(["mouse", "move-up", ...held], AT)).toEqual([
+      "mouse",
+      "move",
+      ...held,
+      "--x",
+      "0.25",
+      "--y",
+      "0.74",
+    ]);
+    expect(placed(["mouse", "move-down"], AT)).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0.25",
+      "--y",
+      "0.76",
+    ]);
+    expect(placed(["mouse", "move-left"], AT)).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0.24",
+      "--y",
+      "0.75",
+    ]);
+    expect(placed(["mouse", "move-right"], AT)).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0.26",
+      "--y",
+      "0.75",
+    ]);
+    expect(placed(["mouse", "move-down"], Option.some({ x: "0.56", y: "0.56" }))).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0.56",
+      "--y",
+      "0.57",
+    ]);
+  });
+
+  it("keeps a nudge on the screen at its edges (unhappy)", () => {
+    expect(placed(["mouse", "move-up"], Option.some({ x: "0.5", y: "0" }))).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0.5",
+      "--y",
+      "0",
+    ]);
+    expect(placed(["mouse", "move-down"], Option.some({ x: "0.5", y: "0.995" }))).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0.5",
+      "--y",
+      "1",
+    ]);
+    expect(placed(["mouse", "move-left"], Option.some({ x: "0.004", y: "0.5" }))).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "0",
+      "--y",
+      "0.5",
+    ]);
+    expect(placed(["mouse", "move-right"], Option.some({ x: "1", y: "0.5" }))).toEqual([
+      "mouse",
+      "move",
+      "--x",
+      "1",
+      "--y",
+      "0.5",
+    ]);
+  });
+
+  it("refuses a nudge before any move, or one that names a point (unhappy)", () => {
+    expect(placed(["mouse", "move-up"], NOWHERE)).toBe(
+      "mouse move-up: no mouse move yet; mouse move to the point first",
+    );
+    expect(placed(["mouse", "move-right", "--x", "0.5"], AT)).toBe(
+      "mouse move-right: takes no --x or --y; it moves from where the pointer is",
+    );
+    expect(placed(["mouse", "move-left", "--y=0.5"], AT)).toBe(
+      "mouse move-left: takes no --x or --y; it moves from where the pointer is",
+    );
+  });
+
+  it("is where the nudge left it, so nudges add up", () => {
+    const once = Pointer.placed(["mouse", "move-up"], AT);
+    assert(Result.isSuccess(once));
+    const moved = Pointer.after(once.success, AT);
+    const twice = Pointer.placed(["mouse", "move-up"], moved);
+    assert(Result.isSuccess(twice));
+    expect(Pointer.after(twice.success, moved)).toEqual(Option.some({ x: "0.25", y: "0.73" }));
   });
 
   it("leaves every other action as the model wrote it, with or without a pointer", () => {

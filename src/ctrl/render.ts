@@ -1,3 +1,4 @@
+import { Array as Arr } from "effect";
 import type * as DbSchema from "../db/schema.ts";
 import type * as Domain from "../shared/domain.ts";
 
@@ -141,6 +142,27 @@ export const renderTestDefinitionHistory = (
   return details
     ? [json(versioned)]
     : versioned.map((row) => `${row.name} v${String(row.version)}`);
+};
+
+// One name's wordings as the store lists a history, oldest first: the last is the newest, and
+// its version is how many there are.
+export const renderTestDefinitionDetails = (
+  wordings: Arr.NonEmptyReadonlyArray<TestDefinitionRow>,
+): ReadonlyArray<string> => {
+  const newest = Arr.lastNonEmpty(wordings);
+  return [
+    `${newest.name} v${String(wordings.length)}`,
+    `added ${newest.createdAt.toISOString()}`,
+    "",
+    "description",
+    newest.description,
+    "",
+    "instruction",
+    newest.instruction,
+    "",
+    "proof",
+    newest.proof,
+  ];
 };
 
 export const renderErrorTypes = (

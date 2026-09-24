@@ -453,6 +453,67 @@ describe("test define", () => {
 });
 
 // ---------------------------------------------------------------------------
+// test details
+// ---------------------------------------------------------------------------
+
+const DETAILS = ["test", "details"];
+
+describe("test details", () => {
+  it.effect("prints the newest version, when it was added, then its wording (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(installRevised, terminal, install);
+      const exit = yield* h.run([...DETAILS, "--name", "Install Omarchy"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual([
+        "Install Omarchy v2",
+        "added 2026-09-02T00:00:00.000Z",
+        "",
+        "description",
+        installRevised.description,
+        "",
+        "instruction",
+        installRevised.instruction,
+        "",
+        "proof",
+        installRevised.proof,
+      ]);
+      expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("refuses a name no definition carries and prints nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install);
+      const exit = yield* h.run([...DETAILS, "--name", "missing-definition"]);
+      expect(failure(exit)).toMatchObject({
+        _tag: "CommandError",
+        message: "test: no test definition named missing-definition",
+      });
+      expect(yield* stdout).toEqual([]);
+    }),
+  );
+
+  it.effect("requires --name, and DATABASE_URL after parsing (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const unnamed = yield* h.run(DETAILS);
+      expect(helpErrors(unnamed).join("\n")).toMatch(/Missing required flag: --name/);
+      const empty = yield* h.run([...DETAILS, "--name", ""]);
+      expect(helpErrors(empty).join("\n")).toMatch(/--name.*length of at least 1/s);
+      expect(h.touched).toEqual([]);
+      const unset = yield* h.run([...DETAILS, "--name", "Install Omarchy"], {});
+      expect(failure(unset)).toMatchObject({
+        _tag: "MissingVariable",
+        message: "DATABASE_URL is not set",
+      });
+      expect(h.touched).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // test run --name
 // ---------------------------------------------------------------------------
 
@@ -3597,6 +3658,7 @@ describe("--server-url", () => {
     ["test", "--list"],
     ["test", "--list", "--history"],
     ["test", "define", "--name", "Change lighting", "--proof", "p"],
+    ["test", "details", "--name", "Install Omarchy"],
     ["test", "list"],
     ["session", "list"],
     ["session", "--session-id", SESSION_ID, "--logs"],
@@ -3858,6 +3920,7 @@ describe("--help", () => {
           ["--help"],
           ["test", "--help"],
           ["test", "define", "--help"],
+          ["test", "details", "--help"],
           ["test", "run", "--help"],
           ["test", "run", "testsuite", "--help"],
           ["test", "list", "--help"],

@@ -30,11 +30,43 @@ const pointOf = (args: ReadonlyArray<string>, x: string, y: string): Option.Opti
   return atX === undefined || atY === undefined ? Option.none() : Option.some({ x: atX, y: atY });
 };
 
+// The harness's own moves, not the client's: the model is often that close to where it means to
+// be. A hundredth of the screenshot, y growing downward, clamped so an edge stays an edge.
+const NUDGE = 0.01;
+const NUDGES: Record<string, { readonly x: number; readonly y: number }> = {
+  "mouse move-up": { x: 0, y: -NUDGE },
+  "mouse move-down": { x: 0, y: NUDGE },
+  "mouse move-left": { x: -NUDGE, y: 0 },
+  "mouse move-right": { x: NUDGE, y: 0 },
+};
+
+// Rounded to a millionth so 0.56 + 0.01 is 0.57, not 0.5700000000000001.
+const nudged = (at: string, by: number): string =>
+  String(Math.round(Math.min(1, Math.max(0, Number(at) + by)) * 1_000_000) / 1_000_000);
+
 export const placed = (
   args: ReadonlyArray<string>,
   at: Option.Option<Point>,
 ): Result.Result<ReadonlyArray<string>, Errors.ToolError> => {
   const action = actionOf(args);
+  const nudge = NUDGES[action];
+  if (nudge !== undefined) {
+    if (names(args, "x") || names(args, "y")) {
+      return fail(`${action}: takes no --x or --y; it moves from where the pointer is`);
+    }
+    if (Option.isNone(at)) {
+      return fail(`${action}: no mouse move yet; mouse move to the point first`);
+    }
+    return Result.succeed([
+      "mouse",
+      "move",
+      ...args.slice(2),
+      "--x",
+      nudged(at.value.x, nudge.x),
+      "--y",
+      nudged(at.value.y, nudge.y),
+    ]);
+  }
   if (action === "mouse click" || action === "mouse double-click") {
     if (names(args, "x") || names(args, "y")) {
       return fail(`${action}: takes no --x or --y; it clicks where the pointer is`);

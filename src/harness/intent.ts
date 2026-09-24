@@ -60,7 +60,7 @@ export type Held = {
   readonly sessionId: string;
 };
 
-const dropHeld = (args: ReadonlyArray<string>): Array<string> => {
+export const dropHeld = (args: ReadonlyArray<string>): Array<string> => {
   const kept: Array<string> = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];

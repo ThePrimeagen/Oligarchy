@@ -1539,6 +1539,15 @@ describe("driver loop", () => {
     }),
   );
 
+  it.effect("a screenshot with no action before it has no previous move (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(getImage(), done()), withScreen());
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(imagesAt(recorder.requests, 1)).toEqual([PNG_URL]);
+      expect(systemText(modelRequests(recorder.requests)[1]?.body)).not.toContain("previous-move");
+    }),
+  );
+
   it.effect("the screenshot bytes are not decoded into the past steps as text", () =>
     Effect.gen(function* () {
       const recorder = routed(answers(getImage(), done()), withScreen());
@@ -1682,6 +1691,40 @@ describe("driver loop", () => {
         }),
     );
 
+    it.effect("a nudge moves the pointer a little from where it is, and a click lands there", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            speak("point at Lock", "mouse move --x 0.25 --y 0.25"),
+            speak("just above", "mouse move-up"),
+            click(),
+            done(),
+          ),
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit) && exit.value.stopped).toEqual({ reason: "result-closed" });
+        expect(bodiesAt(recorder.requests, "/mouse/move")).toEqual([
+          expect.objectContaining({ x: 0.25, y: 0.25 }),
+          expect.objectContaining({ x: 0.25, y: 0.24 }),
+        ]);
+        expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
+          expect.objectContaining({ x: 0.25, y: 0.24 }),
+        ]);
+      }),
+    );
+
+    it.effect("a nudge before any mouse move is refused and reaches no guest (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(speak("just above", "mouse move-up"), done()));
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
+        expect(past(recorder.requests, 1)).toContain(
+          "mouse move-up: no mouse move yet; mouse move to the point first",
+        );
+      }),
+    );
+
     it.effect("a move the guest refuses leaves the pointer where it was (unhappy)", () =>
       Effect.gen(function* () {
         let moves = 0;
@@ -1710,6 +1753,84 @@ describe("driver loop", () => {
         expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
           expect.objectContaining({ x: 0.25, y: 0.75 }),
         ]);
+      }),
+    );
+
+    const systemAt = (requests: ReadonlyArray<FakeHttp.Recorded>, index: number): string =>
+      systemText(modelRequests(requests)[index]?.body);
+
+    it.effect("the ask with the screenshot names the move before it and the values it ran", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(moveTo(), getImage(), done()), withScreen());
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(imagesAt(recorder.requests, 2)).toEqual([PNG_URL]);
+        expect(systemAt(recorder.requests, 2)).toContain(
+          'Your previous action was mouse move with values {"x":"0.5","y":"0.5"}\nAnd the screenshot provided is the result of your action',
+        );
+      }),
+    );
+
+    it.effect("a click's previous move carries the point the harness filled in", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            speak("point at Lock", "mouse move --x 0.25 --y 0.75"),
+            click(),
+            getImage(),
+            done(),
+          ),
+          withScreen(),
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(systemAt(recorder.requests, 3)).toContain(
+          'Your previous action was mouse click with values {"x":"0.25","y":"0.75"}\n',
+        );
+      }),
+    );
+
+    it.effect("an ask without a screenshot has no previous move (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(moveTo(), done()), withScreen());
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(imagesAt(recorder.requests, 1)).toEqual([]);
+        expect(systemAt(recorder.requests, 1)).not.toContain("previous-move");
+      }),
+    );
+
+    it.effect("a move the guest refuses is not the previous move (unhappy)", () =>
+      Effect.gen(function* () {
+        let moves = 0;
+        const recorder = routed(
+          answers(
+            speak("point at Lock", "mouse move --x 0.25 --y 0.75"),
+            speak("point at Cancel", "mouse move --x 0.9 --y 0.9"),
+            getImage(),
+            done(),
+          ),
+          (url) => {
+            if (url.pathname === "/start") {
+              return FakeHttp.json({ id: SESSION });
+            }
+            if (url.pathname === "/image") {
+              return screenshot();
+            }
+            if (url.pathname === "/mouse/move") {
+              moves += 1;
+              return moves === 2
+                ? FakeHttp.json({ error: "qemu: closed" }, 502)
+                : FakeHttp.json({ ok: "true" });
+            }
+            return FakeHttp.json({ ok: "true" });
+          },
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(systemAt(recorder.requests, 3)).toContain(
+          'Your previous action was mouse move with values {"x":"0.25","y":"0.75"}\n',
+        );
       }),
     );
 
