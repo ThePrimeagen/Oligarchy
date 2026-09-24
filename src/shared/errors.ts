@@ -366,6 +366,19 @@ export class CommandError extends Schema.TaggedError<CommandError>(
   "@oligarchy/shared/errors/CommandError",
 )("CommandError", { message: Schema.String }) {}
 
+// The harness loop appended a message the history cannot hold. The caller built
+// the turn; the model did not.
+export class HistoryError extends Schema.TaggedError<HistoryError>(
+  "@oligarchy/shared/errors/HistoryError",
+)("HistoryError", { message: Schema.String }) {}
+
+// A model's tool call is not a command a driver runs. The text goes back to the
+// model as the tool result.
+export class ToolError extends Schema.TaggedError<ToolError>("@oligarchy/shared/errors/ToolError")(
+  "ToolError",
+  { message: Schema.String },
+) {}
+
 export class DatabaseError extends Schema.TaggedError<DatabaseError>(
   "@oligarchy/shared/errors/DatabaseError",
 )("DatabaseError", {
