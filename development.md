@@ -468,8 +468,8 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   `./client intent end` after that command returns. `start`, `reserve`, `relinquish`, `stop`, and
   `save` are not guest actions. A `stop` or `save` that exits 0 is followed by `./ctrl test-results`
   (success when the status is succeeded or completed, or the command is save; failed otherwise),
-  and the model is not called again. A diagnose run may run `./ctrl` and `./session` and does not
-  close the result. The OpenRouter token is `OPENROUTER_API_KEY`.
+  and the model is not called again. A diagnose is not this program: it still runs under OpenCode.
+  The OpenRouter token is `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 

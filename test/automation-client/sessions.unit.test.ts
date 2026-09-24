@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as Driver from "../../src/automation-client/driver.ts";
+import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Cli from "../../src/cli.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -56,7 +57,7 @@ const reservedRun = (ticket: string, prompt: string, model = MODEL) =>
   });
 
 describe("Sessions.run happy path", () => {
-  it.effect("launches ./driver with the model, the prompt, the result and the action", () => {
+  it.effect("launches ./driver with the model, the prompt and the result", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({
       exitCode: 0,
       stdout: "the written result",
@@ -70,7 +71,6 @@ describe("Sessions.run happy path", () => {
             prompt: "do the work",
             model: MODEL,
             testResultId: RESULT,
-            action: "drive",
           }),
         },
       ]);
@@ -105,27 +105,46 @@ describe("Sessions.run happy path", () => {
           prompt: "do the work",
           model: deepseek,
           testResultId: RESULT,
-          action: "drive",
         }),
       );
     }).pipe(Effect.provide(layer(spawner)));
   });
 
-  it.effect("a diagnose reserve launches ./driver --action diagnose", () => {
+  it.effect("a diagnose reserve launches opencode with its config, not ./driver", () => {
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET, "diagnose");
       yield* sessions.run(TICKET, "diagnose the session", MODEL, RESULT);
-      expect(spawner.spawned[0]?.args).toEqual(
-        Driver.args({
-          prompt: "diagnose the session",
-          model: MODEL,
-          testResultId: RESULT,
-          action: "diagnose",
-        }),
-      );
+      expect(spawner.spawned).toMatchObject([
+        {
+          command: OpenCode.BIN,
+          args: OpenCode.args("diagnose the session", MODEL),
+          options: { env: OpenCode.ENV },
+        },
+      ]);
     }).pipe(Effect.provide(layer(spawner)));
+  });
+
+  it.effect("a diagnose that outlives the ceiling names opencode, not the driver", () => {
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "diagnose");
+      const running = yield* Effect.forkChild(
+        Effect.flip(sessions.run(TICKET, "diagnose the session", MODEL, RESULT)),
+      );
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      yield* TestClock.adjust(OpenCode.CEILING);
+      const error = yield* Fiber.join(running);
+      expect(error).toMatchObject({
+        _tag: "RunFailed",
+        message: `opencode run exceeded ${OpenCode.CEILING}`,
+      });
+      expect(spawner.spawned[0]?.command).toBe(OpenCode.BIN);
+    }).pipe(Effect.provide(layer(spawner, 1)));
   });
 });
 
@@ -807,9 +826,8 @@ describe("reserve by action", () => {
       expect(qemu).toEqual([]);
       expect(yield* sessions.jobs).toBe(1);
       yield* sessions.run(TICKET, "diagnose the session", MODEL, RESULT);
-      expect(spawner.spawned.map((spawned) => prompted(spawned.args))).toEqual([
-        "diagnose the session",
-      ]);
+      expect(spawner.spawned[0]?.command).toBe(OpenCode.BIN);
+      expect(spawner.spawned[0]?.args).toEqual(OpenCode.args("diagnose the session", MODEL));
       expect(yield* sessions.jobs).toBe(0);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });
@@ -1079,7 +1097,8 @@ describe("reservation expiry", () => {
       expect(log.lines.map((line) => line.agentId)).toEqual([TICKET]);
       // The younger one still runs.
       yield* sessions.run(OTHER, "still mine", MODEL, RESULT);
-      expect(spawner.spawned.map((spawned) => prompted(spawned.args))).toEqual(["still mine"]);
+      expect(spawner.spawned[0]?.command).toBe(OpenCode.BIN);
+      expect(spawner.spawned[0]?.args.at(-1)).toBe("still mine");
       // The ticket that expired may reserve again.
       yield* sessions.reserve(TICKET, "drive");
       expect(yield* sessions.jobs).toBe(1);

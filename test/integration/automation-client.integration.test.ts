@@ -148,6 +148,14 @@ const freePort = async (): Promise<number> => {
   return port;
 };
 
+const installOpencode = (script: string): string => {
+  const bin = mkdtempSync(join(tmpdir(), "oligarchy-opencode-"));
+  const file = join(bin, "opencode");
+  writeFileSync(file, `#!/bin/sh\n${script}\n`);
+  chmodSync(file, 0o755);
+  return bin;
+};
+
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
 const RESULT = "22222222-2222-4222-8222-222222222222";
 
@@ -360,7 +368,6 @@ describeWithDatabase("automation client POST /run", () => {
                 prompt: "do the work",
                 model: MODEL,
                 testResultId: RESULT,
-                action: "drive",
               }),
               "",
             ].join("\n"),
@@ -378,12 +385,12 @@ describeWithDatabase("automation client POST /run", () => {
   it.live("a diagnose reserve asks the qemu host nothing, and its run still answers 200", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
+      const bin = installOpencode("exit 0");
       const port = await freePort();
-      const process = spawnAutomationClient(
-        [...REQUIRED, "--port", String(port)],
-        { SERVER_URL: qemu.url },
-        "exit 0",
-      );
+      const process = spawnAutomationClient([...REQUIRED, "--port", String(port)], {
+        SERVER_URL: qemu.url,
+        PATH: `${bin}:${globalThis.process.env.PATH ?? ""}`,
+      });
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
@@ -395,6 +402,7 @@ describeWithDatabase("automation client POST /run", () => {
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
+        rmSync(bin, { recursive: true, force: true });
         await qemu.close();
       }
     }),

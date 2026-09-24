@@ -135,7 +135,6 @@ const run = (
       prompt: "Lock the screen.",
       testResultId: RESULT,
       debugLog: LOG,
-      action: "drive",
       config: parsed,
       token: Redacted.make(TOKEN),
     }).pipe(Effect.provide(Layer.mergeAll(capturingFs(log, write), http, spawner.layer)));
@@ -692,7 +691,6 @@ describe("driver loop", () => {
         prompt: "Lock the screen.",
         testResultId: RESULT,
         debugLog: LOG,
-        action: "drive",
         config: parsed,
         token: Redacted.make(TOKEN),
       }).pipe(

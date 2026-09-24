@@ -5,6 +5,7 @@ import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as Driver from "../../src/automation-client/driver.ts";
+import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
@@ -166,8 +167,12 @@ describe("POST /reserve happy path", () => {
         expect((yield* run(http, "diagnose the session")).status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.qemu).toEqual([]);
-      expect(fixed.spawner.spawned.map((spawned) => prompted(spawned.args))).toEqual([
-        "diagnose the session",
+      expect(fixed.spawner.spawned).toMatchObject([
+        {
+          command: OpenCode.BIN,
+          args: OpenCode.args("diagnose the session", MODEL),
+          options: { env: OpenCode.ENV },
+        },
       ]);
       expect(fixed.log.lines).toEqual([]);
     }),
@@ -297,7 +302,6 @@ describe("POST /run happy path", () => {
             prompt: "fix the bug",
             model: MODEL,
             testResultId: RESULT,
-            action: "drive",
           }),
           // The transcript the driver prints is the operator's to watch; this process keeps none of it.
           options: { stdout: "inherit" },

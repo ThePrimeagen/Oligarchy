@@ -1,10 +1,9 @@
-import type * as Domain from "../shared/domain.ts";
-
 export const BIN = "./driver";
 
 // A run holds a dispatch slot for as long as it lives. The driver stops itself at the
 // run ceiling in oligarchy.json, which is this long; past it the client kills the child
 // and the job says so, so a driver that ignores its own ceiling still frees the slot.
+// A diagnose is not this program: it still runs under opencode.
 export const CEILING = "1.5 hours";
 
 // The driver appends one JSON line per step. /tmp exists on every host this process
@@ -16,7 +15,6 @@ export const args = (input: {
   readonly prompt: string;
   readonly model: string;
   readonly testResultId: string;
-  readonly action: Domain.AutomationAction;
 }): ReadonlyArray<string> => [
   "--model",
   input.model,
@@ -26,6 +24,4 @@ export const args = (input: {
   debugLog(input.testResultId),
   "--test-result-id",
   input.testResultId,
-  "--action",
-  input.action,
 ];

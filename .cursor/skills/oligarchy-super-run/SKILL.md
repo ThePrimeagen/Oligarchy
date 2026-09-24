@@ -75,7 +75,8 @@ every server that already holds the disk is at its `--max-jobs`.
   session id, `/tmp/superrun/status.sh "$RID"`,
   `SESSION_ID="$SID" ./ctrl session --all`, both client logs and the
   qemu/proxy/server logs around the timestamps, and
-  `/tmp/oligarchy-driver-<result id>.jsonl`. Tell it to
+  `/tmp/oligarchy-driver-<result id>.jsonl` for a drive, and
+  `~/.local/share/opencode/{opencode.db,log/opencode.log}` for a diagnose. Tell it to
   read `DATABASE_URL` from repo `.env` — do not paste secrets. Ask:
   cause, harness-or-model, exact fix if harness.
 - **COUNTED:** model passed/failed, `driver_loop_ceiling`, agent quit

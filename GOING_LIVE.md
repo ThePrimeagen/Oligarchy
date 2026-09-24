@@ -1,5 +1,6 @@
 [ ] - Automation client's need:
- * ./driver (this repo; OpenRouter, not an OpenCode install)
+ * ./driver for a drive or a mint (this repo, OpenRouter)
+ * opencode for a diagnose
  * OPENROUTER_API_KEY
  * DATABASE_URL
 

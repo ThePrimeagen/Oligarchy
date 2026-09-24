@@ -24,10 +24,6 @@ const flags = {
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("Test result this run closes"),
   ),
-  action: Flag.choice("action", Domain.AutomationAction.literals).pipe(
-    Flag.withDefault("drive"),
-    Flag.withDescription("drive and mint run ./client; diagnose may run ./ctrl and ./session"),
-  ),
 };
 
 export const makeDriverCommand = <E, R>(
@@ -45,7 +41,6 @@ export const makeDriverCommand = <E, R>(
         prompt: input.prompt,
         testResultId: input.testResultId,
         debugLog: input.debugLog,
-        action: input.action,
         config,
         token,
       });

@@ -41,8 +41,10 @@ optional operator note, webhook log.
 
 ## Token usage
 
-Oligarchy does not store tokens. The driver writes one JSON line per step to
-`/tmp/oligarchy-driver-<result id>.jsonl`. OpenRouter's usage page is billed truth.
+Oligarchy does not store drive tokens. The driver writes one JSON line per step to
+`/tmp/oligarchy-driver-<result id>.jsonl`. A diagnose still runs under OpenCode, which
+stores its tokens in `~/.local/share/opencode/opencode.db`. OpenRouter's usage page is
+billed truth.
 
 ## Incidents (do not repeat)
 

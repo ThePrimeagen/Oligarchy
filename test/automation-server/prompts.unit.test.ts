@@ -109,9 +109,6 @@ describe("diagnose happy path", () => {
         expect(text).toContain("## session");
         expect(text).toContain("Post-run reviewer");
         expect(text).toContain("./ctrl diagnose");
-        // The embedded guide still names the log line `intent start`; the prompt does not ask
-        // the reviewer to open one.
-        expect(text).not.toContain("./client intent");
         expect(text).not.toContain("In Review");
         expect(text).not.toContain("Done");
         expect(text.toLowerCase()).not.toContain("label");

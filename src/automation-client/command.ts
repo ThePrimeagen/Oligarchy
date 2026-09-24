@@ -92,7 +92,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
       }),
   ).pipe(
     Command.withDescription(
-      "The automation client: POST /reserve takes a --max-jobs slot for a ticket, for a drive after reserving QEMU first, for a diagnose alone, and refuses a second reserve on this server while one has not answered; POST /run consumes that reservation and launches ./driver with a prompt and waits until it finishes; POST /abort kills the matching run by ticket",
+      "The automation client: POST /reserve takes a --max-jobs slot for a ticket, for a drive after reserving QEMU first, for a diagnose alone, and refuses a second reserve on this server while one has not answered; POST /run consumes that reservation and launches ./driver for a drive or mint, or opencode for a diagnose, and waits until it finishes; POST /abort kills the matching run by ticket",
     ),
     EnvFile.withEnvFile,
   );
