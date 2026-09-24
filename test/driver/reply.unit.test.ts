@@ -84,20 +84,7 @@ describe("reply", () => {
     expect(quoted.success.args[quoted.success.args.length - 1]).toBe('say "hi"');
   });
 
-  it("refuses ./ctrl and ./session: a diagnose is not this loop", () => {
-    for (const args of [
-      ["./ctrl", "diagnose", "--verdict", "passed", "--summary", "ok", "--model", "openrouter/x"],
-      ["./session", "image", "--image-id", "1", "-o", "last.png"],
-    ]) {
-      const refused = Reply.command(parsedClient(client("bad", args)));
-      expect(Result.isFailure(refused)).toBe(true);
-      if (Result.isFailure(refused)) {
-        expect(refused.failure.message).toContain("./ctrl");
-      }
-    }
-  });
-
-  it("takes withImage, or a leading ./client-with-image, as the bin", () => {
+  it("takes withImage as the bin and leaves the args as the action", () => {
     const image = Reply.command(
       parsedClient(
         client("shot", ["get-image", "--agent-id", "OLI-1", "--session-id", SESSION], true),
@@ -108,29 +95,16 @@ describe("reply", () => {
       return;
     }
     expect(image.success.bin).toBe("./client-with-image");
-    expect(image.success.args[0]).toBe("get-image");
-
-    const prefixed = Reply.command(
-      parsedClient(
-        client("shot", [
-          "./client-with-image",
-          "get-image",
-          "--agent-id",
-          "OLI-1",
-          "--session-id",
-          SESSION,
-        ]),
-      ),
-    );
-    expect(Result.isSuccess(prefixed)).toBe(true);
-    if (Result.isFailure(prefixed)) {
-      return;
-    }
-    expect(prefixed.success.bin).toBe("./client-with-image");
-    expect(prefixed.success.args[0]).toBe("get-image");
+    expect(image.success.args).toEqual([
+      "get-image",
+      "--agent-id",
+      "OLI-1",
+      "--session-id",
+      SESSION,
+    ]);
 
     const plain = Reply.command(
-      parsedClient(client("boot", ["./client", "start", "--agent-id", "OLI-1"], false)),
+      parsedClient(client("boot", ["start", "--agent-id", "OLI-1"], false)),
     );
     expect(Result.isSuccess(plain)).toBe(true);
     if (Result.isFailure(plain)) {
@@ -154,6 +128,8 @@ describe("reply", () => {
       line({ name: "client", arguments: { reason: "   ", args: ["start"] } }),
       line({ name: "client", arguments: { reason: "boot", args: [] } }),
       line({ name: "Done", arguments: { reason: "finished" } }),
+      line({ name: "Done", arguments: [] }),
+      line({ name: "Done", arguments: 1 }),
       line({ name: "done", arguments: {} }),
       line({ reason: "boot", completes: false, action: "start" }),
     ];
@@ -184,7 +160,8 @@ describe("reply", () => {
     if (Result.isSuccess(unknown)) {
       expect.fail("an unknown tool parsed");
     }
-    expect(unknown.failure.message).toContain("bash");
+    expect(unknown.failure.message).toContain("Done");
+    expect(unknown.failure.message).toContain("client");
     const blank = Reply.parse(
       line({ name: "client", arguments: { reason: "  ", args: ["start"] } }),
     );
@@ -206,11 +183,6 @@ describe("reply", () => {
     expect(Result.isFailure(intent)).toBe(true);
     if (Result.isFailure(intent)) {
       expect(intent.failure.message).toContain("intent");
-    }
-    const onlyBin = Reply.command(parsedClient(client("boot", ["./client"])));
-    expect(Result.isFailure(onlyBin)).toBe(true);
-    if (Result.isFailure(onlyBin)) {
-      expect(onlyBin.failure.message).toContain("action");
     }
   });
 });

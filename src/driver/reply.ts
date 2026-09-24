@@ -1,5 +1,5 @@
 import { Cause, Exit, Result, Schema } from "effect";
-import * as Tools from "../harness/tools.ts";
+import type * as Tools from "../harness/tools.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 
@@ -16,35 +16,25 @@ export type Reply =
 const fail = (message: string): Result.Result<never, Errors.ToolError> =>
   Result.fail(Errors.ToolError.make({ message }));
 
-const Call = Schema.Struct({
-  name: Schema.String,
-  arguments: Schema.Unknown,
+const ClientCall = Schema.Struct({
+  name: Schema.Literal("client"),
+  arguments: Schema.Struct({
+    reason: Schema.String,
+    withImage: Schema.optionalKey(Schema.Boolean),
+    args: Schema.Array(Schema.String),
+  }),
 });
 
-const ClientArguments = Schema.Struct({
-  reason: Schema.String,
-  withImage: Schema.optionalKey(Schema.Boolean),
-  args: Schema.Array(Schema.String),
+const DoneCall = Schema.Struct({
+  name: Schema.Literal("Done"),
+  arguments: Schema.Struct({}),
 });
+
+const Call = Schema.Union([DoneCall, ClientCall]);
 
 const decodeCall = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.toCodecJson(Call)), {
   onExcessProperty: "error",
 });
-
-const decodeClientArguments = Schema.decodeUnknownExit(ClientArguments, {
-  onExcessProperty: "error",
-});
-
-// An empty struct does not reject keys, so Done's arguments are checked here.
-const doneArguments = (value: unknown): Result.Result<void, Errors.ToolError> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return fail("reply: Done takes no arguments");
-  }
-  if (Object.keys(value).length !== 0) {
-    return fail("reply: Done takes no arguments");
-  }
-  return Result.void;
-};
 
 const schemaFailure = (cause: Cause.Cause<unknown>): Result.Result<never, Errors.ToolError> =>
   fail(`reply: ${Render.headline(Cause.squash(cause))}`);
@@ -59,54 +49,43 @@ export const parse = (text: string): Result.Result<Reply, Errors.ToolError> => {
     return schemaFailure(decoded.cause);
   }
   if (decoded.value.name === "Done") {
-    const args = doneArguments(decoded.value.arguments);
-    if (Result.isFailure(args)) {
-      return fail(args.failure.message);
+    // Struct({}) compiles to a not-nullish check, so excess keys are not rejected.
+    const args = decoded.value.arguments;
+    if (
+      typeof args !== "object" ||
+      args === null ||
+      Array.isArray(args) ||
+      Object.keys(args).length !== 0
+    ) {
+      return fail("reply: Done takes no arguments");
     }
     return Result.succeed({ _tag: "Done" });
   }
-  if (decoded.value.name !== "client") {
-    return fail(`reply: unknown tool "${decoded.value.name}"`);
-  }
-  const args = decodeClientArguments(decoded.value.arguments);
-  if (Exit.isFailure(args)) {
-    return schemaFailure(args.cause);
-  }
-  const reason = args.value.reason.trim();
+  const reason = decoded.value.arguments.reason.trim();
   if (reason === "") {
     return fail("reply: reason is why");
   }
-  if (args.value.args.length === 0) {
+  if (decoded.value.arguments.args.length === 0) {
     return fail("reply: the action is empty");
   }
   return Result.succeed({
     _tag: "client",
     reason,
-    withImage: args.value.withImage === true,
-    args: args.value.args,
+    withImage: decoded.value.arguments.withImage === true,
+    args: decoded.value.arguments.args,
   });
 };
 
-// A leading ./client or ./client-with-image selects the bin. ./ctrl and ./session are not
-// this loop: a diagnose still runs under OpenCode.
+// client.md still tells a driving agent to open intents. The harness does that itself, so a
+// model-issued intent would open a second one.
 export const command = (
   call: Extract<Reply, { readonly _tag: "client" }>,
 ): Result.Result<Tools.CommandLine, Errors.ToolError> => {
-  const head = call.args[0];
-  if (head === "./ctrl" || head === "./session") {
-    return fail("reply: the harness runs ./ctrl");
+  if (call.args[0] === "intent") {
+    return fail("client: the harness opens and closes intents");
   }
-  const prefixed = head === "./client" || head === "./client-with-image";
-  const args = prefixed ? call.args.slice(1) : call.args;
-  if (args.length === 0) {
-    return fail("reply: the action is empty");
-  }
-  const image = call.withImage || head === "./client-with-image";
-  return Tools.commandLine({
-    name: "client",
-    arguments: JSON.stringify({
-      ...(image ? { withImage: true } : {}),
-      args,
-    }),
+  return Result.succeed({
+    bin: call.withImage ? "./client-with-image" : "./client",
+    args: [...call.args],
   });
 };
