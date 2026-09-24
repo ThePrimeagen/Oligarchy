@@ -449,7 +449,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 - The OpenRouter client lives in `src/harness/openrouter.ts`. It posts one streaming chat
   completion, fails when no headers or no next chunk arrive within the configured timeouts, and
   retries an HTTP 429 or 5xx only when `retry-after` fits inside the run ceiling. A missing or
-  malformed `retry-after` waits `defaultRetry` from `oligarchy.json`. A refused
+  malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`. A refused
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.

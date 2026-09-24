@@ -34,14 +34,18 @@ const StepLimit = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(1, { message: "stepLimit must be at least 1" }),
 ).annotate({ identifier: "@oligarchy/harness/config/StepLimit" });
 
+// Knobs for the harness loop. A 429 or 5xx with no Retry-After waits defaultRetry.
+const Harness = Schema.Struct({
+  defaultRetry: PositiveDuration,
+}).annotate({ identifier: "@oligarchy/harness/config/Harness" });
+
 export class AppConfig extends Schema.Class<AppConfig>("@oligarchy/harness/config/AppConfig")({
   models: Models,
   openRouterBaseUrl: Domain.ServerUrl,
   timeouts: Timeouts,
   runCeiling: PositiveDuration,
-  // A 429 or 5xx with no Retry-After waits this long, so a blip is not a tight loop.
-  defaultRetry: PositiveDuration,
   stepLimit: StepLimit,
+  harness: Harness,
 }) {}
 
 // Header is reported before chunk, the same order the file writes them.
@@ -52,8 +56,8 @@ const underCeiling = Schema.makeFilter((config: AppConfig) => {
   if (Duration.Order(config.timeouts.chunk, config.runCeiling) >= 0) {
     return { path: ["timeouts", "chunk"], issue: "must be shorter than runCeiling" };
   }
-  if (Duration.Order(config.defaultRetry, config.runCeiling) >= 0) {
-    return { path: ["defaultRetry"], issue: "must be shorter than runCeiling" };
+  if (Duration.Order(config.harness.defaultRetry, config.runCeiling) >= 0) {
+    return { path: ["harness", "defaultRetry"], issue: "must be shorter than runCeiling" };
   }
   return undefined;
 });

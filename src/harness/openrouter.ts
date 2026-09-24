@@ -30,7 +30,7 @@ export type Options = {
     readonly chunk: Duration.Duration;
   };
   readonly runCeiling: Duration.Duration;
-  // Wait when a 429 or 5xx names no Retry-After. oligarchy.json's defaultRetry.
+  // Wait when a 429 or 5xx names no Retry-After. oligarchy.json's harness.defaultRetry.
   readonly defaultRetry: Duration.Duration;
   // The run's start on the same clock, so a retry can be refused before the ceiling.
   readonly startedAtMillis: number;
