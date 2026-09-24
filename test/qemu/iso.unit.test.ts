@@ -174,6 +174,40 @@ const until = (ready: () => boolean): Effect.Effect<void> =>
     expect(ready()).toBe(true);
   });
 
+const PROGRESS_MS = 30_000;
+
+const progressLines = (log: FakeLog.FakeLog): ReadonlyArray<string> =>
+  log.lines.map((line) => line.text).filter((text) => text.startsWith("iso: downloaded "));
+
+// The partial grows only after the chunk's taps have run, so a size means the progress
+// decision for that chunk has already been made.
+const waitForPartial = (
+  fs: FileSystem.FileSystem,
+  partial: string,
+  size: number,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const target = BigInt(size);
+    for (let attempt = 0; attempt < 5_000; attempt++) {
+      const written = yield* fs.stat(partial).pipe(
+        Effect.map((info) => info.size >= target),
+        Effect.orElseSucceed(() => false),
+      );
+      if (written) {
+        return;
+      }
+      yield* Effect.yieldNow;
+    }
+    expect(false, `partial did not reach ${String(size)} bytes`).toBe(true);
+  });
+
+// The buffer stays one byte; `byteLength` is the count the progress line formats.
+const reporting = (bytes: number): Uint8Array => {
+  const chunk = new Uint8Array(1);
+  Object.defineProperty(chunk, "byteLength", { value: bytes });
+  return chunk;
+};
+
 const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 const withServices = <A, E>(
@@ -508,6 +542,191 @@ describe("getIso with a url: download", () => {
         expect(yield* Fiber.join(first)).toBe(cached);
         expect(yield* Fiber.join(second)).toBe(cached);
         expect(http.requests.filter((request) => request.url === URL_ISO)).toHaveLength(1);
+      }),
+    ),
+  );
+
+  it.effect("logs the download percent every 30 seconds when content-length is known", () =>
+    withServices(
+      Effect.gen(function* () {
+        const payload = new Uint8Array(1000);
+        const digest = createHash("sha256").update(payload).digest("hex");
+        const body = gate();
+        const requested = yield* Deferred.make<void>();
+        const { fs, iso, log, cached } = yield* fixture((_, url) => {
+          if (url.toString().endsWith(".sha256")) {
+            return sidecarFor(digest);
+          }
+          Deferred.doneUnsafe(requested, Effect.void);
+          return new Response(body.body, {
+            status: 200,
+            headers: { "content-length": String(payload.byteLength) },
+          });
+        });
+        const partial = `${cached}.partial-${String(PID)}`;
+        const fiber = yield* Effect.forkChild(iso.getIso(URL_ISO, WHO));
+        yield* Deferred.await(requested);
+        yield* body.push(payload.subarray(0, 500));
+        yield* waitForPartial(fs, partial, 500);
+        expect(progressLines(log)).toEqual([]);
+        yield* TestClock.adjust(PROGRESS_MS - 1);
+        expect(progressLines(log)).toEqual([]);
+        yield* TestClock.adjust(1);
+        yield* until(() => progressLines(log).length === 1);
+        expect(progressLines(log)).toEqual([`iso: downloaded 50% (0.49 KB) of ${URL_ISO}`]);
+        expect(log.lines.at(-1)).toMatchObject({
+          level: "info",
+          location: WHO.sessionId,
+          agentId: WHO.agentId,
+        });
+        yield* body.push(payload.subarray(500));
+        yield* waitForPartial(fs, partial, payload.byteLength);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 2);
+        expect(progressLines(log)).toEqual([
+          `iso: downloaded 50% (0.49 KB) of ${URL_ISO}`,
+          `iso: downloaded 100% (0.98 KB) of ${URL_ISO}`,
+        ]);
+        yield* body.push(null);
+        expect(yield* Fiber.join(fiber)).toBe(cached);
+        expect(progressLines(log)).toHaveLength(2);
+      }),
+    ),
+  );
+
+  it.effect("logs the downloaded size in KB then MB when content-length is absent", () =>
+    withServices(
+      Effect.gen(function* () {
+        const half = new Uint8Array(512 * 1024);
+        const rest = new Uint8Array(1024 * 1024);
+        const payload = new Uint8Array(half.byteLength + rest.byteLength);
+        payload.set(rest, half.byteLength);
+        const digest = createHash("sha256").update(payload).digest("hex");
+        const body = gate();
+        const requested = yield* Deferred.make<void>();
+        const { fs, iso, log, cached } = yield* fixture((_, url) => {
+          if (url.toString().endsWith(".sha256")) {
+            return sidecarFor(digest);
+          }
+          Deferred.doneUnsafe(requested, Effect.void);
+          return new Response(body.body, { status: 200 });
+        });
+        const partial = `${cached}.partial-${String(PID)}`;
+        const fiber = yield* Effect.forkChild(iso.getIso(URL_ISO, WHO));
+        yield* Deferred.await(requested);
+        yield* body.push(half);
+        yield* waitForPartial(fs, partial, half.byteLength);
+        expect(progressLines(log)).toEqual([]);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 1);
+        expect(progressLines(log)).toEqual([`iso: downloaded 512.00 KB of ${URL_ISO}`]);
+        yield* body.push(rest);
+        yield* waitForPartial(fs, partial, payload.byteLength);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 2);
+        expect(progressLines(log)).toEqual([
+          `iso: downloaded 512.00 KB of ${URL_ISO}`,
+          `iso: downloaded 1.50 MB of ${URL_ISO}`,
+        ]);
+        yield* body.push(null);
+        expect(yield* Fiber.join(fiber)).toBe(cached);
+        expect(progressLines(log)).toHaveLength(2);
+      }),
+    ),
+  );
+
+  it.effect("logs the downloaded size in GB once a gibibyte has arrived", () =>
+    withServices(
+      Effect.gen(function* () {
+        const gibibyte = 1024 * 1024 * 1024;
+        const first = reporting(gibibyte);
+        const second = reporting(gibibyte / 2);
+        const digest = createHash("sha256").update(first).update(second).digest("hex");
+        const body = gate();
+        const requested = yield* Deferred.make<void>();
+        const { fs, iso, log, cached } = yield* fixture((_, url) => {
+          if (url.toString().endsWith(".sha256")) {
+            return sidecarFor(digest);
+          }
+          Deferred.doneUnsafe(requested, Effect.void);
+          return new Response(body.body, { status: 200 });
+        });
+        const partial = `${cached}.partial-${String(PID)}`;
+        const fiber = yield* Effect.forkChild(iso.getIso(URL_ISO, WHO));
+        yield* Deferred.await(requested);
+        yield* body.push(first);
+        yield* waitForPartial(fs, partial, 1);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 1);
+        expect(progressLines(log)).toEqual([`iso: downloaded 1.00 GB of ${URL_ISO}`]);
+        yield* body.push(second);
+        yield* waitForPartial(fs, partial, 2);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 2);
+        expect(progressLines(log)).toEqual([
+          `iso: downloaded 1.00 GB of ${URL_ISO}`,
+          `iso: downloaded 1.50 GB of ${URL_ISO}`,
+        ]);
+        yield* body.push(null);
+        expect(yield* Fiber.join(fiber)).toBe(cached);
+      }),
+    ),
+  );
+
+  it.effect("logs the downloaded size when content-length is not a positive integer", () =>
+    withServices(
+      Effect.gen(function* () {
+        const body = gate();
+        const requested = yield* Deferred.make<void>();
+        const { fs, iso, log, cached } = yield* fixture((_, url) => {
+          if (url.toString().endsWith(".sha256")) {
+            return sidecarFor(DIGEST);
+          }
+          Deferred.doneUnsafe(requested, Effect.void);
+          return new Response(body.body, {
+            status: 200,
+            headers: { "content-length": "nope" },
+          });
+        });
+        const partial = `${cached}.partial-${String(PID)}`;
+        const fiber = yield* Effect.forkChild(iso.getIso(URL_ISO, WHO));
+        yield* Deferred.await(requested);
+        yield* body.push(BYTES);
+        yield* waitForPartial(fs, partial, BYTES.byteLength);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 1);
+        expect(progressLines(log)).toEqual([`iso: downloaded 0.02 KB of ${URL_ISO}`]);
+        yield* body.push(null);
+        expect(yield* Fiber.join(fiber)).toBe(cached);
+      }),
+    ),
+  );
+
+  it.effect("logs the downloaded size when content-length is zero", () =>
+    withServices(
+      Effect.gen(function* () {
+        const body = gate();
+        const requested = yield* Deferred.make<void>();
+        const { fs, iso, log, cached } = yield* fixture((_, url) => {
+          if (url.toString().endsWith(".sha256")) {
+            return sidecarFor(DIGEST);
+          }
+          Deferred.doneUnsafe(requested, Effect.void);
+          return new Response(body.body, {
+            status: 200,
+            headers: { "content-length": "0" },
+          });
+        });
+        const partial = `${cached}.partial-${String(PID)}`;
+        const fiber = yield* Effect.forkChild(iso.getIso(URL_ISO, WHO));
+        yield* Deferred.await(requested);
+        yield* body.push(BYTES);
+        yield* waitForPartial(fs, partial, BYTES.byteLength);
+        yield* TestClock.adjust(PROGRESS_MS);
+        yield* until(() => progressLines(log).length === 1);
+        expect(progressLines(log)).toEqual([`iso: downloaded 0.02 KB of ${URL_ISO}`]);
+        yield* body.push(null);
+        expect(yield* Fiber.join(fiber)).toBe(cached);
       }),
     ),
   );

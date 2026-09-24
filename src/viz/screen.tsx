@@ -448,13 +448,13 @@ export const App = (props: Props) => {
                 <box
                   position="absolute"
                   top={found().top}
-                  left={View.SESSION_IMAGE_LEFT}
-                  right={2}
+                  left={found().left}
+                  width={found().columns}
                   height={found().height}
                 >
                   <Shot
                     png={found().png}
-                    columns={dimensions().width - View.SESSION_IMAGE_LEFT - 2}
+                    columns={found().columns}
                     rows={found().height}
                     id={Placeholder.SESSION}
                     protocol={props.imageProtocol}

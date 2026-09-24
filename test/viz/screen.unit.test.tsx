@@ -227,9 +227,11 @@ describe("screen happy path", () => {
         expect(rows[5]).toContain("8.0%");
         expect(rows[6]).toContain("OLI-61");
         expect(rows[6]).toContain("100%");
-        // The graphs keep the top third. 0% is the last of those rows, not the foot of the body.
-        expect(rows[14]).toContain("0%");
-        expect(rows[15]).toContain("no session");
+        // Top half is logs beside the graph. 0% is the graph's last row, not the foot.
+        expect(rows[5]).toContain("no logs");
+        expect(rows[5].indexOf("no logs")).toBeLessThan(rows[5].indexOf("256 MB"));
+        expect(rows[19]).toContain("0%");
+        expect(rows[20]).toContain("no intent");
         expect(rows[ROWS - 2]).toBe(bottom());
         expect(rows[ROWS - 1]).toBe(FOOTER);
         expect(rows.join("\n")).not.toContain("╭─ automation");
@@ -1602,39 +1604,7 @@ describe("session pane", () => {
     sessionNote: note,
   });
 
-  it.effect(
-    "the bottom two thirds is the selected ticket's session: the calls, the intent and the image",
-    () =>
-      Effect.gen(function* () {
-        const full = Follow.apply(
-          Follow.apply(
-            Follow.expand(
-              Follow.peekFromActions(
-                "OLI-61",
-                SESSION_ID,
-                garage.url,
-                [{ request: sendKey, createdAt: ago(2) }],
-                Option.some(TINY_PNG),
-              ),
-              garage.url,
-            ),
-            { type: "intent", state: "started", message: "lock the screen" },
-          ),
-          { type: "action", id: 10, name: "send-keys", state: "running" },
-        );
-        const view = sessionOf(full);
-        const rows = yield* draw(view);
-        expect(rows[15]).toContain("following OLI-61");
-        expect(rows.join("\n")).toContain("lock the screen");
-        expect(rows.join("\n")).toContain("send-keys");
-        expect(rows.join("\n")).toContain("send-key");
-        expect(rows.some((row) => BLOCKS.test(row))).toBe(true);
-        const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
-        expect(drawn.image).toEqual(Option.some({ png: TINY_PNG, top: 15, height: 20 }));
-      }),
-  );
-
-  it.effect("a kitty host pins the session screenshot under the log, not in the corner", () =>
+  it.effect("the lower half shows every stored log line, oldest first", () =>
     Effect.gen(function* () {
       const full = Follow.expand(
         Follow.peekFromActions(
@@ -1647,157 +1617,168 @@ describe("session pane", () => {
         garage.url,
       );
       const view = sessionOf(full);
-      const placed: Array<string> = [];
-      const kitty = yield* Effect.promise(() =>
-        testRender(
-          () => (
-            <Screen.App
-              view={() => view}
-              now={() => READ_AT}
-              imageProtocol="kitty"
-              place={(sequence) => {
-                placed.push(sequence);
-              }}
-            />
-          ),
-          { width: COLUMNS, height: ROWS },
-        ),
-      );
-      yield* Effect.promise(() => kitty.renderOnce());
-      const drawn = View.screen(view, READ_AT, COLUMNS, ROWS);
-      const image = Option.getOrThrow(drawn.image);
-      const width = COLUMNS - View.SESSION_IMAGE_LEFT - 2;
-      const pins = placeholderIds(kitty, width, image.height);
-      const columns = pinnedColumns(kitty, image.top, COLUMNS, pins);
-      expect(columns[0]).toBe(View.SESSION_IMAGE_LEFT);
-      expect(columns[columns.length - 1]).toBe(View.SESSION_IMAGE_LEFT + width - 1);
-      expect(columns).toHaveLength(width);
-      expect(pinnedColumns(kitty, 0, COLUMNS, pins)).toEqual([]);
-      expect(pinnedColumns(kitty, image.top - 1, COLUMNS, pins)).toEqual([]);
-      expect(pinnedColumns(kitty, image.top + image.height - 1, COLUMNS, pins)[0]).toBe(
-        View.SESSION_IMAGE_LEFT,
-      );
-      expect(placed.some((sequence) => sequence.includes("a=p,U=1,i=1,"))).toBe(true);
-      expect(placed.some((sequence) => sequence.includes("\x1b["))).toBe(false);
-      kitty.renderer.destroy();
+      const withLogs: View.View = {
+        ...view,
+        logs: [
+          {
+            id: 1,
+            level: "info",
+            text: "iso: downloading",
+            location: SESSION_ID,
+            agentId: "OLI-61",
+          },
+          {
+            id: 2,
+            level: "warning",
+            text: "iso: heartbeat failed",
+            location: SESSION_ID,
+            agentId: "OLI-61",
+          },
+          {
+            id: 3,
+            level: "info",
+            text: "iso: downloaded 1.50 GB",
+            location: null,
+            agentId: null,
+          },
+        ],
+      };
+      const rows = yield* draw(withLogs);
+      const body = rows.join("\n");
+      const downloading = body.indexOf("iso: downloading");
+      const heartbeat = body.indexOf("heartbeat failed");
+      const amount = body.indexOf("1.50 GB");
+      expect(downloading).toBeGreaterThan(-1);
+      expect(heartbeat).toBeGreaterThan(downloading);
+      expect(amount).toBeGreaterThan(heartbeat);
+      expect(body).toContain("[OLI-61]");
+      expect(rows[19]).toContain("1.50 GB");
+      const image = Option.getOrThrow(View.screen(withLogs, READ_AT, COLUMNS, ROWS).image);
+      expect(image.png).toBe(TINY_PNG);
+      expect(image.top).toBe(20);
+      expect(image.height).toBe(15);
+      expect(image.left).toBeGreaterThan(26);
+      expect(image.columns).toBeGreaterThan(20);
     }),
   );
 
-  it.effect("a spinner tick keeps the session screenshot up, and a new picture replaces it", () =>
+  it.effect("a pane shorter than the tail shows only the newest lines (unhappy)", () =>
     Effect.gen(function* () {
-      const picture = (png: Uint8Array) =>
-        Follow.expand(
-          Follow.peekFromActions(
-            "OLI-61",
-            SESSION_ID,
-            garage.url,
-            [{ request: sendKey, createdAt: ago(2) }],
-            Option.some(png),
-          ),
-          garage.url,
-        );
-      const placed: Array<string> = [];
-      const [view, setView] = createSignal(sessionOf(picture(TINY_PNG)));
-      const [now, setNow] = createSignal(READ_AT);
-      const kitty = yield* Effect.promise(() =>
-        testRender(
-          () => (
-            <Screen.App
-              view={view}
-              now={now}
-              imageProtocol="kitty"
-              place={(sequence) => {
-                placed.push(sequence);
-              }}
-            />
-          ),
-          { width: COLUMNS, height: ROWS },
-        ),
-      );
-      yield* Effect.promise(() => kitty.renderOnce());
-      const shownOnce = placed.length;
-      expect(shownOnce).toBeGreaterThan(0);
-      expect(placed.some((sequence) => sequence.includes("a=d,"))).toBe(false);
-      // The clock and the follow frame both move, which is what a running row does every spin.
-      setNow(READ_AT + View.SPIN_MS);
-      setView((current) => {
-        const follow = Option.getOrNull(current.session);
-        return follow?._tag === "full"
-          ? { ...current, session: Option.some(Follow.tick(follow)) }
-          : current;
-      });
-      yield* Effect.promise(() => kitty.renderOnce());
-      expect(placed).toHaveLength(shownOnce);
-      expect(placed.some((sequence) => sequence.includes("a=d,"))).toBe(false);
-      const next = Uint8Array.from([...TINY_PNG, 9]);
-      setView(sessionOf(picture(next)));
-      yield* Effect.promise(() => kitty.renderOnce());
-      expect(placed.some((sequence) => sequence === Placeholder.hide(Placeholder.SESSION))).toBe(
-        true,
-      );
-      expect(placed.at(-1)).toBe(
-        Placeholder.show(
-          next,
-          Placeholder.SESSION,
-          COLUMNS - View.SESSION_IMAGE_LEFT - 2,
-          Option.getOrThrow(View.screen(view(), now(), COLUMNS, ROWS).image).height,
-        ),
-      );
-      kitty.renderer.destroy();
+      const logs = Array.from({ length: 40 }, (_, index) => ({
+        id: index + 1,
+        level: "info" as const,
+        text: `log-${String(index).padStart(2, "0")}`,
+        location: null,
+        agentId: "OLI-61",
+      }));
+      const rows = yield* draw(shown(SNAPSHOT, { tab: "automation", logs }));
+      const body = rows.join("\n");
+      const logRows = 15;
+      const first = 40 - logRows;
+      const oldest = `log-${String(first).padStart(2, "0")}`;
+      const dropped = `log-${String(first - 1).padStart(2, "0")}`;
+      expect(body).not.toContain("log-00");
+      expect(body).not.toContain(dropped);
+      expect(body).toContain(oldest);
+      expect(body).toContain("log-39");
+      expect(body.indexOf(oldest)).toBeLessThan(body.indexOf("log-39"));
     }),
   );
 
-  it.effect(
-    "on a ticket the pane shows the step, the exact line, and that intent's actions, not the history",
-    () =>
-      Effect.gen(function* () {
-        const instruction = `<ActionList>
+  it.effect("a log line longer than the pane wraps onto the next row, words intact", () =>
+    Effect.gen(function* () {
+      const word = "download-url";
+      const text = Array.from({ length: 24 }, () => word).join(" ");
+      const rows = yield* draw(
+        shown(SNAPSHOT, {
+          tab: "automation",
+          logs: [{ id: 1, level: "info", text, location: null, agentId: null }],
+        }),
+      );
+      const wrapped = rows.filter((row) => row.includes(word));
+      expect(wrapped.length).toBeGreaterThan(1);
+      expect(rows.join("\n")).not.toContain("…");
+      expect(rows.join("\n")).not.toContain(`${word.slice(0, -1)} `);
+      expect(rows.join("\n")).not.toContain(`${word.slice(0, -1)}│`);
+    }),
+  );
+
+  it.effect("a log line with no space still continues on the next row (unhappy)", () =>
+    Effect.gen(function* () {
+      const solid = "X".repeat(180);
+      const rows = yield* draw(
+        shown(SNAPSHOT, {
+          tab: "automation",
+          logs: [{ id: 1, level: "info", text: solid, location: null, agentId: null }],
+        }),
+      );
+      const holding = rows.filter((row) => row.includes("XXXX"));
+      expect(holding.length).toBeGreaterThan(1);
+      expect(holding.some((row) => row.includes("X".repeat(180)))).toBe(false);
+      expect(rows.join("\n")).not.toContain("…");
+    }),
+  );
+
+  it.effect("a followed ticket's pane is the log tail, and the row still shows the step", () =>
+    Effect.gen(function* () {
+      const instruction = `<ActionList>
 * Press Super+Escape. The System menu opens.
 * Click Lock. Use the mouse only. The screen locks.
 * any crashes or erroneous behavior must be reported.
 * always take a screen shot of every step
 </ActionList>`;
-        const full = Follow.apply(
-          Follow.apply(
-            Follow.expand(
-              Follow.peekFromActions(
-                "OLI-61",
-                SESSION_ID,
-                garage.url,
-                [{ request: sendKey, createdAt: ago(2) }],
-                Option.some(TINY_PNG),
-              ),
+      const full = Follow.apply(
+        Follow.apply(
+          Follow.expand(
+            Follow.peekFromActions(
+              "OLI-61",
+              SESSION_ID,
               garage.url,
+              [{ request: sendKey, createdAt: ago(2) }],
+              Option.some(TINY_PNG),
             ),
-            {
-              type: "intent",
-              state: "started",
-              message: "Click Lock. Use the mouse only. The screen locks.",
-            },
+            garage.url,
           ),
-          { type: "action", id: 10, name: "send-keys", state: "running" },
-        );
-        const view = sessionOf(full, Option.none());
-        const onTicket = {
-          ...view,
-          snapshot: Option.some({
-            ...SNAPSHOT,
-            queue: {
-              ...SNAPSHOT.queue,
-              running: [{ ...running, instruction, intent: null }],
-            },
-          }),
-          cursor: { ...view.cursor, clients: 1 },
-        };
-        const rows = yield* draw(onTicket);
-        const body = rows.join("\n");
-        expect(body).toContain("following OLI-61");
-        expect(body).toContain("2/2");
-        expect(body).toContain("Click Lock. Use the mouse only. The");
-        expect(body).toContain("screen locks.");
-        expect(body).toContain("send-keys");
-        expect(body).not.toMatch(/send-key(?!s)/);
-      }),
+          {
+            type: "intent",
+            state: "started",
+            message: "Click Lock. Use the mouse only. The screen locks.",
+          },
+        ),
+        { type: "action", id: 10, name: "send-keys", state: "running" },
+      );
+      const view = sessionOf(full, Option.none());
+      const onTicket = {
+        ...view,
+        snapshot: Option.some({
+          ...SNAPSHOT,
+          queue: {
+            ...SNAPSHOT.queue,
+            running: [{ ...running, instruction, intent: null }],
+          },
+        }),
+        cursor: { ...view.cursor, clients: 1 },
+      };
+      const rows = yield* draw({
+        ...onTicket,
+        logs: [
+          {
+            id: 1,
+            level: "info",
+            text: "iso: downloading",
+            location: SESSION_ID,
+            agentId: "OLI-61",
+          },
+        ],
+      });
+      const body = rows.join("\n");
+      expect(body).toContain("iso: downloading");
+      expect(body).toContain("2/2");
+      expect(body).toContain("Click Lock");
+      expect(body).toContain("send-keys");
+      const intentAt = body.indexOf("Click Lock");
+      expect(body.indexOf("send-keys")).toBeGreaterThan(intentAt);
+    }),
   );
 
   it.effect("a running client shows its step in place of how long it has run", () =>
@@ -1967,11 +1948,11 @@ describe("session pane", () => {
         sessionNote: Option.some("waiting for OLI-61's session"),
       };
       const rows = yield* draw(waiting);
-      expect(rows[15]).toContain("waiting for OLI-61's session");
+      expect(rows[5]).toContain("waiting for OLI-61's session");
       expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
       expect(View.screen(waiting, READ_AT, COLUMNS, ROWS).image).toEqual(Option.none());
       const bare = yield* draw(shown(SNAPSHOT, { tab: "automation" }));
-      expect(bare[15]).toContain("no session");
+      expect(bare[5]).toContain("no logs");
       expect(bare.some((row) => BLOCKS.test(row))).toBe(false);
     }),
   );

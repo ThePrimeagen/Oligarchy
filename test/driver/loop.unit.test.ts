@@ -1,7 +1,17 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import * as NodePath from "@effect/platform-node/NodePath";
-import { Cause, Effect, Exit, Fiber, FileSystem, Layer, PlatformError, Redacted } from "effect";
+import {
+  Cause,
+  Console,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  PlatformError,
+  Redacted,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -47,6 +57,7 @@ const config = (overrides?: {
   HarnessConfig.parse(
     JSON.stringify({
       models: { drive: MODEL, diagnose: MODEL, mint: MODEL },
+      reasoning: { drive: "minimal", diagnose: "minimal", mint: "minimal" },
       openRouterBaseUrl: "https://openrouter.ai/api/v1",
       timeouts: {
         header: overrides?.header ?? "3 minutes",
@@ -170,6 +181,13 @@ const capturingFs = (
     },
   });
 
+const printing = (into: Array<string>): Console.Console =>
+  Object.assign(Object.create(console), {
+    log: (...args: ReadonlyArray<unknown>) => {
+      into.push(args.map(String).join(" "));
+    },
+  });
+
 const events = (log: ReadonlyArray<string>): ReadonlyArray<DriverLog.Event> =>
   log.map((line) => DriverLog.decodeLine(line.trim()));
 
@@ -182,15 +200,71 @@ const messageText = (body: string | undefined, role: string): string => {
     return "";
   }
   for (const message of value.messages) {
-    if (!fields(message) || message.role !== role || typeof message.content !== "string") {
+    if (!fields(message) || message.role !== role) {
       continue;
     }
-    return message.content;
+    if (typeof message.content === "string") {
+      return message.content;
+    }
+    if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (fields(part) && part.type === "text" && typeof part.text === "string") {
+          return part.text;
+        }
+      }
+    }
   }
   return "";
 };
 
 const userText = (body: string | undefined): string => messageText(body, "user");
+
+const userImages = (body: string | undefined): ReadonlyArray<string> => {
+  const value: unknown = JSON.parse(body ?? "{}");
+  if (!fields(value) || !Array.isArray(value.messages)) {
+    return [];
+  }
+  const urls: Array<string> = [];
+  for (const message of value.messages) {
+    if (!fields(message) || message.role !== "user" || !Array.isArray(message.content)) {
+      continue;
+    }
+    for (const part of message.content) {
+      if (
+        fields(part) &&
+        part.type === "image_url" &&
+        fields(part.image_url) &&
+        typeof part.image_url.url === "string"
+      ) {
+        urls.push(part.image_url.url);
+      }
+    }
+  }
+  return urls;
+};
+
+const imagesAt = (requests: ReadonlyArray<FakeHttp.Recorded>, index: number) =>
+  userImages(modelRequests(requests)[index]?.body);
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0xff]);
+const PNG_URL = `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`;
+
+const screenshot = (): Response =>
+  new Response(PNG, {
+    status: 200,
+    headers: { "content-type": "image/png", "x-image-url": "https://example.com/images/1" },
+  });
+
+const withScreen =
+  (image: () => Response = screenshot) =>
+  (url: URL): Response => {
+    if (url.pathname === "/start") {
+      return FakeHttp.json({ id: SESSION });
+    }
+    return url.pathname === "/image" ? image() : FakeHttp.json({ ok: "true" });
+  };
+
+const getImage = () => speak("look at the screen", "get-image");
 
 const systemText = (body: string | undefined): string => messageText(body, "system");
 
@@ -291,6 +365,8 @@ const run = (
     readonly seed?: Partial<Seed>;
     readonly mode?: StoreMode;
     readonly overrides?: Partial<typeof Tests.TestStore.Service>;
+    readonly printed?: Array<string>;
+    readonly reasoning?: HarnessConfig.Effort;
   },
 ) =>
   Effect.gen(function* () {
@@ -303,6 +379,7 @@ const run = (
       seedOf(agentId, options?.seed),
       options?.overrides,
     );
+    const printed = options?.printed ?? [];
     const stoppedRun = yield* Loop.run({
       model: MODEL,
       prompt,
@@ -310,7 +387,9 @@ const run = (
       debugLog: LOG,
       config: parsed,
       token: Redacted.make(TOKEN),
+      reasoning: options?.reasoning ?? "minimal",
     }).pipe(
+      Effect.provideService(Console.Console, printing(printed)),
       Effect.provide(
         Layer.mergeAll(
           capturingFs(log, options?.write),
@@ -322,7 +401,7 @@ const run = (
         ),
       ),
     );
-    return { stopped: stoppedRun, spawner, log };
+    return { stopped: stoppedRun, spawner, log, printed };
   });
 
 describe("driver loop", () => {
@@ -455,8 +534,7 @@ describe("driver loop", () => {
 
         expect(modelRequests(recorder.requests)).toHaveLength(2);
         const system = systemText(modelRequests(recorder.requests)[0]?.body);
-        expect(system).toContain("You MUST use a tool");
-        expect(system).toContain("This is step 1.");
+        expect(system).not.toMatch(/step \d/i);
         expect(system).toContain("<def>\nLock it from the menu.\n</def>");
         expect(system).toContain("<proof>\nThe screen is locked.\n</proof>");
         expect(system).not.toContain("not this");
@@ -678,6 +756,71 @@ describe("driver loop", () => {
     }),
   );
 
+  it.effect("every action is its own intent, opened with that action's reason", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(sendKeys("open the menu"), sendKeys("click lock"), done()));
+      const { stopped: outcome } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(guestPaths(recorder.requests)).toEqual([
+        "/start",
+        "/intent/start",
+        "/send-keys",
+        "/intent/end",
+        "/intent/start",
+        "/send-keys",
+        "/intent/end",
+        "/stop",
+      ]);
+      expect(JSON.parse(guestRequests(recorder.requests)[1]?.body ?? "{}")).toMatchObject({
+        message: "open the menu",
+      });
+      expect(JSON.parse(guestRequests(recorder.requests)[4]?.body ?? "{}")).toMatchObject({
+        message: "click lock",
+      });
+      for (const index of [0, 1, 2]) {
+        expect(systemText(modelRequests(recorder.requests)[index]?.body)).not.toMatch(/step \d/i);
+      }
+    }),
+  );
+
+  it.effect(
+    "a failed intent start runs no action and the next action opens its own intent (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        let opens = 0;
+        const recorder = routed(
+          answers(sendKeys("open the menu"), sendKeys("open the menu"), done()),
+          (url) => {
+            if (url.pathname === "/start") {
+              return FakeHttp.json({ id: SESSION });
+            }
+            if (url.pathname === "/intent/start") {
+              opens += 1;
+              return opens === 1
+                ? FakeHttp.json({ error: "intent refused" }, 400)
+                : FakeHttp.json({ ok: "true" });
+            }
+            return FakeHttp.json({ ok: "true" });
+          },
+        );
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/intent/start",
+          "/send-keys",
+          "/intent/end",
+          "/stop",
+        ]);
+        expect(past(recorder.requests, 1)).toContain("intent refused");
+      }),
+  );
+
   it.effect("a long command output is clipped in the next ask", () =>
     Effect.gen(function* () {
       const recorder = routed(answers(sendKeys(), done()), (url) => {
@@ -750,6 +893,7 @@ describe("driver loop", () => {
         debugLog: LOG,
         config: parsed,
         token: Redacted.make(TOKEN),
+        reasoning: "minimal",
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -891,6 +1035,7 @@ describe("driver loop", () => {
         debugLog: LOG,
         config: parsed,
         token: Redacted.make(TOKEN),
+        reasoning: "minimal",
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -972,6 +1117,227 @@ describe("driver loop", () => {
       expect(outcome).toEqual({ reason: "result-closed" });
       expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
       expect(past(recorder.requests, 1)).toContain("./client-with-image");
+    }),
+  );
+
+  it.effect("every model request carries the reasoning effort it was given", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(sendKeys("press a"), done()));
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], { reasoning: "high" });
+      const bodies = modelRequests(recorder.requests).map((request) => JSON.parse(request.body));
+      expect(bodies).toHaveLength(2);
+      for (const body of bodies) {
+        expect(body.reasoning).toEqual({ effort: "high" });
+      }
+    }),
+  );
+
+  it.effect("prints each model request, reply, and command to stdout under the ticket", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(sendKeys("press a"), done()));
+      const { printed } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+        agentId: "OLIT-7",
+      });
+      expect(printed).toContain(`[OLIT-7] driver: step 1 request: ${MODEL}`);
+      expect(
+        printed.some(
+          (line) =>
+            line.startsWith("[OLIT-7] driver: step 1 assistant: ") &&
+            line.includes('"send-keys"') &&
+            line.includes("press a"),
+        ),
+      ).toBe(true);
+      expect(
+        printed.some(
+          (line) =>
+            line.startsWith("[OLIT-7] driver: step 1 command: ./client") &&
+            line.includes('"send-keys"') &&
+            line.endsWith("exit 0"),
+        ),
+      ).toBe(true);
+      expect(printed.at(-1)).toBe("[OLIT-7] driver: step 0 stop: result-closed");
+      expect(printed.join("\n")).not.toContain(TOKEN);
+    }),
+  );
+
+  it.effect("prints an OpenRouter failure to stdout before the loop fails (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = routed(
+        () =>
+          new Response(JSON.stringify({ error: { message: "no credits" } }), {
+            status: 402,
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      const printed: Array<string> = [];
+      const error = yield* Effect.flip(
+        run(config(), recorder.layer, () => ({ exitCode: 0 }), [], { printed }),
+      );
+      expect(error._tag).toBe("OpenRouterRefusal");
+      expect(
+        printed.some(
+          (line) =>
+            line.startsWith("[OLI-1] driver: step 1 failure: ") && line.includes("no credits"),
+        ),
+      ).toBe(true);
+      expect(printed.join("\n")).not.toContain(TOKEN);
+    }),
+  );
+
+  it.effect(
+    "a debug log that cannot be written still prints the event before failing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(done()));
+        const printed: Array<string> = [];
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+            write: Effect.fail(denied),
+            printed,
+          }),
+        );
+        expect(error._tag).toBe("CommandError");
+        expect(printed[0]?.startsWith("[OLI-1] driver: step 0 start: ")).toBe(true);
+      }),
+  );
+
+  it.effect("get-image sends the screenshot to the model in the next ask, beside the prompt", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(getImage(), done()), withScreen());
+      const { stopped: outcome } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(guestPaths(recorder.requests)).toContain("/image");
+      expect(imagesAt(recorder.requests, 0)).toEqual([]);
+      expect(imagesAt(recorder.requests, 1)).toEqual([PNG_URL]);
+      expect(askText(recorder.requests, 1)).toBe("Lock the screen.");
+    }),
+  );
+
+  it.effect("the screenshot bytes are not decoded into the past steps as text", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(getImage(), done()), withScreen());
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      const again = past(recorder.requests, 1);
+      expect(again).toContain("look at the screen");
+      expect(again).toContain("screenshot");
+      expect(again).not.toContain("PNG");
+      expect(again).not.toContain("\uFFFD");
+    }),
+  );
+
+  it.effect("only the latest screenshot is sent when get-image runs twice", () =>
+    Effect.gen(function* () {
+      const second = new Uint8Array([...PNG, 0x01]);
+      let shots = 0;
+      const recorder = routed(
+        answers(getImage(), getImage(), done()),
+        withScreen(() => {
+          shots += 1;
+          return shots === 1
+            ? screenshot()
+            : new Response(second, {
+                status: 200,
+                headers: {
+                  "content-type": "image/png",
+                  "x-image-url": "https://example.com/images/2",
+                },
+              });
+        }),
+      );
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(imagesAt(recorder.requests, 2)).toEqual([
+        `data:image/png;base64,${Buffer.from(second).toString("base64")}`,
+      ]);
+    }),
+  );
+
+  it.effect("an action after get-image drops the stale screenshot from the next ask", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(getImage(), sendKeys("press a"), done()), withScreen());
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(imagesAt(recorder.requests, 1)).toEqual([PNG_URL]);
+      expect(imagesAt(recorder.requests, 2)).toEqual([]);
+    }),
+  );
+
+  it.effect("a refused action keeps the screenshot; the screen did not change", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(getImage(), speak("boot", "start"), done()), withScreen());
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(imagesAt(recorder.requests, 2)).toEqual([PNG_URL]);
+    }),
+  );
+
+  it.effect(
+    "a failed get-image sends no image and keeps the failure in the next ask (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(getImage(), done()),
+          withScreen(() => FakeHttp.json({ error: "unknown session" }, 404)),
+        );
+        const { stopped: outcome } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          [],
+        );
+        expect(outcome).toEqual({ reason: "result-closed" });
+        expect(imagesAt(recorder.requests, 1)).toEqual([]);
+        expect(past(recorder.requests, 1)).toContain("unknown session");
+      }),
+  );
+
+  it.effect(
+    "a failed get-image tells the model the image failed and the machine is shut down (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(getImage(), done()),
+          withScreen(() => FakeHttp.json({ error: "unknown session" }, 404)),
+        );
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(past(recorder.requests, 1)).toContain("IMAGE HAS FAILED, MACHINE IS SHUT DOWN");
+      }),
+  );
+
+  it.effect("a successful get-image does not say the machine is shut down", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(getImage(), done()), withScreen());
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(past(recorder.requests, 1)).not.toContain("MACHINE IS SHUT DOWN");
+    }),
+  );
+
+  it.effect("a failed get-image drops the earlier screenshot too (unhappy)", () =>
+    Effect.gen(function* () {
+      let shots = 0;
+      const recorder = routed(
+        answers(getImage(), getImage(), done()),
+        withScreen(() => {
+          shots += 1;
+          return shots === 1 ? screenshot() : FakeHttp.json({ error: "exchange failed" }, 502);
+        }),
+      );
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(imagesAt(recorder.requests, 1)).toEqual([PNG_URL]);
+      expect(imagesAt(recorder.requests, 2)).toEqual([]);
+    }),
+  );
+
+  it.effect("get-image --output writes a file and sends no image (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = routed(
+        answers(speak("save it", "get-image --output /tmp/shot.png"), done()),
+        withScreen(),
+      );
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+      expect(imagesAt(recorder.requests, 1)).toEqual([]);
     }),
   );
 

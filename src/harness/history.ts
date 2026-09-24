@@ -64,11 +64,15 @@ export type WireToolCall = {
   };
 };
 
+export type WirePart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image_url"; readonly image_url: { readonly url: string } };
+
 // OpenRouter chat completions. exitCode stays off the wire: it is how the loop
 // decides, and the model reads `content`.
 export type WireMessage =
   | { readonly role: "system"; readonly content: string }
-  | { readonly role: "user"; readonly content: string }
+  | { readonly role: "user"; readonly content: string | ReadonlyArray<WirePart> }
   | { readonly role: "assistant"; readonly content: string | null }
   | {
       readonly role: "assistant";

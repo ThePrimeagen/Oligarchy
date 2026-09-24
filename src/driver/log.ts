@@ -25,3 +25,7 @@ const encodeEvent = Schema.encodeSync(EventLine);
 export const line = (event: Event): string => `${encodeEvent(event)}\n`;
 
 export const decodeLine = Schema.decodeUnknownSync(EventLine);
+
+// The stdout copy. The automation client inherits it, so the ticket leads like its own lines.
+export const printed = (agentId: string, event: Event): string =>
+  `[${agentId}] driver: step ${String(event.step)} ${event.kind}: ${event.text}`;

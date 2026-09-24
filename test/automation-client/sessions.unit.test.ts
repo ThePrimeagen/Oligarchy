@@ -28,6 +28,7 @@ const qemuRelinquishOk = (): Sessions.RelinquishQemu => () => Effect.void;
 const appConfig = (diagnose = MODEL): string =>
   JSON.stringify({
     models: { drive: MODEL, diagnose, mint: MODEL },
+    reasoning: { drive: "minimal", diagnose: "low", mint: "minimal" },
     openRouterBaseUrl: "https://openrouter.ai/api/v1",
     timeouts: { header: "3 minutes", chunk: "3 minutes" },
     runCeiling: "1.5 hours",
@@ -147,7 +148,7 @@ describe("Sessions.run happy path", () => {
         expect(spawner.spawned).toMatchObject([
           {
             command: OpenCode.BIN,
-            args: OpenCode.args("diagnose the session", fromFile),
+            args: OpenCode.args("diagnose the session", fromFile, "low"),
             options: { env: OpenCode.ENV },
           },
         ]);
@@ -1007,7 +1008,8 @@ describe("reserve by action", () => {
       expect(yield* sessions.jobs).toBe(1);
       yield* sessions.run(TICKET, "diagnose the session");
       expect(spawner.spawned[0]?.command).toBe(OpenCode.BIN);
-      expect(spawner.spawned[0]?.args).toEqual(OpenCode.args("diagnose the session", MODEL));
+      expect(spawner.spawned[0]?.args).toEqual(OpenCode.args("diagnose the session", MODEL, "low"));
+      expect(spawner.spawned[0]?.args.join(" ")).toContain("--variant low");
       expect(yield* sessions.jobs).toBe(0);
     }).pipe(Effect.provide(layer(spawner, 1, reserveQemu)));
   });

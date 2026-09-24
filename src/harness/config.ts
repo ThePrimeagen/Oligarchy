@@ -29,6 +29,18 @@ const Models = Schema.Struct({
   mint: Domain.ModelId,
 }).annotate({ identifier: "@oligarchy/harness/config/Models" });
 
+// OpenRouter's reasoning effort, and opencode's --variant for a diagnose.
+export const Effort = Schema.Literals(["minimal", "low", "medium", "high", "xhigh"]).annotate({
+  identifier: "@oligarchy/harness/config/Effort",
+});
+export type Effort = typeof Effort.Type;
+
+const Reasoning = Schema.Struct({
+  drive: Effort,
+  diagnose: Effort,
+  mint: Effort,
+}).annotate({ identifier: "@oligarchy/harness/config/Reasoning" });
+
 // A send-keys storm has to stop before the run ceiling. The count lives in the file.
 const StepLimit = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(1, { message: "stepLimit must be at least 1" }),
@@ -41,6 +53,7 @@ const Harness = Schema.Struct({
 
 export class AppConfig extends Schema.Class<AppConfig>("@oligarchy/harness/config/AppConfig")({
   models: Models,
+  reasoning: Reasoning,
   openRouterBaseUrl: Domain.ServerUrl,
   timeouts: Timeouts,
   runCeiling: PositiveDuration,

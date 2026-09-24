@@ -20,11 +20,13 @@ const CONFIG = JSON.stringify({
 
 export const ENV = { OPENCODE_CONFIG_CONTENT: CONFIG } as const;
 
-export const args = (prompt: string, model: string): ReadonlyArray<string> => [
+export const args = (prompt: string, model: string, variant: string): ReadonlyArray<string> => [
   "run",
   "--auto",
   "--model",
   model,
+  "--variant",
+  variant,
   "--",
   prompt,
 ];

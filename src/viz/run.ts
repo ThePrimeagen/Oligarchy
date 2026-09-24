@@ -30,6 +30,7 @@ import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
+import * as Logs from "../db/logs.ts";
 import * as Tests from "../db/tests.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
@@ -246,10 +247,10 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // selected running job (waiting for its session if the guest has not started) and follows it
 // live on a second F, a asks and then has the automation
 // server abort the selected job, d opens its test definition and enter its details, and q or
-// ctrl-c ends the run and the scope hands the screen back. The selected ticket's session is
-// drawn in the main area, and steps aside while F holds the stream. A read that fails leaves
-// the last picture up with its reason on the footer; a frame that fails ends the run. A
-// session that fails leaves its calls and says so in that pane, not on the footer.
+// ctrl-c ends the run and the scope hands the screen back. Every stored log line is drawn in
+// the main area and steps aside while F holds the stream. A read that fails leaves the last
+// picture up with its reason on the footer; a frame that fails ends the run. A session that
+// fails leaves its calls and says so in that pane, not on the footer.
 export const run: Effect.Effect<
   void,
   Errors.CommandError,
@@ -261,10 +262,12 @@ export const run: Effect.Effect<
   | Automation.AutomationStore
   | Actions.ActionStore
   | Tests.TestStore
+  | Logs.LogStore
 > = Effect.gen(function* () {
   const screen = yield* Renderer;
   const imageProtocol = yield* screen.imageProtocol;
   const tickets = yield* Settings.Tickets;
+  const logStore = yield* Logs.LogStore;
   const needs = yield* Read.board(tickets);
   const prior = yield* Ref.make(Option.none<Read.Live>());
   const [view, setView] = createSignal<View.View>(View.initialView);
@@ -306,6 +309,23 @@ export const run: Effect.Effect<
             failure: Option.some(Render.headline(Cause.squash(cause))),
           })),
     ),
+  );
+  // A failed pull keeps the lines already on screen. The board's own read is what puts a
+  // database outage on the footer.
+  const pullLogs = Effect.gen(function* () {
+    const rows = yield* logStore.listRecent(View.LOG_TAIL);
+    yield* update((current) => ({
+      ...current,
+      logs: rows.map((row) => ({
+        id: row.id,
+        level: row.level,
+        text: row.text,
+        location: row.location,
+        agentId: row.agentId,
+      })),
+    }));
+  }).pipe(
+    Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.void)),
   );
   // L's notice lands after press retired the last one, so it is what the screen shows.
   const open = Effect.gen(function* () {
@@ -790,6 +810,7 @@ export const run: Effect.Effect<
       yield* Effect.raceAllFirst([
         keys,
         Effect.repeat(read, Schedule.spaced(View.REFRESH)),
+        Effect.repeat(pullLogs, Schedule.spaced(View.LOG_PULL)),
         Effect.repeat(tick, Schedule.spaced(View.AGE_TICK)),
         // The glyph is floor(now / SPIN_MS), so this clock has to land on the interval. spaced
         // waits SPIN_MS after the redraw and the index skips a frame.

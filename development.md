@@ -459,9 +459,10 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   when the row says so, and `--server-url` when the run has a server), and the session id is the
   one that start prints. It then runs `./ctrl test start` with that id, the result id, and the
   model, which marks the result running. Each turn is one back and forth: the
-  `custom-harness-driving-agent.html` prompt, filled with the step, the past reasons, the looked-up
+  `custom-harness-driving-agent.html` prompt, filled with the past reasons, the looked-up
   definition and proof, and the client tools, then the task. The reply is one line: the tool call
-  JSON. `client` runs that action; `Done` tells the harness the task is finished. The model's args
+  JSON. `client` runs that action and carries a `reason`; there is no step number and no
+  step-status. `Done` tells the harness the task is finished. The model's args
   are the action and its own flags. It does not call `start`, `stop`, or `save`, and it does not
   pass `--agent-id`, `--session-id`, or `--server-url`. The log names `resume` when the looked-up
   run resumes and `routing <url>` when a server was added. When the model calls `Done`, the harness
@@ -477,7 +478,8 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   action itself is the client function for that action (`mouse click` is `mouseClick`), called in
   this process. The driver does not run the client CLI and does not spawn `./client`. Before a
   guest action (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) the driver calls
-  `intent start`, and `intent end` after the action returns. `start`, `reserve`, `relinquish`,
+  `intent start` with that reply's `reason`, and `intent end` after the action returns. The step
+  limit counts tool calls. `start`, `reserve`, `relinquish`,
   `stop`, and `save` are not guest actions. A diagnose is not this program: it still runs under
   OpenCode. The OpenRouter token is `OPENROUTER_API_KEY`.
 

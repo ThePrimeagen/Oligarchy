@@ -5,6 +5,7 @@ import * as EnvFile from "../env-file.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
+import * as Logs from "../db/logs.ts";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";
@@ -17,6 +18,7 @@ export type Stores =
   | ProcessStats.ProcessStatsStore
   | Automation.AutomationStore
   | Actions.ActionStore
+  | Logs.LogStore
   | Tests.TestStore;
 
 // viz reads the database alone: the machines, their readings and the queue. What it changes, an
@@ -32,6 +34,7 @@ export const live: Deps = {
       ProcessStats.ProcessStatsStore.layer,
       Automation.AutomationStore.layer,
       Actions.ActionStore.layer,
+      Logs.LogStore.layer,
       Tests.TestStore.layer,
     ).pipe(Layer.provide(Client.Database.layer(url))),
 };
@@ -59,7 +62,7 @@ export const makeVizCommand = (deps: Deps = live) => {
     }),
   ).pipe(
     Command.withDescription(
-      "Watch the automation clients, the qemu servers and the tickets in the terminal. It opens on automation: each client and the jobs it runs, beside that client's memory and cpu over the last five minutes, and the selected ticket's session in the rest of the main area. On a ticket that pane is the current ActionList step and the actions under it, and a running row shows the step as n/total. j and k rest on a ticket. s, t and h/l switch tabs; the qemu tab keeps each server as a card with the running and pending jobs below, and the tickets tab lists those plus the newest finished. j/k select, tab moves between the machines and the queue on the qemu tab, d opens the selected ticket's test definition, enter shows the ticket, L opens the selected job's Linear ticket in the browser, F follows the selected running job, waiting for its session if the guest has not started, a asks, then aborts the selected job at the automation server (AUTOMATION_SERVER_URL, with OLIGARCHY_TOKEN), q quits",
+      "Watch the automation clients, the qemu servers and the tickets in the terminal. It opens on automation: each client and the jobs it runs, beside that client's memory and cpu over the last five minutes, and every log line from the database in the rest of the main area, newest at the bottom, in the same shape as stdout. A running row shows the step as n/total. j and k rest on a ticket. s, t and h/l switch tabs; the qemu tab keeps each server as a card with the running and pending jobs below, and the tickets tab lists those plus the newest finished. j/k select, tab moves between the machines and the queue on the qemu tab, d opens the selected ticket's test definition, enter shows the ticket, L opens the selected job's Linear ticket in the browser, F follows the selected running job, waiting for its session if the guest has not started, a asks, then aborts the selected job at the automation server (AUTOMATION_SERVER_URL, with OLIGARCHY_TOKEN), q quits",
     ),
     Command.provide(withDb),
     EnvFile.withEnvFile,

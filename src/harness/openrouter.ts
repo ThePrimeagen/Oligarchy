@@ -5,6 +5,7 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Sse from "effect/unstable/encoding/Sse";
+import type * as HarnessConfig from "./config.ts";
 import * as History from "./history.ts";
 import type * as Tools from "./tools.ts";
 import * as Errors from "../shared/errors.ts";
@@ -25,6 +26,7 @@ export type Options = {
   readonly model: string;
   readonly messages: ReadonlyArray<History.WireMessage>;
   readonly tools: ReadonlyArray<Tools.ToolDefinition>;
+  readonly reasoning: HarnessConfig.Effort;
   readonly timeouts: {
     readonly header: Duration.Duration;
     readonly chunk: Duration.Duration;
@@ -381,6 +383,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         model: options.model,
         messages: options.messages,
         tools: options.tools,
+        reasoning: { effort: options.reasoning },
         stream: true,
       }),
     );

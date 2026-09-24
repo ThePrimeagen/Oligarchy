@@ -81,6 +81,7 @@ const qemuRecording =
 
 const appConfig = JSON.stringify({
   models: { drive: MODEL, diagnose: MODEL, mint: MODEL },
+  reasoning: { drive: "minimal", diagnose: "minimal", mint: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",
@@ -188,7 +189,7 @@ describe("POST /reserve happy path", () => {
       expect(fixed.spawner.spawned).toMatchObject([
         {
           command: OpenCode.BIN,
-          args: OpenCode.args("diagnose the session", MODEL),
+          args: OpenCode.args("diagnose the session", MODEL, "minimal"),
           options: { env: OpenCode.ENV },
         },
       ]);

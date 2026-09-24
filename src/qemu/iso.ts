@@ -13,6 +13,7 @@ import {
   Semaphore,
   Stream,
 } from "effect";
+import * as Headers from "effect/unstable/http/Headers";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
@@ -40,6 +41,43 @@ export const Host = Context.Reference<HostFacts>("@oligarchy/qemu/iso/Host", {
 export const HEARTBEAT_MS = 10_000;
 export const POLL_MS = 10_000;
 export const STALE_MS = 3 * HEARTBEAT_MS;
+
+// Every 30s while the body is open, including when no chunk arrives.
+const PROGRESS_MS = 30_000;
+
+const KB = 1024;
+const MB = 1024 * 1024;
+const GB = 1024 * 1024 * 1024;
+
+// 1024, the size of the file on disk, printed with two decimals (`1.50 GB`).
+const formatDownloaded = (bytes: number): string => {
+  if (bytes >= GB) {
+    return `${(bytes / GB).toFixed(2)} GB`;
+  }
+  if (bytes >= MB) {
+    return `${(bytes / MB).toFixed(2)} MB`;
+  }
+  return `${(bytes / KB).toFixed(2)} KB`;
+};
+
+// A missing, zero, or non-numeric length cannot be a percentage. Callers then report bytes.
+const contentLength = (headers: Headers.Headers): number | undefined => {
+  const header = Option.getOrUndefined(Headers.get(headers, "content-length"));
+  if (header === undefined || !/^\d+$/.test(header)) {
+    return undefined;
+  }
+  const total = Number(header);
+  return Number.isSafeInteger(total) && total > 0 ? total : undefined;
+};
+
+const progressText = (url: string, received: number, total: number | undefined): string => {
+  const amount = formatDownloaded(received);
+  if (total === undefined) {
+    return `iso: downloaded ${amount} of ${url}`;
+  }
+  const percent = Math.floor((received * 100) / total);
+  return `iso: downloaded ${String(percent)}% (${amount}) of ${url}`;
+};
 
 export const ManifestEntry = Schema.Union([
   Schema.Struct({ status: Schema.Literal("downloading"), heartbeatAt: Schema.String }),
@@ -162,6 +200,7 @@ const make: Effect.Effect<
       // download; the pid keeps two proxies on one machine out of each other's partials.
       const partial = `${target}.partial-${String(host.pid)}`;
       let beatAt = yield* Clock.currentTimeMillis;
+      let downloaded = 0;
       const response = yield* http.get(url).pipe(
         Effect.filterOrFail(
           (received) => ok(received.status),
@@ -171,6 +210,7 @@ const make: Effect.Effect<
             }),
         ),
       );
+      const total = contentLength(response.headers);
       const hash = createHash("sha256");
       const beat = Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
@@ -186,14 +226,29 @@ const make: Effect.Effect<
         );
       });
       yield* Effect.gen(function* () {
-        yield* response.stream.pipe(
-          Stream.tap((chunk) =>
-            Effect.sync(() => {
-              hash.update(chunk);
-            }),
-          ),
-          Stream.tap(() => beat),
-          Stream.run(fs.sink(partial)),
+        // Closed with the body, so the checksum request does not keep logging.
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* Effect.forkScoped(
+              Effect.forever(
+                Effect.gen(function* () {
+                  yield* Effect.sleep(PROGRESS_MS);
+                  yield* log.info(progressText(url, downloaded, total), logWho(who));
+                }),
+              ),
+              { startImmediately: true },
+            );
+            yield* response.stream.pipe(
+              Stream.tap((chunk) =>
+                Effect.sync(() => {
+                  hash.update(chunk);
+                  downloaded += chunk.byteLength;
+                }),
+              ),
+              Stream.tap(() => beat),
+              Stream.run(fs.sink(partial)),
+            );
+          }),
         );
         const digest = hash.digest("hex");
         const published = yield* publishedSha256(url);

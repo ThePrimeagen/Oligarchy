@@ -8,6 +8,7 @@ const MODEL = "meta/muse-spark-1.3-contributor";
 
 const valid = () => ({
   models: { drive: MODEL, diagnose: MODEL, mint: MODEL },
+  reasoning: { drive: "minimal", diagnose: "low", mint: "high" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",
@@ -57,6 +58,7 @@ describe("oligarchy.json", () => {
           Effect.provide(file(JSON.stringify(valid()))),
         );
         expect(config.models).toEqual({ drive: MODEL, diagnose: MODEL, mint: MODEL });
+        expect(config.reasoning).toEqual({ drive: "minimal", diagnose: "low", mint: "high" });
         expect(config.openRouterBaseUrl).toBe("https://openrouter.ai/api/v1");
         expect(Duration.toMillis(config.timeouts.header)).toBe(Duration.toMillis("3 minutes"));
         expect(Duration.toMillis(config.timeouts.chunk)).toBe(Duration.toMillis("3 minutes"));
@@ -72,6 +74,7 @@ describe("oligarchy.json", () => {
       expect(config.models.drive).toBe(MODEL);
       expect(config.models.diagnose).toBe(MODEL);
       expect(config.models.mint).toBe(MODEL);
+      expect(config.reasoning).toEqual({ drive: "minimal", diagnose: "minimal", mint: "minimal" });
       expect(config.openRouterBaseUrl).toBe("https://openrouter.ai/api/v1");
       expect(Duration.toMillis(config.timeouts.header)).toBe(Duration.toMillis("3 minutes"));
       expect(Duration.toMillis(config.timeouts.chunk)).toBe(Duration.toMillis("3 minutes"));
@@ -124,6 +127,22 @@ describe("oligarchy.json", () => {
       badModel.models.drive = "muse";
       const model = yield* refuse(badModel);
       expect(model.message).toContain('["models"]["drive"]');
+
+      const missingReasoning = yield* refuse({
+        ...valid(),
+        reasoning: { diagnose: "minimal", mint: "minimal" },
+      });
+      expect(missingReasoning.message).toContain('["reasoning"]["drive"]');
+
+      const { reasoning: _noReasoning, ...withoutReasoning } = valid();
+      const noReasoning = yield* refuse(withoutReasoning);
+      expect(noReasoning.message).toContain('["reasoning"]');
+
+      const badEffort = yield* refuse({
+        ...valid(),
+        reasoning: { drive: "max", diagnose: "minimal", mint: "minimal" },
+      });
+      expect(badEffort.message).toContain('["reasoning"]["drive"]');
 
       const badUrl = valid();
       badUrl.openRouterBaseUrl = "not-a-url";

@@ -74,6 +74,27 @@ describe("reply", () => {
     expect(quoted.success.args[quoted.success.args.length - 1]).toBe('say "hi"');
   });
 
+  it("reads a client call with no step-status; the reply has no step to report", () => {
+    const parsed = parsedClient(client("open the menu", ["send-keys", "--keys", "a"]));
+    expect(Object.keys(parsed).sort()).toEqual(["_tag", "args", "reason"]);
+  });
+
+  it("refuses a step-status; there are no steps to complete or continue (unhappy)", () => {
+    for (const status of ["completed", "continue"]) {
+      const parsed = Reply.parse(
+        line({
+          name: "client",
+          arguments: { reason: "boot", "step-status": status, args: ["get-image"] },
+        }),
+      );
+      if (Result.isSuccess(parsed)) {
+        expect.fail(`step-status ${status} parsed`);
+      }
+      expect(parsed.failure.message.startsWith("reply:")).toBe(true);
+      expect(parsed.failure.message).toContain("step-status");
+    }
+  });
+
   it("refuses a reply that is not one tool call of the expected shape", () => {
     const cases = [
       "continue\nbooted the guest\nstart",

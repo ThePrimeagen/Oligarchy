@@ -65,6 +65,7 @@ const storesLayer = (
   scripted: Scripted = {},
   actions = Stores.fakeActionStore(),
   tests = Stores.fakeTestStore(),
+  logs = Stores.fakeLogStore(),
 ) =>
   Layer.mergeAll(
     Stores.fakeServerStore({
@@ -76,6 +77,7 @@ const storesLayer = (
     Stores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) }).layer,
     actions.layer,
     tests.layer,
+    logs.layer,
   );
 
 // What a run may be given beyond the stores: a spawner that opens nothing unless told, servers
@@ -85,6 +87,7 @@ type Extra = {
   readonly spawner?: FakeSpawner;
   readonly actions?: Stores.FakeActionStore;
   readonly tests?: Stores.FakeTestStore;
+  readonly logs?: Stores.FakeLogStore;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
   readonly env?: Record<string, string>;
 };
@@ -101,6 +104,7 @@ const live = (
           scripted,
           extra.actions ?? Stores.fakeActionStore(),
           extra.tests ?? Stores.fakeTestStore(),
+          extra.logs ?? Stores.fakeLogStore(),
         ),
         screen.layer,
         (extra.spawner ?? fakeSpawner()).layer,
@@ -211,6 +215,73 @@ describe("run happy path", () => {
         yield* settle;
         expect(reads.count).toBe(2);
         expect(screen.setups).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "pulls every stored log line onto the pane within a second, and a failed pull keeps the lines it has",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer({ columns: 135, rows: 37 });
+        const stored: Array<{
+          readonly id: number;
+          readonly text: string;
+          readonly level: "info" | "warning";
+          readonly location: string | null;
+          readonly agentId: string | null;
+          readonly createdAt: Date;
+        }> = [
+          {
+            id: 1,
+            text: "iso: downloading",
+            level: "info",
+            location: SESSION_ID,
+            agentId: "OLI-61",
+            createdAt: new Date(0),
+          },
+        ];
+        let fail = false;
+        const logs = Stores.fakeLogStore({
+          listRecent: () =>
+            fail ? Effect.fail(refused) : Effect.succeed(stored.map((row) => ({ ...row }))),
+        });
+        const { fiber, setup } = yield* started(screen, {}, { logs });
+        const first = yield* until(setup, (drawn) =>
+          drawn.some((row) => row.includes("iso: downloading")),
+        );
+        expect(first.some((row) => row.includes("[OLI-61]"))).toBe(true);
+        expect(first.some((row) => row.includes(SESSION_ID))).toBe(true);
+        stored.push({
+          id: 2,
+          text: "iso: downloaded 1.50 GB",
+          level: "info",
+          location: SESSION_ID,
+          agentId: "OLI-61",
+          createdAt: new Date(0),
+        });
+        yield* TestClock.adjust(View.LOG_PULL);
+        yield* settle;
+        const second = yield* until(setup, (drawn) =>
+          drawn.some((row) => row.includes("iso: downloaded 1.50 GB")),
+        );
+        expect(second.some((row) => row.includes("iso: downloading"))).toBe(true);
+        fail = true;
+        stored.push({
+          id: 3,
+          text: "iso: should not appear",
+          level: "warning",
+          location: null,
+          agentId: null,
+          createdAt: new Date(0),
+        });
+        yield* TestClock.adjust(View.LOG_PULL);
+        yield* settle;
+        const kept = yield* rows(setup);
+        expect(kept.some((row) => row.includes("iso: downloaded 1.50 GB"))).toBe(true);
+        expect(kept.some((row) => row.includes("iso: should not appear"))).toBe(false);
+        expect(kept[36]).toBe(FOOTER);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
       }),
   );
 
@@ -1689,41 +1760,44 @@ describe("definition and ticket information", () => {
 });
 
 describe("selected session", () => {
-  it.effect(
-    "draws the selected ticket's calls, intent and image in the main area, and leaves the footer alone",
-    () =>
-      Effect.gen(function* () {
-        const screen = fakeRenderer();
-        const http = following([
-          { type: "session", status: "running" },
-          { type: "intent", state: "started", message: "lock the screen" },
-          { type: "action", id: 10, name: "send-keys", state: "running" },
-        ]);
-        const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), http });
-        const drawn = yield* until(setup, shows("lock the screen"));
-        expect(drawn.join("\n")).toContain("send-key");
-        expect(drawn.join("\n")).toContain("send-keys");
-        expect(drawn.join("\n")).toContain("screendump");
-        expect(drawn.some((row) => BLOCKS.test(row))).toBe(true);
-        expect(drawn[36]).toBe(FOOTER);
-        expect(drawn.join("\n")).not.toContain("error:");
-        setup.mockInput.pressKey("q");
-        yield* Fiber.join(fiber);
-      }),
+  it.effect("draws stored log lines in the main area and leaves the footer alone", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const logs = Stores.fakeLogStore({
+        listRecent: () =>
+          Effect.succeed([
+            {
+              id: 1,
+              text: "iso: downloading",
+              level: "info" as const,
+              location: SESSION_ID,
+              agentId: "OLI-61",
+              createdAt: new Date(0),
+            },
+          ]),
+      });
+      const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), logs });
+      const drawn = yield* until(setup, shows("iso: downloading"));
+      expect(drawn.join("\n")).toContain("[OLI-61]");
+      expect(drawn.join("\n")).toContain("iso: downloading");
+      expect(drawn.some((row) => BLOCKS.test(row))).toBe(true);
+      expect(drawn[36]).toBe(FOOTER);
+      expect(drawn[36]).not.toContain("error:");
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
   );
 
-  it.effect(
-    "a refused session stream keeps the calls and does not put error: on the footer (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        const screen = fakeRenderer();
-        const { fiber, setup } = yield* started(screen);
-        const drawn = yield* until(setup, shows(PEEK_TITLE));
-        expect(drawn.join("\n")).toContain("no commands yet");
-        expect(drawn[36]).toBe(FOOTER);
-        expect(drawn.join("\n")).not.toContain("error:");
-        setup.mockInput.pressKey("q");
-        yield* Fiber.join(fiber);
-      }),
+  it.effect("a refused session stream does not put the refusal on the footer (unhappy)", () =>
+    Effect.gen(function* () {
+      const screen = fakeRenderer();
+      const { fiber, setup } = yield* started(screen);
+      yield* settle;
+      const drawn = yield* rows(setup);
+      expect(drawn[36]).toBe(FOOTER);
+      expect(drawn[36]).not.toContain("error:");
+      setup.mockInput.pressKey("q");
+      yield* Fiber.join(fiber);
+    }),
   );
 });

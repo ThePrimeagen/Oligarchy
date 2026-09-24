@@ -492,6 +492,35 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect(
+      "LogStore lists the newest rows from every bucket, oldest first, and a shorter window drops the older ones",
+      () =>
+        Effect.gen(function* () {
+          const logs = yield* Logs.LogStore;
+          const mark = uuid();
+          yield* logs.insertLog({
+            text: `${mark} older`,
+            level: "info",
+            location: "server",
+            agentId: null,
+          });
+          yield* logs.insertLog({
+            text: `${mark} newest`,
+            level: "warning",
+            location: null,
+            agentId: "OLI-9",
+          });
+          const recent = yield* logs.listRecent(2);
+          expect(recent.map((row) => row.text)).toEqual([`${mark} older`, `${mark} newest`]);
+          expect(recent[1]).toMatchObject({
+            level: "warning",
+            location: null,
+            agentId: "OLI-9",
+          });
+          expect((yield* logs.listRecent(1)).map((row) => row.text)).toEqual([`${mark} newest`]);
+        }),
+    );
+
     scoped.effect("DebugLogStore snapshots each origin into sources", () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions.SessionStore;

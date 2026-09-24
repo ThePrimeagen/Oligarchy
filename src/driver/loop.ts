@@ -1,6 +1,7 @@
 import {
   Cause,
   Clock,
+  Console,
   Duration,
   Effect,
   Exit,
@@ -32,6 +33,7 @@ export type Input = {
   readonly debugLog: string;
   readonly config: HarnessConfig.AppConfig;
   readonly token: Redacted.Redacted;
+  readonly reasoning: HarnessConfig.Effort;
 };
 
 export type Stopped = {
@@ -56,14 +58,16 @@ const shown = (command: { readonly bin: string; readonly args: ReadonlyArray<str
   [command.bin, ...command.args.map((arg) => JSON.stringify(arg))].join(" ");
 
 const log = Effect.fn("Driver.log")(function* (
-  path: string,
+  to: { readonly debugLog: string; readonly agentId: string },
   step: number,
   kind: Log.Kind,
   text: string,
 ) {
+  const event = Log.Event.make({ step, kind, text });
+  yield* Console.log(Log.printed(to.agentId, event));
   const fs = yield* FileSystem.FileSystem;
   yield* fs
-    .writeFileString(path, Log.line(Log.Event.make({ step, kind, text })), {
+    .writeFileString(to.debugLog, Log.line(event), {
       flag: "a",
       mode: 0o644,
     })
@@ -186,6 +190,8 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   const facts = yield* loadRun(input.agentId);
   const decisions: Array<string> = [];
   let turns = 0;
+  // The last get-image's PNG. Any other guest action may change the screen, so it drops it.
+  let screen: Uint8Array | undefined;
 
   // acquireUseRelease keeps the stop uninterruptible: an interrupt during the model
   // loop still stops the session start already opened. A start that never prints an id
@@ -210,19 +216,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         ...(routing === undefined ? [] : [`routing ${routing}`]),
       ].join(" ");
       // Logged before the guest boots, so a log that cannot be written starts nothing.
-      yield* log(input.debugLog, 0, "start", noted);
+      yield* log(input, 0, "start", noted);
       const started = yield* Client.run(command);
       const sessionId = (started.stdout.split("\n")[0] ?? "").trim();
       if (started.exitCode !== 0 || sessionId === "") {
-        yield* log(
-          input.debugLog,
-          0,
-          "command",
-          `${shown(command)} exit ${String(started.exitCode)}`,
-        );
+        yield* log(input, 0, "command", `${shown(command)} exit ${String(started.exitCode)}`);
         const printed = Tools.toolContent(started);
         const message = printed === "" ? "start failed" : printed;
-        yield* log(input.debugLog, 0, "failure", message);
+        yield* log(input, 0, "failure", message);
         return yield* Effect.fail(commandError(message));
       }
       // The id is the resource. The exit log is the use, so a log failure still stops.
@@ -232,7 +233,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       Effect.gen(function* () {
         const sessionId = booted.sessionId;
         yield* log(
-          input.debugLog,
+          input,
           0,
           "command",
           `${shown(booted.command)} exit ${String(booted.started.exitCode)}`,
@@ -250,18 +251,13 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             input.model,
           ],
         };
-        yield* log(input.debugLog, 0, "running", sessionId);
+        yield* log(input, 0, "running", sessionId);
         const marked = yield* runCommand(markRunning).pipe(
           Effect.catchTag("CommandError", (error) =>
             Effect.succeed({ exitCode: 1, stdout: "", stderr: `${error.message}\n` }),
           ),
         );
-        yield* log(
-          input.debugLog,
-          0,
-          "command",
-          `${shown(markRunning)} exit ${String(marked.exitCode)}`,
-        );
+        yield* log(input, 0, "command", `${shown(markRunning)} exit ${String(marked.exitCode)}`);
         if (marked.exitCode !== 0) {
           decisions.push(decision("start", Tools.toolContent(marked)));
         }
@@ -270,95 +266,105 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           const now = yield* Clock.currentTimeMillis;
           if (turns >= input.config.stepLimit) {
             const message = `step limit of ${String(input.config.stepLimit)} reached`;
-            yield* log(input.debugLog, turns, "failure", message);
+            yield* log(input, turns, "failure", message);
             return yield* Effect.fail(commandError(message));
           }
           if (Duration.Order(Duration.millis(now - startedAt), input.config.runCeiling) >= 0) {
             const message = `run ceiling of ${Duration.format(input.config.runCeiling)} passed`;
-            yield* log(input.debugLog, turns, "failure", message);
+            yield* log(input, turns, "failure", message);
             return yield* Effect.fail(commandError(message));
           }
 
-          const step = turns + 1;
+          const turn = turns + 1;
           const reasons = decisions.length === 0 ? "none" : decisions.join("\n");
           const system = Prompt.render({
             TEST_DEFINITION: facts.instruction,
             TEST_PROOF: facts.proof,
-            STEP: String(step),
             REASONS: reasons,
             CLIENT_TOOLS: Tools.clientGuide.trimEnd(),
           });
-          yield* log(input.debugLog, step, "request", input.model);
-          const turn = yield* OpenRouter.complete({
+          yield* log(input, turn, "request", input.model);
+          const answer = yield* OpenRouter.complete({
             baseUrl: input.config.openRouterBaseUrl,
             token: input.token,
             model: input.model,
             messages: [
               { role: "system", content: system },
-              { role: "user", content: input.prompt },
+              {
+                role: "user",
+                content:
+                  screen === undefined
+                    ? input.prompt
+                    : [
+                        { type: "text", text: input.prompt },
+                        {
+                          type: "image_url",
+                          image_url: {
+                            url: `data:image/png;base64,${Buffer.from(screen).toString("base64")}`,
+                          },
+                        },
+                      ],
+              },
             ],
             tools: [],
+            reasoning: input.reasoning,
             timeouts: input.config.timeouts,
             runCeiling: input.config.runCeiling,
             defaultRetry: input.config.harness.defaultRetry,
             startedAtMillis: startedAt,
-          }).pipe(
-            Effect.tapError((error) =>
-              log(input.debugLog, step, "failure", Render.headline(error)),
-            ),
-          );
-          yield* log(input.debugLog, step, "assistant", turn.content ?? "");
-          const parsed = Reply.parse(turn.content ?? "");
+          }).pipe(Effect.tapError((error) => log(input, turn, "failure", Render.headline(error))));
+          yield* log(input, turn, "assistant", answer.content ?? "");
+          const parsed = Reply.parse(answer.content ?? "");
           if (Result.isFailure(parsed)) {
-            yield* log(input.debugLog, step, "failure", parsed.failure.message);
+            yield* log(input, turn, "failure", parsed.failure.message);
             return yield* Effect.fail(commandError(parsed.failure.message));
           }
           const reply = parsed.success;
           if (reply._tag === "Done") {
-            yield* log(input.debugLog, step, "stop", "model-stopped");
+            yield* log(input, turn, "stop", "model-stopped");
             return { reason: "model-stopped" } satisfies Stopped;
           }
 
           const planned = Reply.command(reply);
           if (Result.isFailure(planned)) {
-            yield* log(input.debugLog, step, "refusal", planned.failure.message);
+            yield* log(input, turn, "refusal", planned.failure.message);
             decisions.push(decision(reply.reason, planned.failure.message));
             continue;
           }
           if (HARNESS_OWNED.has(planned.success.args[0] ?? "")) {
             const message = "client: the harness starts and stops the session";
-            yield* log(input.debugLog, step, "refusal", message);
+            yield* log(input, turn, "refusal", message);
             decisions.push(decision(reply.reason, message));
             continue;
           }
-          turns = step;
+          turns = turn;
           const owned = Intent.owned(planned.success.args, {
             agentId: input.agentId,
             serverUrl: facts.serverUrl,
             sessionId,
           });
           if (Result.isFailure(owned)) {
-            yield* log(input.debugLog, step, "refusal", owned.failure.message);
+            yield* log(input, turn, "refusal", owned.failure.message);
             decisions.push(decision(reply.reason, owned.failure.message));
             continue;
           }
           const guest = { bin: planned.success.bin, args: owned.success };
-          let outcomeText = "";
 
           const message = Intent.intentMessage(reply.reason, guest.args);
           const bracketed = Intent.bracket(guest, facts.resultId, message);
           if (Result.isFailure(bracketed)) {
-            yield* log(input.debugLog, step, "refusal", bracketed.failure.message);
+            yield* log(input, turn, "refusal", bracketed.failure.message);
             decisions.push(decision(reply.reason, bracketed.failure.message));
             continue;
           }
 
+          let intentEnd: Tools.CommandLine | undefined;
           if (bracketed.success._tag === "guest") {
-            yield* log(input.debugLog, step, "intent", message);
+            yield* log(input, turn, "intent", message);
             const opened = yield* Client.run(bracketed.success.start);
             yield* log(
-              input.debugLog,
-              step,
+              input,
+              turn,
               "command",
               `${shown(bracketed.success.start)} exit ${String(opened.exitCode)}`,
             );
@@ -366,38 +372,40 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
               decisions.push(decision(reply.reason, Tools.toolContent(opened)));
               continue;
             }
-            // A log failure still has to close the intent this start opened.
-            const closeIntent = Client.run(bracketed.success.end).pipe(Effect.ignore);
-            const ran = yield* Client.run(guest);
-            yield* log(
-              input.debugLog,
-              step,
-              "command",
-              `${shown(guest)} exit ${String(ran.exitCode)}`,
-            ).pipe(Effect.tapError(() => closeIntent));
-            const ended = yield* Client.run(bracketed.success.end);
-            yield* log(
-              input.debugLog,
-              step,
-              "command",
-              `${shown(bracketed.success.end)} exit ${String(ended.exitCode)}`,
-            );
-            outcomeText =
-              ended.exitCode === 0
-                ? Tools.toolContent(ran)
-                : `${Tools.toolContent(ran)}\nintent end failed\n${Tools.toolContent(ended)}`;
-            decisions.push(decision(reply.reason, outcomeText));
-            continue;
+            intentEnd = bracketed.success.end;
           }
 
+          // A log failure still has to close the intent this start opened.
+          const closeIntent =
+            intentEnd === undefined ? Effect.void : Client.run(intentEnd).pipe(Effect.ignore);
           const ran = yield* Client.run(guest);
-          yield* log(
-            input.debugLog,
-            step,
-            "command",
-            `${shown(guest)} exit ${String(ran.exitCode)}`,
+          yield* log(input, turn, "command", `${shown(guest)} exit ${String(ran.exitCode)}`).pipe(
+            Effect.tapError(() => closeIntent),
           );
-          decisions.push(decision(reply.reason, Tools.toolContent(ran)));
+          const imaging = guest.args[0] === "get-image";
+          const shot = imaging && ran.exitCode === 0 && ran.bytes.length > 0;
+          screen = shot ? ran.bytes : undefined;
+          // Without this a failed get-image reads as nothing, and the model asks for it forever.
+          let outcome = Tools.toolContent(ran);
+          if (shot) {
+            outcome = "took a screenshot";
+          } else if (imaging && ran.exitCode !== 0) {
+            outcome = `IMAGE HAS FAILED, MACHINE IS SHUT DOWN\n${outcome}`;
+          }
+          if (intentEnd === undefined) {
+            decisions.push(decision(reply.reason, outcome));
+            continue;
+          }
+          const ended = yield* Client.run(intentEnd);
+          yield* log(input, turn, "command", `${shown(intentEnd)} exit ${String(ended.exitCode)}`);
+          decisions.push(
+            decision(
+              reply.reason,
+              ended.exitCode === 0
+                ? outcome
+                : `${outcome}\nintent end failed\n${Tools.toolContent(ended)}`,
+            ),
+          );
         }
       }),
     (booted, exit) =>
@@ -427,12 +435,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             args: stamped.success,
           } satisfies Tools.CommandLine;
           const ran = yield* Client.run(command);
-          yield* log(
-            input.debugLog,
-            0,
-            "command",
-            `${shown(command)} exit ${String(ran.exitCode)}`,
-          );
+          yield* log(input, 0, "command", `${shown(command)} exit ${String(ran.exitCode)}`);
           if (ran.exitCode !== 0) {
             const printed = Tools.toolContent(ran);
             return yield* Effect.fail(commandError(printed === "" ? "stop failed" : printed));
@@ -454,12 +457,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             ],
           };
           const marked = yield* runCommand(mark);
-          yield* log(
-            input.debugLog,
-            0,
-            "command",
-            `${shown(mark)} exit ${String(marked.exitCode)}`,
-          );
+          yield* log(input, 0, "command", `${shown(mark)} exit ${String(marked.exitCode)}`);
           if (marked.exitCode !== 0) {
             const printed = Tools.toolContent(marked);
             return yield* Effect.fail(
@@ -474,7 +472,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           const stopped = yield* Effect.exit(stopGuest);
           if (Exit.isFailure(stopped)) {
             yield* log(
-              input.debugLog,
+              input,
               0,
               "failure",
               `stop: ${Render.headline(Cause.squash(stopped.cause))}`,
@@ -483,20 +481,20 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           const closed = yield* Effect.exit(closeResult);
           if (Exit.isFailure(closed)) {
             yield* log(
-              input.debugLog,
+              input,
               0,
               "failure",
               `test-results: ${Render.headline(Cause.squash(closed.cause))}`,
             ).pipe(Effect.ignore);
           }
           if (Exit.isSuccess(stopped)) {
-            yield* log(input.debugLog, 0, "stop", "session-stopped").pipe(Effect.ignore);
+            yield* log(input, 0, "stop", "session-stopped").pipe(Effect.ignore);
           }
           return;
         }
         yield* stopGuest;
         yield* closeResult;
-        yield* log(input.debugLog, 0, "stop", "result-closed");
+        yield* log(input, 0, "stop", "result-closed");
       }),
   );
   return { reason: "result-closed" } satisfies Stopped;

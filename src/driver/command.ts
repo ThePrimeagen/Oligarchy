@@ -47,6 +47,7 @@ export const makeDriverCommand = <E, R>(
         debugLog: input.debugLog,
         config,
         token,
+        reasoning: input.action === "mint" ? config.reasoning.mint : config.reasoning.drive,
       });
       return yield* Console.log(stopped.reason);
     }),

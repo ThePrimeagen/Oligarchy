@@ -10,6 +10,20 @@ const decoder = new TextDecoder();
 const text = (chunks: ReadonlyArray<Uint8Array>): string =>
   chunks.map((chunk) => decoder.decode(chunk)).join("");
 
+const joined = (chunks: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const out = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+};
+
+// stdout is the text a command prints. bytes is the same stdout undecoded: get-image
+// prints a PNG, which text would mangle.
+export type Ran = Tools.CommandOutput & { readonly bytes: Uint8Array };
+
 const written = (args: ReadonlyArray<unknown>): Uint8Array =>
   encoder.encode(`${args.map(String).join(" ")}\n`);
 
@@ -81,7 +95,8 @@ const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<s
     exitCode,
     stdout: text(stdout),
     stderr: text(stderr),
-  } satisfies Tools.CommandOutput;
+    bytes: joined(stdout),
+  } satisfies Ran;
 });
 
 export const run = Effect.fn("Driver.client")(function* (command: Tools.CommandLine) {

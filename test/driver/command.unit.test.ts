@@ -48,6 +48,7 @@ const configText = (models: { readonly drive: string; readonly mint?: string }):
       diagnose: models.drive,
       mint: models.mint ?? models.drive,
     },
+    reasoning: { drive: "minimal", diagnose: "medium", mint: "high" },
     openRouterBaseUrl: "https://openrouter.ai/api/v1",
     timeouts: { header: "3 minutes", chunk: "3 minutes" },
     runCeiling: "1.5 hours",
@@ -123,6 +124,7 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       yield* run(FLAGS, seen, { contents: configText({ drive: MODEL, mint: "openrouter/mint" }) });
       expect(seen.input?.model).toBe(MODEL);
+      expect(seen.input?.reasoning).toBe("minimal");
       expect(seen.input?.prompt).toBe(PROMPT);
       expect(seen.input?.agentId).toBe("OLI-1");
       expect(seen.input?.debugLog).toBe(LOG);
@@ -194,6 +196,7 @@ describe("driver command", () => {
         { contents: configText({ drive: MODEL, mint }) },
       );
       expect(seen.input?.model).toBe(mint);
+      expect(seen.input?.reasoning).toBe("high");
     }),
   );
 

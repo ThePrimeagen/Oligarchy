@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import type * as Domain from "../shared/domain.ts";
 import * as Client from "./client.ts";
@@ -30,7 +30,15 @@ export class LogStore extends Context.Service<LogStore>()("@oligarchy/db/LogStor
       );
     });
 
-    return { insertLog, listLogs };
+    // The newest rows from every bucket, oldest first: a tail, not one session's history.
+    const listRecent = Effect.fn("db.listRecentLogs")(function* (limit: number) {
+      const rows = yield* database.run("listRecentLogs", (db) =>
+        db.select().from(DbSchema.logs).orderBy(desc(DbSchema.logs.id)).limit(limit),
+      );
+      return rows.reverse();
+    });
+
+    return { insertLog, listLogs, listRecent };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

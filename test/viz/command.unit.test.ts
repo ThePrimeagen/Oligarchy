@@ -45,6 +45,7 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
     });
     const actions = Stores.fakeActionStore();
     const tests = Stores.fakeTestStore();
+    const logs = Stores.fakeLogStore();
     const touched: Array<string> = [];
     const stdio = StdioSupport.capture();
     const command = VizCommand.makeVizCommand({
@@ -56,6 +57,7 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
           automation.layer,
           actions.layer,
           tests.layer,
+          logs.layer,
         );
       },
     });
@@ -104,7 +106,9 @@ describe("viz happy path", () => {
       expect(printed).toMatch(/L opens the selected job's Linear ticket/);
       expect(printed).toMatch(/F follows the selected running job/);
       expect(printed).toMatch(/j and k rest on a ticket/);
-      expect(printed).toMatch(/selected ticket's session/);
+      expect(printed).toMatch(/every log line from the database/);
+      expect(printed).toMatch(/newest at the bottom/);
+      expect(printed).toMatch(/same shape as stdout/);
       expect(printed).toMatch(/d opens the selected ticket's test definition/);
       expect(printed).toMatch(/enter shows the ticket/);
       expect(printed).toMatch(/a asks, then aborts the selected job at the automation server/);

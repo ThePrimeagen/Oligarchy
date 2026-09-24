@@ -29,6 +29,7 @@ const APP = JSON.stringify({
     diagnose: "openrouter/meta/muse-spark-1.3-contributor",
     mint: "openrouter/meta/muse-spark-1.3-contributor",
   },
+  reasoning: { drive: "minimal", diagnose: "minimal", mint: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",

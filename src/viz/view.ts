@@ -2,6 +2,8 @@ import { Duration, Option } from "effect";
 import type * as Automation from "../db/automation.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
+import * as Render from "../observability/render.ts";
+import type * as Domain from "../shared/domain.ts";
 import * as Follow from "./follow.ts";
 import * as Steps from "./steps.ts";
 import * as Text from "./text.ts";
@@ -20,6 +22,10 @@ const QUEUE_MIN_ROWS = 4;
 // A server writes its row every thirty seconds. The screen's cycle is ten: status and
 // the latest tickets, not a query on every frame.
 export const REFRESH = Duration.seconds(10);
+// Log lines are watched as they land, so they are pulled on their own, not with the board.
+export const LOG_PULL = Duration.seconds(1);
+// More than a pane can show, so a short burst between pulls stays in the tail.
+export const LOG_TAIL = 200;
 // The ages tick between reads.
 export const AGE_TICK = Duration.seconds(1);
 // A pop-up stays this long, whatever keys are pressed under it.
@@ -126,13 +132,34 @@ export type Sheet = {
   readonly offset: number;
 };
 
+// One row of the logs table, as stored. The pane prints it the way stdout does.
+export type StoredLog = {
+  readonly id: number;
+  readonly level: Domain.LogLevel;
+  readonly text: string;
+  readonly location: string | null;
+  readonly agentId: string | null;
+};
+
+export const logText = (row: StoredLog): string =>
+  Render.renderLogLine(
+    {
+      text: row.text,
+      level: row.level,
+      ...(row.location === null ? {} : { location: row.location }),
+      ...(row.agentId === null ? {} : { agentId: row.agentId }),
+    },
+    false,
+  );
+
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
 // the next key. follow is the job F is looking at: a peek over the board, or the whole screen.
-// session is that job's calls, intents and image, drawn in the main area whether or not F is
-// up; sessionNote is why that pane is empty. confirm is a's question while it is up; popup is
-// what a had to say about a job that could not be aborted, up until its time is over. sheet is
+// session is that job's calls and image. logs is every stored log line, oldest first, drawn in
+// the main area; sessionNote is why that pane is empty when no line has landed. confirm is a's
+// question while it is up; popup is what a had to say about a job that could not be aborted, up
+// until its time is over. sheet is
 // d's definition or enter's ticket information. tab is the kind of machine the cards show;
 // focus is the box j and k move in; cursor is each list's selected row (a tab's cards and the
 // jobs on them as one list, the queue's jobs as another), kept when the tab or the focus
@@ -144,6 +171,7 @@ export type View = {
   readonly follow: Option.Option<Follow.Follow>;
   readonly session: Option.Option<Follow.Follow>;
   readonly sessionNote: Option.Option<string>;
+  readonly logs: ReadonlyArray<StoredLog>;
   readonly confirm: Option.Option<Confirm>;
   readonly popup: Option.Option<Popup>;
   readonly sheet: Option.Option<Sheet>;
@@ -159,6 +187,7 @@ export const initialView: View = {
   follow: Option.none(),
   session: Option.none(),
   sessionNote: Option.none(),
+  logs: [],
   confirm: Option.none(),
   popup: Option.none(),
   sheet: Option.none(),
@@ -832,16 +861,16 @@ export type Screen = {
     readonly place: Option.Option<string>;
   };
   readonly footer: { readonly left: Text.Row; readonly right: string };
-  // The selected ticket's last image, over the session pane. Absent when there is none.
+  // The selected ticket's last image, between the log tail and the graph, as tall as both.
+  // Absent when there is none.
   readonly image: Option.Option<{
     readonly png: Uint8Array;
     readonly top: number;
+    readonly left: number;
+    readonly columns: number;
     readonly height: number;
   }>;
 };
-
-// Where the session image sits: past the border, the sidebar and the calls column.
-export const SESSION_IMAGE_LEFT = 2 + 26 + 3 + Follow.LEFT_COLS;
 
 const card = (
   machine: Servers.Machine,
@@ -1206,19 +1235,31 @@ const usage = (
   });
 };
 
+type AutomationBody = {
+  readonly rows: ReadonlyArray<Text.Row>;
+  readonly image: Option.Option<{
+    readonly png: Uint8Array;
+    readonly logWidth: number;
+    readonly columns: number;
+  }>;
+};
+
 const automationRows = (
   view: View,
   snapshot: Snapshot,
   columns: number,
   height: number,
   now: number,
-): ReadonlyArray<Text.Row> => {
+): AutomationBody => {
   const inner = columns - 4;
   const entries = entriesOf(snapshot, "clients");
   if (entries.length === 0) {
-    return Array.from({ length: height }, (_, row) =>
-      row === 0 ? [Text.muted("no automation clients")] : [Text.SPACE],
-    );
+    return {
+      rows: Array.from({ length: height }, (_, row) =>
+        row === 0 ? [Text.muted("no automation clients")] : [Text.SPACE],
+      ),
+      image: Option.none(),
+    };
   }
   const cursor = clamp(view.cursor.clients, 0, entries.length - 1);
   const drift = now - snapshot.readAt;
@@ -1274,37 +1315,167 @@ const automationRows = (
   const series = snapshot.series.find(
     (found) => found.type === "automation-client" && found.name === entries[cursor]?.machine.name,
   );
-  // The graphs keep the top third. The rest is the selected ticket's session.
-  const graphHeight = Math.max(1, Math.floor(height / 3));
-  const plotted = usage(series?.samples ?? [], inner - 28, graphHeight);
-  const session = sessionPane(view, height - graphHeight, now);
-  return Array.from({ length: height }, (_, row) => {
+  // Top half: the log tail on the left of the graph, the same number of rows.
+  // Bottom half: the open intent on the left of the guest image.
+  const png = Option.flatMap(view.session, (follow) => follow.png);
+  const top = Math.floor(height / 2);
+  const bottom = height - top;
+  const afterClient = inner - 29;
+  const logWidth = Math.floor((afterClient - 3) / 2);
+  const graphWidth = afterClient - 3 - logWidth;
+  const plotted = usage(series?.samples ?? [], graphWidth, top);
+  const logs = sessionPane(view, top, logWidth);
+  const intent = intentPane(view, bottom, logWidth);
+  const rows = Array.from({ length: height }, (_, row) => {
     const line = left[from + row] ?? [Text.SPACE];
-    const right = row < graphHeight ? plotted[row] : session[row - graphHeight];
-    return [...clip(line, 26), Text.muted(" │ "), ...(right ?? [])];
+    const client = clip(line, 26);
+    if (row < top) {
+      return [
+        ...client,
+        Text.muted(" │ "),
+        ...(logs[row] ?? [Text.value(Text.fit("", logWidth))]),
+        Text.muted(" │ "),
+        ...(plotted[row] ?? []),
+      ];
+    }
+    return [
+      ...client,
+      Text.muted(" │ "),
+      ...(intent[row - top] ?? [Text.value(Text.fit("", logWidth))]),
+      Text.muted(" │ "),
+      Text.value(Text.fit("", graphWidth)),
+    ];
+  });
+  return {
+    rows,
+    image: Option.map(png, (bytes) => ({ png: bytes, logWidth, columns: graphWidth })),
+  };
+};
+
+// Breaks on a space when one fits, otherwise mid-word, and never drops a character.
+const wrapLog = (text: string, width: number): ReadonlyArray<string> => {
+  const plain = Text.clean(text);
+  if (plain.length === 0 || width < 1) {
+    return [plain];
+  }
+  const lines: Array<string> = [];
+  let rest = plain;
+  while (rest.length > width) {
+    const at = rest.lastIndexOf(" ", width);
+    const cut = at > 0 ? at : width;
+    lines.push(rest.slice(0, cut));
+    rest = rest.slice(at > 0 ? cut + 1 : cut);
+  }
+  if (rest.length > 0) {
+    lines.push(rest);
+  }
+  return lines;
+};
+
+// The tail of every log row. Stdout prints the same text, so a download's lines show up here
+// as they are stored, newest on the last row. The step stays on the running row and in the
+// full follow.
+const openIntent = (view: View): string | undefined => {
+  const follow = Option.getOrNull(view.session);
+  if (follow !== null && follow._tag === "full") {
+    const running = follow.entries.findLast(
+      (entry) => entry.id === "intent" && entry.state === "running",
+    );
+    if (running !== undefined) {
+      return running.name;
+    }
+  }
+  const job = Option.getOrNull(selectedJob(view));
+  if (job !== null && job.intent !== null) {
+    return job.intent;
+  }
+  if (follow !== null && follow._tag === "full") {
+    return follow.entries.findLast((entry) => entry.id === "intent")?.name;
+  }
+  return undefined;
+};
+
+const filled = (
+  height: number,
+  width: number,
+  lines: ReadonlyArray<string>,
+  empty: string,
+  newestLast: boolean,
+): ReadonlyArray<Text.Row> => {
+  const blank = (): Text.Row => [Text.value(Text.fit("", width))];
+  const cell = (text: string, muted = false): Text.Row => [
+    muted ? Text.muted(Text.fit(text, width)) : Text.value(Text.fit(text, width)),
+  ];
+  if (lines.length === 0) {
+    return Array.from({ length: height }, (_, row) => (row === 0 ? cell(empty, true) : blank()));
+  }
+  const fitted = lines.slice(-height);
+  const pad = newestLast ? height - fitted.length : 0;
+  return Array.from({ length: height }, (_, row) => {
+    const line = fitted[row - pad];
+    return line === undefined ? blank() : cell(line);
   });
 };
 
-const sessionPane = (view: View, height: number, now: number): ReadonlyArray<Text.Row> => {
+const sessionPane = (view: View, height: number, width: number): ReadonlyArray<Text.Row> => {
+  const note = view.logs.length === 0 ? Option.getOrElse(view.sessionNote, () => "no logs") : "";
+  const lines =
+    view.logs.length === 0 ? [] : view.logs.flatMap((row) => wrapLog(logText(row), width));
+  return filled(height, width, lines, note, true);
+};
+
+const markOf = (state: Follow.Entry["state"], glyph: string): string => {
+  if (state === "completed") {
+    return "✓";
+  }
+  if (state === "failed") {
+    return "✗";
+  }
+  return glyph;
+};
+
+// The open intent, then the actions recorded under it. A peek that has not streamed yet
+// shows the commands it already has.
+const intentLines = (view: View, width: number): ReadonlyArray<string> => {
   const follow = Option.getOrNull(view.session);
-  const lines = (): ReadonlyArray<Text.Row> => {
-    if (follow === null) {
-      return [[Text.muted(Option.getOrElse(view.sessionNote, () => "no session"))]];
+  if (follow !== null && follow._tag === "full") {
+    const glyph = Follow.SPINNER[follow.frame % Follow.SPINNER.length] ?? "⠋";
+    const at = follow.entries.findLastIndex((entry) => entry.id === "intent");
+    const intent = at === -1 ? undefined : follow.entries[at];
+    const actions =
+      at === -1
+        ? follow.entries.filter((entry) => entry.id !== "intent")
+        : follow.entries.slice(at + 1);
+    const lines: Array<string> = [];
+    if (intent !== undefined) {
+      lines.push(...wrapLog(`${markOf(intent.state, glyph)} ${intent.name}`, width));
     }
-    if (follow._tag === "peek") {
-      return [[Text.value(Follow.title(follow))], ...Follow.peekRows(follow, now)];
-    }
-    const job = Option.getOrNull(selectedJob(view));
-    if (job !== null && job.ticket === follow.ticket) {
-      const steps = Steps.stepsOf(job.instruction);
-      if (steps.length > 0) {
-        return Follow.ticketRows(follow, steps, height);
+    for (const action of actions) {
+      if (action.id === "intent") {
+        continue;
       }
+      lines.push(...wrapLog(`  ${markOf(action.state, glyph)} ${action.name}`, width));
     }
-    return [Follow.fullHeader(follow), ...Follow.fullEntries(follow, Math.max(0, height - 1))];
-  };
-  const drawn = lines();
-  return Array.from({ length: height }, (_, row) => drawn[row] ?? [Text.SPACE]);
+    if (lines.length > 0) {
+      return lines;
+    }
+  }
+  if (follow !== null && follow._tag === "peek" && follow.commands.length > 0) {
+    return follow.commands.flatMap((command) => wrapLog(`  ✓ ${command.name}`, width));
+  }
+  const said = openIntent(view);
+  return said === undefined ? [] : wrapLog(said, width);
+};
+
+const intentPane = (view: View, height: number, width: number): ReadonlyArray<Text.Row> => {
+  const lines = intentLines(view, width);
+  const intentCount = lines.findIndex((line) => line.startsWith("  "));
+  const head = intentCount === -1 ? lines : lines.slice(0, intentCount);
+  const actions = intentCount === -1 ? [] : lines.slice(intentCount);
+  const keptHead = head.slice(0, height);
+  const actionRoom = height - keptHead.length;
+  const kept = [...keptHead, ...actions.slice(-Math.max(0, actionRoom))];
+  return filled(height, width, kept, "no intent", false);
 };
 
 const ticketRows = (
@@ -1366,21 +1537,19 @@ export const screen = (view: View, now: number, columns: number, rows: number): 
       if (view.tab !== "servers") {
         // Top and bottom borders, the counts, the tabs, and the footer, off the height.
         const height = Math.max(1, rows - 4 - PAGES.length);
-        const graphHeight = Math.max(1, Math.floor(height / 3));
-        const png =
-          view.tab === "automation"
-            ? Option.flatMap(view.session, (follow) => follow.png)
-            : Option.none<Uint8Array>();
+        if (view.tab !== "automation") {
+          return { ...blank, body: ticketRows(view, snapshot, now, height) };
+        }
+        const laid = automationRows(view, snapshot, columns, height, now);
         return {
           ...blank,
-          body:
-            view.tab === "automation"
-              ? automationRows(view, snapshot, columns, height, now)
-              : ticketRows(view, snapshot, now, height),
-          image: Option.map(png, (bytes) => ({
-            png: bytes,
-            top: 2 + PAGES.length + graphHeight,
-            height: height - graphHeight,
+          body: laid.rows,
+          image: Option.map(laid.image, (placed) => ({
+            png: placed.png,
+            top: 2 + PAGES.length + Math.floor(height / 2),
+            left: 2 + 26 + 3 + placed.logWidth + 3,
+            columns: placed.columns,
+            height: height - Math.floor(height / 2),
           })),
         };
       }

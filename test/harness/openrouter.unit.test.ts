@@ -45,14 +45,16 @@ const run = (
     readonly chunk?: Duration.Duration;
     readonly ceiling?: Duration.Duration;
     readonly defaultRetry?: Duration.Duration;
+    readonly messages?: ReadonlyArray<History.WireMessage>;
   },
 ) =>
   OpenRouter.complete({
     baseUrl: BASE,
     token: Redacted.make(TOKEN),
     model: MODEL,
-    messages,
+    messages: overrides?.messages ?? messages,
     tools: [tool],
+    reasoning: "minimal",
     timeouts: {
       header: overrides?.header ?? Duration.minutes(3),
       chunk: overrides?.chunk ?? Duration.minutes(3),
@@ -184,8 +186,27 @@ describe("OpenRouter client", () => {
         model: MODEL,
         messages,
         tools: [tool],
+        reasoning: { effort: "minimal" },
         stream: true,
       });
+    }),
+  );
+
+  it.effect("posts a user message's screenshot as an image part beside its text", () =>
+    Effect.gen(function* () {
+      const withImage: ReadonlyArray<History.WireMessage> = [
+        { role: "system", content: "You drive." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Lock the screen." },
+            { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } },
+          ],
+        },
+      ];
+      const recorder = FakeHttp.recordRequests(() => doneTurn());
+      yield* run(recorder.layer, { messages: withImage });
+      expect(JSON.parse(recorder.requests[0]?.body ?? "").messages).toEqual(withImage);
     }),
   );
 

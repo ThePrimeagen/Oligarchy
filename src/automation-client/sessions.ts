@@ -255,13 +255,13 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
           const args = diagnose
-            ? OpenCode.args(
-                prompt,
-                (yield* HarnessConfig.load.pipe(
-                  Effect.mapError((error) =>
-                    Errors.RunFailed.make({ message: error.message, cause: error }),
-                  ),
-                )).models.diagnose,
+            ? yield* HarnessConfig.load.pipe(
+                Effect.mapError((error) =>
+                  Errors.RunFailed.make({ message: error.message, cause: error }),
+                ),
+                Effect.map((config) =>
+                  OpenCode.args(prompt, config.models.diagnose, config.reasoning.diagnose),
+                ),
               )
             : Driver.args({
                 prompt,

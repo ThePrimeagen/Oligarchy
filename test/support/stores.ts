@@ -242,10 +242,20 @@ export type FakeLogStore = {
 };
 
 // `insertLog` scripts the outcome of an insert; a row is recorded once it succeeds.
+const recorded = (row: LogRow, id: number) => ({
+  id,
+  location: row.location,
+  agentId: row.agentId,
+  level: row.level,
+  text: row.text,
+  createdAt: new Date(),
+});
+
 export const fakeLogStore = (
   options: {
     readonly insertLog?: (row: LogRow) => Effect.Effect<void, Errors.DatabaseError>;
     readonly listLogs?: typeof Logs.LogStore.Service.listLogs;
+    readonly listRecent?: typeof Logs.LogStore.Service.listRecent;
   } = {},
 ): FakeLogStore => {
   const rows: Array<LogRow> = [];
@@ -265,14 +275,15 @@ export const fakeLogStore = (
         Effect.sync(() =>
           rows
             .filter((row) => row.location !== null && row.location === location)
-            .map((row, index) => ({
-              id: index + 1,
-              location: row.location,
-              agentId: row.agentId,
-              level: row.level,
-              text: row.text,
-              createdAt: new Date(),
-            })),
+            .map((row, index) => recorded(row, index + 1)),
+        )),
+    listRecent:
+      options.listRecent ??
+      ((limit) =>
+        Effect.sync(() =>
+          rows
+            .slice(Math.max(0, rows.length - limit))
+            .map((row, index) => recorded(row, index + 1)),
         )),
   });
   return { rows, layer: Layer.succeed(Logs.LogStore)(service) };
