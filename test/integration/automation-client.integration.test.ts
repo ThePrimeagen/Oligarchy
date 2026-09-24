@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
-import { env as processEnv } from "node:process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,6 +11,7 @@ import { Client } from "pg";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Schedule } from "effect";
+import * as Driver from "../../src/automation-client/driver.ts";
 import * as DbClient from "../../src/db/client.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
@@ -29,6 +29,7 @@ const dbUrl = Postgres.getDbUrl();
 
 type Process = {
   readonly child: ChildProcess;
+  readonly cwd: string;
   readonly stdout: () => string;
   readonly stderr: () => string;
   readonly exited: Promise<{ readonly code: number | null; readonly signal: string | null }>;
@@ -58,13 +59,18 @@ const environment = (
 const spawnAutomationClient = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
-  path = process.env.PATH ?? "",
+  driver?: string,
 ): Process => {
   const home = mkdtempSync(join(tmpdir(), "oligarchy-automation-client-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "oligarchy-automation-client-cwd-"));
+  if (driver !== undefined) {
+    const file = join(cwd, "driver");
+    writeFileSync(file, `#!/bin/sh\n${driver}\n`);
+    chmodSync(file, 0o755);
+  }
   const child = spawn(AUTOMATION_CLIENT, args, {
     cwd,
-    env: environment(home, path, overrides),
+    env: environment(home, process.env.PATH ?? "", overrides),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -118,7 +124,7 @@ const spawnAutomationClient = (
       listeners.add(check);
       check();
     });
-  return { child, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
+  return { child, cwd, stdout: () => stdout, stderr: () => stderr, exited, waitFor };
 };
 
 const portOf = (address: string | AddressInfo | null): number =>
@@ -142,15 +148,11 @@ const freePort = async (): Promise<number> => {
   return port;
 };
 
-const installOpencode = (script: string): string => {
-  const bin = mkdtempSync(join(tmpdir(), "oligarchy-opencode-"));
-  const file = join(bin, "opencode");
-  writeFileSync(file, `#!/bin/sh\n${script}\n`);
-  chmodSync(file, 0o755);
-  return bin;
-};
-
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
+const RESULT = "22222222-2222-4222-8222-222222222222";
+
+const runJson = (prompt: string, ticket = "OLI-42") =>
+  JSON.stringify({ prompt, ticket, model: MODEL, testResultId: RESULT });
 
 const lines = (output: string): ReadonlyArray<string> =>
   output.split("\n").filter((line) => line !== "");
@@ -334,47 +336,40 @@ describeWithDatabase("automation client startup refusals with a database", () =>
 
 describeWithDatabase("automation client POST /run", () => {
   it.live(
-    "answers 200 when opencode exits 0, having run it with --model and the prompt, its transcript on this stdout",
+    "answers 200 when ./driver exits 0, having run it with the model, the prompt and the result, its transcript on this stdout",
     () =>
       Effect.promise(async () => {
         const qemu = await stubQemuReserve();
-        const bin = installOpencode(
-          'printf "%s\\n" "$@" > "$(dirname "$0")/argv"; printf "%s" "$OPENCODE_CONFIG_CONTENT" > "$(dirname "$0")/config"; echo "transcript-sentinel: the agent spoke"; exit 0',
-        );
         const port = await freePort();
         const process = spawnAutomationClient(
           [...REQUIRED, "--port", String(port)],
           { SERVER_URL: qemu.url },
-          `${bin}:${processEnv.PATH ?? ""}`,
+          'printf "%s\\n" "$@" > "$(dirname "$0")/argv"; echo "transcript-sentinel: the agent spoke"; exit 0',
         );
         try {
           await process.waitFor(
             new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
           );
           expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
-          const response = await request(
-            port,
-            "/run",
-            AUTH_JSON,
-            JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
-          );
+          const response = await request(port, "/run", AUTH_JSON, runJson("do the work"));
           expect(response.status).toBe(200);
           expect(await response.json()).toEqual({ ok: "true" });
-          expect(readFileSync(join(bin, "argv"), "utf8")).toBe(
-            ["run", "--auto", "--model", MODEL, "--", "do the work", ""].join("\n"),
+          expect(readFileSync(join(process.cwd, "argv"), "utf8")).toBe(
+            [
+              ...Driver.args({
+                prompt: "do the work",
+                model: MODEL,
+                testResultId: RESULT,
+                action: "drive",
+              }),
+              "",
+            ].join("\n"),
           );
           expect(process.stdout()).toContain("transcript-sentinel: the agent spoke");
-          expect(JSON.parse(readFileSync(join(bin, "config"), "utf8"))).toEqual({
-            permission: { external_directory: "allow", doom_loop: "allow" },
-            provider: {
-              openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } },
-            },
-          });
           expect(qemu.hits()).toEqual(["/reserve"]);
         } finally {
           process.child.kill("SIGTERM");
           await process.exited;
-          rmSync(bin, { recursive: true, force: true });
           await qemu.close();
         }
       }),
@@ -383,52 +378,45 @@ describeWithDatabase("automation client POST /run", () => {
   it.live("a diagnose reserve asks the qemu host nothing, and its run still answers 200", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
-      const bin = installOpencode("exit 0");
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
         { SERVER_URL: qemu.url },
-        `${bin}:${processEnv.PATH ?? ""}`,
+        "exit 0",
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect((await request(port, "/reserve", AUTH_JSON, DIAGNOSE_RESERVE)).status).toBe(200);
-        const response = await request(
-          port,
-          "/run",
-          AUTH_JSON,
-          JSON.stringify({ prompt: "diagnose the session", ticket: "OLI-42", model: MODEL }),
-        );
+        const response = await request(port, "/run", AUTH_JSON, runJson("diagnose the session"));
         expect(response.status).toBe(200);
         expect(qemu.hits()).toEqual([]);
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
         await qemu.close();
       }
     }),
   );
 
-  // opencode's stderr is shared with everything it starts; a straggler holding it must not hold
+  // The driver's stderr is shared with everything it starts; a straggler holding it must not hold
   // the answer. The exit ends the run.
   it.live(
-    "answers 200 once opencode exits 0 even while a process it started still holds stderr",
+    "answers 200 once ./driver exits 0 even while a process it started still holds stderr",
     () =>
       Effect.promise(async () => {
         const qemu = await stubQemuReserve();
-        // The straggler keeps opencode's stderr and outlives it by a minute; it gives up stdout,
+        // The straggler keeps the driver's stderr and outlives it by a minute; it gives up stdout,
         // which is this test's pipe to the client, so the client's own close is not held too.
-        const bin = installOpencode(
-          '(exec sleep 60 >/dev/null) & echo $! > "$(dirname "$0")/straggler"; echo agent-said-done >&2; exit 0',
-        );
+        // The pid file lives outside cwd: cwd is removed when the client exits.
+        const stragglerDir = mkdtempSync(join(tmpdir(), "oligarchy-driver-straggler-"));
+        const stragglerFile = join(stragglerDir, "pid");
         const port = await freePort();
         const process = spawnAutomationClient(
           [...REQUIRED, "--port", String(port)],
           { SERVER_URL: qemu.url },
-          `${bin}:${processEnv.PATH ?? ""}`,
+          `(exec sleep 60 >/dev/null) & echo $! > "${stragglerFile}"; echo agent-said-done >&2; exit 0`,
         );
         try {
           await process.waitFor(
@@ -436,58 +424,46 @@ describeWithDatabase("automation client POST /run", () => {
           );
           expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
           const began = Date.now();
-          const response = await request(
-            port,
-            "/run",
-            AUTH_JSON,
-            JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
-          );
+          const response = await request(port, "/run", AUTH_JSON, runJson("do the work"));
           expect(response.status).toBe(200);
           // Well under the straggler's minute: the grace, not the pipe, bounded the wait.
           expect(Date.now() - began).toBeLessThan(30_000);
         } finally {
           process.child.kill("SIGTERM");
           await process.exited;
-          const straggler = Number(readFileSync(join(bin, "straggler"), "utf8").trim());
+          const straggler = Number(readFileSync(stragglerFile, "utf8").trim());
           // Best effort: a straggler already gone cannot be killed.
           try {
             globalThis.process.kill(straggler, "SIGKILL");
           } catch {
             // ESRCH: it exited on its own.
           }
-          rmSync(bin, { recursive: true, force: true });
+          rmSync(stragglerDir, { recursive: true, force: true });
           await qemu.close();
         }
       }),
   );
 
-  it.live("answers 500 with opencode's error when it exits non-zero", () =>
+  it.live("answers 500 with the driver's error when it exits non-zero", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
-      const bin = installOpencode("echo out of token credits >&2; exit 1");
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
         { SERVER_URL: qemu.url },
-        `${bin}:${processEnv.PATH ?? ""}`,
+        "echo out of token credits >&2; exit 1",
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
-        const response = await request(
-          port,
-          "/run",
-          AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
-        );
+        const response = await request(port, "/run", AUTH_JSON, runJson("do the work"));
         expect(response.status).toBe(500);
         expect(await response.json()).toEqual({ error: "out of token credits" });
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
         await qemu.close();
       }
     }),
@@ -495,13 +471,8 @@ describeWithDatabase("automation client POST /run", () => {
 
   it.live("answers 401 without the bearer and persists the error in logs", () =>
     Effect.promise(async () => {
-      const bin = installOpencode("exit 0");
       const port = await freePort();
-      const process = spawnAutomationClient(
-        [...REQUIRED, "--port", String(port)],
-        {},
-        `${bin}:${processEnv.PATH ?? ""}`,
-      );
+      const process = spawnAutomationClient([...REQUIRED, "--port", String(port)]);
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
@@ -510,14 +481,13 @@ describeWithDatabase("automation client POST /run", () => {
           port,
           "/run",
           { "content-type": "application/json" },
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
+          runJson("do the work"),
         );
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: "unauthorized" });
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
       }
       // The row is written by the log drain fiber and flushed before the process exits; only
       // after the exit is it certainly there.
@@ -529,14 +499,13 @@ describeWithDatabase("automation client POST /run", () => {
   it.live("answers 503 at capacity on a second reserve while --max-jobs runs are in flight", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
-      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-driver-started-"));
       const started = join(startedDir, "ready");
-      const bin = installOpencode(`touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
         { SERVER_URL: qemu.url },
-        `${bin}:${processEnv.PATH ?? ""}`,
+        `touch "${started}"; sleep 60`,
       );
       try {
         await process.waitFor(
@@ -545,16 +514,11 @@ describeWithDatabase("automation client POST /run", () => {
           ),
         );
         expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
-        const running = request(
-          port,
-          "/run",
-          AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
-        );
+        const running = request(port, "/run", AUTH_JSON, runJson("do the work"));
         const began = Date.now();
         while (!existsSync(started)) {
           if (Date.now() - began > 10_000) {
-            throw new Error("opencode did not start");
+            throw new Error("driver did not start");
           }
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
@@ -582,7 +546,6 @@ describeWithDatabase("automation client POST /run", () => {
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
         rmSync(startedDir, { recursive: true, force: true });
         await qemu.close();
       }
@@ -591,33 +554,27 @@ describeWithDatabase("automation client POST /run", () => {
 });
 
 describeWithDatabase("automation client POST /abort", () => {
-  it.live("kills a running opencode and answers 200, and its /run answers 409 run aborted", () =>
+  it.live("kills a running driver and answers 200, and its /run answers 409 run aborted", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
-      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-driver-started-"));
       const started = join(startedDir, "ready");
-      const bin = installOpencode(`touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
         { SERVER_URL: qemu.url },
-        `${bin}:${processEnv.PATH ?? ""}`,
+        `touch "${started}"; sleep 60`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
-        const running = request(
-          port,
-          "/run",
-          AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
-        );
+        const running = request(port, "/run", AUTH_JSON, runJson("do the work"));
         const began = Date.now();
         while (!existsSync(started)) {
           if (Date.now() - began > 10_000) {
-            throw new Error("opencode did not start");
+            throw new Error("driver did not start");
           }
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
@@ -635,40 +592,33 @@ describeWithDatabase("automation client POST /abort", () => {
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
         rmSync(startedDir, { recursive: true, force: true });
         await qemu.close();
       }
     }),
   );
 
-  it.live("kills a SIGTERM-resistant opencode after the force-kill deadline", () =>
+  it.live("kills a SIGTERM-resistant driver after the force-kill deadline", () =>
     Effect.promise(async () => {
       const qemu = await stubQemuReserve();
-      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-opencode-started-"));
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-driver-started-"));
       const started = join(startedDir, "ready");
-      const bin = installOpencode(`trap "" TERM; touch "${started}"; sleep 60`);
       const port = await freePort();
       const process = spawnAutomationClient(
         [...REQUIRED, "--port", String(port)],
         { SERVER_URL: qemu.url },
-        `${bin}:${processEnv.PATH ?? ""}`,
+        `trap "" TERM; touch "${started}"; sleep 60`,
       );
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
-        const running = request(
-          port,
-          "/run",
-          AUTH_JSON,
-          JSON.stringify({ prompt: "do the work", ticket: "OLI-42", model: MODEL }),
-        );
+        const running = request(port, "/run", AUTH_JSON, runJson("do the work"));
         const began = Date.now();
         while (!existsSync(started)) {
           if (Date.now() - began > 10_000) {
-            throw new Error("opencode did not start");
+            throw new Error("driver did not start");
           }
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
@@ -686,7 +636,6 @@ describeWithDatabase("automation client POST /abort", () => {
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
         rmSync(startedDir, { recursive: true, force: true });
         await qemu.close();
       }
@@ -695,13 +644,8 @@ describeWithDatabase("automation client POST /abort", () => {
 
   it.live("an unknown ticket is 404", () =>
     Effect.promise(async () => {
-      const bin = installOpencode("exit 0");
       const port = await freePort();
-      const process = spawnAutomationClient(
-        [...REQUIRED, "--port", String(port)],
-        {},
-        `${bin}:${processEnv.PATH ?? ""}`,
-      );
+      const process = spawnAutomationClient([...REQUIRED, "--port", String(port)]);
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
@@ -717,7 +661,6 @@ describeWithDatabase("automation client POST /abort", () => {
       } finally {
         process.child.kill("SIGTERM");
         await process.exited;
-        rmSync(bin, { recursive: true, force: true });
       }
     }),
   );

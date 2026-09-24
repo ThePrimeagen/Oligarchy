@@ -73,12 +73,26 @@ const tokens = (action: string): Result.Result<ReadonlyArray<string>, Errors.Too
 };
 
 // Line 3 is one ./client command. A leading ./client or ./client-with-image selects the bin.
-export const command = (action: string): Result.Result<Tools.CommandLine, Errors.ToolError> => {
+// A diagnose run may also name ./ctrl or ./session; a drive may not, because the harness
+// owns intents and the result.
+export const command = (
+  action: string,
+  record = false,
+): Result.Result<Tools.CommandLine, Errors.ToolError> => {
   const split = tokens(action);
   if (Result.isFailure(split)) {
     return fail(split.failure.message);
   }
   const [head, ...rest] = split.success;
+  if (head === "./ctrl" || head === "./session") {
+    if (!record) {
+      return fail("reply: the harness runs ./ctrl");
+    }
+    if (rest.length === 0) {
+      return fail("reply: line 3 is the action");
+    }
+    return Result.succeed({ bin: head, args: rest });
+  }
   const image = head === "./client-with-image";
   const args = head === "./client" || image ? rest : split.success;
   return Tools.commandLine({

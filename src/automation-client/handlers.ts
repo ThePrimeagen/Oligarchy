@@ -9,7 +9,7 @@ import * as Sessions from "./sessions.ts";
 
 const ok = Contract.Ok.make({});
 
-// A client that disconnects mid-run must not kill OpenCode: the work is the process, not the
+// A client that disconnects mid-run must not kill the driver: the work is the process, not the
 // HTTP conversation that launched it. Abort is the one path that may.
 const uninterruptible = { uninterruptible: true } as const;
 
@@ -36,7 +36,7 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
       ({ payload }) =>
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          yield* sessions.run(payload.ticket, payload.prompt, payload.model);
+          yield* sessions.run(payload.ticket, payload.prompt, payload.model, payload.testResultId);
           return ok;
         }),
       uninterruptible,

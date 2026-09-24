@@ -13,8 +13,9 @@ import * as Errors from "../shared/errors.ts";
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
 
-// The free contributor model: a server started without --model costs nothing to run.
-const DEFAULT_MODEL = "opencode/muse-spark-1.3-contributor-free";
+// The paid contributor model oligarchy.json names. A server started without --model
+// runs that, which is what ./driver sends to OpenRouter.
+const DEFAULT_MODEL = "openrouter/meta/muse-spark-1.3-contributor";
 
 // What main.ts hands the command: the listener as a layer for its port, the model every job runs
 // as, and the signal a server error raises after listen.
@@ -44,7 +45,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
         Flag.withSchema(Domain.ModelId),
         Flag.withDefault(DEFAULT_MODEL),
         Flag.withDescription(
-          "The OpenCode model every drive and diagnose runs as, provider/model; the agent records it on its result",
+          "The OpenRouter model every drive and diagnose runs as, provider/model; the harness records it on the result",
         ),
       ),
     },

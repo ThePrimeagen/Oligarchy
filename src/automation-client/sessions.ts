@@ -17,7 +17,7 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
-import * as OpenCode from "./opencode.ts";
+import * as Driver from "./driver.ts";
 
 // A reservation is a promise that a run follows at once; the dispatcher POSTs /run right after
 // /reserve answers. One nobody runs (the dispatcher died in between) would hold a slot, and a
@@ -59,12 +59,12 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     const running = yield* Ref.make<ReadonlyMap<string, ChildProcessSpawner.ChildProcessHandle>>(
       new Map(),
     );
-    // The abort under way for a running ticket, done with whether its kill signalled OpenCode.
+    // The abort under way for a running ticket, done with whether its kill signalled the driver.
     // A run whose child exits meanwhile waits for it: only a child the kill reached is
     // RunAborted, and one that had exited on its own ends as it did.
     const aborts = yield* Ref.make<ReadonlyMap<string, Deferred.Deferred<boolean>>>(new Map());
     // How many runs are admitted against --max-jobs, and which tickets already hold a slot
-    // that run will consume. `running` cannot count them: a run is only in it once OpenCode
+    // that run will consume. `running` cannot count them: a run is only in it once the driver
     // has spawned, and the slot must be taken before that, so a refused run spawns nothing.
     const slots = yield* Ref.make<{
       readonly count: number;
@@ -210,16 +210,23 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       ticket: string,
       prompt: string,
       model: string,
+      testResultId: string,
     ) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
+          // Read before consume: the reservation is what says drive, diagnose, or mint,
+          // and consume removes it. A missing one fails in consume and spawns nothing.
+          const action = (yield* Ref.get(slots)).reserved.get(ticket)?.action ?? "drive";
           // The reservation is the run's first resource: consumed and its release registered
           // in one uninterruptible step, so the slot is given back however the run ends, and
           // last, after the child is reaped and the ticket forgotten.
           yield* Effect.acquireRelease(consume(ticket), () =>
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
-          const handle = yield* Cli.spawn(OpenCode.BIN, OpenCode.args(prompt, model), OpenCode.ENV);
+          const handle = yield* Cli.spawn(
+            Driver.BIN,
+            Driver.args({ prompt, model, testResultId, action }),
+          );
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)
               ? ([false, map] as const)
@@ -233,7 +240,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               map.get(ticket) === handle ? mapWithout(map, ticket) : map,
             ).pipe(Effect.andThen(Ref.update(aborts, (map) => mapWithout(map, ticket)))),
           );
-          const exit = yield* Effect.exit(Cli.awaitExit(OpenCode.BIN, handle));
+          const exit = yield* Effect.exit(Cli.awaitExit(Driver.BIN, handle));
           const stopping = (yield* Ref.get(aborts)).get(ticket);
           if (stopping !== undefined && (yield* Deferred.await(stopping))) {
             return yield* Errors.RunAborted.make({ agentId: ticket });
@@ -246,9 +253,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         ),
         // Leaving the scope kills the child and gives the slot back before the failure is raised.
         Effect.timeoutOrElse({
-          duration: OpenCode.CEILING,
-          orElse: () =>
-            Errors.RunFailed.make({ message: `opencode run exceeded ${OpenCode.CEILING}` }),
+          duration: Driver.CEILING,
+          orElse: () => Errors.RunFailed.make({ message: `driver exceeded ${Driver.CEILING}` }),
         }),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );

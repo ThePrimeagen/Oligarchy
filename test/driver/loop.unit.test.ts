@@ -135,6 +135,7 @@ const run = (
       prompt: "Lock the screen.",
       testResultId: RESULT,
       debugLog: LOG,
+      action: "drive",
       config: parsed,
       token: Redacted.make(TOKEN),
     }).pipe(Effect.provide(Layer.mergeAll(capturingFs(log, write), http, spawner.layer)));
@@ -379,15 +380,120 @@ describe("driver loop", () => {
         config(),
         recorder.layer,
         (_command, args) => {
-          expect(args[0]).toBe("stop");
+          if (args[0] === "stop") {
+            return { exitCode: 0, stdout: "" };
+          }
+          expect(args).toEqual([
+            "test-results",
+            "--agent-id",
+            "OLI-1",
+            "--id",
+            RESULT,
+            "--status",
+            "success",
+          ]);
           return { exitCode: 0, stdout: "" };
         },
         log,
       );
       expect(outcome).toEqual({ reason: "result-closed" });
       expect(recorder.requests).toHaveLength(1);
-      expect(spawner.spawned.map((child) => child.args[0])).toEqual(["stop"]);
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./client", "./ctrl"]);
       expect(events(log).at(-1)).toMatchObject({ kind: "stop", text: "result-closed" });
+    }),
+  );
+
+  it.effect("a failed stop closes the result failed, with the reason", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        speak(
+          "continue",
+          "the installer hung",
+          `stop --agent-id OLI-1 --session-id ${SESSION} --status failed --reason "installer hung"`,
+        ),
+      );
+      const { spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0, stdout: "" }),
+        [],
+      );
+      expect(spawner.spawned[1]?.args).toEqual([
+        "test-results",
+        "--agent-id",
+        "OLI-1",
+        "--id",
+        RESULT,
+        "--status",
+        "failed",
+        "--reason",
+        "installer hung",
+      ]);
+    }),
+  );
+
+  it.effect("a save closes the result as a success", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        speak("continue", "kept the disk", `save --agent-id OLI-1 --session-id ${SESSION}`),
+      );
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0, stdout: "saved\n" }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(spawner.spawned[1]?.args).toContain("success");
+      expect(recorder.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect(
+    "a test-results failure is a loop failure and does not ask the model again (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(() => stop());
+        const error = yield* Effect.flip(
+          run(
+            config(),
+            recorder.layer,
+            (_command, args) =>
+              args[0] === "stop"
+                ? { exitCode: 0, stdout: "" }
+                : { exitCode: 1, stderr: "result is aborted\n" },
+            [],
+          ),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("aborted");
+        }
+        expect(recorder.requests).toHaveLength(1);
+      }),
+  );
+
+  it.effect("a stop without --agent-id does not close the result (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() =>
+        speak("continue", "halt", `stop --session-id ${SESSION} --status succeeded`),
+      );
+      const error = yield* Effect.flip(
+        run(
+          config(),
+          recorder.layer,
+          (_command, args) => {
+            expect(args[0]).toBe("stop");
+            return { exitCode: 0, stdout: "" };
+          },
+          [],
+        ),
+      );
+      expect(error._tag).toBe("CommandError");
+      if (error._tag === "CommandError") {
+        expect(error.message).toContain("--agent-id");
+      }
+      expect(recorder.requests).toHaveLength(1);
     }),
   );
 
@@ -586,6 +692,7 @@ describe("driver loop", () => {
         prompt: "Lock the screen.",
         testResultId: RESULT,
         debugLog: LOG,
+        action: "drive",
         config: parsed,
         token: Redacted.make(TOKEN),
       }).pipe(

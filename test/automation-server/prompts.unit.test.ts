@@ -59,8 +59,12 @@ describe("drive happy path", () => {
       expect(text).toContain(TICKET);
       expect(text).toContain(MODEL);
       expect(text).toContain("driving agent");
+      expect(text).toContain("Do not call intent");
+      expect(text).toContain("Do not call ./ctrl");
+      expect(text).not.toContain("intent start");
+      expect(text).not.toContain("test-results");
       expect(text).toContain(
-        "the intent message is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
+        "line 2 of your reply is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
       );
       expect(text).toContain("any crashes or erroneous behavior must be reported");
       expect(text).toContain("Any crash or erroneous behavior must be reported");
@@ -105,10 +109,45 @@ describe("diagnose happy path", () => {
         expect(text).toContain("## session");
         expect(text).toContain("Post-run reviewer");
         expect(text).toContain("./ctrl diagnose");
+        // The embedded guide still names the log line `intent start`; the prompt does not ask
+        // the reviewer to open one.
+        expect(text).not.toContain("./client intent");
         expect(text).not.toContain("In Review");
         expect(text).not.toContain("Done");
         expect(text.toLowerCase()).not.toContain("label");
       }),
+  );
+});
+
+describe("mission text", () => {
+  const mission = {
+    ticket: TICKET,
+    name: "lock-screen",
+    description: "the lock screen",
+    instruction: "Press Super+Escape.",
+    proof: "the clock is showing",
+    iso: "https://example.com/omarchy.iso",
+    serverUrl: "http://127.0.0.1:55555",
+  };
+
+  it.effect("a drive names the resumed start and does not ask for intent or ./ctrl", () =>
+    Effect.sync(() => {
+      const text = Prompts.missionText({ action: "drive", ...mission });
+      expect(text).toContain("--resume");
+      expect(text).toContain("Press Super+Escape.");
+      expect(text).toContain(TICKET);
+      expect(text).not.toContain("intent start");
+      expect(text).not.toContain("./ctrl");
+    }),
+  );
+
+  it.effect("a mint starts fresh (unhappy for a resumed boot)", () =>
+    Effect.sync(() => {
+      const text = Prompts.missionText({ action: "mint", ...mission });
+      expect(text).not.toContain("--resume");
+      expect(text).toContain("--iso");
+      expect(text).toContain(mission.iso);
+    }),
   );
 });
 

@@ -41,21 +41,8 @@ optional operator note, webhook log.
 
 ## Token usage
 
-Oligarchy does not store tokens. OpenCode does, locally:
-
-`~/.local/share/opencode/opencode.db` table `session`
-(`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `cost`).
-
-```bash
-sqlite3 ~/.local/share/opencode/opencode.db \
-  "select model, count(*), printf('%.2f', sum(cost)),
-          sum(tokens_input), sum(tokens_output), sum(tokens_cache_read)
-   from session
-   where directory like '%/oligarchy%'
-   group by model;"
-```
-
-OpenRouter's usage page is billed truth.
+Oligarchy does not store tokens. The driver writes one JSON line per step to
+`/tmp/oligarchy-driver-<result id>.jsonl`. OpenRouter's usage page is billed truth.
 
 ## Incidents (do not repeat)
 
@@ -121,5 +108,5 @@ announce. Proxy and `./automation-server` have neither flag.
 
 `./automation-server --help` has `--port` and `--model` only. Dispatch
 claims every pending job a live client will reserve. `--max-jobs` on
-qemu/client is the reserve cap. Default `--model` is the free Muse; this
-skill passes paid `openrouter/meta/muse-spark-1.3-contributor`.
+qemu/client is the reserve cap. Default `--model` is
+`openrouter/meta/muse-spark-1.3-contributor`, which this skill also passes.

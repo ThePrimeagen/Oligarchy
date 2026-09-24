@@ -17,4 +17,17 @@ describe("openrouter-driving-agent.html", () => {
     expect(Prompt.text).toContain("./client");
     expect(Prompt.text).not.toContain("{{");
   });
+
+  it("is the diagnosing prompt, and it names ./ctrl rather than ./client", () => {
+    const file = readFileSync(
+      new URL("../../prompts/openrouter-diagnosing-agent.html", import.meta.url),
+      "utf8",
+    );
+    expect(Prompt.diagnoseText).toBe(file.trimEnd());
+    expect(Prompt.diagnoseText).toContain("./ctrl");
+    expect(Prompt.diagnoseText).toContain("./session");
+    expect(Prompt.diagnoseText).toContain("Do not call ./client");
+    expect(Prompt.diagnoseText).toContain("Do not call intent");
+    expect(Prompt.diagnoseText).not.toContain("{{");
+  });
 });

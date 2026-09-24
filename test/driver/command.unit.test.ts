@@ -102,6 +102,7 @@ describe("driver command", () => {
       expect(seen.input?.prompt).toBe(PROMPT);
       expect(seen.input?.debugLog).toBe(LOG);
       expect(seen.input?.testResultId).toBe(RESULT);
+      expect(seen.input?.action).toBe("drive");
       expect(seen.input?.config.stepLimit).toBeGreaterThanOrEqual(1);
       expect(Redacted.value(seen.input?.token ?? Redacted.make(""))).toBe(TOKEN);
       expect(yield* TestConsole.logLines).toEqual(["model-stopped"]);
@@ -157,6 +158,21 @@ describe("driver command", () => {
       const stderr = yield* TestConsole.errorLines;
       expect(stderr.join("\n")).toContain("model must be provider/model");
       expect(seen.input).toBeUndefined();
+    }),
+  );
+
+  it.effect("--action diagnose reaches the loop, and an unknown action is a usage error", () =>
+    Effect.gen(function* () {
+      const seen: Seen = { input: undefined };
+      yield* run([...FLAGS, "--action", "diagnose"], seen);
+      expect(seen.input?.action).toBe("diagnose");
+
+      const refused: Seen = { input: undefined };
+      const error = yield* Effect.flip(run([...FLAGS, "--action", "review"], refused));
+      expect(error._tag).toBe("ShowHelp");
+      const stderr = yield* TestConsole.errorLines;
+      expect(stderr.join("\n")).toContain("action");
+      expect(refused.input).toBeUndefined();
     }),
   );
 

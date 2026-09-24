@@ -10,7 +10,7 @@ import * as Errors from "../shared/errors.ts";
 export const clientGuide = readFileSync(new URL("../../client.md", import.meta.url), "utf8");
 
 export type CommandLine = {
-  readonly bin: "./client" | "./client-with-image";
+  readonly bin: "./client" | "./client-with-image" | "./ctrl" | "./session";
   readonly args: ReadonlyArray<string>;
 };
 

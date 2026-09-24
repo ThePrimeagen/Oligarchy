@@ -83,7 +83,7 @@ the database knows what a mint is.
   session id, `/tmp/mintedrun/status.sh "$RID"`,
   `SESSION_ID="$SID" ./ctrl session --all`, the client log and the
   qemu/proxy/server logs around the timestamps, and
-  `~/.local/share/opencode/{opencode.db,log/opencode.log}`. Tell it to
+  `/tmp/oligarchy-driver-<result id>.jsonl`. Tell it to
   read `DATABASE_URL` from repo `.env` — do not paste secrets. Ask:
   cause, harness-or-model, exact fix if harness.
 - **COUNTED:** model passed/failed, `driver_loop_ceiling`, agent quit

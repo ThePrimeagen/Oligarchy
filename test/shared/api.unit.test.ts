@@ -361,7 +361,7 @@ describe("AutomationClientApi", () => {
     expect(run.group).toBe("Runs");
     expect(run.middleware).toEqual([Api.BearerAuth.key, Api.ApiBoundary.key]);
     expect(spec.paths["/run"]?.post?.security).toEqual([{ bearer: [] }]);
-    // 409: POST /abort ended the run. 500: opencode failed. Capacity is /reserve's 503.
+    // 409: POST /abort ended the run. 500: the driver failed. Capacity is /reserve's 503.
     expect(run.errors).toEqual([400, 401, 409, 500]);
     const abort = byIdentifier(client, "abort");
     expect(abort.group).toBe("Runs");

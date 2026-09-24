@@ -1,6 +1,6 @@
 [ ] - Automation client's need:
- * opencode
- * openrouter token
+ * ./driver (this repo; OpenRouter, not an OpenCode install)
+ * OPENROUTER_API_KEY
  * DATABASE_URL
 
 [ ] - Automation server's need:

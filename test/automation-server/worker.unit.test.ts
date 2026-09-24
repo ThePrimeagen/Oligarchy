@@ -95,6 +95,27 @@ const seedResult = (
   });
 };
 
+const seedFacts = (tests: Stores.FakeTestStore, instruction: string, name = "lock-screen") => {
+  tests.definitions.push({
+    id: 1,
+    name,
+    description: "the lock screen",
+    instruction,
+    proof: "The screen is locked.",
+    createdAt: new Date(),
+  });
+  tests.runs.push({
+    id: RUN_ID,
+    name: "Omarchy experiment",
+    iso: "https://example.com/omarchy.iso",
+    serverUrl: "http://127.0.0.1:42069",
+    status: "pending",
+    reason: null,
+    startedAt: new Date(),
+    endedAt: null,
+  });
+};
+
 type JobStatus = Stores.FakeAutomationStore["jobs"][number]["status"];
 
 const seedJob = (
@@ -130,7 +151,7 @@ const seedLiveClient = (servers: Stores.FakeServerStore, url = URL) => {
 };
 
 // What a driver does on the far side of POST /run: ./ctrl test-results closes the result before
-// opencode exits. A drive whose client answers without this is a driver that quit early.
+// ./driver exits. A drive whose client answers without this is a driver that quit early.
 const closing = (tests: Stores.FakeTestStore, status: ResultStatus = "passed") =>
   Effect.sync(() => {
     for (const row of tests.results) {
@@ -431,6 +452,7 @@ describe("dispatch happy path", () => {
           prompt: DRIVE_PROMPT,
           ticket: TICKET,
           model: MODEL,
+          testResultId: RESULT_ID,
         });
         expect(FakeLog.texts(fixed.log)).toEqual([
           `dispatching drive; ${URL}; ${MODEL}`,
@@ -443,6 +465,45 @@ describe("dispatch happy path", () => {
         ]);
         expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       }),
+  );
+
+  it.effect(
+    "a drive whose definition is there posts the mission, including the resume start line",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedFacts(fixed.tests, "Lock the screen from the menu.");
+        seedJob(fixed.automation, "drive");
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "completed");
+        const posted = JSON.parse(http.requests[1]?.body ?? "");
+        expect(posted.prompt).toContain(DRIVE_PROMPT);
+        expect(posted.prompt).toContain("Lock the screen from the menu.");
+        expect(posted.prompt).toContain("--resume");
+        expect(posted.prompt).not.toContain("intent start");
+        expect(posted.testResultId).toBe(RESULT_ID);
+      }),
+  );
+
+  it.effect("a mint whose definition is there posts the mission without --resume", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedFacts(fixed.tests, "Install Omarchy.", "mint");
+      seedJob(fixed.automation, "mint");
+      fixed.pins.set(RESULT_ID, "http://127.0.0.1:55332");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      const posted = JSON.parse(http.requests[1]?.body ?? "");
+      expect(posted.prompt).toContain("Install Omarchy.");
+      expect(posted.prompt).toContain("--iso https://example.com/omarchy.iso");
+      expect(posted.prompt).not.toContain("--resume");
+    }),
   );
 
   it.effect("a drive whose driver closed the result failed is still completed as a job", () =>
@@ -483,6 +544,7 @@ describe("dispatch happy path", () => {
         prompt: DIAGNOSE_PROMPT,
         ticket: TICKET,
         model: MODEL,
+        testResultId: RESULT_ID,
       });
       expect(FakeLog.texts(fixed.log)).toEqual([
         `dispatching diagnose; ${URL}; ${MODEL}`,
@@ -2717,7 +2779,7 @@ describe("a running job left by the last automation server", () => {
           http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
         ).toEqual([
           `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
-          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", model: MODEL })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", model: MODEL, testResultId: waitingResult })}`,
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
@@ -3179,7 +3241,7 @@ describe("a running job left by the last automation server", () => {
 });
 
 // Two drives on two automation clients, each parked on /run, which a shutdown does not end:
-// OpenCode outlives a dropped /run.
+// ./driver outlives a dropped /run.
 const twoRunning = (fixed: Harness, http: FakeHttp.Recorder) =>
   Effect.gen(function* () {
     seedPair(fixed);
@@ -3547,7 +3609,9 @@ const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
     for (const ticket of left) {
       yield* AutomationClient.reserve(URL, ticket, "drive");
       connections.push(
-        yield* Effect.forkChild(AutomationClient.run(URL, promptOf(ticket), ticket, MODEL)),
+        yield* Effect.forkChild(
+          AutomationClient.run(URL, promptOf(ticket), ticket, MODEL, resultOf(ticket)),
+        ),
       );
     }
     const children = yield* Effect.all(left.map(() => client.spawner.nextSpawn));
@@ -3591,11 +3655,15 @@ const countingRunning = (automation = Stores.fakeAutomationStore()) => {
 const ticketsOf = (fixed: Harness, jobs: ReadonlyArray<{ readonly resultId: string }>) =>
   jobs.map((job) => fixed.tests.results.find((row) => row.id === job.resultId)?.linearId);
 
-// The prompt of each OpenCode still running, in the order they started.
+// The prompt of each driver still running, in the order they started.
 const livePrompts = (client: SixJobClient) =>
   Effect.map(
     Effect.filter(client.spawner.spawned, (child) => child.isRunning),
-    (children) => children.map((child) => child.args.at(-1)),
+    (children) =>
+      children.map((child) => {
+        const index = child.args.indexOf("--prompt");
+        return index < 0 ? undefined : child.args[index + 1];
+      }),
   );
 
 // Every tick here ends turning a drive away for want of room. The clock moves to the next tick

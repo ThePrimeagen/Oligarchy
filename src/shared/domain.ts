@@ -205,7 +205,7 @@ export const AutomationAction = Schema.Literals(["drive", "diagnose", "mint"]).a
 });
 export type AutomationAction = typeof AutomationAction.Type;
 
-// An OpenCode model as `opencode run --model` takes it: the provider, a slash, the model's own
+// A harness model as `./driver --model` takes it: the provider, a slash, the model's own
 // id (which may hold slashes of its own: openrouter/deepseek/deepseek-v4.1-flash). Refused at
 // the flag so a run is never dispatched as a model no client can launch.
 export const ModelId = Schema.String.check(

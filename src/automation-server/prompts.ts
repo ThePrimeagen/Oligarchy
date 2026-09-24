@@ -62,7 +62,7 @@ const render = Effect.fn("Prompts.render")(function* (
   return yield* Effect.fromResult(fill(template, text, known));
 });
 
-// `model` is the OpenCode model the agent runs as, and so the one it is told to record.
+// `model` is the harness model the agent runs as, and so the one it is told it is.
 export const drive = Effect.fn("Prompts.drive")(function* (ticket: string, model: string) {
   return yield* render("driving-agent.html", { LINEAR_TICKET: ticket, MODEL: model });
 });
@@ -78,3 +78,31 @@ export const diagnose = Effect.fn("Prompts.diagnose")(function* (
     MODEL: model,
   });
 });
+
+export type DriveMission = {
+  readonly action: "drive" | "mint";
+  readonly ticket: string;
+  readonly name: string;
+  readonly description: string;
+  readonly instruction: string;
+  readonly proof: string;
+  readonly iso: string;
+  readonly serverUrl: string;
+};
+
+// The task the model can see. It has no Linear tool and it does not call ./ctrl or intent.
+export const missionText = (mission: DriveMission): string => {
+  const start =
+    mission.action === "mint"
+      ? `./client start --agent-id ${mission.ticket} --server-url ${mission.serverUrl} --iso ${mission.iso}`
+      : `./client start --agent-id ${mission.ticket} --server-url ${mission.serverUrl} --iso ${mission.iso} --resume`;
+  return [
+    "<mission>",
+    `<name>${mission.name}</name>`,
+    `<description>${mission.description}</description>`,
+    `<instruction>${mission.instruction}</instruction>`,
+    `<proof>${mission.proof}</proof>`,
+    `<start>${start}</start>`,
+    "</mission>",
+  ].join("\n");
+};

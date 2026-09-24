@@ -54,6 +54,28 @@ describe("reply", () => {
     expect(command.success.args).toEqual(["send-keys", "--keys", "hello world"]);
   });
 
+  it("refuses ./ctrl on a drive and allows it on a diagnose", () => {
+    const refused = Reply.command(
+      "./ctrl diagnose --verdict passed --summary ok --model openrouter/x",
+    );
+    expect(Result.isFailure(refused)).toBe(true);
+    if (Result.isFailure(refused)) {
+      expect(refused.failure.message).toContain("./ctrl");
+    }
+    const allowed = Reply.command(
+      "./ctrl diagnose --verdict passed --summary ok --model openrouter/x",
+      true,
+    );
+    expect(Result.isSuccess(allowed)).toBe(true);
+    if (Result.isFailure(allowed)) {
+      return;
+    }
+    expect(allowed.success).toEqual({
+      bin: "./ctrl",
+      args: ["diagnose", "--verdict", "passed", "--summary", "ok", "--model", "openrouter/x"],
+    });
+  });
+
   it("takes ./client-with-image as the bin", () => {
     const command = Reply.command(
       `./client-with-image get-image --agent-id OLI-1 --session-id ${SESSION}`,

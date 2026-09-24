@@ -17,6 +17,7 @@ export type Input = {
   readonly prompt: string;
   readonly testResultId: string;
   readonly debugLog: string;
+  readonly action: "drive" | "diagnose" | "mint";
   readonly config: HarnessConfig.AppConfig;
   readonly token: Redacted.Redacted;
 };
@@ -133,6 +134,22 @@ const ask = (prompt: string, decisions: ReadonlyArray<string>): string => {
   return `${prompt}\n\n${decisions.join("\n")}`;
 };
 
+// save keeps a finished install. succeeded and completed are a passed drive.
+// Anything else the session was stopped as is a failed result.
+const verdictOf = (
+  command: Tools.CommandLine,
+): { readonly status: "success" | "failed"; readonly reason: string | undefined } => {
+  const reason = Intent.flag(command.args, "reason");
+  if (command.args[0] === "save") {
+    return { status: "success", reason };
+  }
+  const status = Intent.flag(command.args, "status");
+  if (status === "succeeded" || status === "completed") {
+    return { status: "success", reason };
+  }
+  return { status: "failed", reason };
+};
+
 export const run = Effect.fn("Driver.run")(function* (input: Input) {
   const startedAt = yield* Clock.currentTimeMillis;
   const decisions: Array<string> = [];
@@ -153,12 +170,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
 
     const step = turns + 1;
     yield* log(input.debugLog, step, "request", input.model);
+    const system =
+      input.action === "diagnose" ? Prompt.diagnoseText : `${Prompt.text}\n\n${Tools.clientGuide}`;
     const turn = yield* OpenRouter.complete({
       baseUrl: input.config.openRouterBaseUrl,
       token: input.token,
       model: input.model,
       messages: [
-        { role: "system", content: `${Prompt.text}\n\n${Tools.clientGuide}` },
+        { role: "system", content: system },
         { role: "user", content: ask(input.prompt, decisions) },
       ],
       tools: [],
@@ -182,7 +201,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }
 
     turns = step;
-    const planned = Reply.command(reply.action);
+    const planned = Reply.command(reply.action, input.action === "diagnose");
     if (Result.isFailure(planned)) {
       yield* log(input.debugLog, step, "refusal", planned.failure.message);
       decisions.push(decision(reply.did, planned.failure.message));
@@ -290,6 +309,43 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     const ran = yield* runCommand(command);
     yield* log(input.debugLog, step, "command", `${shown(command)} exit ${String(ran.exitCode)}`);
     if (Intent.closesResult(command, ran.exitCode)) {
+      // A diagnose does not own the result: the drive closed it, and this run only records
+      // a verdict. A drive or mint stop/save is the harness closing the result.
+      if (input.action !== "diagnose") {
+        const agent = Intent.flag(command.args, "agent-id");
+        if (agent === undefined) {
+          const missing = "client: closing the result needs --agent-id";
+          yield* log(input.debugLog, step, "failure", missing);
+          return yield* Effect.fail(commandError(missing));
+        }
+        const closed = verdictOf(command);
+        const mark = {
+          bin: "./ctrl",
+          args: [
+            "test-results",
+            "--agent-id",
+            agent,
+            "--id",
+            input.testResultId,
+            "--status",
+            closed.status,
+            ...(closed.reason === undefined ? [] : ["--reason", closed.reason]),
+          ],
+        };
+        const marked = yield* runCommand(mark);
+        yield* log(
+          input.debugLog,
+          step,
+          "command",
+          `${shown(mark)} exit ${String(marked.exitCode)}`,
+        );
+        if (marked.exitCode !== 0) {
+          const printed = Tools.toolContent(marked);
+          const reason = printed === "" ? "./ctrl test-results failed" : printed;
+          yield* log(input.debugLog, step, "failure", reason);
+          return yield* Effect.fail(commandError(reason));
+        }
+      }
       yield* log(input.debugLog, step, "stop", "result-closed");
       return { reason: "result-closed" } satisfies Stopped;
     }

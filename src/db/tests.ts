@@ -273,6 +273,29 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       return Option.map(Arr.head(rows), (row) => row.name);
     });
 
+    // The definition and run a drive or mint prompt is filled from. None when either row is gone.
+    const driveFacts = Effect.fn("db.driveFacts")(function* (resultId: string) {
+      const rows = yield* database.run("driveFacts", (db) =>
+        db
+          .select({
+            name: DbSchema.testDefinitions.name,
+            description: DbSchema.testDefinitions.description,
+            instruction: DbSchema.testDefinitions.instruction,
+            proof: DbSchema.testDefinitions.proof,
+            iso: DbSchema.testRuns.iso,
+            serverUrl: DbSchema.testRuns.serverUrl,
+          })
+          .from(DbSchema.testResults)
+          .innerJoin(
+            DbSchema.testDefinitions,
+            eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+          )
+          .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.testResults.runId))
+          .where(eq(DbSchema.testResults.id, resultId)),
+      );
+      return Arr.head(rows);
+    });
+
     // The iso a drive resumes, when this result is not the mint install. None when the result
     // is missing or its definition is mint: a mint boots fresh and pins itself.
     const resumeIso = Effect.fn("db.resumeIso")(function* (resultId: string) {
@@ -311,6 +334,7 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       resultForSession,
       definitionName,
       resumeIso,
+      driveFacts,
     };
   }),
 }) {

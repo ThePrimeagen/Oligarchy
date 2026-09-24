@@ -466,8 +466,10 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the test result id, and the model, which marks the result running. Before a guest action
   (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) it runs `./client intent start`, and
   `./client intent end` after that command returns. `start`, `reserve`, `relinquish`, `stop`, and
-  `save` are not guest actions. A `stop` or `save` that exits 0 is the harness closing the result,
-  and the model is not called again. The OpenRouter token is `OPENROUTER_API_KEY`.
+  `save` are not guest actions. A `stop` or `save` that exits 0 is followed by `./ctrl test-results`
+  (success when the status is succeeded or completed, or the command is save; failed otherwise),
+  and the model is not called again. A diagnose run may run `./ctrl` and `./session` and does not
+  close the result. The OpenRouter token is `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 
