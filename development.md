@@ -454,7 +454,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`. A refused
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
 - `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
-  the `OpenRouterDrivingAgent` prompt, the task, and the decisions so far, one line each. The
+  the `openrouter-driving-agent.html` prompt, the task, and the decisions so far, one line each. The
   reply is three lines: `complete` or `continue`, what the agent did in a few words, and the
   action. `continue` runs that action; `complete` records the action taken and does not run it
   again. It appends one JSON line to `--debug-log` per step (the loop counter and the step), and

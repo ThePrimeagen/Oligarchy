@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as Prompt from "../../src/driver/prompt.ts";
 
-describe("OpenRouterDrivingAgent", () => {
+describe("openrouter-driving-agent.html", () => {
   it("is the driving prompt, and it states the three lines", () => {
     const file = readFileSync(
-      new URL("../../prompts/OpenRouterDrivingAgent.html", import.meta.url),
+      new URL("../../prompts/openrouter-driving-agent.html", import.meta.url),
       "utf8",
     );
     expect(Prompt.text).toBe(file.trimEnd());
