@@ -12,6 +12,7 @@ import {
   Stdio,
   Terminal,
 } from "effect";
+import * as HarnessConfig from "../../src/harness/config.ts";
 import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
@@ -22,8 +23,31 @@ import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
+const APP = JSON.stringify({
+  models: {
+    drive: "openrouter/meta/muse-spark-1.3-contributor",
+    diagnose: "openrouter/meta/muse-spark-1.3-contributor",
+    mint: "openrouter/meta/muse-spark-1.3-contributor",
+  },
+  openRouterBaseUrl: "https://openrouter.ai/api/v1",
+  timeouts: { header: "3 minutes", chunk: "3 minutes" },
+  runCeiling: "1.5 hours",
+  stepLimit: 200,
+  harness: { defaultRetry: "1 second" },
+});
+
+const configFs = (text: string | undefined) =>
+  FileSystem.layerNoop({
+    exists: (path) => Effect.succeed(path === HarnessConfig.PATH && text !== undefined),
+    readFileString: (path) => {
+      if (path !== HarnessConfig.PATH || text === undefined) {
+        return Effect.die(`unexpected read ${path}`);
+      }
+      return Effect.succeed(text);
+    },
+  });
+
 const CliTestLayer = Layer.mergeAll(
-  FileSystem.layerNoop({}),
   Path.layer,
   Stdio.layerTest({}),
   Layer.succeed(Terminal.Terminal)(
@@ -41,18 +65,21 @@ const CliTestLayer = Layer.mergeAll(
 );
 
 const MUSE = "openrouter/meta/muse-spark-1.3-contributor";
-const DEEPSEEK = "openrouter/deepseek/deepseek-v4.1-flash";
+const MODELS = { drive: MUSE, diagnose: MUSE, mint: MUSE };
 
 // The server layer and the failure signal the command is built from.
 const fakeServer = () => {
-  const served: Array<{ readonly port: number; readonly model: string }> = [];
+  const served: Array<{
+    readonly port: number;
+    readonly models: { readonly drive: string; readonly diagnose: string; readonly mint: string };
+  }> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: AutomationServerCommand.AutomationServer<never> = {
-    serve: (port, model) =>
+    serve: (port, models) =>
       Layer.effectDiscard(
         Effect.gen(function* () {
-          served.push({ port, model });
+          served.push({ port, models });
           yield* Deferred.succeed(listening, undefined);
         }),
       ),
@@ -75,10 +102,11 @@ const run = (
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   database: Layer.Layer<Client.Database> = DatabaseLive(),
+  file: Layer.Layer<FileSystem.FileSystem> = configFs(APP),
 ) =>
   Command.runWith(AutomationServerCommand.makeAutomationServerCommand(server), {
     version: Api.VERSION,
-  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, log.layer, database)));
+  })(args).pipe(Effect.provide(Layer.mergeAll(CliTestLayer, file, log.layer, database)));
 
 describe("automation server command flags", () => {
   it.effect("--port must be an integer", () =>
@@ -103,7 +131,7 @@ describe("automation server command flags", () => {
       const stdout = yield* TestConsole.logLines;
       expect(stdout.join("\n")).toContain("automation-server");
       expect(stdout.join("\n")).toContain("--port");
-      expect(stdout.join("\n")).toContain("--model");
+      expect(stdout.join("\n")).not.toContain("--model");
       expect(stdout.join("\n")).not.toContain("--jobs");
       expect(stdout.join("\n")).not.toContain("--max-jobs");
       expect(stdout.join("\n")).not.toContain("--diagnostics-port");
@@ -111,18 +139,20 @@ describe("automation server command flags", () => {
     }),
   );
 
-  it.effect("defaults to port 54321 and the Muse model, pings the database, and listens", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, [], log));
-      yield* Deferred.await(fake.listening);
-      yield* Fiber.interrupt(fiber);
-      const exit = yield* Fiber.await(fiber);
-      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
-      expect(fake.served).toEqual([{ port: 54321, model: MUSE }]);
-      expect(log.lines).toEqual([]);
-    }),
+  it.effect(
+    "defaults to port 54321 and the models in oligarchy.json, pings the database, and listens",
+    () =>
+      Effect.gen(function* () {
+        const fake = fakeServer();
+        const log = FakeLog.fakeLog();
+        const fiber = yield* Effect.forkChild(run(fake.server, [], log));
+        yield* Deferred.await(fake.listening);
+        yield* Fiber.interrupt(fiber);
+        const exit = yield* Fiber.await(fiber);
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+        expect(fake.served).toEqual([{ port: 54321, models: MODELS }]);
+        expect(log.lines).toEqual([]);
+      }),
   );
 
   it.effect("--port 1234 reaches the server as given", () =>
@@ -132,34 +162,38 @@ describe("automation server command flags", () => {
       const fiber = yield* Effect.forkChild(run(fake.server, ["--port", "1234"], log));
       yield* Deferred.await(fake.listening);
       yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([{ port: 1234, model: MUSE }]);
+      expect(fake.served).toEqual([{ port: 1234, models: MODELS }]);
     }),
   );
 
-  it.effect("--model reaches the server as given, whichever provider it names", () =>
+  it.effect("--model is not a flag and the server does not listen (unhappy)", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const fiber = yield* Effect.forkChild(run(fake.server, ["--model", DEEPSEEK], log));
-      yield* Deferred.await(fake.listening);
-      yield* Fiber.interrupt(fiber);
-      expect(fake.served).toEqual([{ port: 54321, model: DEEPSEEK }]);
-    }),
-  );
-
-  it.effect("--model without a provider is a usage error naming the rule (unhappy)", () =>
-    Effect.gen(function* () {
-      const fake = fakeServer();
-      const log = FakeLog.fakeLog();
-      const error = yield* Effect.flip(run(fake.server, ["--model", "muse-spark-1.3"], log));
+      const error = yield* Effect.flip(
+        run(fake.server, ["--model", "openrouter/deepseek/deepseek-v4.1-flash"], log),
+      );
       expect(error._tag).toBe("ShowHelp");
-      if (error._tag === "ShowHelp") {
-        expect(error.errors[0]?._tag).toBe("InvalidValue");
-      }
-      const stderr = yield* TestConsole.errorLines;
-      expect(stderr.join("\n")).toContain("model must be provider/model");
       expect(fake.served).toEqual([]);
       expect(log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a missing oligarchy.json is fatal and never listens (unhappy)", () =>
+    Effect.gen(function* () {
+      const fake = fakeServer();
+      const log = FakeLog.fakeLog();
+      const error = yield* Effect.flip(
+        run(fake.server, [], log, DatabaseLive(), configFs(undefined)),
+      );
+      expect(error._tag).toBe("CommandError");
+      if (error._tag === "CommandError") {
+        expect(error.message).toContain(HarnessConfig.PATH);
+        expect(error.message).toContain("missing");
+      }
+      expect(fake.served).toEqual([]);
+      expect(log.lines.map((line) => line.level)).toEqual(["fatal"]);
+      expect(log.lines[0]?.text).toContain(HarnessConfig.PATH);
     }),
   );
 });

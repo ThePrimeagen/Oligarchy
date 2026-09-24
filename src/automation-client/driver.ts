@@ -13,11 +13,11 @@ export const debugLog = (testResultId: string): string =>
 
 export const args = (input: {
   readonly prompt: string;
-  readonly model: string;
+  readonly action: "drive" | "mint";
   readonly testResultId: string;
 }): ReadonlyArray<string> => [
-  "--model",
-  input.model,
+  "--action",
+  input.action,
   "--prompt",
   input.prompt,
   "--debug-log",

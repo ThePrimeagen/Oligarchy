@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Redacted, Schema } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
@@ -8,6 +8,7 @@ import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Config from "../../src/config.ts";
+import * as HarnessConfig from "../../src/harness/config.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
@@ -79,10 +80,25 @@ const qemuRecording =
       return yield* Effect.void;
     });
 
+const appConfig = JSON.stringify({
+  models: { drive: MODEL, diagnose: MODEL, mint: MODEL },
+  openRouterBaseUrl: "https://openrouter.ai/api/v1",
+  timeouts: { header: "3 minutes", chunk: "3 minutes" },
+  runCeiling: "1.5 hours",
+  stepLimit: 200,
+  harness: { defaultRetry: "1 second" },
+});
+
+const configFs = FileSystem.layerNoop({
+  exists: (path) => Effect.succeed(path === HarnessConfig.PATH),
+  readFileString: (path) =>
+    path === HarnessConfig.PATH ? Effect.succeed(appConfig) : Effect.die(`unexpected read ${path}`),
+});
+
 const serve = (fixed: Fixture) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provide(Sessions.Sessions.layer(fixed.maxJobs, qemuRecording(fixed), () => Effect.void)),
-    Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive)),
+    Layer.provide(Layer.mergeAll(fixed.spawner.layer, fixed.log.layer, ProxyConfigLive, configFs)),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationClientProcessAttribution)),
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provideMerge(fixed.reporter.layer),
@@ -112,7 +128,7 @@ const run = (
   http.post("/run", {
     headers: extraHeaders,
     body: HttpBody.text(
-      JSON.stringify({ prompt, ticket, model: MODEL, testResultId: RESULT }),
+      JSON.stringify({ prompt, ticket, testResultId: RESULT }),
       "application/json",
     ),
   });
@@ -286,7 +302,7 @@ describe("POST /reserve decoding", () => {
 });
 
 describe("POST /run happy path", () => {
-  it.effect("answers ok after the driver exits 0, run as the model the body names", () =>
+  it.effect("answers ok after the driver exits 0, run as the reserved action", () =>
     Effect.gen(function* () {
       const fixed = fixture(() => ({ exitCode: 0, stdout: "the written result" }));
       yield* Effect.gen(function* () {
@@ -300,7 +316,7 @@ describe("POST /run happy path", () => {
           command: Driver.BIN,
           args: Driver.args({
             prompt: "fix the bug",
-            model: MODEL,
+            action: "drive",
             testResultId: RESULT,
           }),
           // The transcript the driver prints is the operator's to watch; this process keeps none of it.
@@ -378,7 +394,7 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ ticket: TICKET, model: MODEL, testResultId: RESULT }),
+            JSON.stringify({ ticket: TICKET, testResultId: RESULT }),
             "application/json",
           ),
         });
@@ -398,7 +414,7 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", model: MODEL, testResultId: RESULT }),
+            JSON.stringify({ prompt: "do the work", testResultId: RESULT }),
             "application/json",
           ),
         });
@@ -410,48 +426,31 @@ describe("POST /run authentication and decoding", () => {
     }),
   );
 
-  it.effect("a body without model is 400 and spawns nothing", () =>
+  it.effect("a body that names a model does not pass it to the driver", () =>
     Effect.gen(function* () {
-      const fixed = fixture();
+      const fixed = fixture(() => ({ exitCode: 0 }));
+      const sent = "openrouter/deepseek/deepseek-v4.1-flash";
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;
-        const response = yield* http.post("/run", {
-          headers,
-          body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", ticket: TICKET, testResultId: RESULT }),
-            "application/json",
-          ),
-        });
-        expect(response.status).toBe(400);
-        const body = decodeErrorBody(yield* response.json);
-        expect(body.error).toContain("model");
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.spawner.spawned).toEqual([]);
-    }),
-  );
-
-  it.effect("a model that is not provider/model is 400 with the rule and spawns nothing", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
+        expect((yield* reserve(http)).status).toBe(200);
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
             JSON.stringify({
               prompt: "do the work",
               ticket: TICKET,
-              model: "muse-spark-1.3",
+              model: sent,
               testResultId: RESULT,
             }),
             "application/json",
           ),
         });
-        expect(response.status).toBe(400);
-        const body = decodeErrorBody(yield* response.json);
-        expect(body.error).toContain("model must be provider/model");
+        expect(response.status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.spawner.spawned).toEqual([]);
+      expect(fixed.spawner.spawned[0]?.args).toEqual(
+        Driver.args({ prompt: "do the work", action: "drive", testResultId: RESULT }),
+      );
+      expect(fixed.spawner.spawned[0]?.args).not.toContain(sent);
     }),
   );
 
@@ -463,7 +462,7 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", ticket: TICKET, model: MODEL }),
+            JSON.stringify({ prompt: "do the work", ticket: TICKET }),
             "application/json",
           ),
         });

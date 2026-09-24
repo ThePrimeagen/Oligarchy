@@ -37,7 +37,7 @@ ledger dir (`/tmp/mintedrun`). The two fleets never run together (same proxy
 port, same tunnel). `reset.sh` wipes the first five for a fresh batch.
 </WriteableFiles>
 <Runs>
-<model>openrouter/meta/muse-spark-1.3-contributor</model>
+<model>meta/muse-spark-1.3-contributor</model>
 <count>100 COUNTED, after 4 mints</count>
 <test>lock-screen (resumed); mint (fresh, once per server)</test>
 <fleet>
@@ -164,7 +164,6 @@ start_fleet() {
     >"$P/automation-client-4.log" 2>&1 & echo "automation-client-4 $!" | tee -a "$P/pids"
 
   ./automation-server --port 54321 \
-    --model openrouter/meta/muse-spark-1.3-contributor \
     >"$P/automation-server.log" 2>&1 & echo "automation-server $!" | tee -a "$P/pids"
 }
 start_fleet
@@ -230,7 +229,7 @@ Each `AGENT_LOOP_TICK_mintedrun` you **do this work** (the sleep loop does not):
 # RETIRE n|…  → if ANALYZE is also printed, wait for the subagent, then:
 /tmp/mintedrun/retire.sh "$N" COUNTED   # or INFRA
 # STUCK no-drive-job → stop refill; diagnose (automation-server log); fix; retire.sh N INFRA
-# STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model openrouter/meta/muse-spark-1.3-contributor
+# STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model meta/muse-spark-1.3-contributor
 #        or retire INFRA. cannot re-enqueue diagnose
 # LEDGER refill=yes → /tmp/mintedrun/new.sh muse
 # LEDGER remaining=0 → no new.sh; drain until active is empty

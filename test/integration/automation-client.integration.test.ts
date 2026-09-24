@@ -156,11 +156,10 @@ const installOpencode = (script: string): string => {
   return bin;
 };
 
-const MODEL = "opencode/muse-spark-1.3-contributor-free";
 const RESULT = "22222222-2222-4222-8222-222222222222";
 
 const runJson = (prompt: string, ticket = "OLI-42") =>
-  JSON.stringify({ prompt, ticket, model: MODEL, testResultId: RESULT });
+  JSON.stringify({ prompt, ticket, testResultId: RESULT });
 
 const lines = (output: string): ReadonlyArray<string> =>
   output.split("\n").filter((line) => line !== "");
@@ -344,7 +343,7 @@ describeWithDatabase("automation client startup refusals with a database", () =>
 
 describeWithDatabase("automation client POST /run", () => {
   it.live(
-    "answers 200 when ./driver exits 0, having run it with the model, the prompt and the result, its transcript on this stdout",
+    "answers 200 when ./driver exits 0, having run it with the action, the prompt and the result, its transcript on this stdout",
     () =>
       Effect.promise(async () => {
         const qemu = await stubQemuReserve();
@@ -366,7 +365,7 @@ describeWithDatabase("automation client POST /run", () => {
             [
               ...Driver.args({
                 prompt: "do the work",
-                model: MODEL,
+                action: "drive",
                 testResultId: RESULT,
               }),
               "",

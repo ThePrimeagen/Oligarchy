@@ -23,6 +23,7 @@ import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Config from "../../src/config.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
+import * as HarnessConfig from "../../src/harness/config.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as FakeFs from "../support/fake-fs.ts";
@@ -267,7 +268,7 @@ const start = (
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* Worker.dispatch(MODEL).pipe(
+    yield* Worker.dispatch({ drive: MODEL, diagnose: MODEL, mint: MODEL }).pipe(
       Effect.provide(layers(fixed, http, fs)),
       Scope.provide(scope),
     );
@@ -428,7 +429,7 @@ describe("dispatch happy path", () => {
   );
 
   it.effect(
-    "a drive job posts the driving prompt, the ticket and the model and completes on 200 once the result is closed",
+    "a drive job posts the driving prompt and the ticket, and completes on 200 once the result is closed",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -451,7 +452,6 @@ describe("dispatch happy path", () => {
         expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
           prompt: DRIVE_PROMPT,
           ticket: TICKET,
-          model: MODEL,
           testResultId: RESULT_ID,
         });
         expect(FakeLog.texts(fixed.log)).toEqual([
@@ -543,7 +543,6 @@ describe("dispatch happy path", () => {
       expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
         prompt: DIAGNOSE_PROMPT,
         ticket: TICKET,
-        model: MODEL,
         testResultId: RESULT_ID,
       });
       expect(FakeLog.texts(fixed.log)).toEqual([
@@ -2779,7 +2778,7 @@ describe("a running job left by the last automation server", () => {
           http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
         ).toEqual([
           `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
-          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", model: MODEL, testResultId: waitingResult })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", testResultId: waitingResult })}`,
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
@@ -3567,12 +3566,30 @@ type SixJobClient = {
 };
 
 // Every OpenCode it starts runs until the test ends it, unless the script says otherwise.
+const clientConfig = FileSystem.layerNoop({
+  exists: (path) => Effect.succeed(path === HarnessConfig.PATH),
+  readFileString: (path) =>
+    path === HarnessConfig.PATH
+      ? Effect.succeed(
+          JSON.stringify({
+            models: { drive: MODEL, diagnose: MODEL, mint: MODEL },
+            openRouterBaseUrl: "https://openrouter.ai/api/v1",
+            timeouts: { header: "3 minutes", chunk: "3 minutes" },
+            runCeiling: "1.5 hours",
+            stepLimit: 200,
+            harness: { defaultRetry: "1 second" },
+          }),
+        )
+      : Effect.die(`unexpected read ${path}`),
+});
+
 const sixJobClient = (script: FakeSpawner.Script = () => ({})) =>
   Effect.gen(function* () {
     const spawner = FakeSpawner.fakeSpawner(script);
     const services = Layer.mergeAll(
       spawner.layer,
       FakeLog.fakeLog().layer,
+      clientConfig,
       Layer.succeed(Config.ProxyConfig)({
         token: Redacted.make(TOKEN),
         databaseUrl: Redacted.make("postgres://unused"),
@@ -3596,7 +3613,9 @@ const sixJobClient = (script: FakeSpawner.Script = () => ({})) =>
     const client: SixJobClient = {
       spawner,
       sessions,
-      http: FakeHttp.serving(Effect.provideService(app, Sessions.Sessions, sessions)),
+      http: FakeHttp.serving(
+        Effect.provideService(app, Sessions.Sessions, sessions).pipe(Effect.provide(clientConfig)),
+      ),
     };
     return client;
   });
@@ -3610,7 +3629,7 @@ const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
       yield* AutomationClient.reserve(URL, ticket, "drive");
       connections.push(
         yield* Effect.forkChild(
-          AutomationClient.run(URL, promptOf(ticket), ticket, MODEL, resultOf(ticket)),
+          AutomationClient.run(URL, promptOf(ticket), ticket, resultOf(ticket)),
         ),
       );
     }
