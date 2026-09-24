@@ -9,6 +9,7 @@ import {
   resultDurationMs,
   suiteStatusOf,
   runningForDefinition,
+  currentVersionTally,
   durationChart,
   followEvents,
   groupDefinitions,
@@ -16,6 +17,7 @@ import {
   modelStats,
   selectDefinition,
   versionStats,
+  wordingTallies,
   type AutomationJob,
   type DefinitionRunSource,
   type FollowAction,
@@ -218,6 +220,7 @@ const source = (
   status: DefinitionRunSource["status"],
   at: number,
   extra: {
+    readonly definitionId?: number;
     readonly durationMs?: number | null;
     readonly errorType?: string | null;
     readonly summary?: string | null;
@@ -225,6 +228,7 @@ const source = (
   } = {},
 ): DefinitionRunSource => ({
   id,
+  definitionId: extra.definitionId ?? 1,
   status,
   at,
   durationMs: extra.durationMs ?? null,
@@ -651,6 +655,75 @@ describe("durationChart unhappy path", () => {
     ).toEqual({
       bars: [{ ms: 5_000, succeeded: false }],
       percentiles: { p10: 5_000, p25: 5_000, p50: 5_000, p75: 5_000, p90: 5_000, p99: 5_000 },
+    });
+  });
+});
+
+describe("wordingTallies happy path", () => {
+  it("counts each wording's passes and fails, wordings in id order", () => {
+    expect(
+      wordingTallies([
+        source("a", "passed", 1, { definitionId: 5 }),
+        source("b", "failed", 2, { definitionId: 2 }),
+        source("c", "passed", 3, { definitionId: 5 }),
+        source("d", "failed", 4, { definitionId: 5 }),
+        source("e", "passed", 5, { definitionId: 2 }),
+      ]),
+    ).toEqual([
+      { definitionId: 2, passed: 1, failed: 1 },
+      { definitionId: 5, passed: 2, failed: 1 },
+    ]);
+  });
+});
+
+describe("wordingTallies unhappy path", () => {
+  it("returns nothing for no results", () => {
+    expect(wordingTallies([])).toEqual([]);
+  });
+
+  it("does not count pending, running, aborted or timed out, nor list a wording with only those", () => {
+    expect(
+      wordingTallies([
+        source("pending", "pending", 1, { definitionId: 9 }),
+        source("running", "running", 2, { definitionId: 9 }),
+        source("aborted", "aborted", 3, { definitionId: 5 }),
+        source("timed", "timed_out", 4, { definitionId: 5 }),
+        source("pass", "passed", 5, { definitionId: 5 }),
+      ]),
+    ).toEqual([{ definitionId: 5, passed: 1, failed: 0 }]);
+  });
+});
+
+describe("currentVersionTally happy path", () => {
+  it("is the newest wording's passes and fails, numbered by position, not the older ones'", () => {
+    const lock = { name: "lock-screen", versions: [lockV1, lockV2, lockV3] };
+    expect(
+      currentVersionTally(lock, [
+        { definitionId: lockV1.id, passed: 40, failed: 2 },
+        { definitionId: lockV3.id, passed: 7, failed: 3 },
+        { definitionId: lockV2.id, passed: 1, failed: 9 },
+      ]),
+    ).toEqual({ version: 3, passed: 7, failed: 3 });
+  });
+});
+
+describe("currentVersionTally unhappy path", () => {
+  it("is zero and zero when the newest wording has not passed or failed yet", () => {
+    const lock = { name: "lock-screen", versions: [lockV1, lockV2] };
+    expect(currentVersionTally(lock, [{ definitionId: lockV1.id, passed: 4, failed: 1 }])).toEqual({
+      version: 2,
+      passed: 0,
+      failed: 0,
+    });
+    expect(currentVersionTally(lock, [])).toEqual({ version: 2, passed: 0, failed: 0 });
+  });
+
+  it("ignores another name's wording", () => {
+    const one = { name: "install", versions: [install] };
+    expect(currentVersionTally(one, [{ definitionId: lockV3.id, passed: 5, failed: 5 }])).toEqual({
+      version: 1,
+      passed: 0,
+      failed: 0,
     });
   });
 });

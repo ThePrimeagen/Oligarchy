@@ -104,6 +104,18 @@ sh .cursor/skills/oligarchy-super-run/scripts/install.sh
 . /tmp/superrun/env
 ```
 
+**Find the latest Omarchy ISO once per batch.** There is no default. Every
+`new.sh` takes it as its second argument, and the version is read from the
+filename. Use the `https://iso.omarchy.org/omarchy-*.iso` URL in the latest
+release body, or else build it from `tag_name` with the leading `v` removed.
+Stop if it is not published.
+
+```bash
+ISO=$(curl -fsS https://api.github.com/repos/omacom/omarchy/releases/latest \
+  | jq -r '(.body | [scan("https://iso\\.omarchy\\.org/omarchy-[^ )\"]*\\.iso")][0]) // "https://iso.omarchy.org/omarchy-\(.tag_name | ltrimstr("v")).iso"')
+curl -fsI "$ISO" >/dev/null && echo "$ISO"   # non-200 → stop
+```
+
 **Fresh batch:** a previous super-run leaves `index.tsv`, per-run files,
 process logs, `SCRATCH.md`, `TODOS.md`, and the `/tmp/superrun` ledger
 behind. Stop any old fleet (the six ports must be free), then:
@@ -189,7 +201,7 @@ Expect `qemu-server-4` / `qemu-server-3` (`qemu`) and `automation-client-5` / `a
 Start a run by creating its Linear ticket:
 
 ```bash
-/tmp/superrun/new.sh muse
+/tmp/superrun/new.sh muse "$ISO"
 # exit 2 = no drive job: stop refill, diagnose (automation-server log), fix, retire.sh N INFRA
 ```
 
@@ -202,7 +214,7 @@ Each `AGENT_LOOP_TICK_superrun` you **do this work** (the sleep loop does not):
 # STUCK no-drive-job → stop refill; diagnose (automation-server log); fix; retire.sh N INFRA
 # STUCK diagnose=* no-diagnosis-row → ./ctrl diagnose … --model meta/muse-spark-1.3-contributor
 #        or retire INFRA. cannot re-enqueue diagnose
-# LEDGER refill=yes → /tmp/superrun/new.sh muse
+# LEDGER refill=yes → /tmp/superrun/new.sh muse "$ISO"
 # LEDGER remaining=0 → no new.sh; drain until active is empty
 ```
 

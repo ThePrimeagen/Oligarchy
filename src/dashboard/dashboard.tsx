@@ -25,6 +25,7 @@ import {
   listSessions,
   listTestBasePrompts,
   listTestDefinitions,
+  NO_DEFINITION_RESULTS,
   removeServer,
   RETENTION_DAYS,
   reviseTestDefinition,
@@ -418,7 +419,7 @@ app.get("/definitions", async (context) => {
       error: undefined,
       running,
       histories,
-      runs: [],
+      results: NO_DEFINITION_RESULTS,
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -431,7 +432,7 @@ app.get("/definitions", async (context) => {
       error: "Test definitions are unavailable.",
       running: null,
       histories: [],
-      runs: [],
+      results: NO_DEFINITION_RESULTS,
     });
   }
 });
@@ -475,7 +476,7 @@ app.get("/definitions/:name", async (context) => {
   const name = context.req.param("name");
   const notice = editNotice(context.req.query("edit"));
   try {
-    const [definitions, running, runs] = await Promise.all([
+    const [definitions, running, results] = await Promise.all([
       listTestDefinitions(context.env.HYPERDRIVE.connectionString),
       listRunningAutomationJobs(context.env.HYPERDRIVE.connectionString),
       listDefinitionRuns(context.env.HYPERDRIVE.connectionString, name),
@@ -489,7 +490,7 @@ app.get("/definitions/:name", async (context) => {
       error: undefined,
       running: runningForDefinition(running, name),
       histories: [],
-      runs,
+      results,
     });
   } catch (error) {
     Sentry.captureException(error);
@@ -502,7 +503,7 @@ app.get("/definitions/:name", async (context) => {
       error: "Test definitions are unavailable.",
       running: null,
       histories: [],
-      runs: [],
+      results: NO_DEFINITION_RESULTS,
     });
   }
 });
@@ -553,7 +554,7 @@ app.post("/definitions", async (context) => {
       error: "Test definitions are unavailable.",
       running: null,
       histories: [],
-      runs: [],
+      results: NO_DEFINITION_RESULTS,
     });
   }
 });

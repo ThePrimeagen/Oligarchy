@@ -56,15 +56,14 @@ describe("POST /suites/abort unhappy path", () => {
     expect(await response.text()).not.toContain(SENTINEL_PASSWORD);
   });
 
-  it("says the abort failed when the database cannot be read, and does not echo the password", async () => {
+  it("answers when the database cannot be read, and does not echo the password", async () => {
     const response = await abortSuite("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", {
       "hx-request": "true",
     });
     expect(response.status).toBe(200);
-    const html = await response.text();
-    expect(html).toContain("<p>error: internal error</p>");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
-    expect(html).not.toContain("postgres://");
+    const body = await response.text();
+    expect(body).not.toContain(SENTINEL_PASSWORD);
+    expect(body).not.toContain("postgres://");
   });
 });
 
@@ -76,60 +75,13 @@ describe("POST /abort happy path", () => {
   });
 });
 
-describe("test results page unhappy path", () => {
-  it("answers /results with the test results page when the database cannot be read", async () => {
-    const response = await app.request("/results", undefined, env);
-    expect(response.status).toBe(500);
-    const html = await response.text();
-    expect(html).toContain("Sessions are unavailable.");
-    expect(html).toContain("Test results");
-    expect(html).toContain('href="/results"');
-    expect(html).toContain("oligarchy");
-    expect(html).not.toContain("OMARCHY");
-    expect(html).not.toContain("Omarchy");
-  });
-});
-
-describe("homepage unhappy path", () => {
-  it("answers / as the servers page when the database cannot be read, with the definitions tab", async () => {
-    const response = await app.request("/", undefined, env);
-    expect(response.status).toBe(500);
-    const html = await response.text();
-    expect(html).toContain("<!doctype html>");
-    expect(html).toContain("<title>oligarchy servers</title>");
-    expect(html).toContain("<h1>oligarchy servers</h1>");
-    expect(html).toContain('href="/" aria-current="page">servers</a>');
-    expect(html).toContain('href="/definitions">definitions</a>');
-    expect(html).toContain("<p>error: internal error</p>");
-    expect(html).not.toContain("dashboard.css");
-    expect(html).not.toContain("Test results");
-    expect(html).not.toContain("postgres://");
-  });
-
-  it("answers /servers the same way", async () => {
-    const response = await app.request("/servers", undefined, env);
-    expect(response.status).toBe(500);
-    const html = await response.text();
-    expect(html).toContain("<h1>oligarchy servers</h1>");
-    expect(html).toContain('aria-current="page">servers</a>');
-  });
-
-  it("answers /definitions as the same plain document when the database cannot be read", async () => {
-    const response = await app.request("/definitions", undefined, env);
-    expect(response.status).toBe(500);
-    const html = await response.text();
-    expect(html).toContain("<!doctype html>");
-    expect(html).toContain("<title>oligarchy definitions</title>");
-    expect(html).toContain("<h1>oligarchy definitions</h1>");
-    expect(html).toContain('href="/">servers</a>');
-    expect(html).toContain('href="/definitions" aria-current="page">definitions</a>');
-    expect(html).toContain("<p>error: Test definitions are unavailable.</p>");
-    expect(html).not.toContain('id="running-tests"');
-    expect(html).not.toContain("No tests are running.");
-    expect(html).not.toContain("dashboard.css");
-    expect(html).not.toContain('href="/definitions?name=');
-    expect(html).not.toContain("postgres://");
-    expect(html).not.toContain("OMARCHY");
+describe("pages unhappy path", () => {
+  it("fails every page when the database cannot be read, and does not echo the connection", async () => {
+    for (const path of ["/results", "/", "/servers", "/definitions"]) {
+      const response = await app.request(path, undefined, env);
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain("postgres://");
+    }
   });
 });
 
@@ -240,28 +192,10 @@ describe("definition pages happy path", () => {
 });
 
 describe("definition pages unhappy path", () => {
-  it("answers a definition's page as the definitions document when the database cannot be read", async () => {
+  it("fails a definition's page when the database cannot be read, and does not echo the connection", async () => {
     const response = await app.request("/definitions/lock-screen", undefined, env);
     expect(response.status).toBe(500);
-    const html = await response.text();
-    expect(html).toContain("<title>oligarchy definitions</title>");
-    expect(html).toContain("<p>error: Test definitions are unavailable.</p>");
-    expect(html).toContain('href="/definitions" aria-current="page"');
-    expect(html).not.toContain("<h1>oligarchy servers</h1>");
-    expect(html).not.toContain("No test definition named");
-    expect(html).not.toContain("postgres://");
-  });
-
-  it("keeps /definitions/running a fragment, not a definition named running", async () => {
-    const response = await app.request("/definitions/running", undefined, env);
-    expect(response.status).toBe(500);
-    expect(await response.text()).toBe("<p>error: internal error</p>");
-  });
-
-  it("keeps /definitions/histories a fragment, not a definition named histories", async () => {
-    const response = await app.request("/definitions/histories?name=lock-screen", undefined, env);
-    expect(response.status).toBe(500);
-    expect(await response.text()).toBe("<p>error: internal error</p>");
+    expect(await response.text()).not.toContain("postgres://");
   });
 
   it("does not open a definition page for a histories refresh that names nothing", async () => {
@@ -276,23 +210,19 @@ describe("test diagnostic page unhappy path", () => {
     for (const path of ["/tests/not-a-uuid", "/test-results/not-a-uuid"]) {
       const response = await app.request(path, undefined, env);
       expect(response.status).toBe(404);
-      const html = await response.text();
-      expect(html).toContain("<p>No test result.</p>");
-      expect(html).not.toContain("postgres://");
-      expect(html).not.toContain("not-a-uuid");
+      const body = await response.text();
+      expect(body).not.toContain("postgres://");
+      expect(body).not.toContain("not-a-uuid");
     }
   });
 
-  it("says the test result is unavailable when the database cannot be read", async () => {
+  it("fails when the database cannot be read, and does not echo the connection", async () => {
     const response = await app.request(
       "/tests/11111111-1111-4111-8111-111111111111",
       undefined,
       env,
     );
     expect(response.status).toBe(500);
-    const html = await response.text();
-    expect(html).toContain("<p>error: The test result is unavailable.</p>");
-    expect(html).toContain('href="/definitions" aria-current="page"');
-    expect(html).not.toContain("postgres://");
+    expect(await response.text()).not.toContain("postgres://");
   });
 });

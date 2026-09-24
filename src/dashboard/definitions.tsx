@@ -1,12 +1,16 @@
 import type { FC } from "hono/jsx";
 import { OperatorPage } from "./page.tsx";
 import {
+  currentVersionTally,
   runningForDefinition,
   type AutomationJob,
   type DefinitionHistory,
   type DefinitionPill,
+  type DefinitionResults,
   type DefinitionRun,
   type DefinitionVersions,
+  type DurationChart as DurationChartData,
+  type VersionTally,
 } from "./query.ts";
 import { since } from "./servers.tsx";
 import { followHref, linearHref } from "./ticket.ts";
@@ -181,11 +185,90 @@ const DefinitionRuns: FC<{ runs: ReadonlyArray<DefinitionRun> }> = ({ runs }) =>
     </ul>
   );
 
+// The current wording's passes and fails as one bar, green then red, each as wide as its share.
+// A count of zero draws no segment. A wording with neither says so instead of drawing a bar.
+const CurrentVersion: FC<{ tally: VersionTally }> = ({ tally }) => {
+  const label = `v${String(tally.version)}`;
+  return tally.passed + tally.failed === 0 ? (
+    <p class="version-tally__empty">No passed or failed runs of {label} yet.</p>
+  ) : (
+    <div class="version-tally">
+      <span class="version-tally__name">{label}</span>
+      <div
+        class="version-tally__bar"
+        role="img"
+        aria-label={`${label}: ${String(tally.passed)} succeeded, ${String(tally.failed)} failed`}
+      >
+        {tally.passed > 0 ? (
+          <span class="version-tally__passed" style={{ flexGrow: tally.passed, flexBasis: 0 }}>
+            {tally.passed}
+          </span>
+        ) : null}
+        {tally.failed > 0 ? (
+          <span class="version-tally__failed" style={{ flexGrow: tally.failed, flexBasis: 0 }}>
+            {tally.failed}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+const PERCENTILES = [
+  ["p10", "10%"],
+  ["p25", "25%"],
+  ["p50", "median"],
+  ["p75", "75%"],
+  ["p90", "90%"],
+  ["p99", "99%"],
+] as const;
+
+// One bar per run: green passed, red failed, height the duration, shortest on the left. Every
+// wording of the name counts, like the verdicts above it. Nothing when no run was timed.
+const DurationChart: FC<{ chart: DurationChartData }> = ({ chart }) => {
+  const { bars, percentiles } = chart;
+  if (bars.length === 0 || percentiles === undefined) {
+    return null;
+  }
+  const longest = bars.reduce((max, bar) => (bar.ms > max ? bar.ms : max), 0);
+  return (
+    <>
+      <h3>Last 50 runs by duration</h3>
+      <div
+        class="duration-chart"
+        role="group"
+        aria-label="Last 50 runs by duration, shortest to longest"
+      >
+        {bars.map((bar) => (
+          <span
+            class={
+              bar.succeeded
+                ? "duration-chart__bar duration-chart__bar--passed"
+                : "duration-chart__bar duration-chart__bar--failed"
+            }
+            style={{ height: longest === 0 ? "100%" : `${String((bar.ms / longest) * 100)}%` }}
+            role="img"
+            aria-label={`${bar.succeeded ? "succeeded" : "failed"} in ${took(bar.ms)}`}
+          ></span>
+        ))}
+      </div>
+      <dl class="duration-chart__percentiles">
+        {PERCENTILES.map(([key, label]) => (
+          <div>
+            <dt>{label}</dt>
+            <dd>{took(percentiles[key])}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  );
+};
+
 const Definition: FC<{
   group: DefinitionVersions;
   notice: EditNotice | undefined;
-  runs: ReadonlyArray<DefinitionRun>;
-}> = ({ group, notice, runs }) => {
+  results: DefinitionResults;
+}> = ({ group, notice, results }) => {
   const newest = group.versions[group.versions.length - 1];
   const next = group.versions.length + 1;
   // Two: the current wording and the one before it. Older wordings stay in the database.
@@ -193,7 +276,8 @@ const Definition: FC<{
   return (
     <section>
       <h2>{group.name}</h2>
-      <DefinitionRuns runs={runs} />
+      <DefinitionRuns runs={results.runs} />
+      <DurationChart chart={results.durations} />
       {/* The class is what public/dashboard.js looks for: the button starts disabled and is
           enabled once a field differs from the wording it was rendered with. */}
       <form method="post" action="/definitions" class="definition__form">
@@ -354,9 +438,10 @@ const DefinitionList: FC<{
   );
 };
 
-// The index is one link per name, with the search on that list. A name's own page is its newest
-// wording as a form, then the current wording and the one before it, and the last ten verdicts
-// under the name. Running jobs sit above the search: the box filters names already on the page,
+// The index is one link per name, with the search on that list. A name's own page opens on the
+// current wording's passes and fails, then its newest wording as a form, the current wording and
+// the one before it, and the last ten verdicts and the duration chart under the name. Running jobs
+// sit above the search: the box filters names already on the page,
 // not the jobs in flight. On a name's page they are that name's jobs, and the block is absent
 // when none of them are running. `groups` is the index's list, absent on a name's page and when
 // the database could not be read. `running` is absent on that same failure, so it does not claim
@@ -369,8 +454,8 @@ export const DefinitionsPage: FC<{
   error: string | undefined;
   running: ReadonlyArray<AutomationJob> | null;
   histories: ReadonlyArray<DefinitionHistory>;
-  runs: ReadonlyArray<DefinitionRun>;
-}> = ({ groups, name, selected, notice, error, running, histories, runs }) => {
+  results: DefinitionResults;
+}> = ({ groups, name, selected, notice, error, running, histories, results }) => {
   const index = error === undefined && name === undefined && groups !== null;
   // A name's page shows only that name's jobs. The index shows every one. A failed read
   // stays absent so the page does not claim that nothing is running.
@@ -382,6 +467,9 @@ export const DefinitionsPage: FC<{
     <OperatorPage title="oligarchy definitions" page="definitions" scriptSrc="/dashboard.js">
       <h1>oligarchy definitions</h1>
       {error === undefined ? null : <p>error: {error}</p>}
+      {selected === undefined ? null : (
+        <CurrentVersion tally={currentVersionTally(selected, results.tallies)} />
+      )}
       {shownRunning === null || (name !== undefined && shownRunning.length === 0) ? null : (
         <RunningTests jobs={shownRunning} definition={name} />
       )}
@@ -392,7 +480,9 @@ export const DefinitionsPage: FC<{
           No test definition named <code>{name}</code>.
         </p>
       ) : null}
-      {selected === undefined ? null : <Definition group={selected} notice={notice} runs={runs} />}
+      {selected === undefined ? null : (
+        <Definition group={selected} notice={notice} results={results} />
+      )}
     </OperatorPage>
   );
 };

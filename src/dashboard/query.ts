@@ -419,16 +419,6 @@ export const resultDurationMs = (
   return ms < 0 ? null : ms;
 };
 
-const durationOf = (row: TestResultOutcome): number | undefined => {
-  const ms = resultDurationMs(
-    row.createdAt,
-    row.finishedAt,
-    row.sessionStartedAt,
-    row.sessionEndedAt,
-  );
-  return ms === null ? undefined : ms;
-};
-
 // The diagnosis the reviewer wrote, or the result's own reason when nobody diagnosed it.
 // An error type names the cause; the summary is what they said. A blank is not a diagnosis.
 export const failureDiagnosis = (
@@ -445,24 +435,21 @@ export const failureDiagnosis = (
   return reason;
 };
 
-const finishedAt = (row: TestResultOutcome): number =>
-  (row.finishedAt ?? row.sessionEndedAt ?? row.startedAt).getTime();
-
 // Nearest rank: the value at ceil(p/100 * n), 1-indexed, for a non-empty sorted list.
 const percentileAt = (sorted: ReadonlyArray<number>, p: number): number =>
   sorted[Math.ceil((p / 100) * sorted.length) - 1] ?? 0;
 
-// Passed and failed runs that have a duration, the newest 50, then shortest first. A wording
+// Passed and failed runs that have a duration, the newest 50, then shortest first. A name
 // with neither is an empty chart.
-export function durationChart(rows: ReadonlyArray<TestResultOutcome>): DurationChart {
-  const timed = rows.flatMap((row) => {
-    if (row.status !== "passed" && row.status !== "failed") {
-      return [];
-    }
-    const ms = durationOf(row);
-    return ms === undefined ? [] : [{ row, ms }];
-  });
-  timed.sort((left, right) => finishedAt(right.row) - finishedAt(left.row));
+export function durationChart(rows: ReadonlyArray<DefinitionRunSource>): DurationChart {
+  const timed = rows.flatMap((row) =>
+    (row.status === "passed" || row.status === "failed") && row.durationMs !== null
+      ? [{ row, ms: row.durationMs }]
+      : [],
+  );
+  timed.sort(
+    (left, right) => right.row.at - left.row.at || left.row.id.localeCompare(right.row.id),
+  );
   const newest = timed.slice(0, DURATION_RUNS);
   newest.sort((left, right) => left.ms - right.ms);
   const bars = newest.map((item) => ({
@@ -960,6 +947,7 @@ export type DefinitionRun = {
 
 export type DefinitionRunSource = {
   readonly id: string;
+  readonly definitionId: number;
   readonly status: (typeof testResults.$inferSelect)["status"];
   readonly at: number;
   readonly durationMs: number | null;
@@ -984,17 +972,74 @@ export function recentDefinitionRuns(rows: ReadonlyArray<DefinitionRunSource>): 
     }));
 }
 
-// Passed and failed results of one definition, newest ten after recentDefinitionRuns. Older
-// wordings of the name count: a result hangs off the wording it ran. The clock keeps the
-// page out of Hyperdrive's cache.
+// One wording's passes and fails. A wording that has neither is not a tally.
+export type WordingTally = {
+  readonly definitionId: number;
+  readonly passed: number;
+  readonly failed: number;
+};
+
+export function wordingTallies(rows: ReadonlyArray<DefinitionRunSource>): WordingTally[] {
+  const byWording = new Map<number, { passed: number; failed: number }>();
+  for (const row of rows) {
+    if (row.status !== "passed" && row.status !== "failed") {
+      continue;
+    }
+    const tally = byWording.get(row.definitionId) ?? { passed: 0, failed: 0 };
+    tally[row.status] += 1;
+    byWording.set(row.definitionId, tally);
+  }
+  return [...byWording.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([definitionId, tally]) => ({ definitionId, ...tally }));
+}
+
+export type VersionTally = {
+  readonly version: number;
+  readonly passed: number;
+  readonly failed: number;
+};
+
+// The newest wording's tally, numbered by its position like the page's v headings. A wording
+// that has not passed or failed yet is zero and zero, not an older wording's count.
+export function currentVersionTally(
+  group: DefinitionVersions,
+  tallies: ReadonlyArray<WordingTally>,
+): VersionTally {
+  const newest = group.versions[group.versions.length - 1];
+  const tally = tallies.find((row) => row.definitionId === newest?.id);
+  return {
+    version: group.versions.length,
+    passed: tally?.passed ?? 0,
+    failed: tally?.failed ?? 0,
+  };
+}
+
+// What a definition's page draws from its results: the last ten verdicts, the duration chart,
+// and each wording's tally.
+export type DefinitionResults = {
+  readonly runs: ReadonlyArray<DefinitionRun>;
+  readonly durations: DurationChart;
+  readonly tallies: ReadonlyArray<WordingTally>;
+};
+
+export const NO_DEFINITION_RESULTS: DefinitionResults = {
+  runs: [],
+  durations: { bars: [], percentiles: undefined },
+  tallies: [],
+};
+
+// Passed and failed results of one definition. Older wordings of the name count: a result
+// hangs off the wording it ran. The clock keeps the page out of Hyperdrive's cache.
 export function listDefinitionRuns(
   connectionString: string,
   name: string,
-): Promise<DefinitionRun[]> {
+): Promise<DefinitionResults> {
   return withDatabase(connectionString, async (db) => {
     const rows = await db
       .select({
         id: testResults.id,
+        definitionId: testResults.definitionId,
         status: testResults.status,
         reason: testResults.reason,
         createdAt: testResults.createdAt,
@@ -1015,22 +1060,26 @@ export function listDefinitionRuns(
       .where(
         and(eq(testDefinitions.name, name), inArray(testResults.status, ["passed", "failed"])),
       );
-    return recentDefinitionRuns(
-      rows.map((row) => ({
-        id: row.id,
-        status: row.status,
-        at: row.at.getTime(),
-        durationMs: resultDurationMs(
-          row.createdAt,
-          row.finishedAt,
-          row.sessionStartedAt,
-          row.sessionEndedAt,
-        ),
-        errorType: row.errorType,
-        summary: row.summary,
-        reason: row.reason,
-      })),
-    );
+    const sources = rows.map((row) => ({
+      id: row.id,
+      definitionId: row.definitionId,
+      status: row.status,
+      at: row.at.getTime(),
+      durationMs: resultDurationMs(
+        row.createdAt,
+        row.finishedAt,
+        row.sessionStartedAt,
+        row.sessionEndedAt,
+      ),
+      errorType: row.errorType,
+      summary: row.summary,
+      reason: row.reason,
+    }));
+    return {
+      runs: recentDefinitionRuns(sources),
+      durations: durationChart(sources),
+      tallies: wordingTallies(sources),
+    };
   });
 }
 

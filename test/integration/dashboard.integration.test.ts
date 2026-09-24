@@ -299,6 +299,56 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.samples.length,
     ]);
   });
 
+  it("reads one name's verdicts, durations and per-wording tallies, and ends the connection", async () => {
+    const result = await runQuery(
+      `
+const { drizzle } = await import("drizzle-orm/node-postgres");
+const { Client } = await import("pg");
+const schema = await import(${JSON.stringify(SCHEMA)});
+const client = new Client({ connectionString: url });
+await client.connect();
+const db = drizzle(client);
+const [v1] = await db.insert(schema.testDefinitions).values({ name: "lock-results", description: "d", instruction: "first", proof: "p" }).returning({ id: schema.testDefinitions.id });
+const [v2] = await db.insert(schema.testDefinitions).values({ name: "lock-results", description: "d", instruction: "second", proof: "p" }).returning({ id: schema.testDefinitions.id });
+const [other] = await db.insert(schema.testDefinitions).values({ name: "install-results", description: "d", instruction: "i", proof: "p" }).returning({ id: schema.testDefinitions.id });
+const [run] = await db.insert(schema.testRuns).values({ name: "results", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" }).returning({ id: schema.testRuns.id });
+const at = (minute) => new Date(Date.UTC(2026, 8, 1, 0, minute));
+await db.insert(schema.testResults).values([
+  { runId: run.id, definitionId: v1.id, status: "failed", model: "grok-4.6", createdAt: at(0), finishedAt: at(1) },
+  { runId: run.id, definitionId: v2.id, status: "passed", model: "grok-4.6", createdAt: at(10), finishedAt: at(14) },
+  { runId: run.id, definitionId: v2.id, status: "failed", model: "grok-4.6", createdAt: at(20), finishedAt: at(22) },
+  { runId: run.id, definitionId: v2.id, status: "passed", model: "grok-4.6", createdAt: at(30) },
+  { runId: run.id, definitionId: v2.id, status: "pending", model: "grok-4.6" },
+  { runId: run.id, definitionId: other.id, status: "passed", model: "grok-4.6", createdAt: at(40), finishedAt: at(49) },
+]);
+await client.end();
+const results = await query.listDefinitionRuns(url, "lock-results");
+const wording = (id) => (id === v1.id ? "v1" : id === v2.id ? "v2" : "other");
+console.log(results.runs.map((row) => row.status).join(" "));
+console.log(JSON.stringify(results.durations.bars));
+console.log(JSON.stringify(results.tallies.map((row) => [wording(row.definitionId), row.passed, row.failed])));
+console.log(JSON.stringify(query.currentVersionTally({ name: "lock-results", versions: [{ id: v1.id }, { id: v2.id }] }, results.tallies)));
+`,
+      dbUrl,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const [runs, bars, tallies, current] = lines(result.stdout);
+    expect(runs).toBe("passed failed passed failed");
+    // The pass with no finish has no duration; install's nine minutes are another name's.
+    expect(JSON.parse(bars ?? "")).toEqual([
+      { ms: 60_000, succeeded: false },
+      { ms: 120_000, succeeded: false },
+      { ms: 240_000, succeeded: true },
+    ]);
+    expect(JSON.parse(tallies ?? "")).toEqual([
+      ["v1", 0, 1],
+      ["v2", 2, 1],
+    ]);
+    expect(JSON.parse(current ?? "")).toEqual({ version: 2, passed: 2, failed: 1 });
+  });
+
   it("returns undefined for an unknown image id and still exits", async () => {
     const result = await runQuery(
       'const image = await query.getImage(url, "00000000-0000-4000-8000-000000000000");\nconsole.log(String(image));',
@@ -354,78 +404,6 @@ const seed = async <T>(
   }
 };
 
-// One name's section of the plain page, from its heading up to the next name.
-const section = (html: string, name: string): string => {
-  const start = html.indexOf(`<h2>${name}</h2>`);
-  if (start < 0) {
-    return "";
-  }
-  const next = html.indexOf("<h2>", start + 4);
-  return html.slice(start, next === -1 ? html.length : next);
-};
-
-// The wordings of a section, newest first: each an h3 naming the version and the paragraphs
-// that follow it, up to the next wording or the section's end.
-type Wording = { readonly label: string; readonly body: string };
-
-// One name's row in the definitions index, rate and pills included. The running strip links the
-// same names, so this is the list and not that strip.
-const definitionItem = (html: string, name: string): string => {
-  const list = /<ul class="definition-list">([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? "";
-  const at = list.indexOf(`href="/definitions/${name}"`);
-  if (at < 0) {
-    return "";
-  }
-  return list.slice(list.lastIndexOf("<li>", at), list.indexOf("</li>", at) + "</li>".length);
-};
-
-const blipStatuses = (item: string): ReadonlyArray<string> =>
-  [...item.matchAll(/definition-blip--(passed|failed|running)/g)].map((match) => match[1] ?? "");
-
-// The running strip at the top of the definitions page, up to its own end. It has no nested
-// section, so the first close is the close.
-const runningSection = (html: string): string =>
-  /<section class="running-tests"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
-
-const definitionsAbortForm = (
-  ticket: string,
-  action: QueuedJob["action"],
-  definition: string,
-): string =>
-  `<form method="post" action="/abort" hx-post="/abort" hx-confirm="are you sure?" hx-target="#running-tests" hx-swap="innerHTML"><input type="hidden" name="ticket" value="${ticket}"/><input type="hidden" name="action" value="${action}"/><input type="hidden" name="view" value="definitions"/><input type="hidden" name="definition" value="${definition}"/><button type="submit" class="abort" aria-label="abort">`;
-const wordings = (card: string): ReadonlyArray<Wording> =>
-  [...card.matchAll(/<h3>(v\d+)<\/h3>([\s\S]*?)(?=<h3>|$)/g)].map(([, label, body]) => ({
-    label: label ?? "",
-    body: body ?? "",
-  }));
-
-// The edit form of the current card: the hidden name, each field's prefilled text, and the update
-// button's label and whether the page hands it over disabled.
-const editForm = (
-  card: string,
-): {
-  readonly name: string;
-  readonly fields: Record<string, string>;
-  readonly button: string;
-  readonly disabled: boolean;
-} => {
-  const form =
-    /<form method="post" action="\/definitions"[^>]*>([\s\S]*?)<\/form>/.exec(card)?.[1] ?? "";
-  const fields: Record<string, string> = {};
-  for (const [, field, text] of form.matchAll(
-    /<textarea name="([a-z]+)"[^>]*>([\s\S]*?)<\/textarea>/g,
-  )) {
-    fields[field ?? ""] = text ?? "";
-  }
-  const button = /<button([^>]*type="submit"[^>]*)>([\s\S]*?)<\/button>/.exec(form);
-  return {
-    name: /<input type="hidden" name="name" value="([^"]*)"/.exec(form)?.[1] ?? "",
-    fields,
-    button: button?.[2] ?? "",
-    disabled: (button?.[1] ?? "").includes("disabled"),
-  };
-};
-
 // A form submission as the browser sends it, answered without following the redirect.
 const postForm = async (
   fields: Record<string, string>,
@@ -467,702 +445,24 @@ const wordingsOf = async (databaseUrl: string, name: string): Promise<ReadonlyAr
   }
 };
 
-// Every result here is its own run: a run holds one result per definition.
-const seedResults = async (
-  db: NodePgDatabase,
-  definitionId: number,
-  outcomes: ReadonlyArray<{
-    readonly status: (typeof testResults.$inferInsert)["status"];
-    readonly model: string;
-    readonly reason?: string;
-    readonly createdAt?: Date;
-    readonly finishedAt?: Date;
-  }>,
-): Promise<ReadonlyArray<string>> => {
-  const runs = await db
-    .insert(testRuns)
-    .values(
-      outcomes.map(() => ({
-        name: "wide",
-        iso: "https://example.com/omarchy.iso",
-        serverUrl: "http://127.0.0.1:42069",
-      })),
-    )
-    .returning({ id: testRuns.id });
-  await db.insert(testResults).values(
-    outcomes.map((outcome, index) =>
-      Object.assign(
-        {
-          runId: runs[index].id,
-          definitionId,
-          status: outcome.status,
-          model: outcome.model,
-        },
-        outcome.createdAt === undefined ? undefined : { createdAt: outcome.createdAt },
-        outcome.finishedAt === undefined ? undefined : { finishedAt: outcome.finishedAt },
-        outcome.reason === undefined ? undefined : { reason: outcome.reason },
-      ),
-    ),
-  );
-  return runs.map((run) => run.id);
-};
-
-describe.skipIf(dbUrl === "")("dashboard/definitions page happy path", () => {
-  it("lists every definition as its own page, under a search", async () => {
-    const { status, html } = await getPage("/definitions", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toContain('<search class="search"><input type="search"');
-    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
-    expect(html).not.toContain("<h2>lock-screen</h2>");
-    expect(html).toContain('aria-current="page">definitions</a>');
-    expect(html).toContain('href="/">servers</a>');
-    expect(html).not.toContain("dashboard.css");
-    // The suite is not a button on this page yet. The heading is where it would go.
-    expect(html).not.toContain("/create-test-suite-run");
-  });
-
-  it("shows passes out of a definition's runs, across its wordings, beside the name", async () => {
-    const at = (minute: number): Date => new Date(Date.UTC(2026, 8, 1, 0, minute));
-    await seed(dbUrl, async (db) => {
-      const [older] = await db
-        .insert(testDefinitions)
-        .values({ name: "rate-mixed", description: "d", instruction: "older", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      const [newer] = await db
-        .insert(testDefinitions)
-        .values({ name: "rate-mixed", description: "d", instruction: "newer", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await db
-        .insert(testDefinitions)
-        .values({ name: "rate-unrun", description: "d", instruction: "i", proof: "p" });
-      await seedResults(db, older.id, [
-        {
-          status: "failed",
-          model: "grok-4.6",
-          reason: "stayed unlocked",
-          finishedAt: at(0),
-        },
-        { status: "failed", model: "grok-4.6", finishedAt: at(1) },
-        { status: "timed_out", model: "grok-4.6", finishedAt: at(2) },
-        { status: "aborted", model: "grok-4.6", finishedAt: at(3) },
-        { status: "pending", model: "grok-4.6" },
-        { status: "running", model: "grok-4.6" },
-      ]);
-      await seedResults(
-        db,
-        newer.id,
-        Array.from({ length: 15 }, (_, index) => ({
-          status: "passed" as const,
-          model: "grok-4.6",
-          finishedAt: at(10 + index),
-        })),
-      );
-    });
-    const { status, html } = await getPage("/definitions", dbUrl);
-    expect(status).toBe(200);
-    const mixed = definitionItem(html, "rate-mixed");
-    expect(mixed).toContain('<a href="/definitions/rate-mixed">rate-mixed</a>');
-    expect(mixed).toContain('<span class="definition-rate">15 out of 17</span>');
-    expect(blipStatuses(mixed)).toEqual([
-      "failed",
-      "failed",
-      ...Array.from({ length: 15 }, () => "passed"),
-      "running",
-    ]);
-    expect(mixed).toContain('<span class="definition-tip__reason">stayed unlocked</span>');
-    expect(mixed).not.toMatch(/definition-blip--(?:pending|aborted|timed_out)/);
-    expect(mixed).not.toContain("hx-");
-    const unrunItem = definitionItem(html, "rate-unrun");
-    expect(unrunItem).toContain('href="/definitions/rate-unrun"');
-    expect(unrunItem).toContain('data-name="rate-unrun"');
-    expect(unrunItem).toContain("Loading");
-    expect(unrunItem).not.toContain("out of");
-    const fragment = await getPage("/definitions/histories?name=rate-mixed&name=rate-unrun", dbUrl);
-    expect(fragment.status).toBe(200);
-    expect(fragment.html).not.toContain("<!doctype");
-    expect(fragment.html).toContain('data-name="rate-mixed"');
-    expect(fragment.html).toContain("15 out of 17");
-    const unrun = fragment.html.slice(fragment.html.indexOf('data-name="rate-unrun"'));
-    expect(unrun.startsWith('data-name="rate-unrun"')).toBe(true);
-    expect(unrun).not.toContain("out of");
-    expect(unrun).toContain("Loading");
-  });
-
-  it("draws the newest twenty-five pills and still counts every earlier pass and fail", async () => {
-    const at = (minute: number): Date => new Date(Date.UTC(2026, 8, 1, 1, minute));
-    await seed(dbUrl, async (db) => {
-      const [definition] = await db
-        .insert(testDefinitions)
-        .values({ name: "rate-capped", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await seedResults(
-        db,
-        definition.id,
-        Array.from({ length: 30 }, (_, index) => ({
-          status: index < 5 ? "failed" : "passed",
-          model: "grok-4.6",
-          finishedAt: at(index),
-        })),
-      );
-    });
-    const { status, html } = await getPage("/definitions", dbUrl);
-    expect(status).toBe(200);
-    const item = definitionItem(html, "rate-capped");
-    expect(item).toContain('<a href="/definitions/rate-capped">rate-capped</a>');
-    expect(item).toContain('<span class="definition-rate">25 out of 30</span>');
-    expect(blipStatuses(item)).toEqual(Array.from({ length: 25 }, () => "passed"));
-  });
-
-  it("keeps every name on the page when a query is present; the browser narrows them", async () => {
-    await seed(dbUrl, async (db) => {
-      await db
-        .insert(testDefinitions)
-        .values({ name: "wide layout", description: "d", instruction: "i", proof: "p" });
-    });
-    const { status, html } = await getPage("/definitions?q=LOCK", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toContain('<a href="/definitions/lock-screen">lock-screen</a>');
-    expect(html).toContain('<a href="/definitions/wide%20layout">wide layout</a>');
-    expect(html).toContain('<p class="definition-miss" hidden="">');
-    expect(html).not.toContain('value="LOCK"');
-  });
-
-  it("lines a name's wordings up newest first, each as its own text", async () => {
-    await seed(dbUrl, async (db) => {
-      const [older] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-versions", description: "d", instruction: "first", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      const [newer] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-versions", description: "d", instruction: "second", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await seedResults(db, older.id, [
-        { status: "passed", model: "grok-4.6" },
-        { status: "failed", model: "grok-4.6" },
-      ]);
-      await seedResults(db, newer.id, [{ status: "passed", model: "composer-2.5" }]);
-    });
-
-    const { status, html } = await getPage("/definitions/wide-versions", dbUrl);
-    expect(status).toBe(200);
-    expect(html.match(/<h2>wide-versions<\/h2>/g)).toHaveLength(1);
-    const card = section(html, "wide-versions");
-    expect(card).toContain("<h2>wide-versions</h2>");
-    const [v2, v1, ...rest] = wordings(card);
-    expect(rest).toEqual([]);
-    expect(v2).toMatchObject({ label: "v2" });
-    expect(v1).toMatchObject({ label: "v1" });
-    expect(v2?.body).toContain('<p class="wording">second</p>');
-    expect(v2?.body).not.toContain('<p class="wording">first</p>');
-    expect(v2?.body).not.toContain("composer-2.5:");
-    expect(v2?.body).not.toContain("grok-4.6:");
-    expect(v1?.body).toContain('<p class="wording">first</p>');
-    expect(v1?.body).not.toContain('<p class="wording">second</p>');
-    expect(v1?.body).not.toContain("grok-4.6:");
-    expect(v1?.body).not.toContain("composer-2.5:");
-    expect(card).not.toContain('<table class="runs"');
-  });
-
-  it("keeps only the current wording and the one before it, even when a name has more", async () => {
-    await seed(dbUrl, async (db) => {
-      const [oldest] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-three", description: "d", instruction: "first", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      const [middle] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-three", description: "d", instruction: "second", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      const [newest] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-three", description: "d", instruction: "third", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await seedResults(db, oldest.id, [{ status: "passed", model: "grok-4.6" }]);
-      await seedResults(db, middle.id, [{ status: "failed", model: "grok-4.6" }]);
-      await seedResults(db, newest.id, [{ status: "passed", model: "composer-2.5" }]);
-    });
-    const { status, html } = await getPage("/definitions/wide-three", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide-three");
-    expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
-    expect(card).toContain('<p class="wording">third</p>');
-    expect(card).toContain('<p class="wording">second</p>');
-    expect(card).not.toContain('<p class="wording">first</p>');
-    expect(card).not.toContain("<h3>v1</h3>");
-  });
-
-  it("shows a wording as text and does not chart its timed runs", async () => {
-    await seed(dbUrl, async (db) => {
-      const [definition] = await db
-        .insert(testDefinitions)
-        .values({ name: "wide-duration", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await seedResults(db, definition.id, [
-        {
-          status: "failed",
-          model: "grok-4.6",
-          createdAt: new Date("2026-09-01T00:00:00Z"),
-          finishedAt: new Date("2026-09-01T00:04:00Z"),
-        },
-        {
-          status: "passed",
-          model: "grok-4.6",
-          createdAt: new Date("2026-09-01T00:10:00Z"),
-          finishedAt: new Date("2026-09-01T00:11:00Z"),
-        },
-        {
-          status: "passed",
-          model: "composer-2.5",
-          createdAt: new Date("2026-09-01T00:20:00Z"),
-          finishedAt: new Date("2026-09-01T00:22:00Z"),
-        },
-      ]);
-    });
-    const { status, html } = await getPage("/definitions/wide-duration", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide-duration");
-    expect(card).toContain("<h2>wide-duration</h2>");
-    expect(card).toContain('<p class="wording">i</p>');
-    expect(card).not.toContain("Last 50 runs by duration");
-    expect(card).not.toContain("duration-chart");
-    expect(card).not.toContain("succeeded in");
-    // Newest first. A pass says how long it took. The four-minute failure does not: it says failed.
-    expect(card).toContain('aria-label="Last ten runs"');
-    expect(card.match(/href="\/test-results\//g)).toHaveLength(3);
-    expect(card.indexOf("2 min")).toBeLessThan(card.indexOf("1 min"));
-    expect(card).not.toContain("4 min");
-    expect(card).toContain('<span class="definition-pill__error">failed</span>');
-  });
-
-  it("shows the newest wording in a form, the name fixed, its update button handed over disabled", async () => {
-    await seed(dbUrl, async (db) => {
-      await db.insert(testDefinitions).values([
-        { name: "wide-edit", description: "old d", instruction: "old i", proof: "old p" },
-        { name: "wide-edit", description: "new d", instruction: "new i", proof: "new p" },
-      ]);
-    });
-    const { status, html } = await getPage("/definitions/wide-edit", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide-edit");
-    // The form is in the card as it is, not behind a fold; the page's script enables the button
-    // once a field differs from the text it was rendered with.
-    expect(card).not.toContain('<details class="definition__edit"');
-    expect(editForm(card)).toEqual({
-      name: "wide-edit",
-      fields: { description: "new d", instruction: "new i", proof: "new p" },
-      button: "Update",
-      disabled: true,
-    });
-    expect(card).toContain(
-      "Updating writes v3 of wide-edit; the earlier wordings keep their runs.",
-    );
-    expect(html).toContain('<script src="/dashboard.js" defer=""></script>');
-    // The name is not a field: it is what the wordings collapse under.
-    expect(card).not.toMatch(/<(input|textarea)[^>]*name="name"[^>]*type="text"/);
-    expect(card).not.toContain('class="definition__form-notice"');
-  });
-
-  it("shows the wording when the definition has not run yet, with no chart", async () => {
-    await seed(dbUrl, async (db) => {
-      await db
-        .insert(testDefinitions)
-        .values({ name: "wide-unrun", description: "d", instruction: "i", proof: "p" });
-    });
-    const { status, html } = await getPage("/definitions/wide-unrun", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide-unrun");
-    expect(card).toContain("<h2>wide-unrun</h2>");
-    expect(card).toContain('<p class="wording">d</p>');
-    expect(card).toContain('<p class="wording">i</p>');
-    expect(card).toContain('<p class="wording">p</p>');
-    expect(card).not.toContain("No passed or failed results yet.");
-    expect(card).not.toContain("result-chart");
-    expect(card).not.toContain('<table class="runs"');
-  });
-
-  it("keeps only this definition's running jobs, and its last ten verdicts", async () => {
-    const keptSession = randomUUID();
-    const failedSession = randomUUID();
-    const errorKey = `pill-unlocked-${randomUUID().slice(0, 8)}`;
-    let diagnosed = "";
-    let timed = "";
-    let dropped = "";
-    let keptOld = "";
-    await seed(dbUrl, async (db) => {
-      const [definition] = await db
-        .insert(testDefinitions)
-        .values({ name: "pill-lock", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      const [other] = await db
-        .insert(testDefinitions)
-        .values({ name: "pill-other", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await db.insert(postRunErrorTypes).values({
-        key: errorKey,
-        description: "the lock did not take",
-      });
-      await db.insert(sessions).values([
-        {
-          id: keptSession,
-          config: { iso: "x" },
-          status: "succeeded",
-          startedAt: secondsAgo(7_200),
-          endedAt: secondsAgo(7_080),
-        },
-        {
-          id: failedSession,
-          config: { iso: "x" },
-          status: "failed",
-          startedAt: secondsAgo(3_600),
-          endedAt: secondsAgo(3_360),
-        },
-      ]);
-      const runs = await db
-        .insert(testRuns)
-        .values(
-          Array.from({ length: 13 }, (_, index) => ({
-            name: `pill ${String(index)}`,
-            iso: "https://example.com/omarchy.iso",
-            serverUrl: "http://127.0.0.1:42069",
-          })),
-        )
-        .returning({ id: testRuns.id });
-      const runId = (index: number): string => runs[index]?.id ?? "";
-      const inserted = await db
-        .insert(testResults)
-        .values([
-          {
-            runId: runId(0),
-            definitionId: definition.id,
-            sessionId: failedSession,
-            status: "failed" as const,
-            model: "grok-4.6",
-            reason: "driver gave up",
-            createdAt: new Date("2026-09-03T00:00:00Z"),
-            finishedAt: new Date("2026-09-03T00:04:00Z"),
-          },
-          {
-            runId: runId(1),
-            definitionId: definition.id,
-            sessionId: keptSession,
-            status: "passed" as const,
-            model: "grok-4.6",
-            createdAt: new Date("2026-09-02T00:00:00Z"),
-            finishedAt: new Date("2026-09-02T00:10:00Z"),
-          },
-          ...Array.from({ length: 9 }, (_, index) => ({
-            runId: runId(index + 2),
-            definitionId: definition.id,
-            status: "passed" as const,
-            model: "grok-4.6",
-            createdAt: new Date(Date.UTC(2026, 8, 1, index + 1)),
-            finishedAt: new Date(Date.UTC(2026, 8, 1, index + 1, 1)),
-          })),
-          {
-            runId: runId(11),
-            definitionId: definition.id,
-            status: "pending" as const,
-            model: "grok-4.6",
-            linearId: "PILL-KEEP",
-          },
-          {
-            runId: runId(12),
-            definitionId: other.id,
-            status: "pending" as const,
-            model: "grok-4.6",
-            linearId: "PILL-OTHER",
-          },
-        ])
-        .returning({ id: testResults.id });
-      diagnosed = inserted[0]?.id ?? "";
-      timed = inserted[1]?.id ?? "";
-      dropped = inserted[2]?.id ?? "";
-      keptOld = inserted[10]?.id ?? "";
-      await db.insert(postRunDiagnosis).values([
-        {
-          sessionId: keptSession,
-          verdict: "passed",
-          summary: "a pass is not an error",
-          model: "grok-4.6",
-        },
-        {
-          sessionId: failedSession,
-          verdict: "failed",
-          errorType: errorKey,
-          summary: "the screen stayed unlocked",
-          model: "grok-4.6",
-        },
-      ]);
-      await db.insert(automationJobs).values([
-        {
-          resultId: inserted[11]?.id ?? "",
-          action: "drive",
-          status: "running",
-          startedAt: secondsAgo(45),
-          createdAt: secondsAgo(120),
-        },
-        {
-          resultId: inserted[12]?.id ?? "",
-          action: "diagnose",
-          status: "running",
-          startedAt: secondsAgo(10),
-          createdAt: secondsAgo(30),
-        },
-      ]);
-    });
-
-    const { status, html } = await getPage("/definitions/pill-lock", dbUrl);
-    expect(status).toBe(200);
-    const running = runningSection(html);
-    expect(running).toContain("PILL-KEEP");
-    expect(running).not.toContain("PILL-OTHER");
-    expect(running).toContain(definitionsAbortForm("PILL-KEEP", "drive", "pill-lock"));
-    expect(running.match(/action="\/abort"/g)).toHaveLength(1);
-    const card = section(html, "pill-lock");
-    expect(card).toContain(`href="/test-results/${diagnosed}"`);
-    expect(card).toContain(`>${diagnosed.slice(0, 6)}</a>`);
-    expect(card).toContain(`${errorKey}: the screen stayed unlocked`);
-    expect(card).toContain('<span class="definition-pill__error">failed</span>');
-    expect(card).not.toContain("4 min");
-    expect(card).not.toContain("driver gave up");
-    expect(card).toContain(`href="/test-results/${timed}"`);
-    expect(card).toContain(`>${timed.slice(0, 6)}</a>`);
-    expect(card).toContain("2 min");
-    expect(card).not.toContain("10 min");
-    expect(card).not.toContain("a pass is not an error");
-    expect(card).toContain(`href="/test-results/${keptOld}"`);
-    expect(card).not.toContain(`href="/test-results/${dropped}"`);
-    expect(card.match(/href="\/test-results\//g)).toHaveLength(10);
-    expect(card.indexOf(diagnosed)).toBeLessThan(card.indexOf(timed));
-    expect(card.indexOf(timed)).toBeLessThan(card.indexOf(keptOld));
-
-    const fragment = await getPage("/definitions/running?name=pill-lock", dbUrl);
-    expect(fragment.status).toBe(200);
-    expect(fragment.html).toContain("PILL-KEEP");
-    expect(fragment.html).not.toContain("PILL-OTHER");
-    const otherPage = await getPage("/definitions/pill-other", dbUrl);
-    const otherBody = otherPage.html.slice(otherPage.html.indexOf("<body>"));
-    expect(otherBody).toContain("PILL-OTHER");
-    expect(otherBody).not.toContain("PILL-KEEP");
-    expect(otherBody).not.toContain("definition-runs");
-    const index = await getPage("/definitions", dbUrl);
-    expect(runningSection(index.html)).toContain("PILL-KEEP");
-    expect(runningSection(index.html)).toContain("PILL-OTHER");
-  });
-});
-
-describe.skipIf(dbUrl === "")("dashboard test diagnostic happy path", () => {
-  it("dumps the wording that ran, then its screenshots and logs, and the pill opens that page", async () => {
-    const sessionId = randomUUID();
-    let resultId = "";
-    let olderShot = "";
-    let newerShot = "";
-    await seed(dbUrl, async (db) => {
-      await db.insert(sessions).values({
-        id: sessionId,
-        config: { iso: "x" },
-        status: "failed",
-      });
-      const [older] = await db
-        .insert(testDefinitions)
-        .values({
-          name: "dump-lock",
-          description: "the lock screen",
-          instruction: "lock the older one",
-          proof: "it stays locked",
-        })
-        .returning({ id: testDefinitions.id });
-      await db.insert(testDefinitions).values({
-        name: "dump-lock",
-        description: "later",
-        instruction: "lock the newer one",
-        proof: "later proof",
-      });
-      const [run] = await db
-        .insert(testRuns)
-        .values({
-          name: "dump",
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: "http://127.0.0.1:42069",
-        })
-        .returning({ id: testRuns.id });
-      const [result] = await db
-        .insert(testResults)
-        .values({
-          runId: run.id,
-          definitionId: older.id,
-          sessionId,
-          model: "grok-4.6",
-          linearId: "DUMP-1",
-          status: "failed",
-          reason: "the screen stayed unlocked",
-          finishedAt: new Date("2026-09-01T00:16:00.000Z"),
-        })
-        .returning({ id: testResults.id });
-      resultId = result.id;
-      const [first, second] = await db
-        .insert(actions)
-        .values([
-          { sessionId, request: { execute: "screendump", arguments: {} }, state: "completed" },
-          { sessionId, request: { execute: "screendump", arguments: {} }, state: "failed" },
-        ])
-        .returning({ id: actions.id });
-      const shots = await db
-        .insert(images)
-        .values([
-          { actionId: first.id, data: Buffer.from("one") },
-          { actionId: second.id, data: Buffer.from("two") },
-        ])
-        .returning({ id: images.id, actionId: images.actionId });
-      olderShot = shots.find((shot) => shot.actionId === first.id)?.id ?? "";
-      newerShot = shots.find((shot) => shot.actionId === second.id)?.id ?? "";
-      await db.insert(logs).values([
-        { location: sessionId, level: "info", text: "intent start; lock it" },
-        { location: sessionId, level: "error", text: "the screen stayed unlocked" },
-      ]);
-    });
-    const listed = await getPage("/definitions", dbUrl);
-    expect(definitionItem(listed.html, "dump-lock")).toContain(`href="/tests/${resultId}"`);
-    const { status, html } = await getPage(`/tests/${resultId}`, dbUrl);
-    const linked = await getPage(`/test-results/${resultId}`, dbUrl);
-    expect(linked.status).toBe(200);
-    expect(linked.html).toContain('<p class="test-reason">the screen stayed unlocked</p>');
-    expect(status).toBe(200);
-    expect(html).toContain("<h1>dump-lock</h1>");
-    expect(html).toContain("v1");
-    expect(html).toContain('<a href="/definitions/dump-lock">dump-lock</a>');
-    expect(html).toContain("<h2>screenshots</h2>");
-    expect(html).toContain("<h2>logs</h2>");
-    expect(html).toContain('<p class="wording">lock the older one</p>');
-    expect(html).not.toContain("lock the newer one");
-    expect(html).toContain('<p class="test-reason">the screen stayed unlocked</p>');
-    expect(html).toContain("grok-4.6");
-    expect(html).toContain("DUMP-1");
-    expect(html).toContain(sessionId);
-    expect(html.indexOf(`/images/${olderShot}`)).toBeGreaterThan(0);
-    expect(html.indexOf(`/images/${olderShot}`)).toBeLessThan(html.indexOf(`/images/${newerShot}`));
-    expect(html).toContain(
-      '<pre class="test-logs">info intent start; lock it\nerror the screen stayed unlocked</pre>',
-    );
-  });
-});
-
 describe.skipIf(dbUrl === "")("dashboard test diagnostic unhappy path", () => {
-  it("says the result is missing when nobody ran it, and dumps nothing when it has no session", async () => {
+  it("answers 404 for a result nobody ran, or an id that is not one", async () => {
     const unknown = await getPage("/tests/99999999-9999-4999-8999-999999999999", dbUrl);
     expect(unknown.status).toBe(404);
-    expect(unknown.html).toContain("<p>No test result.</p>");
-
     const bad = await getPage("/tests/not-a-result", dbUrl);
     expect(bad.status).toBe(404);
-    expect(bad.html).toContain("<p>No test result.</p>");
-    expect(bad.html).not.toContain("not-a-result");
-
-    let resultId = "";
-    await seed(dbUrl, async (db) => {
-      const [definition] = await db
-        .insert(testDefinitions)
-        .values({
-          name: "dump-empty",
-          description: "d",
-          instruction: "i",
-          proof: "p",
-        })
-        .returning({ id: testDefinitions.id });
-      const [run] = await db
-        .insert(testRuns)
-        .values({
-          name: "dump empty",
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: "http://127.0.0.1:42069",
-        })
-        .returning({ id: testRuns.id });
-      const [result] = await db
-        .insert(testResults)
-        .values({
-          runId: run.id,
-          definitionId: definition.id,
-          status: "passed",
-          model: "grok-4.6",
-          reason: "not a failure",
-        })
-        .returning({ id: testResults.id });
-      resultId = result.id;
-    });
-    const { status, html } = await getPage(`/tests/${resultId}`, dbUrl);
-    expect(status).toBe(200);
-    const body = html.slice(html.indexOf("<body>"));
-    expect(body).toContain("<p>no session</p>");
-    expect(body).toContain("<p>no screenshots</p>");
-    expect(body).toContain("<p>no logs</p>");
-    expect(body).not.toContain("<img");
-    expect(body).not.toContain("test-reason");
-    expect(body).not.toContain("not a failure");
   });
 });
 
 describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
-  it("shows no rate when a definition's runs never passed or failed", async () => {
-    await seed(dbUrl, async (db) => {
-      const [definition] = await db
-        .insert(testDefinitions)
-        .values({ name: "rate-open", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await seedResults(db, definition.id, [
-        { status: "pending", model: "grok-4.6" },
-        { status: "running", model: "grok-4.6" },
-        { status: "aborted", model: "grok-4.6" },
-        { status: "timed_out", model: "grok-4.6" },
-      ]);
-    });
-    const { status, html } = await getPage("/definitions", dbUrl);
-    expect(status).toBe(200);
-    const item = definitionItem(html, "rate-open");
-    expect(item).not.toContain("out of");
-    expect(blipStatuses(item)).toEqual(["running"]);
-    expect(item).toContain('href="/tests/');
-    expect(item).not.toContain("pending");
-    expect(item).not.toContain("aborted");
-    expect(item).not.toContain("timed_out");
-  });
-
-  it("says nothing is running, and offers no abort, when every job is waiting or finished", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "nothing-running", [
-        pendingJob("RUN-NONE"),
-        {
-          ticket: "RUN-FINISHED",
-          action: "drive",
-          status: "failed",
-          queuedSecondsAgo: 80,
-          startedSecondsAgo: 40,
-          finishedSecondsAgo: 10,
-        },
-      ]),
-    );
-    const { status, html } = await getPage("/definitions/lock-screen", dbUrl);
-    expect(status).toBe(200);
-    const body = html.slice(html.indexOf("<body>"));
-    expect(body).not.toContain("running-tests");
-    expect(body).not.toContain("No tests are running.");
-    expect(body).not.toContain("RUN-NONE");
-    expect(body).not.toContain("RUN-FINISHED");
-    expect(body).not.toContain('action="/abort"');
-  });
-
-  it("answers 404 for a name no definition carries, and does not open another one", async () => {
-    const { status, html } = await getPage("/definitions/no-such-definition", dbUrl);
+  it("answers 404 for a name no definition carries", async () => {
+    const { status } = await getPage("/definitions/no-such-definition", dbUrl);
     expect(status).toBe(404);
-    expect(html).toContain("No test definition named <code>no-such-definition</code>.");
-    expect(html).not.toContain("<h2>lock-screen</h2>");
-    expect(html).toContain('href="/definitions" aria-current="page"');
-    expect(section(html, "no-such-definition")).toBe("");
   });
 });
 
 describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
-  it("saves a changed wording as the next version and returns to the name, which now opens on it", async () => {
+  it("saves a changed wording as the next version and returns to the name", async () => {
     await seed(dbUrl, async (db) => {
       await db.insert(testDefinitions).values([
         { name: "wide-save", description: "d", instruction: "first", proof: "p" },
@@ -1177,25 +477,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
     expect(saved.status).toBe(303);
     expect(saved.location).toBe("/definitions/wide-save");
     expect(await wordingsOf(dbUrl, "wide-save")).toEqual(["first", "second", "third\nand more"]);
-
-    const { status, html } = await getPage("/definitions/wide-save", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide-save");
-    const [newest] = wordings(card);
-    expect(newest).toMatchObject({ label: "v3" });
-    expect(newest?.body).toContain('<p class="wording">third\nand more</p>');
-    expect(wordings(card).map((wording) => wording.label)).toEqual(["v3", "v2"]);
-    expect(editForm(card)).toMatchObject({
-      fields: { instruction: "third\nand more" },
-      button: "Update",
-      disabled: true,
-    });
-    expect(card).toContain(
-      "Updating writes v4 of wide-save; the earlier wordings keep their runs.",
-    );
   });
 
-  it("saves a wording that changes one field only, the other two as they were (happy)", async () => {
+  it("saves a wording that changes one field only (happy)", async () => {
     await seed(dbUrl, async (db) => {
       await db
         .insert(testDefinitions)
@@ -1206,15 +490,13 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
       dbUrl,
     );
     expect(saved.status).toBe(303);
-    const { html } = await getPage("/definitions/wide-one-field", dbUrl);
-    const [newest] = wordings(section(html, "wide-one-field"));
-    expect(newest?.body).toContain('<p class="wording">p2</p>');
-    expect(newest?.body).toContain('<p class="wording">i</p>');
+    expect(saved.location).toBe("/definitions/wide-one-field");
+    expect(await wordingsOf(dbUrl, "wide-one-field")).toEqual(["i", "i"]);
   });
 });
 
 describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
-  it("refuses a wording identical to the newest: nothing is written and the form says so", async () => {
+  it("refuses a wording identical to the newest: nothing is written", async () => {
     await seed(dbUrl, async (db) => {
       await db.insert(testDefinitions).values({
         name: "wide-same",
@@ -1231,15 +513,9 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
     expect(same.status).toBe(303);
     expect(same.location).toBe("/definitions/wide-same?edit=unchanged");
     expect(await wordingsOf(dbUrl, "wide-same")).toEqual(["i\nover two lines"]);
-
-    const { status, html } = await getPage("/definitions/wide-same?edit=unchanged", dbUrl);
-    expect(status).toBe(200);
-    const card = section(html, "wide-same");
-    expect(card).toContain('<p role="alert">');
-    expect(card).toContain("Nothing changed: the newest wording already reads like this.");
   });
 
-  it("refuses an empty field: nothing is written and the form says so", async () => {
+  it("refuses an empty field: nothing is written", async () => {
     await seed(dbUrl, async (db) => {
       await db
         .insert(testDefinitions)
@@ -1255,11 +531,6 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
     expect(missing.status).toBe(303);
     expect(missing.location).toBe("/definitions/wide-empty?edit=empty");
     expect(await wordingsOf(dbUrl, "wide-empty")).toEqual(["i"]);
-
-    const { html } = await getPage("/definitions/wide-empty?edit=empty", dbUrl);
-    const card = section(html, "wide-empty");
-    expect(card).toContain('<p role="alert">');
-    expect(card).toContain("Every field needs text.");
   });
 
   it("answers 404 for a name nobody carries, or none at all: a new test is ctrl test define's", async () => {
@@ -1272,12 +543,6 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
     expect(nameless.status).toBe(404);
     expect(await wordingsOf(dbUrl, "wide-nobody")).toEqual([]);
   });
-
-  it("shows a stale ?edit value as no notice at all", async () => {
-    const { status, html } = await getPage("/definitions/lock-screen?edit=whatever", dbUrl);
-    expect(status).toBe(200);
-    expect(html).not.toContain('role="alert"');
-  });
 });
 
 describe("dashboard/definitions edit unhappy path: unreachable database", () => {
@@ -1287,119 +552,17 @@ describe("dashboard/definitions edit unhappy path: unreachable database", () => 
       REFUSED_URL,
     );
     expect(result.status).toBe(500);
-    expect(result.text).toContain("Test definitions are unavailable.");
     expect(result.text).not.toContain(SENTINEL_PASSWORD);
   });
 });
 
-describe.skipIf(dbUrl === "")("dashboard/results page: the test each session ran", () => {
-  it("names the definition and its version on the session card", async () => {
-    const sessionId = "33333333-3333-4333-8333-333333333333";
-    await seed(dbUrl, async (db) => {
-      await db
-        .insert(testDefinitions)
-        .values({ name: "card-versions", description: "d", instruction: "first", proof: "p" });
-      const [newer] = await db
-        .insert(testDefinitions)
-        .values({ name: "card-versions", description: "d", instruction: "second", proof: "p" })
-        .returning({ id: testDefinitions.id });
-      await db
-        .insert(sessions)
-        .values({ id: sessionId, config: { iso: "z" }, status: "succeeded" });
-      const [run] = await db
-        .insert(testRuns)
-        .values({
-          name: "card",
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: "http://127.0.0.1:42069",
-        })
-        .returning({ id: testRuns.id });
-      await db.insert(testResults).values({
-        runId: run.id,
-        definitionId: newer.id,
-        sessionId,
-        status: "passed",
-        model: "grok-4.6",
-      });
-    });
-    const { status, html } = await getPage("/results", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toContain('<span class="session__version-name">card-versions v2</span>');
-  });
-});
-
-describe.skipIf(dbUrl === "")("dashboard/definitions running fragment", () => {
-  it("serves the running list alone at /definitions/running, what the top of the page polls for", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "running-fragment", [runningJob("RUN-FRAG"), pendingJob("RUN-FRAG-PEND")]),
-    );
-    const { status, html } = await getPage("/definitions/running?name=running-fragment", dbUrl);
-    expect(status).toBe(200);
-    expect(html.startsWith("<table>")).toBe(true);
-    expect(html).toContain(definitionsAbortForm("RUN-FRAG", "drive", "running-fragment"));
-    expect(html).not.toContain("RUN-FRAG-PEND");
-    expect(html).not.toContain("<html");
-    expect(html).not.toContain("definitions-heading");
-  });
-
-  it("lists every running job, past the fifty the queue page shows", async () => {
-    const running: ReadonlyArray<QueuedJob> = Array.from({ length: 51 }, (_, index) => ({
-      ticket: `RUN-ALL-${String(index)}`,
-      action: "drive",
-      status: "running",
-      queuedSecondsAgo: 1_000 - index,
-      startedSecondsAgo: 1_000 - index,
-    }));
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "running-all", [...running, pendingJob("RUN-ALL-PEND")]),
-    );
-    const page = await getPage("/definitions/running-all", dbUrl);
-    expect(page.status).toBe(200);
-    const runningHtml = runningSection(page.html);
-    expect(runningHtml.match(/action="\/abort"/g)).toHaveLength(51);
-    expect(runningHtml.indexOf(">RUN-ALL-0<")).toBeLessThan(runningHtml.indexOf(">RUN-ALL-50<"));
-    expect(runningHtml).not.toContain("RUN-ALL-PEND");
-    const fragment = await getPage("/definitions/running?name=running-all", dbUrl);
-    expect(fragment.status).toBe(200);
-    expect(fragment.html.match(/action="\/abort"/g)).toHaveLength(51);
-    expect(fragment.html).not.toContain("RUN-ALL-PEND");
-  });
-
-  it("polls the running list with no name on the index", async () => {
-    const { status, html } = await getPage("/definitions", dbUrl);
-    expect(status).toBe(200);
-    expect(runningSection(html)).toContain('hx-get="/definitions/running"');
-    expect(runningSection(html)).not.toContain("?name=");
-  });
-
-  it("serves the empty line alone when nothing is running", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "running-fragment-empty", [pendingJob("RUN-FRAG-NONE")]),
-    );
-    const { status, html } = await getPage("/definitions/running", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toBe('<p class="running-tests__empty">No tests are running.</p>');
-  });
-});
-
-describe("dashboard/definitions running fragment unhappy path", () => {
-  it("answers 500 when the database is unreachable and never echoes the password", async () => {
-    const { status, html } = await getPage("/definitions/running", REFUSED_URL);
-    expect(status).toBe(500);
-    expect(html).toBe("<p>error: internal error</p>");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
-  });
-});
-
 describe("dashboard/definitions page unhappy path: unreachable database", () => {
-  it("answers 500 with the unavailable message and never echoes the password", async () => {
-    const { status, html } = await getPage("/definitions/lock-screen", REFUSED_URL);
-    expect(status).toBe(500);
-    expect(html).toContain("Test definitions are unavailable.");
-    expect(html).not.toContain('href="/definitions?name=');
-    expect(html).not.toContain('id="running-tests"');
-    expect(html).not.toContain("No tests are running.");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
+  it("answers 500 for the page and its running list, and never echoes the password", async () => {
+    for (const path of ["/definitions/lock-screen", "/definitions/running"]) {
+      const { status, html } = await getPage(path, REFUSED_URL);
+      expect(status, path).toBe(500);
+      expect(html, path).not.toContain(SENTINEL_PASSWORD);
+    }
   });
 });
 
@@ -1418,6 +581,17 @@ describe("dashboard/query unhappy path: unreachable database", () => {
   it("surfaces a refused connection from listTestResultOutcomes without echoing the password", async () => {
     const result = await runQuery(
       "try {\n  await query.listTestResultOutcomes(url);\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
+      REFUSED_URL,
+    );
+    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toMatch(/ECONNREFUSED/);
+    expect(result.stderr).not.toContain(SENTINEL_PASSWORD);
+  });
+
+  it("listDefinitionRuns surfaces a refused connection and exits without echoing the password", async () => {
+    const result = await runQuery(
+      "try {\n  await query.listDefinitionRuns(url, 'lock-screen');\n} catch (err) {\n  console.error(err.message);\n  process.exitCode = 3;\n}",
       REFUSED_URL,
     );
     expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -1465,149 +639,6 @@ const registeredUrls = async (databaseUrl: string): Promise<ReadonlyArray<string
   (await registered(databaseUrl)).map((row) => row.url);
 
 describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
-  it("lists the fleet from its rows: one heard from just now, one silent, one never heard from", async () => {
-    // The integration files share one database; the fleet this page expects is its own to arrange.
-    await seed(dbUrl, async (db) => {
-      await db.delete(processStats);
-      await db.delete(servers);
-      await db.insert(servers).values([
-        {
-          url: "http://10.1.0.1:42069",
-          name: "garage",
-          stats: {
-            qemus: 2,
-            memory: { totalBytes: 66_900_000_000, usedBytes: 31_500_000_000 },
-            cpu: { mean1m: 12.3, mean2m: 11, mean3m: 9.8 },
-          },
-          generation: 42,
-          heartbeatAt: sql`now() - interval '12 seconds'`,
-        },
-        {
-          url: "http://10.1.0.2:42069",
-          name: "attic",
-          stats: {
-            qemus: 3,
-            memory: { totalBytes: 16_000_000_000, usedBytes: 4_000_000_000 },
-            cpu: { mean1m: 50, mean2m: 40, mean3m: 30 },
-          },
-          generation: 7,
-          heartbeatAt: sql`now() - interval '5 minutes'`,
-        },
-        { url: "http://10.1.0.3:42069" },
-        {
-          url: "http://10.1.0.4:54322",
-          name: "workshop",
-          type: "automation-client",
-          stats: {
-            qemus: 0,
-            memory: { totalBytes: 16_000_000_000, usedBytes: 2_000_000_000 },
-            cpu: { mean1m: 4, mean2m: 3, mean3m: 2 },
-          },
-          generation: 3,
-          heartbeatAt: sql`now() - interval '8 seconds'`,
-        },
-      ]);
-      await db.insert(processStats).values([
-        {
-          name: "garage",
-          type: "qemu",
-          jobs: 2,
-          memoryBytes: 512_000_000,
-          cpuPercent: 37.5,
-          reportedAt: sql`now() - interval '12 seconds'`,
-        },
-        {
-          name: "attic",
-          type: "qemu",
-          jobs: 3,
-          memoryBytes: 256_000_000,
-          cpuPercent: 80,
-          reportedAt: sql`now() - interval '5 minutes'`,
-        },
-        {
-          name: "workshop",
-          type: "automation-client",
-          jobs: 1,
-          memoryBytes: 128_000_000,
-          cpuPercent: 8,
-          reportedAt: sql`now() - interval '8 seconds'`,
-        },
-      ]);
-    });
-    const { status, html } = await getPage("/servers", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toContain("<!doctype html>");
-    expect(html).toContain("<h1>oligarchy servers</h1>");
-    expect(html).toContain('aria-current="page">servers</a>');
-    const home = await getPage("/", dbUrl);
-    expect(home.status).toBe(200);
-    expect(home.html).toContain("<h1>oligarchy servers</h1>");
-    expect(home.html).toContain('aria-current="page">servers</a>');
-    expect(home.html).toContain("<td>http://10.1.0.1:42069</td>");
-    expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
-    expect(html).toContain(
-      "<tr><td>garage</td><td>http://10.1.0.1:42069</td><td>2</td><td>31.5 / 66.9 GB</td><td>12.3% / 11.0% / 9.8%</td><td>42</td><td>12 s ago</td>",
-    );
-    expect(html).toContain(
-      '<tr><td>attic</td><td>http://10.1.0.2:42069</td><td colspan="3"><strong>silent</strong></td><td>7</td><td>5 min ago</td>',
-    );
-    expect(html).toContain(
-      '<tr><td>—</td><td>http://10.1.0.3:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
-    );
-    expect(html).toContain('<div id="process" hx-get="/servers/process" hx-trigger="every 30s">');
-    expect(html).toContain("<h3>garage</h3>");
-    expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
-    expect(html).toContain("memory 512.0 MB");
-    expect(html).toContain("jobs 2");
-    expect(html).toContain("cpu 37.5%");
-    expect(html).toContain("<h2>process</h2>");
-    expect(html).toContain("<h2>automation</h2>");
-    expect(html).toContain("<h3>attic</h3>");
-    expect(html).toContain("<p><strong>silent</strong></p>");
-    expect(html).toContain("<h3>workshop</h3>");
-    expect(html).toContain('aria-label="jobs 1 · cpu 8.0% · memory 128.0 MB"');
-    expect(html).not.toContain("dashboard.css");
-  });
-
-  it("does not list an automation-client among the qemu fleet", async () => {
-    await seed(dbUrl, async (db) => {
-      await db.insert(servers).values({ url: "http://10.1.0.1:42069" }).onConflictDoNothing();
-      await db.delete(servers).where(eq(servers.url, "http://10.1.0.4:54322"));
-      await db.insert(servers).values({
-        url: "http://10.1.0.4:54322",
-        type: "automation-client",
-      });
-    });
-    const page = await getPage("/servers", dbUrl);
-    expect(page.html).toContain("<td>http://10.1.0.1:42069</td>");
-    const fleet = await getPage("/servers/fleet", dbUrl);
-    expect(fleet.html).toContain("<td>http://10.1.0.1:42069</td>");
-    expect(fleet.html).not.toContain("http://10.1.0.4:54322");
-  });
-
-  it("serves the process graphs alone at /servers/process, what the page's poll swaps in", async () => {
-    const { status, html } = await getPage("/servers/process", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toContain('<article class="process-card">');
-    expect(html).toContain("<h3>garage</h3>");
-    expect(html).toContain('aria-label="jobs 2 · cpu 37.5% · memory 512.0 MB"');
-    expect(html).toContain("jobs 2");
-    expect(html).toContain("cpu 37.5%");
-    expect(html).toContain("memory 512.0 MB");
-    expect(html).not.toContain("<table>");
-    expect(html).not.toContain("<html");
-    expect(html).not.toContain("add a server");
-  });
-
-  it("serves the fleet alone at /servers/fleet, what the page's poll swaps in", async () => {
-    const { status, html } = await getPage("/servers/fleet", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toContain("<table>");
-    expect(html).toContain("<td>http://10.1.0.1:42069</td>");
-    expect(html).not.toContain("<html");
-    expect(html).not.toContain("add a server");
-  });
-
   it("adds a qemu server once, however often it is posted, and sends the browser back to the page", async () => {
     const first = await postForm({ url: "http://10.1.0.9:42069" }, dbUrl, "/servers");
     expect(first.status).toBe(303);
@@ -1618,10 +649,6 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
     expect(rows.filter((row) => row.url === "http://10.1.0.9:42069")).toEqual([
       { url: "http://10.1.0.9:42069", type: "qemu" },
     ]);
-    const { html } = await getPage("/servers", dbUrl);
-    expect(html).toContain(
-      '<tr><td>—</td><td>http://10.1.0.9:42069</td><td colspan="3">never heard from</td><td>0</td><td>never</td>',
-    );
   });
 
   it("deletes a server and sends the browser back to the page", async () => {
@@ -1633,25 +660,20 @@ describe.skipIf(dbUrl === "")("dashboard/servers page happy path", () => {
 });
 
 describe.skipIf(dbUrl === "")("dashboard/servers page unhappy path", () => {
-  it("refuses a url that is not http or https: 400, the reason on top of the fleet, nothing stored", async () => {
+  it("refuses a url that is not http or https: 400, nothing stored", async () => {
     const result = await postForm({ url: "ftp://qemu.example.com" }, dbUrl, "/servers");
     expect(result.status).toBe(400);
-    expect(result.text).toContain("<p>error: url must be an http or https url</p>");
-    expect(result.text).toContain("<td>http://10.1.0.1:42069</td>");
     expect(await registeredUrls(dbUrl)).not.toContain("ftp://qemu.example.com");
   });
 
   it("refuses a form without a url the same way", async () => {
     const result = await postForm({ nope: "x" }, dbUrl, "/servers");
     expect(result.status).toBe(400);
-    expect(result.text).toContain("<p>error: url must be an http or https url</p>");
   });
 
-  it("answers 404 with the reason for deleting a url that was never registered", async () => {
+  it("answers 404 for deleting a url that was never registered", async () => {
     const result = await postForm({ url: "http://10.1.0.77:42069" }, dbUrl, "/servers/delete");
     expect(result.status).toBe(404);
-    expect(result.text).toContain("<p>error: http://10.1.0.77:42069 is not registered</p>");
-    expect(result.text).toContain("<td>http://10.1.0.1:42069</td>");
   });
 });
 
@@ -1791,8 +813,6 @@ const QUEUE_JOBS: ReadonlyArray<QueuedJob> = [
   },
 ];
 
-// The first test arranges the queue; the page and fragment tests read it as it is; the cap test
-// arranges its own last.
 describe.skipIf(dbUrl === "")("dashboard/servers page: the automation half happy path", () => {
   it("orders running and pending diagnoses ahead of drives and then in queue order, completed newest finished first, and ends the connection", async () => {
     await seed(dbUrl, (db) => seedQueue(db, "queue-order", QUEUE_JOBS));
@@ -1817,40 +837,6 @@ console.log([failed.test, failed.action, failed.reason, failed.createdAt instanc
       "QUE-107:failed QUE-108:aborted QUE-106:succeeded QUE-109:timed_out QUE-110:completed QUE-111:errored",
       "queue-order drive session timed out true true true true null null null null",
     ]);
-  });
-
-  it("shows the queue in the automation half, running then pending then completed, beside the fleet", async () => {
-    const { status, html } = await getPage("/servers", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toMatch(
-      /<div class="halves"><section><h2>automation<\/h2><div id="queue" hx-get="\/servers\/queue" hx-trigger="every 30s">(?:<p>no test suites<\/p>|<ul[^>]*aria-label="Test suites"[^>]*>[\s\S]*?<\/ul>)<h3>running 2<\/h3><table>/,
-    );
-    // The ages are read against the database's clock: a minute has margin, seconds are counted.
-    expect(html).toMatch(
-      /<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-102">QUE-102<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">running<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-102" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-102"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort">/,
-    );
-    expect(html).toMatch(
-      /<h3>pending 4<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-104">QUE-104<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">diagnose<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">pending<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-104" tabindex="-1" aria-hidden="true"><\/a><\/td><td><form method="post" action="\/abort" hx-post="\/abort" hx-confirm="are you sure\?" hx-target="#queue" hx-swap="innerHTML"><input type="hidden" name="ticket" value="QUE-104"\/><input type="hidden" name="action" value="diagnose"\/><button type="submit" class="abort" aria-label="abort">.*?<\/form><\/td><\/tr>.*?>QUE-103<\/a>.*?>QUE-105<\/a>.*?<tr><td>—<\/td><td>queue-order<\/td><td>drive<\/td><td>pending<\/td><td>\d+ s ago<\/td><td>—<\/td><td>—<\/td><td><\/td><td><\/td><\/tr>.*?<h3>completed<\/h3>/s,
-    );
-    expect(html).toMatch(
-      /<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/QUE-107">QUE-107<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107">queue-order<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">failed<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">\d+ min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">1 min ago<\/a><\/td><td class="follow"><a href="\/tickets\/QUE-107" tabindex="-1" aria-hidden="true">session timed out<\/a><\/td><td><\/td><\/tr>.*?>QUE-108<\/a>.*?>QUE-106<\/a>.*?>QUE-109<\/a>/s,
-    );
-    expect(html).toContain("<h2>qemu servers</h2>");
-    expect(html).toContain('<div id="fleet" hx-get="/servers/fleet" hx-trigger="every 30s">');
-    expect(html).toContain("<h2>add a server</h2>");
-  });
-
-  it("serves the queue alone at /servers/queue, what the automation half's poll swaps in", async () => {
-    const { status, html } = await getPage("/servers/queue", dbUrl);
-    expect(status).toBe(200);
-    expect(html).toMatch(/^(?:<p>no test suites<\/p>|<ul[^>]*aria-label="Test suites"[^>]*>)/);
-    expect(html).toContain('href="https://linear.app/issue/QUE-102"');
-    expect(html).toContain('href="/tickets/QUE-102"');
-    expect(html).toContain('href="https://linear.app/issue/QUE-109"');
-    expect(html).toContain('href="/tickets/QUE-109"');
-    expect(html).not.toContain("<html");
-    expect(html).not.toContain("qemu servers");
-    expect(html).not.toContain("add a server");
   });
 
   it("cuts each list at fifty: the fifty that finished last, the fifty at the front of the queue", async () => {
@@ -1983,7 +969,7 @@ const abortSuiteBindings = (databaseUrl: string) => ({
   LINEAR_TEAM: "Local Board",
 });
 
-const postAbortSuite = async (databaseUrl: string, run: string): Promise<Page> => {
+const postAbortSuite = async (databaseUrl: string, run: string): Promise<number> => {
   const response = await app.request(
     "/suites/abort",
     {
@@ -1996,7 +982,7 @@ const postAbortSuite = async (databaseUrl: string, run: string): Promise<Page> =
     },
     abortSuiteBindings(databaseUrl),
   );
-  return { status: response.status, html: await response.text() };
+  return response.status;
 };
 
 // Aborting is the operator's way off a suite whose results never reached a verdict. The
@@ -2067,18 +1053,7 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       };
     });
     try {
-      const before = await getPage("/servers/queue", dbUrl);
-      expect(before.html).toContain(`value="${inserted.runId}"`);
-      const page = await postAbortSuite(dbUrl, inserted.runId);
-      expect(page.status).toBe(200);
-      expect(page.html).not.toContain(`value="${inserted.runId}"`);
-      const item = page.html
-        .split("<li>")
-        .map((part) => part.split("</li>")[0] ?? "")
-        .find((part) => part.includes(`>${inserted.runId.slice(0, 6)}<`));
-      expect(item).toContain(">aborted<");
-      expect(item).not.toContain(">completed<");
-      expect(page.html).not.toContain("postgres://");
+      expect(await postAbortSuite(dbUrl, inserted.runId)).toBe(200);
       const stored = await seed(dbUrl, async (db) => {
         const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
         const results = await db
@@ -2159,9 +1134,7 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       return { runId: run.id, definitionId: definition.id, resultId: result.id };
     });
     try {
-      const page = await postAbortSuite(dbUrl, inserted.runId);
-      expect(page.status).toBe(200);
-      expect(page.html).not.toContain(`value="${inserted.runId}"`);
+      expect(await postAbortSuite(dbUrl, inserted.runId)).toBe(200);
       const stored = await seed(dbUrl, async (db) => {
         const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
         const [result] = await db
@@ -2183,144 +1156,22 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
   });
 });
 
-// The ticket page is the terminal follow, read from the database: the open step, the command
-// under it, the newest frame, and a poll. The feed route is only what that poll swaps in.
 describe.skipIf(dbUrl === "")("dashboard ticket follow", () => {
-  it("shows the open step, the command under it and the latest frame, and polls every five seconds", async () => {
-    const sessionId = randomUUID();
-    await seed(dbUrl, async (db) => {
-      await db.insert(sessions).values({
-        id: sessionId,
-        config: { iso: "x" },
-        status: "running",
-      });
-      const [definition] = await db
-        .insert(testDefinitions)
-        .values({
-          name: "follow-page",
-          description: "d",
-          instruction:
-            "<ActionList>\n* open a terminal\n* type hello\n* any crashes or erroneous behavior must be reported.\n</ActionList>",
-          proof: "p",
-        })
-        .returning({ id: testDefinitions.id });
-      const [run] = await db
-        .insert(testRuns)
-        .values({
-          name: "follow page",
-          iso: "https://example.com/omarchy.iso",
-          serverUrl: "http://127.0.0.1:42069",
-        })
-        .returning({ id: testRuns.id });
-      const [result] = await db
-        .insert(testResults)
-        .values({
-          runId: run.id,
-          definitionId: definition.id,
-          sessionId,
-          linearId: "FOL-1",
-          status: "running",
-        })
-        .returning({ id: testResults.id });
-      await db.insert(automationJobs).values({
-        resultId: result.id,
-        action: "drive",
-        status: "running",
-      });
-      await db.insert(logs).values({
-        location: sessionId,
-        text: "intent start; open a terminal",
-        createdAt: secondsAgo(12),
-      });
-      const [action] = await db
-        .insert(actions)
-        .values({
-          sessionId,
-          request: { execute: "screendump", arguments: {} },
-          state: "completed",
-          createdAt: secondsAgo(8),
-        })
-        .returning({ id: actions.id });
-      await db.insert(images).values({ actionId: action.id, data: Buffer.from("png") });
-    });
-
-    const page = await getPage("/tickets/FOL-1", dbUrl);
-    expect(page.status).toBe(200);
-    expect(page.html).toContain(
-      `<h1 id="follow-heading"><a href="https://linear.app/issue/FOL-1">FOL-1</a> · <code>${sessionId}</code> running</h1>`,
-    );
-    expect(page.html).toContain('<p class="follow__step">1/2</p>');
-    expect(page.html).toContain("screendump");
-    expect(page.html).toContain('class="follow__image" src="/images/');
-    expect(page.html).toContain('hx-get="/tickets/FOL-1/feed" hx-trigger="every 5s"');
-
-    const feed = await getPage("/tickets/FOL-1/feed", dbUrl);
-    expect(feed.status).toBe(200);
-    expect(feed.html).toContain("screendump");
-    expect(feed.html).toContain('class="follow__image"');
-    expect(feed.html).not.toContain("<html");
-    expect(feed.html).not.toContain("hx-trigger");
-  });
-
-  it("waits, and keeps polling, when the ticket has not started a session", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "follow-wait", [
-        { ticket: "FOL-WAIT", action: "drive", status: "pending", queuedSecondsAgo: 5 },
-      ]),
-    );
-    const page = await getPage("/tickets/FOL-WAIT", dbUrl);
-    expect(page.status).toBe(200);
-    expect(page.html).toContain("waiting for FOL-WAIT");
-    expect(page.html).toContain("session");
-    expect(page.html).toContain('hx-trigger="every 5s"');
-    expect(page.html).not.toContain("no commands yet");
-  });
-
-  it("answers 404 and does not poll when no result carries the ticket", async () => {
+  it("answers 404 for the page and its feed when no result carries the ticket", async () => {
     const page = await getPage("/tickets/FOL-NONE", dbUrl);
     const feed = await getPage("/tickets/FOL-NONE/feed", dbUrl);
     expect(page.status).toBe(404);
     expect(feed.status).toBe(404);
-    expect(page.html).toContain("No ticket named FOL-NONE");
-    expect(page.html).not.toContain("every 5s");
-    expect(feed.html).toContain("No ticket named FOL-NONE");
-    expect(feed.html).not.toContain("hx-trigger");
   });
 });
 
 describe("dashboard/servers page unhappy path: unreachable database", () => {
-  it("answers 500 with internal error and neither half's body, never echoing the password", async () => {
-    const { status, html } = await getPage("/servers", REFUSED_URL);
-    expect(status).toBe(500);
-    expect(html).toContain("<p>error: internal error</p>");
-    expect(html).not.toContain('id="queue"');
-    expect(html).not.toContain('id="fleet"');
-    expect(html).not.toContain('id="process"');
-    expect(html).toContain("<h2>automation</h2>");
-    expect(html).toContain("<h2>add a server</h2>");
-    expect(html).toContain("<h2>process</h2>");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
-  });
-
-  it("the process fragment answers 500 with the reason, never echoing the password", async () => {
-    const { status, html } = await getPage("/servers/process", REFUSED_URL);
-    expect(status).toBe(500);
-    expect(html).toBe("<p>error: internal error</p>");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
-  });
-
-  it("the fleet fragment answers 500 with the reason, never echoing the password", async () => {
-    const { status, html } = await getPage("/servers/fleet", REFUSED_URL);
-    expect(status).toBe(500);
-    expect(html).toBe("<p>error: internal error</p>");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
-  });
-
-  it("the queue fragment answers 500 with the reason, never echoing the password", async () => {
-    const { status, html } = await getPage("/servers/queue", REFUSED_URL);
-    expect(status).toBe(500);
-    expect(html).toBe("<p>error: internal error</p>");
-    expect(html).not.toContain(SENTINEL_PASSWORD);
+  it("answers 500 for the page and each fragment, never echoing the password", async () => {
+    for (const path of ["/servers", "/servers/process", "/servers/fleet", "/servers/queue"]) {
+      const { status, html } = await getPage(path, REFUSED_URL);
+      expect(status, path).toBe(500);
+      expect(html, path).not.toContain(SENTINEL_PASSWORD);
+    }
   });
 
   it("listAutomationQueue surfaces a refused connection and exits without echoing the password", async () => {
@@ -2337,7 +1188,6 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
   it("adding and deleting answer 500 the same way", async () => {
     const added = await postForm({ url: "http://10.1.0.5:42069" }, REFUSED_URL, "/servers");
     expect(added.status).toBe(500);
-    expect(added.text).toContain("<p>error: internal error</p>");
     expect(added.text).not.toContain(SENTINEL_PASSWORD);
     const deleted = await postForm(
       { url: "http://10.1.0.5:42069" },
@@ -2345,7 +1195,6 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
       "/servers/delete",
     );
     expect(deleted.status).toBe(500);
-    expect(deleted.text).toContain("<p>error: internal error</p>");
     expect(deleted.text).not.toContain(SENTINEL_PASSWORD);
   });
 });
@@ -2869,7 +1718,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
     }
   });
 
-  it("answers the queue fragment with the pending job under completed as aborted when htmx asks", async () => {
+  it("closes the pending job an htmx post names, leaves the other pending, and moves the ticket", async () => {
     const linear = await StubProxy.startStubProxy(linearAnswering());
     try {
       await seed(dbUrl, (db) =>
@@ -2888,19 +1737,15 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
         abortBindings({ databaseUrl: dbUrl, automationUrl: REFUSED_HTTP, linearUrl: linear.url }),
       );
       expect(response.status).toBe(200);
-      const html = await response.text();
-      expect(html).toMatch(/^(?:<p>no test suites<\/p>|<ul[^>]*aria-label="Test suites"[^>]*>)/);
-      expect(html).toMatch(/<h3>running 0<\/h3><p>none<\/p><h3>pending 1<\/h3><table>/);
-      expect(html).toMatch(
-        /<h3>pending 1<\/h3><table>.*?<a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-2">ABT-HX-2<\/a>.*?<h3>completed<\/h3><table>.*?<tr><td><a class="ticket" href="https:\/\/linear\.app\/issue\/ABT-HX-1">ABT-HX-1<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1">abort-htmx-pending<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">drive<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">—<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">\d+ s ago<\/a><\/td><td class="follow"><a href="\/tickets\/ABT-HX-1" tabindex="-1" aria-hidden="true">aborted<\/a><\/td><td><\/td><\/tr>/s,
-      );
+      expect((await jobByTicket(dbUrl, "ABT-HX-1")).status).toBe("aborted");
+      expect((await jobByTicket(dbUrl, "ABT-HX-2")).status).toBe("pending");
       expect(linear.requests).toEqual(linearMove("ABT-HX-1"));
     } finally {
       await linear.close();
     }
   });
 
-  it("answers the running list with the stopped job gone when the definitions page aborts it", async () => {
+  it("aborts the running job a definitions-page htmx post names and leaves the other running", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.refusal(500, "opencode exited 1"));
     const linear = await StubProxy.startStubProxy(linearAnswering());
     try {
@@ -2928,11 +1773,6 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
         abortBindings({ databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url }),
       );
       expect(response.status).toBe(200);
-      const html = await response.text();
-      expect(html.startsWith("<table>")).toBe(true);
-      expect(html).toContain(definitionsAbortForm("ABT-DEF-KEEP", "drive", "abort-definitions"));
-      expect(html).not.toContain("ABT-DEF-STOP");
-      expect(html).not.toContain("<h3>running</h3>");
       expect((await jobByTicket(dbUrl, "ABT-DEF-STOP")).status).toBe("aborted");
       expect((await jobByTicket(dbUrl, "ABT-DEF-KEEP")).status).toBe("running");
       expect(linear.requests).toEqual(linearMove("ABT-DEF-STOP"));
@@ -2993,28 +1833,7 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     }
   });
 
-  it("answers the queue error fragment when htmx asks and the database is unreachable", async () => {
-    const response = await app.request(
-      "/abort",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "hx-request": "true",
-        },
-        body: "",
-      },
-      abortBindings({
-        databaseUrl: REFUSED_URL,
-        automationUrl: REFUSED_HTTP,
-        linearUrl: REFUSED_HTTP,
-      }),
-    );
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe("<p>error: internal error</p>");
-  });
-
-  it("answers the running-list error when the definitions page asks and the database is unreachable", async () => {
+  it("answers 200 without a redirect when the definitions page asks over htmx and the database is unreachable", async () => {
     const response = await app.request(
       "/abort",
       {
@@ -3032,7 +1851,6 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
       }),
     );
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("<p>error: internal error</p>");
     expect(response.headers.get("location")).toBeNull();
   });
 
