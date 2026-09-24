@@ -24,6 +24,7 @@ const INSTRUMENT = "src/observability/instrument.ts";
 const SOLID_JSX = "src/viz/preload.ts";
 const PROCESSES: Readonly<Record<string, ReadonlyArray<string>>> = {
   client: [],
+  driver: [],
   session: [],
   viz: [SOLID_JSX],
   dig: [],
@@ -128,7 +129,7 @@ describe("root executables", () => {
   // The preload is named from the wrapper's own directory: an operator runs ./viz from anywhere.
   it("each execs bun on its entry with exactly the preloads it needs, never node", () => {
     for (const [name, preloads] of Object.entries(PROCESSES)) {
-      if (name === "client") {
+      if (name === "client" || name === "driver") {
         continue;
       }
       const wrapper = read(name);
@@ -143,19 +144,25 @@ describe("root executables", () => {
     }
   });
 
-  // A driving agent calls ./client many times per task, so it runs one bundle with a bytecode
-  // cache instead of loading three hundred modules each time; the bundle is rebuilt when a source
-  // is newer, and the sources run as they are when the build fails.
-  it("client runs a bytecode bundle built under node_modules/.cache, its entry when the build fails", () => {
-    const wrapper = read("client");
-    expect(wrapper.startsWith("#!/bin/sh\n")).toBe(true);
-    expect(wrapper).toContain("bun build --target=bun --bytecode ");
-    expect(wrapper).toContain('"$root/src/client/main.ts"');
-    expect(wrapper).toContain("node_modules/.cache/oligarchy/client");
-    expect(wrapper).toContain('exec bun --no-env-file "$cache/main.js" "$@"');
-    expect(wrapper).toContain('exec bun --no-env-file "$root/src/client/main.ts" "$@"');
-    expect(wrapper).not.toContain("--preload");
-    expect(wrapper).not.toMatch(NOT_BUN);
+  // ./client is called many times per task, and ./driver is the harness entry: each runs one
+  // bundle with a bytecode cache. The bundle is rebuilt when a source is newer, and the sources
+  // run as they are when the build fails.
+  it("client and driver run a bytecode bundle built under node_modules/.cache, the entry when the build fails", () => {
+    for (const name of ["client", "driver"]) {
+      const wrapper = read(name);
+      expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
+      expect(wrapper, name).toContain("bun build --target=bun --bytecode ");
+      expect(wrapper, name).toContain(`"$root/src/${name}/main.ts"`);
+      expect(wrapper, name).toContain(`node_modules/.cache/oligarchy/${name}`);
+      expect(wrapper, name).toContain('exec bun --no-env-file "$cache/main.js" "$@"');
+      expect(wrapper, name).toContain(`exec bun --no-env-file "$root/src/${name}/main.ts" "$@"`);
+      expect(wrapper, name).toContain(`${name}: bundle build failed; running the sources`);
+      expect(wrapper, name).not.toContain("--preload");
+      expect(wrapper, name).not.toMatch(NOT_BUN);
+    }
+    const driver = read("driver");
+    expect(driver).toContain("/src/harness/config.ts");
+    expect(driver).toContain("--define");
   });
 });
 

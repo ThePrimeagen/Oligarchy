@@ -52,6 +52,7 @@ describe("requiredRedacted", () => {
   it.effect("the named accessors read their variables", () =>
     Effect.gen(function* () {
       expect(Redacted.value(yield* Config.oligarchyToken)).toBe("a");
+      expect(Redacted.value(yield* Config.openRouterToken)).toBe("i");
       expect(Redacted.value(yield* Config.databaseUrl)).toBe("b");
       expect(Redacted.value(yield* Config.databaseMigrationUrl)).toBe("g");
       expect(Redacted.value(yield* Config.linearApiToken)).toBe("c");
@@ -63,6 +64,7 @@ describe("requiredRedacted", () => {
       Effect.provide(
         Support.withEnv({
           OLIGARCHY_TOKEN: "a",
+          OPENROUTER_API_KEY: "i",
           DATABASE_URL: "b",
           DATABASE_MIGRATION_URL: "g",
           LINEAR_API_TOKEN: "c",

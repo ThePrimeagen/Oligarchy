@@ -92,6 +92,8 @@ export const requiredRedacted = (
   EffectConfig.redacted(name).pipe(Effect.mapError(missing(name)));
 
 export const oligarchyToken = requiredRedacted("OLIGARCHY_TOKEN");
+// The harness talks to OpenRouter as itself. The token stays out of oligarchy.json.
+export const openRouterToken = requiredRedacted("OPENROUTER_API_KEY");
 export const databaseUrl = requiredRedacted("DATABASE_URL");
 // `bun run db:migrate` only. Kept off DATABASE_URL so the app can use a pooler while
 // migrations stay on a direct connection.
