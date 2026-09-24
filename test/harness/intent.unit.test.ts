@@ -6,17 +6,10 @@ import type * as Tools from "../../src/harness/tools.ts";
 const RESULT = "22222222-2222-4222-8222-222222222222";
 const SESSION = "6f1c8c2e-1b2a-4d3e-8f4a-9c0b1a2d3e4f";
 
-const line = (
-  args: ReadonlyArray<string>,
-  bin: Tools.CommandLine["bin"] = "./client",
-): Tools.CommandLine => ({ bin, args });
+const line = (args: ReadonlyArray<string>): Tools.CommandLine => ({ bin: "./client", args });
 
-const guest = (
-  args: ReadonlyArray<string>,
-  message = "lock the screen",
-  bin: Tools.CommandLine["bin"] = "./client",
-): Intent.Bracket => {
-  const result = Intent.bracket(line(args, bin), RESULT, message);
+const guest = (args: ReadonlyArray<string>, message = "lock the screen"): Intent.Bracket => {
+  const result = Intent.bracket(line(args), RESULT, message);
   if (Result.isFailure(result)) {
     expect.fail(result.failure.message);
   }
@@ -100,20 +93,6 @@ describe("intent brackets", () => {
     ]) {
       expect(guest(args)._tag, args[0]).toBe("guest");
     }
-  });
-
-  it("keeps the screenshot wrapper on the guest command and uses ./client for the intent", () => {
-    const shot = guest(
-      ["get-image", "--agent-id", "OLI-1", "--session-id", SESSION],
-      "see the desktop",
-      "./client-with-image",
-    );
-    expect(shot._tag).toBe("guest");
-    if (shot._tag !== "guest") {
-      return;
-    }
-    expect(shot.start.bin).toBe("./client");
-    expect(shot.end.bin).toBe("./client");
   });
 
   it("leaves start, reserve, relinquish, stop and save outside an intent", () => {

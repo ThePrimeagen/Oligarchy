@@ -424,7 +424,9 @@ describe("Sessions.shutdown", () => {
       const sessions = yield* Sessions.Sessions;
       yield* sessions.reserve(TICKET, "drive");
       yield* sessions.reserve(OTHER, "drive");
-      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", RESULT));
+      const running = yield* Effect.forkChild(
+        sessions.run(TICKET, "do the work", RESULT, "do the work", "none"),
+      );
       for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
         yield* Effect.yieldNow;
       }
@@ -522,8 +524,12 @@ describe("Sessions.shutdown", () => {
         const sessions = yield* Sessions.Sessions;
         yield* sessions.reserve(TICKET, "drive");
         yield* sessions.reserve(OTHER, "drive");
-        const stuck = yield* Effect.forkChild(sessions.run(TICKET, "stuck", RESULT));
-        const other = yield* Effect.forkChild(sessions.run(OTHER, "other", RESULT));
+        const stuck = yield* Effect.forkChild(
+          sessions.run(TICKET, "stuck", RESULT, "stuck", "none"),
+        );
+        const other = yield* Effect.forkChild(
+          sessions.run(OTHER, "other", RESULT, "other", "none"),
+        );
         for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
           yield* Effect.yieldNow;
         }

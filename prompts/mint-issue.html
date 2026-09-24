@@ -29,7 +29,7 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 
 <rules>
   <rule>Do not read files in this repository. Do not write, edit, or commit code. Do not open a pull request.</rule>
-  <rule>Run only ./client, ./client-with-image, ./ctrl, and sleep. You may open only the screenshots and serial dumps the client writes. Do not upload images to Linear.</rule>
+  <rule>Run only ./client, ./ctrl, and sleep. You may open only the screenshots and serial dumps the client writes. Do not upload images to Linear.</rule>
   <rule>Every guest action — every key, click, and image — runs inside an intent. Only relinquish, reserve, start, ./ctrl, save, and stop sit outside one.</rule>
   <rule>Never type into a screen you have not seen. Image first.</rule>
   <rule>Never wait more than 5 seconds between commands. Image instead. The install writes for a long time: keep imaging, and the session stays alive.</rule>
@@ -88,10 +88,9 @@ $ ./ctrl test start --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --mo
 
 # every series of guest actions inside an intent
 $ ./client intent start --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --test-result-id {{RESULT_ID}} --message "wait for the boot menu"
-$ export CLIENT_IMAGE=screen.png
 $ ./client get-image --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 -o screen.png
     boot menu
-$ ./client-with-image send-keys --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --keys "<ENTER>"
+$ ./client send-keys --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9 --keys "<ENTER>"
 $ ./client intent end --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --session-id 6f1c...e2a9
 # ... the installer: user name, password, disk passphrase from the install; defaults elsewhere ...
 # ... the installer reboots; the disk comes up (or, at the ISO's boot menu, the entry that boots the installed disk) ...

@@ -9,7 +9,6 @@ export type Reply =
   | {
       readonly _tag: "client";
       readonly reason: string;
-      readonly withImage: boolean;
       readonly args: ReadonlyArray<string>;
     };
 
@@ -20,7 +19,6 @@ const ClientCall = Schema.Struct({
   name: Schema.Literal("client"),
   arguments: Schema.Struct({
     reason: Schema.String,
-    withImage: Schema.optionalKey(Schema.Boolean),
     args: Schema.Array(Schema.String),
   }),
 });
@@ -71,7 +69,6 @@ export const parse = (text: string): Result.Result<Reply, Errors.ToolError> => {
   return Result.succeed({
     _tag: "client",
     reason,
-    withImage: decoded.value.arguments.withImage === true,
     args: decoded.value.arguments.args,
   });
 };
@@ -85,7 +82,7 @@ export const command = (
     return fail("client: the harness opens and closes intents");
   }
   return Result.succeed({
-    bin: call.withImage ? "./client-with-image" : "./client",
+    bin: "./client",
     args: [...call.args],
   });
 };

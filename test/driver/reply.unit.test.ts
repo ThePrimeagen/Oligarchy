@@ -2,19 +2,10 @@ import { describe, expect, it } from "vitest";
 import { Result } from "effect";
 import * as Reply from "../../src/driver/reply.ts";
 
-const SESSION = "6f1c8c2e-1b2a-4d3e-8f4a-9c0b1a2d3e4f";
-
 const line = (body: unknown): string => JSON.stringify(body);
 
-const client = (reason: string, args: ReadonlyArray<string>, withImage?: boolean): string =>
-  line({
-    name: "client",
-    arguments: {
-      reason,
-      ...(withImage === undefined ? {} : { withImage }),
-      args,
-    },
-  });
+const client = (reason: string, args: ReadonlyArray<string>): string =>
+  line({ name: "client", arguments: { reason, args } });
 
 const done = (): string => line({ name: "Done", arguments: {} });
 
@@ -42,7 +33,6 @@ describe("reply", () => {
     expect(parsed).toEqual({
       _tag: "client",
       reason: "booted the guest",
-      withImage: false,
       args: ["start", "--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9", "--resume"],
     });
     const command = Reply.command(parsed);
@@ -84,36 +74,6 @@ describe("reply", () => {
     expect(quoted.success.args[quoted.success.args.length - 1]).toBe('say "hi"');
   });
 
-  it("takes withImage as the bin and leaves the args as the action", () => {
-    const image = Reply.command(
-      parsedClient(
-        client("shot", ["get-image", "--agent-id", "OLI-1", "--session-id", SESSION], true),
-      ),
-    );
-    expect(Result.isSuccess(image)).toBe(true);
-    if (Result.isFailure(image)) {
-      return;
-    }
-    expect(image.success.bin).toBe("./client-with-image");
-    expect(image.success.args).toEqual([
-      "get-image",
-      "--agent-id",
-      "OLI-1",
-      "--session-id",
-      SESSION,
-    ]);
-
-    const plain = Reply.command(
-      parsedClient(client("boot", ["start", "--agent-id", "OLI-1"], false)),
-    );
-    expect(Result.isSuccess(plain)).toBe(true);
-    if (Result.isFailure(plain)) {
-      return;
-    }
-    expect(plain.success.bin).toBe("./client");
-    expect(plain.success.args).toEqual(["start", "--agent-id", "OLI-1"]);
-  });
-
   it("refuses a reply that is not one tool call of the expected shape", () => {
     const cases = [
       "continue\nbooted the guest\nstart",
@@ -124,6 +84,7 @@ describe("reply", () => {
         name: "client",
         arguments: { reason: "boot", args: ["start"], token: "secret-token" },
       }),
+      line({ name: "client", arguments: { reason: "boot", args: ["start"], withImage: true } }),
       line({ name: "bash", arguments: { args: ["ls"] } }),
       line({ name: "client", arguments: { reason: "   ", args: ["start"] } }),
       line({ name: "client", arguments: { reason: "boot", args: [] } }),
@@ -156,6 +117,13 @@ describe("reply", () => {
     }
     expect(secret.failure.message).toContain("token");
     expect(secret.failure.message).not.toContain("secret-token");
+    const image = Reply.parse(
+      line({ name: "client", arguments: { reason: "boot", args: ["start"], withImage: true } }),
+    );
+    if (Result.isSuccess(image)) {
+      expect.fail("withImage parsed");
+    }
+    expect(image.failure.message).toContain("withImage");
     const unknown = Reply.parse(line({ name: "bash", arguments: {} }));
     if (Result.isSuccess(unknown)) {
       expect.fail("an unknown tool parsed");
