@@ -41,8 +41,8 @@ Three decisions, each defended on its own, together make the queue fragile.
 `src/automation-server/worker.ts` on interrupt writes `status: "aborted"`, reason
 `automation server shutting down` (pinned by "closing the scope mid-request aborts the job"),
 while `src/automation-client/handlers.ts` marks `/run` uninterruptible and its test pins
-"POST /run finishes opencode even when the client disconnects mid-run". After a server restart
-the row says aborted, opencode keeps driving, the client's `--max-jobs` slot stays held, and the
+"a dropped POST /run leaves the driver running until POST /abort stops it". After a server restart
+the row says aborted, ./driver keeps driving, the client's `--max-jobs` slot stays held, and the
 driver may still close the result. The worker comment "the HTTP wait is restored so SIGTERM
 aborts an in-flight job" describes the wait being aborted, not the job. Either POST `/abort` to
 the client before closing the row (best effort, one log line when it fails), or record a distinct

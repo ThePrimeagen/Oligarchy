@@ -22,7 +22,7 @@ const flags = {
   ),
   testResultId: Flag.string("test-result-id").pipe(
     Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("Test result id passed to intent start"),
+    Flag.withDescription("Test result this run closes"),
   ),
 };
 

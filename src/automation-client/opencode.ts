@@ -2,9 +2,8 @@ export const BIN = "opencode";
 
 // A run holds a dispatch slot for as long as it lives, and opencode sleeps out a provider's
 // retry-after in silence: a daily quota answers with the seconds to midnight, and `opencode run`
-// only exits on idle (anomalyco/opencode#40747). Drives have taken up to fifteen minutes,
-// diagnoses under four, and a mint installs Omarchy to the desktop before it saves; past the
-// ceiling the run is killed and the job says so.
+// only exits on idle (anomalyco/opencode#40747). Diagnoses have taken under four minutes; past
+// the ceiling the run is killed and the job says so.
 export const CEILING = "1.5 hours";
 
 // A headless run has nobody to answer a permission prompt. --auto approves the root session's

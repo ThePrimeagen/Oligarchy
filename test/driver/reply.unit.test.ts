@@ -54,6 +54,19 @@ describe("reply", () => {
     expect(command.success.args).toEqual(["send-keys", "--keys", "hello world"]);
   });
 
+  it("refuses ./ctrl and ./session: a diagnose is not this loop", () => {
+    for (const action of [
+      "./ctrl diagnose --verdict passed --summary ok --model openrouter/x",
+      "./session image --image-id 1 -o last.png",
+    ]) {
+      const refused = Reply.command(action);
+      expect(Result.isFailure(refused)).toBe(true);
+      if (Result.isFailure(refused)) {
+        expect(refused.failure.message).toContain("./ctrl");
+      }
+    }
+  });
+
   it("takes ./client-with-image as the bin", () => {
     const command = Reply.command(
       `./client-with-image get-image --agent-id OLI-1 --session-id ${SESSION}`,

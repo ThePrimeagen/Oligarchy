@@ -13,8 +13,8 @@ set -u
 ROOT=$(dirname "$0")
 SERVER_PORT=54321
 CLIENT_PORT=54322
-# Paid Muse: the server's own default is the free contributor model, which is rate-limited at a
-# handful of concurrent jobs.
+# The model every drive and diagnose runs as unless the caller passes one. Same id the
+# automation server uses when --model is omitted.
 DEFAULT_MODEL=openrouter/meta/muse-spark-1.3-contributor
 
 usage() {

@@ -142,10 +142,22 @@ const place = Effect.fn("place")(function* (
     return yield* Errors.AutomationClientError.make({ message: "no Linear ticket" });
   }
   const ticket = result.value.linearId;
-  const prompt =
+  const base =
     job.action === "diagnose"
       ? yield* Prompts.diagnose(ticket, job.resultId, model)
       : yield* Prompts.drive(ticket, model);
+  // A drive or mint whose definition is still there carries the mission. The model has no
+  // Linear tool, so the start line, instruction and proof have to be in the prompt.
+  const facts = job.action === "diagnose" ? Option.none() : yield* tests.driveFacts(job.resultId);
+  const prompt = Option.match(facts, {
+    onNone: () => base,
+    onSome: (fact) =>
+      `${base}\n\n${Prompts.missionText({
+        action: job.action === "mint" ? "mint" : "drive",
+        ticket,
+        ...fact,
+      })}`,
+  });
   // A drive resumes the run's iso. A mint boots fresh. A missing row reserves fresh rather
   // than failing a drive the definition lookup cannot see.
   const resume =
@@ -229,8 +241,8 @@ const judge = Effect.fn("judge")(function* (job: Automation.AutomationJobRow) {
   if (job.action === "diagnose") {
     return finished(job);
   }
-  // opencode exiting 0 with the result still open is an agent that quit early, and the job says
-  // so rather than reading as a run.
+  // The driver exiting 0 with the result still open is an agent that quit early, and the job
+  // says so rather than reading as a run. The harness closes the result on stop or save.
   const after = yield* tests.findResult(job.resultId);
   if (Option.isNone(after)) {
     return yield* Effect.die(new Error(`judge: result ${job.resultId} vanished during the drive`));
@@ -431,10 +443,10 @@ const abortAt = (url: string, ticket: string) =>
     }),
   );
 
-// A shutdown ended the /run wait, and OpenCode outlives a dropped /run, so the automation
+// A shutdown ended the /run wait, and ./driver outlives a dropped /run, so the automation
 // client is asked to stop the job before its row closes aborted. A 404 is an automation client
 // holding nothing for a job this process has running: reported, then closed aborted. One that
-// fails the stop or does not answer leaves OpenCode unconfirmed: reported, and the row stays
+// fails the stop or does not answer leaves the driver unconfirmed: reported, and the row stays
 // running, so the next startup stops it and fails it.
 const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
   job: Automation.AutomationJobRow,
@@ -462,7 +474,7 @@ const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
 // qemu server errored its session, which moves the ticket to Errored. Nothing is asked of its
 // automation client: whatever the driver still does after closing the result, it does on its
 // own. A diagnose's result was closed before it was queued, so it says nothing about the
-// diagnose. Every other row is stopped at the automation client that took it, so opencode is
+// diagnose. Every other row is stopped at the automation client that took it, so the driver is
 // killed or the reservation and its qemu slot are given back, then errored, and its ticket
 // moved to Errored with the reason. A 404 is an automation client holding nothing for the
 // ticket, which is reported. One that does not answer is reported and the job is errored
@@ -689,7 +701,13 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
                 agentId: placement.ticket,
               });
               return yield* Effect.interruptible(
-                AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
+                AutomationClient.run(
+                  placement.url,
+                  placement.prompt,
+                  placement.ticket,
+                  model,
+                  job.resultId,
+                ),
               ).pipe(
                 Effect.andThen(judge(job)),
                 Effect.matchCauseEffect({

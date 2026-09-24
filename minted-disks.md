@@ -68,8 +68,8 @@ lets every later session boot a throwaway copy of that disk in seconds.
   `prompts/mint-issue.html`, whose values include `PINNED_SERVER`; a failure part-way fails the run
   being created, names every ticket Linear did create, and leaves earlier servers' runs standing.
   `./client reserve --agent-id … [--server <url>]` is the driver's own reservation, pinned when
-  `--server` is given. ctrl's database layer provides `ServerStore`. opencode's ceiling is 45
-  minutes. `client.md` has `reserve`, `ctrl.md` has `mint`.
+  `--server` is given. ctrl's database layer provides `ServerStore`. The driver's ceiling is 1.5
+  hours. `client.md` has `reserve`, `ctrl.md` has `mint`.
 - A resume reserve (`ReserveAgentBody.resume`, the iso url) is placed only where the disk is.
   The proxy asks the least-busy live server first. A 200 lands there. A qemu 409 `setup needed:
   max-jobs is N` takes no slot; the proxy keeps looking. When no server that holds the disk can

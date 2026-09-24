@@ -276,7 +276,7 @@ export const reserveRun = HttpApiEndpoint.post("reserve", "/reserve", {
 export const run = HttpApiEndpoint.post("run", "/run", {
   payload: Contract.RunBody,
   success: Contract.Ok,
-  // 409: POST /abort ended the run. 500: opencode failed.
+  // 409: POST /abort ended the run. 500: the driver failed.
   error: [Errors.RunAbortedWire, Errors.RunFailedWire],
 });
 

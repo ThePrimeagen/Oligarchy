@@ -71,7 +71,7 @@ type Sample = {
 
 const missing = (path: string): Error => new Error(`unreadable process usage: ${path}`);
 
-// QEMU and OpenCode hold the RAM this Node process does not. Walk every task's children
+// QEMU and ./driver hold the RAM this Node process does not. Walk every task's children
 // file; a pid with no VmRSS is skipped for the sum, but we still walk its children so a
 // grandchild that answers is counted. A missing /proc is not a defect of us.
 const descendantsMemory = (fs: FileSystem.FileSystem, root: string): Effect.Effect<number> =>
@@ -126,7 +126,7 @@ export const procSource: Effect.Effect<Source, never, FileSystem.FileSystem> = E
           return yield* Effect.die(missing(statusPath));
         }
         // cpu stays this pid: children appear and vanish with each job, and lost ticks would
-        // report 0. Memory is the tree, so a qemu or opencode the dashboard cannot see is counted.
+        // report 0. Memory is the tree, so a qemu or driver the dashboard cannot see is counted.
         const childrenBytes = yield* descendantsMemory(fs, "self");
         return { cpuTicks, memoryBytes: memoryBytes + childrenBytes };
       });

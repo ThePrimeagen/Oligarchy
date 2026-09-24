@@ -11,6 +11,7 @@ const TOKEN = "test-token";
 const PROMPT = "drive OLI-42";
 const TICKET = "OLI-42";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
+const RESULT = "22222222-2222-4222-8222-222222222222";
 
 const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
@@ -26,7 +27,7 @@ const reserve = (
   );
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
-  AutomationClient.run(URL, PROMPT, TICKET, MODEL).pipe(
+  AutomationClient.run(URL, PROMPT, TICKET, MODEL, RESULT).pipe(
     Effect.provide(Layer.mergeAll(token, http)),
   );
 
@@ -98,7 +99,7 @@ describe("automation client POST /reserve unhappy path", () => {
 
 describe("automation client POST /run happy path", () => {
   it.effect(
-    "posts the prompt, the ticket and the model with the bearer token and succeeds on 200",
+    "posts the prompt, the ticket, the model and the result with the bearer token and succeeds on 200",
     () =>
       Effect.gen(function* () {
         const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
@@ -111,6 +112,7 @@ describe("automation client POST /run happy path", () => {
           prompt: PROMPT,
           ticket: TICKET,
           model: MODEL,
+          testResultId: RESULT,
         });
       }),
   );

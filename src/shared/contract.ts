@@ -192,6 +192,8 @@ export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/R
   prompt: Schema.String,
   ticket: Schema.NonEmptyString,
   model: Domain.ModelId,
+  // The harness passes this to intent start and to ./ctrl test start / test-results.
+  testResultId: Schema.NonEmptyString,
 }) {}
 
 // What an automation client is asked to hold for a ticket: a mint and a drive take a guest slot

@@ -40,7 +40,7 @@ const CliTestLayer = Layer.mergeAll(
   ),
 );
 
-const MUSE = "opencode/muse-spark-1.3-contributor-free";
+const MUSE = "openrouter/meta/muse-spark-1.3-contributor";
 const DEEPSEEK = "openrouter/deepseek/deepseek-v4.1-flash";
 
 // The server layer and the failure signal the command is built from.
@@ -111,7 +111,7 @@ describe("automation server command flags", () => {
     }),
   );
 
-  it.effect("defaults to port 54321 and the free Muse model, pings the database, and listens", () =>
+  it.effect("defaults to port 54321 and the Muse model, pings the database, and listens", () =>
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();

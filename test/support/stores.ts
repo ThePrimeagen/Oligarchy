@@ -535,6 +535,26 @@ export const fakeTestStore = (
     // Inner joins, as the real query: a result whose definition or run is missing is no row.
     definitionName: (id) =>
       Effect.sync(() => Option.fromUndefinedOr(definitions.find((row) => row.id === id)?.name)),
+    driveFacts: (resultId) =>
+      Effect.sync(() => {
+        const result = results.find((row) => sameId(row.id, resultId));
+        if (result === undefined) {
+          return Option.none();
+        }
+        const definition = definitions.find((row) => row.id === result.definitionId);
+        const run = runs.find((row) => sameId(row.id, result.runId));
+        if (definition === undefined || run === undefined) {
+          return Option.none();
+        }
+        return Option.some({
+          name: definition.name,
+          description: definition.description,
+          instruction: definition.instruction,
+          proof: definition.proof,
+          iso: run.iso,
+          serverUrl: run.serverUrl,
+        });
+      }),
     resumeIso: (resultId) =>
       Effect.sync(() => {
         const result = results.find((row) => sameId(row.id, resultId));
