@@ -10,5 +10,6 @@
     "chunk": "3 minutes"
   },
   "runCeiling": "1.5 hours",
+  "defaultRetry": "1 second",
   "stepLimit": 200
 }

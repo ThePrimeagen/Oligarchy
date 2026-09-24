@@ -39,6 +39,8 @@ export class AppConfig extends Schema.Class<AppConfig>("@oligarchy/harness/confi
   openRouterBaseUrl: Domain.ServerUrl,
   timeouts: Timeouts,
   runCeiling: PositiveDuration,
+  // A 429 or 5xx with no Retry-After waits this long, so a blip is not a tight loop.
+  defaultRetry: PositiveDuration,
   stepLimit: StepLimit,
 }) {}
 
@@ -49,6 +51,9 @@ const underCeiling = Schema.makeFilter((config: AppConfig) => {
   }
   if (Duration.Order(config.timeouts.chunk, config.runCeiling) >= 0) {
     return { path: ["timeouts", "chunk"], issue: "must be shorter than runCeiling" };
+  }
+  if (Duration.Order(config.defaultRetry, config.runCeiling) >= 0) {
+    return { path: ["defaultRetry"], issue: "must be shorter than runCeiling" };
   }
   return undefined;
 });

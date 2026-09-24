@@ -45,6 +45,7 @@ const run = (
     readonly header?: Duration.Duration;
     readonly chunk?: Duration.Duration;
     readonly ceiling?: Duration.Duration;
+    readonly defaultRetry?: Duration.Duration;
   },
 ) =>
   OpenRouter.complete({
@@ -58,6 +59,7 @@ const run = (
       chunk: overrides?.chunk ?? Duration.minutes(3),
     },
     runCeiling: overrides?.ceiling ?? Duration.hours(1.5),
+    defaultRetry: overrides?.defaultRetry ?? Duration.seconds(1),
     startedAtMillis: 0,
   }).pipe(Effect.provide(layer));
 
@@ -433,14 +435,14 @@ describe("OpenRouter client", () => {
       const error = yield* Effect.flip(run(recorder.layer));
       expect(error._tag).toBe("OpenRouterUnreachable");
       expect(error.message).toBe(
-        "openrouter: retry-after of 2h would pass the run ceiling: slow down",
+        "openrouter: retry delay of 2h would pass the run ceiling: slow down",
       );
       expect(recorder.requests).toHaveLength(1);
       expect(rendered(error)).not.toContain(TOKEN);
     }),
   );
 
-  it.effect("waits one second when a 429 has no retry-after", () =>
+  it.effect("waits the configured default when a 429 has no retry-after", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() => {
         if (recorder.requests.length === 1) {
@@ -448,14 +450,48 @@ describe("OpenRouter client", () => {
         }
         return doneTurn();
       });
-      const fiber = yield* Effect.forkScoped(run(recorder.layer));
-      yield* TestClock.adjust("999 millis");
+      const fiber = yield* Effect.forkScoped(
+        run(recorder.layer, { defaultRetry: Duration.seconds(2) }),
+      );
+      yield* TestClock.adjust("1 second");
       expect(recorder.requests).toHaveLength(1);
       expect(fiber.pollUnsafe()).toBeUndefined();
-      yield* TestClock.adjust("1 milli");
+      yield* TestClock.adjust("1 second");
       const turn = yield* Fiber.join(fiber);
       expect(turn.content).toBe("Locked.");
       expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a malformed retry-after waits the configured default", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => {
+        if (recorder.requests.length === 1) {
+          return jsonError(429, "slow down", "soon");
+        }
+        return doneTurn();
+      });
+      const fiber = yield* Effect.forkScoped(
+        run(recorder.layer, { defaultRetry: Duration.seconds(2) }),
+      );
+      yield* TestClock.adjust("1 second");
+      expect(recorder.requests).toHaveLength(1);
+      yield* TestClock.adjust("1 second");
+      const turn = yield* Fiber.join(fiber);
+      expect(turn.content).toBe("Locked.");
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("does not sleep a configured default that would pass the run ceiling", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => jsonError(503, "unavailable"));
+      const error = yield* Effect.flip(run(recorder.layer, { defaultRetry: Duration.hours(2) }));
+      expect(error._tag).toBe("OpenRouterUnreachable");
+      expect(error.message).toBe(
+        "openrouter: retry delay of 2h would pass the run ceiling: unavailable",
+      );
+      expect(recorder.requests).toHaveLength(1);
     }),
   );
 

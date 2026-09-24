@@ -12,7 +12,8 @@ import * as Errors from "../shared/errors.ts";
 // One streaming chat completion. The header timeout is the wait for a status line, the chunk
 // timeout the wait for the next body chunk: OpenRouter's own stream has neither, which is what
 // the three-minute OpenCode options were papering over. A 429 or 5xx is retried for the
-// Retry-After the response names, and not at all when that wait would run past the run ceiling.
+// Retry-After the response names, or the configured default when it names none, and not at all
+// when that wait would run past the run ceiling.
 // A 4xx other than 429 refused the request. Anything that never produced a completion left the
 // service unreachable.
 
@@ -29,12 +30,11 @@ export type Options = {
     readonly chunk: Duration.Duration;
   };
   readonly runCeiling: Duration.Duration;
+  // Wait when a 429 or 5xx names no Retry-After. oligarchy.json's defaultRetry.
+  readonly defaultRetry: Duration.Duration;
   // The run's start on the same clock, so a retry can be refused before the ceiling.
   readonly startedAtMillis: number;
 };
-
-// A 429 or 5xx with no Retry-After still waits, so a provider blip is not a tight loop.
-const DEFAULT_RETRY = Duration.seconds(1);
 
 // Internal: the attempt failed with a delay that still fits in the ceiling. The schedule sleeps
 // it. It does not leave `complete`.
@@ -127,10 +127,14 @@ const fromTransport = (error: HttpClientError.HttpClientError): Errors.OpenRoute
 };
 
 // Delta-seconds, or an HTTP-date. Zero and a date already past wait one millisecond, so a
-// stuck 429 still yields. A header that is neither falls back to the one-second wait.
-const retryDelay = (header: string | undefined, nowMillis: number): Duration.Duration => {
+// stuck 429 still yields. A missing or malformed header waits the configured default.
+const retryDelay = (
+  header: string | undefined,
+  nowMillis: number,
+  fallback: Duration.Duration,
+): Duration.Duration => {
   if (header === undefined) {
-    return DEFAULT_RETRY;
+    return fallback;
   }
   const trimmed = header.trim();
   if (/^\d+$/.test(trimmed)) {
@@ -138,7 +142,7 @@ const retryDelay = (header: string | undefined, nowMillis: number): Duration.Dur
   }
   const parsed = Date.parse(trimmed);
   if (Number.isNaN(parsed)) {
-    return DEFAULT_RETRY;
+    return fallback;
   }
   const millis = parsed - nowMillis;
   if (millis <= 0) {
@@ -344,14 +348,14 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       const text = yield* readText(response);
       const now = yield* Clock.currentTimeMillis;
       const header = Option.getOrUndefined(Headers.get(response.headers, "retry-after"));
-      const delay = retryDelay(header, now);
+      const delay = retryDelay(header, now, options.defaultRetry);
       const remaining = Duration.subtract(
         options.runCeiling,
         Duration.millis(now - options.startedAtMillis),
       );
       if (Duration.Order(delay, remaining) >= 0) {
         return yield* unreachable(
-          `openrouter: retry-after of ${Duration.format(delay)} would pass the run ceiling: ${refusalMessage(text)}`,
+          `openrouter: retry delay of ${Duration.format(delay)} would pass the run ceiling: ${refusalMessage(text)}`,
           null,
         );
       }
