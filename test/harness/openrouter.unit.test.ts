@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Duration, Effect, Fiber, Layer, Redacted, Stream } from "effect";
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
 import * as OpenRouter from "../../src/harness/openrouter.ts";
@@ -302,9 +302,84 @@ describe("OpenRouter client", () => {
     }),
   );
 
+  it.effect("interrupting a stalled stream stays an interruption", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const layer = Layer.succeed(HttpClient.HttpClient)(
+        HttpClient.make((request) => {
+          const response = HttpClientResponse.fromWeb(
+            request,
+            new Response(null, {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            }),
+          );
+          Object.defineProperty(response, "stream", {
+            configurable: true,
+            get: () =>
+              Stream.fromEffect(
+                Deferred.succeed(started, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.andThen(Effect.succeed(new Uint8Array())),
+                ),
+              ),
+          });
+          return Effect.succeed(response);
+        }),
+      );
+      const fiber = yield* Effect.forkScoped(run(layer));
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(fiber);
+      const exit = yield* Fiber.await(fiber);
+      expect(Exit.hasInterrupts(exit)).toBe(true);
+    }),
+  );
+
+  it.effect("a defect while reading the stream stays a defect", () =>
+    Effect.gen(function* () {
+      const layer = Layer.succeed(HttpClient.HttpClient)(
+        HttpClient.make((request) => {
+          const response = HttpClientResponse.fromWeb(
+            request,
+            new Response(null, {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            }),
+          );
+          Object.defineProperty(response, "stream", {
+            configurable: true,
+            get: () => Stream.die("boom"),
+          });
+          return Effect.succeed(response);
+        }),
+      );
+      const exit = yield* Effect.exit(run(layer));
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+    }),
+  );
+
   it.effect("a stream that closes before the completion is unreachable", () =>
     Effect.gen(function* () {
       const layer = FakeHttp.respondWith(() => sse([frame(choice({ content: "partial" }, null))]));
+      const error = yield* Effect.flip(run(layer));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterUnreachable",
+        message: "openrouter: stream ended before the completion",
+      });
+    }),
+  );
+
+  it.effect("a stop with no text is the model ending the turn", () =>
+    Effect.gen(function* () {
+      const layer = FakeHttp.respondWith(() => sse([frame(choice({}, "stop")), "[DONE]"]));
+      const turn = yield* run(layer);
+      expect(turn).toEqual({ content: null, toolCalls: [] });
+    }),
+  );
+
+  it.effect("a stream that is only the done marker is not a completion", () =>
+    Effect.gen(function* () {
+      const layer = FakeHttp.respondWith(() => sse(["[DONE]"]));
       const error = yield* Effect.flip(run(layer));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",

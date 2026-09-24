@@ -1,16 +1,4 @@
-import {
-  Cause,
-  Clock,
-  Duration,
-  Effect,
-  Exit,
-  Option,
-  Pull,
-  Redacted,
-  Schedule,
-  Schema,
-  Stream,
-} from "effect";
+import { Clock, Duration, Effect, Option, Pull, Redacted, Schedule, Schema, Stream } from "effect";
 import * as Headers from "effect/unstable/http/Headers";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type * as HttpClientError from "effect/unstable/http/HttpClientError";
@@ -183,6 +171,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
   const readEvents = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
       let content: string | null = null;
+      let sawChoice = false;
       let sawTerminal = false;
 
       const callsByIndex = new Map<number, PartialCall>();
@@ -224,6 +213,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
           if (choice === undefined) {
             return yield* Effect.void;
           }
+          sawChoice = true;
           if (choice.error !== undefined) {
             const payload = yield* decodeErrorPayload(choice.error).pipe(Effect.mapError(invalid));
             return yield* failPayload(payload);
@@ -254,6 +244,8 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       // Stream.timeout does not see the test clock: it samples Clock from the stream's
       // parent and sleeps against a different one. Each pull is timed with Effect.timeout,
       // the same primitive as the header timeout, so a gap between chunks fails on either clock.
+      // Done is the stream ending. A typed pull error is a broken body. A defect or an
+      // interruption is left alone, so cancelling the run does not become an unreachable service.
       // A chat completion does not use the SSE retry field; a directive is a broken stream.
       const decoder = new TextDecoder();
       const queued: Array<Sse.Event | Sse.Retry> = [];
@@ -294,19 +286,16 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
                 duration: options.timeouts.chunk,
                 orElse: () => Effect.fail(chunkTimeout),
               }),
-              Effect.exit,
+              Effect.map((bytes) => ({ _tag: "chunk" as const, bytes })),
+              Pull.catchDone(() => Effect.succeed({ _tag: "end" as const })),
+              Effect.mapError((error) =>
+                error._tag === "OpenRouterUnreachable" ? error : invalid(error),
+              ),
             );
-            if (Exit.isFailure(step)) {
-              if (Pull.isDoneCause(step.cause)) {
-                return yield* Effect.void;
-              }
-              const failed = Cause.findErrorOption(step.cause);
-              if (Option.isSome(failed) && failed.value._tag === "OpenRouterUnreachable") {
-                return yield* failed.value;
-              }
-              return yield* invalid(Cause.squash(step.cause));
+            if (step._tag === "end") {
+              return yield* Effect.void;
             }
-            for (const bytes of step.value) {
+            for (const bytes of step.bytes) {
               yield* feed(decoder.decode(bytes, { stream: true }));
             }
             if (sawTerminal) {
@@ -321,7 +310,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         }),
       );
 
-      if (!sawTerminal) {
+      if (!sawTerminal || !sawChoice) {
         return yield* unreachable("openrouter: stream ended before the completion", null);
       }
 
