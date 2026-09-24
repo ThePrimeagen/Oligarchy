@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Redacted } from "effect";
+import { Deferred, Effect, Fiber, Layer, Redacted, Stdio } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
@@ -56,6 +56,7 @@ const serve = (fixed: Fixture, outbound: Layer.Layer<HttpClient.HttpClient> = Fa
         SecretLive,
         TokenLive,
         outbound,
+        Stdio.layerTest({}),
       ),
     ),
     Layer.provide(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),
@@ -890,6 +891,37 @@ describe("POST /abort refusals", () => {
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.stores.automation.jobs[0]?.status).toBe("running");
     }),
+  );
+
+  it.effect(
+    "a client that never answers /abort is given up after ten seconds, and the job stays running",
+    () =>
+      Effect.gen(function* () {
+        const asked = yield* Deferred.make<void>();
+        const outbound = FakeHttp.recordRequests(() =>
+          Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+        );
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const pending = yield* abort(http).pipe(Effect.forkChild);
+          yield* Deferred.await(asked);
+          yield* TestClock.adjust("9 seconds");
+          expect(pending.pollUnsafe()).toBeUndefined();
+          yield* TestClock.adjust("1 second");
+          const response = yield* Fiber.join(pending);
+          expect(response.status).toBe(500);
+          expect(yield* response.json).toEqual({
+            error: `automation client: POST ${CLIENT_URL}/abort failed: no answer within 10 seconds`,
+          });
+        }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+        expect(fixed.stores.automation.jobs[0]).toMatchObject({
+          status: "running",
+          finishedAt: null,
+        });
+      }),
   );
 
   it.effect("500 when the client fails, and the job stays running", () =>

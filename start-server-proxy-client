@@ -3,8 +3,9 @@
 #
 # The QEMU half of the fleet on this machine: one qemu reverse proxy on 127.0.0.1:55555 (what the
 # tunnel's server hostname points at) and one qemu server on 127.0.0.1:42069 that runs <max-jobs>
-# sessions at once, both in the foreground of this shell. Ctrl-C or a TERM stops both; one of them
-# exiting stops the other. Exit 0 when both ended cleanly, 1 otherwise.
+# sessions at once, both in the foreground of this shell. Ctrl-C or a TERM asks both to stop;
+# another one kills them. One of them exiting stops the other. Exit 0 when both ended cleanly,
+# 1 otherwise.
 #
 # Runs from the current directory, as ./qemu-server does: its .env fills what the environment
 # lacks. The iso cache and minted disks go where --data-dir defaults (OLIGARCHY_DATA_DIR, else
@@ -38,17 +39,41 @@ PROXY=$!
   --port "$SERVER_PORT" --url "http://127.0.0.1:$SERVER_PORT" &
 SERVER=$!
 
-stop() {
-  kill -TERM "$PROXY" "$SERVER" 2>/dev/null
+# The first signal asks. A second one kills: a child waiting on a response must not hold this
+# shell, and ignoring the signal would make that second Ctrl-C do nothing.
+asked=0
+request_stop() {
+  asked=1
+  kill -TERM "$PROXY" "$SERVER" 2>/dev/null || true
 }
-trap stop INT TERM
+on_signal() {
+  if [ "$asked" -eq 0 ]; then
+    request_stop
+  else
+    kill -KILL "$PROXY" "$SERVER" 2>/dev/null || true
+  fi
+}
+trap on_signal INT TERM
 # Returns when the first of the two exits, or at once when a signal arrives (its trap has run).
-wait -n "$PROXY" "$SERVER"
-# One is down or a signal came: stop the other and wait for both, undisturbed by a second signal.
-trap '' INT TERM
-stop
-wait "$PROXY"
+wait -n "$PROXY" "$SERVER" || true
+if [ "$asked" -eq 0 ]; then
+  request_stop
+fi
+reap() {
+  local code=0
+  while kill -0 "$1" 2>/dev/null; do
+    wait "$1"
+    code=$?
+  done
+  wait "$1" 2>/dev/null
+  local reaped=$?
+  if [ "$reaped" -ne 127 ]; then
+    code=$reaped
+  fi
+  return "$code"
+}
+reap "$PROXY"
 PROXY_CODE=$?
-wait "$SERVER"
+reap "$SERVER"
 SERVER_CODE=$?
 [ "$PROXY_CODE" -eq 0 ] && [ "$SERVER_CODE" -eq 0 ]

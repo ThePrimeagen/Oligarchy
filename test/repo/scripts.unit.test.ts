@@ -219,6 +219,18 @@ describe(".github/workflows/migrations.yml", () => {
   });
 });
 
+describe("fleet starters", () => {
+  // The first signal asks. A child waiting on a response must not make the second do nothing.
+  it("a second signal kills both children", () => {
+    for (const name of ["start-automation-server-client", "start-server-proxy-client"]) {
+      const script = read(name);
+      expect(script, name).toContain("kill -TERM");
+      expect(script, name).toContain("kill -KILL");
+      expect(script, name).not.toContain("trap '' INT TERM");
+    }
+  });
+});
+
 describe("tsconfig.json", () => {
   const { compilerOptions } = decodeTsConfig(read("tsconfig.json"));
 

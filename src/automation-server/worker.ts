@@ -10,12 +10,12 @@ import * as ExternalFailure from "../external-failure.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
+import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
 import * as Prompts from "./prompts.ts";
 import * as Ready from "./ready.ts";
 
 const DISPATCH_INTERVAL = "5 seconds";
-const ABORT_TIMEOUT = "10 seconds";
 
 const isDatabaseError = Schema.is(Errors.DatabaseError);
 
@@ -443,18 +443,11 @@ const closeJob = Effect.fn("closeJob")(function* (
   return true;
 });
 
-// Ten seconds: an automation client that never answers must not hold dispatch. The timeout
-// races on its own fibers, so it lands inside the tick's uninterruptible region too.
+// Ten seconds, on screen as a countdown: an automation client that never answers must not
+// hold dispatch. The timeout races on its own fibers, so it lands inside the tick's
+// uninterruptible region too.
 const abortAt = (url: string, ticket: string) =>
-  AutomationClient.abort(url, ticket).pipe(
-    Effect.timeoutOrElse({
-      duration: ABORT_TIMEOUT,
-      orElse: () =>
-        Errors.AutomationClientError.make({
-          message: `automation client: POST ${url}/abort failed: no answer within ${ABORT_TIMEOUT}`,
-        }),
-    }),
-  );
+  AbortWait.within(url, AutomationClient.abort(url, ticket));
 
 // A shutdown ended the /run wait, and ./driver outlives a dropped /run, so the automation
 // client is asked to stop the job before its row closes aborted. A 404 is an automation client

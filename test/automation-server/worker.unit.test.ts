@@ -11,6 +11,7 @@ import {
   Option,
   Redacted,
   Scope,
+  Stdio,
 } from "effect";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -259,6 +260,7 @@ const layers = (
     setupLayer(fixed.pins),
     token,
     fs,
+    Stdio.layerTest({}),
   ).pipe(Layer.provideMerge(http));
 
 const start = (

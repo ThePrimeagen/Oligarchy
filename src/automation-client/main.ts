@@ -67,6 +67,10 @@ const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Opt
         onNone: () => Effect.void,
         onSome: (announced) => Heartbeat.announce(announced, name),
       });
+      // Registered last so it runs first: the drivers die before the listener waits on them.
+      // A /run handler is uninterruptible, so a signal alone would wait out the driver.
+      const sessions = yield* Sessions.Sessions;
+      yield* Effect.addFinalizer(() => sessions.shutdown());
     }),
   ).pipe(
     Layer.provide(

@@ -412,6 +412,141 @@ describe("Sessions.abort happy path", () => {
   );
 });
 
+describe("Sessions.shutdown", () => {
+  it.effect("kills every running driver and gives an unused reservation back", () => {
+    const relinquished: Array<string> = [];
+    const relinquishQemu: Sessions.RelinquishQemu = (ticket) =>
+      Effect.sync(() => {
+        relinquished.push(ticket);
+      });
+    const spawner = FakeSpawner.fakeSpawner(() => ({}));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "drive");
+      yield* sessions.reserve(OTHER, "drive");
+      const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work", RESULT));
+      for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(spawner.spawned).toHaveLength(1);
+      yield* sessions.shutdown();
+      expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
+      expect(relinquished).toEqual([OTHER]);
+      expect(yield* sessions.jobs).toBe(0);
+      const error = yield* Effect.flip(Fiber.join(running));
+      expect(error).toMatchObject({ _tag: "RunAborted", agentId: TICKET });
+      const refused = yield* Effect.flip(sessions.reserve("OLI-7", "drive"));
+      expect(refused).toMatchObject({ _tag: "AtCapacity", message: "shutting down" });
+    }).pipe(Effect.provide(layer(spawner, 2, qemuOk(), relinquishQemu)));
+  });
+
+  it.effect(
+    "a reserve whose guest arrives after shutdown gives the guest back and is refused",
+    () =>
+      Effect.gen(function* () {
+        const hold = yield* Deferred.make<void>();
+        const asked = yield* Deferred.make<void>();
+        const relinquished: Array<string> = [];
+        const reserveQemu: Sessions.ReserveQemu = () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(asked, undefined);
+            yield* Deferred.await(hold);
+          });
+        const relinquishQemu: Sessions.RelinquishQemu = (ticket) =>
+          Effect.sync(() => {
+            relinquished.push(ticket);
+          });
+        const spawner = FakeSpawner.fakeSpawner(() => ({}));
+        yield* Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const reserving = yield* Effect.forkChild(sessions.reserve(TICKET, "drive"));
+          yield* Deferred.await(asked);
+          yield* sessions.shutdown();
+          yield* Deferred.succeed(hold, undefined);
+          const refused = yield* Effect.flip(Fiber.join(reserving));
+          expect(refused).toMatchObject({ _tag: "AtCapacity", message: "shutting down" });
+          expect(relinquished).toEqual([TICKET]);
+          expect(spawner.spawned).toEqual([]);
+          expect(yield* sessions.jobs).toBe(0);
+        }).pipe(Effect.provide(layer(spawner, 1, reserveQemu, relinquishQemu)));
+      }),
+  );
+
+  it.effect(
+    "a guest that cannot be given back after shutdown is logged, and the reserve is still refused",
+    () =>
+      Effect.gen(function* () {
+        const hold = yield* Deferred.make<void>();
+        const asked = yield* Deferred.make<void>();
+        const failure = Errors.Internal.make({
+          cause: new Error("relinquish refused"),
+          agentId: TICKET,
+        });
+        const log = FakeLog.fakeLog();
+        const reserveQemu: Sessions.ReserveQemu = () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(asked, undefined);
+            yield* Deferred.await(hold);
+          });
+        const relinquishQemu: Sessions.RelinquishQemu = () => Effect.fail(failure);
+        const spawner = FakeSpawner.fakeSpawner(() => ({}));
+        yield* Effect.gen(function* () {
+          const sessions = yield* Sessions.Sessions;
+          const reserving = yield* Effect.forkChild(sessions.reserve(TICKET, "drive"));
+          yield* Deferred.await(asked);
+          yield* sessions.shutdown();
+          yield* Deferred.succeed(hold, undefined);
+          const refused = yield* Effect.flip(Fiber.join(reserving));
+          expect(refused).toMatchObject({ _tag: "AtCapacity", message: "shutting down" });
+          expect(log.lines).toEqual([
+            expect.objectContaining({
+              level: "error",
+              text: "relinquish failed: internal error: relinquish refused",
+              agentId: TICKET,
+              cause: failure,
+            }),
+          ]);
+          expect(yield* sessions.jobs).toBe(0);
+        }).pipe(Effect.provide(layer(spawner, 1, reserveQemu, relinquishQemu, log)));
+      }),
+  );
+
+  it.effect(
+    "a driver that cannot be killed is logged, and the other driver is still stopped",
+    () => {
+      const log = FakeLog.fakeLog();
+      const spawner = FakeSpawner.fakeSpawner((_command, args) =>
+        args.includes("stuck") ? { killError: "kill EPERM" } : {},
+      );
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        yield* sessions.reserve(OTHER, "drive");
+        const stuck = yield* Effect.forkChild(sessions.run(TICKET, "stuck", RESULT));
+        const other = yield* Effect.forkChild(sessions.run(OTHER, "other", RESULT));
+        for (let i = 0; i < 100 && spawner.spawned.length < 2; i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(spawner.spawned).toHaveLength(2);
+        yield* sessions.shutdown();
+        expect(spawner.spawned[1]?.kills).toEqual(["SIGTERM"]);
+        expect(yield* spawner.spawned[0]?.isRunning ?? Effect.succeed(false)).toBe(true);
+        expect(log.lines).toEqual([
+          expect.objectContaining({
+            level: "error",
+            agentId: TICKET,
+            text: expect.stringContaining("shutdown stop failed"),
+          }),
+        ]);
+        expect(log.lines[0]?.cause).toBeDefined();
+        yield* Fiber.interrupt(stuck);
+        yield* spawner.spawned[1]?.exit(0) ?? Effect.void;
+        yield* Effect.exit(Fiber.join(other));
+      }).pipe(Effect.provide(layer(spawner, 2, qemuOk(), qemuRelinquishOk(), log)));
+    },
+  );
+});
+
 describe("Sessions.abort unhappy path", () => {
   it.effect(
     "a relinquish that fails after aborting a reservation is logged and the slot is free",
