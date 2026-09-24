@@ -113,18 +113,35 @@ const events = (log: ReadonlyArray<string>): ReadonlyArray<DriverLog.Event> =>
 const fields = (value: unknown): value is { readonly [key: string]: unknown } =>
   typeof value === "object" && value !== null;
 
-const userText = (body: string | undefined): string => {
+const messageText = (body: string | undefined, role: string): string => {
   const value: unknown = JSON.parse(body ?? "{}");
   if (!fields(value) || !Array.isArray(value.messages)) {
     return "";
   }
   for (const message of value.messages) {
-    if (!fields(message) || message.role !== "user" || typeof message.content !== "string") {
+    if (!fields(message) || message.role !== role || typeof message.content !== "string") {
       continue;
     }
     return message.content;
   }
   return "";
+};
+
+const userText = (body: string | undefined): string => messageText(body, "user");
+
+const systemText = (body: string | undefined): string => messageText(body, "system");
+
+// The guide also mentions intents and reservations. The past steps are the decisions.
+const reasons = (body: string | undefined): string => {
+  const system = systemText(body);
+  const marker = "Past steps:\n";
+  const at = system.indexOf(marker);
+  if (at === -1) {
+    return "";
+  }
+  const from = at + marker.length;
+  const end = system.indexOf("</progress>", from);
+  return system.slice(from, end === -1 ? undefined : end).trim();
 };
 
 const denied = PlatformError.systemError({
@@ -142,13 +159,14 @@ const run = (
   script: Script,
   log: Array<string>,
   write?: Effect.Effect<void, PlatformError.PlatformError>,
+  prompt = "Lock the screen.",
 ) =>
   Effect.gen(function* () {
     const parsed = yield* app;
     const spawner = FakeSpawner.fakeSpawner(script);
     const stoppedRun = yield* Loop.run({
       model: MODEL,
-      prompt: "Lock the screen.",
+      prompt,
       testResultId: RESULT,
       debugLog: LOG,
       config: parsed,
@@ -210,10 +228,20 @@ describe("driver loop", () => {
             { role: "user", content: "Lock the screen." },
           ],
         });
-        expect(request.messages[0].content).toContain("./client start");
-        const again = userText(recorder.requests[1]?.body);
-        expect(again).toContain("Lock the screen.");
-        expect(again).toContain("lock the screen: typed");
+        const system = request.messages[0].content;
+        expect(system).toContain("./client start");
+        expect(system).toContain("This is step 1.");
+        expect(system).toContain("<def>\nLock the screen.\n</def>");
+        expect(system).toContain("<proof>\nnone\n</proof>");
+        expect(system).toContain("Past steps:\nnone");
+        expect(system).toContain("<context>");
+        expect(system).toContain("Never take more than two screenshots in a row.");
+        expect(system).not.toContain("{{");
+        expect(reasons(first?.body)).toBe("none");
+        expect(userText(recorder.requests[1]?.body)).toBe("Lock the screen.");
+        const again = systemText(recorder.requests[1]?.body);
+        expect(again).toContain("This is step 2.");
+        expect(reasons(recorder.requests[1]?.body)).toBe("lock the screen: typed");
         expect(JSON.parse(recorder.requests[1]?.body ?? "{}")).toMatchObject({
           messages: [{ role: "system" }, { role: "user" }],
         });
@@ -271,7 +299,7 @@ describe("driver loop", () => {
         kind: "running",
         text: SESSION,
       });
-      expect(userText(recorder.requests[1]?.body)).toContain(SESSION);
+      expect(reasons(recorder.requests[1]?.body)).toContain(SESSION);
     }),
   );
 
@@ -318,7 +346,7 @@ describe("driver loop", () => {
       );
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
       expect(events(log).some((event) => event.kind === "running")).toBe(false);
-      expect(userText(recorder.requests[1]?.body)).toContain("no reservation");
+      expect(reasons(recorder.requests[1]?.body)).toContain("no reservation");
     }),
   );
 
@@ -343,8 +371,8 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client", "./ctrl"]);
-      expect(userText(recorder.requests[1]?.body)).toContain(SESSION);
-      expect(userText(recorder.requests[1]?.body)).toContain("not pending");
+      expect(reasons(recorder.requests[1]?.body)).toContain(SESSION);
+      expect(reasons(recorder.requests[1]?.body)).toContain("not pending");
       expect(events(log).find((event) => event.kind === "running")?.text).toBe(SESSION);
     }),
   );
@@ -369,8 +397,8 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
-      expect(userText(recorder.requests[1]?.body)).toContain("./ctrl");
-      expect(userText(recorder.requests[1]?.body)).toContain("ENOENT");
+      expect(reasons(recorder.requests[1]?.body)).toContain("./ctrl");
+      expect(reasons(recorder.requests[1]?.body)).toContain("ENOENT");
     }),
   );
 
@@ -385,7 +413,7 @@ describe("driver loop", () => {
       const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
       expect(spawner.spawned).toEqual([]);
       expect(events(log).some((event) => event.kind === "refusal")).toBe(true);
-      expect(userText(recorder.requests[1]?.body)).toContain("intent");
+      expect(reasons(recorder.requests[1]?.body)).toContain("intent");
     }),
   );
 
@@ -539,8 +567,8 @@ describe("driver loop", () => {
         log,
       );
       expect(spawner.spawned).toHaveLength(1);
-      expect(userText(recorder.requests[1]?.body)).toContain("already running");
-      expect(userText(recorder.requests[1]?.body)).not.toContain("typed");
+      expect(reasons(recorder.requests[1]?.body)).toContain("already running");
+      expect(reasons(recorder.requests[1]?.body)).not.toContain("typed");
     }),
   );
 
@@ -596,8 +624,8 @@ describe("driver loop", () => {
         "send-keys",
         "intent",
       ]);
-      expect(userText(recorder.requests[1]?.body)).toContain("typed");
-      expect(userText(recorder.requests[1]?.body)).toContain("no intent open");
+      expect(reasons(recorder.requests[1]?.body)).toContain("typed");
+      expect(reasons(recorder.requests[1]?.body)).toContain("no intent open");
     }),
   );
 
@@ -614,10 +642,56 @@ describe("driver loop", () => {
         () => ({ exitCode: 0, stdout: `${"x".repeat(2_000)}\n` }),
         [],
       );
-      const again = userText(recorder.requests[1]?.body);
+      const again = reasons(recorder.requests[1]?.body);
       expect(again).toContain("x".repeat(100));
       expect(again).not.toContain("x".repeat(501));
+      expect(userText(recorder.requests[1]?.body)).toBe("Lock the screen.");
     }),
+  );
+
+  it.effect("fills the system prompt from the task's instruction and proof", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => done());
+      const task = [
+        "<mission>",
+        "<name>lock</name>",
+        "<instruction>Lock it from the menu.</instruction>",
+        "<proof>The screen is locked.</proof>",
+        "</mission>",
+      ].join("\n");
+      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], undefined, task);
+      const system = systemText(recorder.requests[0]?.body);
+      expect(system).toContain("<def>\nLock it from the menu.\n</def>");
+      expect(system).toContain("<proof>\nThe screen is locked.\n</proof>");
+      expect(system).not.toContain("<name>lock</name>");
+      expect(system).not.toContain("{{");
+      expect(userText(recorder.requests[0]?.body)).toBe(task);
+    }),
+  );
+
+  it.effect(
+    "a task with an instruction and no proof fails before the model is asked (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = FakeHttp.recordRequests(() => done());
+        const log: Array<string> = [];
+        const error = yield* Effect.flip(
+          run(
+            config(),
+            recorder.layer,
+            () => ({ exitCode: 0 }),
+            log,
+            undefined,
+            "<instruction>lock it</instruction>",
+          ),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("proof");
+        }
+        expect(recorder.requests).toEqual([]);
+        expect(events(log).some((event) => event.kind === "failure")).toBe(true);
+      }),
   );
 
   it.effect("Done leaves the loop and runs nothing", () =>

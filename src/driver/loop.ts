@@ -126,13 +126,6 @@ const decision = (did: string, outcome: string): string => {
   return `${did}: ${rest}`;
 };
 
-const ask = (prompt: string, decisions: ReadonlyArray<string>): string => {
-  if (decisions.length === 0) {
-    return prompt;
-  }
-  return `${prompt}\n\n${decisions.join("\n")}`;
-};
-
 // save keeps a finished install. succeeded and completed are a passed drive.
 // Anything else the session was stopped as is a failed result.
 const verdictOf = (
@@ -168,15 +161,31 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }
 
     const step = turns + 1;
+    const read = Prompt.mission(input.prompt);
+    if (Result.isFailure(read)) {
+      yield* log(input.debugLog, step, "failure", read.failure.message);
+      return yield* Effect.fail(commandError(read.failure.message));
+    }
+    const reasons = decisions.length === 0 ? "none" : decisions.join("\n");
+    const rendered = Prompt.render({
+      TEST_DEFINITION: read.success.definition,
+      TEST_PROOF: read.success.proof,
+      STEP: String(step),
+      REASONS: reasons,
+      CLIENT_TOOLS: Tools.clientGuide.trimEnd(),
+    });
+    if (Result.isFailure(rendered)) {
+      yield* log(input.debugLog, step, "failure", rendered.failure.message);
+      return yield* Effect.fail(commandError(rendered.failure.message));
+    }
     yield* log(input.debugLog, step, "request", input.model);
-    const system = `${Prompt.text}\n\n${Tools.clientGuide}`;
     const turn = yield* OpenRouter.complete({
       baseUrl: input.config.openRouterBaseUrl,
       token: input.token,
       model: input.model,
       messages: [
-        { role: "system", content: system },
-        { role: "user", content: ask(input.prompt, decisions) },
+        { role: "system", content: rendered.success },
+        { role: "user", content: input.prompt },
       ],
       tools: [],
       timeouts: input.config.timeouts,
