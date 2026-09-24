@@ -20,13 +20,13 @@ const flags = {
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("The user prompt"),
   ),
+  agentId: Flag.string("agent-id").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.withDescription("Ticket the harness looks up and passes as --agent-id"),
+  ),
   debugLog: Flag.string("debug-log").pipe(
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("File that receives one JSON line per step"),
-  ),
-  testResultId: Flag.string("test-result-id").pipe(
-    Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("Test result this run closes"),
   ),
 };
 
@@ -43,7 +43,7 @@ export const makeDriverCommand = <E, R>(
       const stopped = yield* run({
         model: input.action === "mint" ? config.models.mint : config.models.drive,
         prompt: input.prompt,
-        testResultId: input.testResultId,
+        agentId: input.agentId,
         debugLog: input.debugLog,
         config,
         token,
@@ -52,7 +52,7 @@ export const makeDriverCommand = <E, R>(
     }),
   ).pipe(
     Command.withDescription(
-      "Run the harness loop for one prompt: the model is oligarchy.json's for --action; each reply is complete or continue, what the agent did, and the action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
+      "Run the harness loop for one prompt: the model is oligarchy.json's for --action; the run is looked up from --agent-id; the harness starts the guest and stops it; each reply is one tool call, client or Done",
     ),
     EnvFile.withEnvFile,
   );

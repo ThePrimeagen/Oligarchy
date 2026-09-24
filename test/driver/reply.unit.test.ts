@@ -2,30 +2,40 @@ import { describe, expect, it } from "vitest";
 import { Result } from "effect";
 import * as Reply from "../../src/driver/reply.ts";
 
-const SESSION = "6f1c8c2e-1b2a-4d3e-8f4a-9c0b1a2d3e4f";
+const line = (body: unknown): string => JSON.stringify(body);
 
-const text = (status: string, did: string, action: string): string =>
-  `${status}\n${did}\n${action}`;
+const client = (reason: string, args: ReadonlyArray<string>): string =>
+  line({ name: "client", arguments: { reason, args } });
+
+const done = (): string => line({ name: "Done", arguments: {} });
+
+const parsedClient = (text: string): Extract<Reply.Reply, { readonly _tag: "client" }> => {
+  const parsed = Reply.parse(text);
+  expect(Result.isSuccess(parsed)).toBe(true);
+  if (Result.isFailure(parsed) || parsed.success._tag !== "client") {
+    expect.fail("client tool call did not parse");
+  }
+  return parsed.success;
+};
 
 describe("reply", () => {
-  it("reads continue, what the agent did, and the next action", () => {
-    const parsed = Reply.parse(
-      text(
-        "continue",
-        "booted the guest",
-        `start --agent-id OLI-1 --server-url http://127.0.0.1:9 --resume`,
-      ),
+  it("reads one line: a client tool call, and runs its args", () => {
+    const parsed = parsedClient(
+      client("booted the guest", [
+        "start",
+        "--agent-id",
+        "OLI-1",
+        "--server-url",
+        "http://127.0.0.1:9",
+        "--resume",
+      ]),
     );
-    expect(Result.isSuccess(parsed)).toBe(true);
-    if (Result.isFailure(parsed)) {
-      return;
-    }
-    expect(parsed.success).toEqual({
-      status: "continue",
-      did: "booted the guest",
-      action: "start --agent-id OLI-1 --server-url http://127.0.0.1:9 --resume",
+    expect(parsed).toEqual({
+      _tag: "client",
+      reason: "booted the guest",
+      args: ["start", "--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9", "--resume"],
     });
-    const command = Reply.command(parsed.success.action);
+    const command = Reply.command(parsed);
     expect(Result.isSuccess(command)).toBe(true);
     if (Result.isFailure(command)) {
       return;
@@ -36,84 +46,108 @@ describe("reply", () => {
     });
   });
 
-  it("reads complete as the action taken, and keeps a quoted argument whole", () => {
-    const parsed = Reply.parse(
-      text("complete", "locked the screen", 'send-keys --keys "hello world"'),
-    );
-    expect(Result.isSuccess(parsed)).toBe(true);
-    if (Result.isFailure(parsed)) {
+  it("reads Done as leaving the loop, and keeps a quoted argument whole", () => {
+    const stopped = Reply.parse(`${done()}\n`);
+    expect(Result.isSuccess(stopped)).toBe(true);
+    if (Result.isFailure(stopped)) {
       return;
     }
-    expect(parsed.success.status).toBe("complete");
-    expect(parsed.success.did).toBe("locked the screen");
-    const command = Reply.command(parsed.success.action);
+    expect(stopped.success).toEqual({ _tag: "Done" });
+
+    const parsed = parsedClient(
+      `  ${client("locked the screen", ["send-keys", "--keys", "hello world"])}  `,
+    );
+    expect(parsed.reason).toBe("locked the screen");
+    const command = Reply.command(parsed);
     expect(Result.isSuccess(command)).toBe(true);
     if (Result.isFailure(command)) {
       return;
     }
     expect(command.success.args).toEqual(["send-keys", "--keys", "hello world"]);
-  });
-
-  it("strips a leading ./client and leaves any other token in the arguments", () => {
-    const client = Reply.command(`./client get-image --agent-id OLI-1 --session-id ${SESSION}`);
-    expect(Result.isSuccess(client)).toBe(true);
-    if (Result.isFailure(client)) {
-      return;
-    }
-    expect(client.success).toEqual({
-      bin: "./client",
-      args: ["get-image", "--agent-id", "OLI-1", "--session-id", SESSION],
-    });
-    const wrapped = Reply.command(
-      `./client-with-image get-image --agent-id OLI-1 --session-id ${SESSION}`,
+    const quoted = Reply.command(
+      parsedClient(client("typed", ["send-keys", "--keys", 'say "hi"'])),
     );
-    expect(Result.isSuccess(wrapped)).toBe(true);
-    if (Result.isFailure(wrapped)) {
+    expect(Result.isSuccess(quoted)).toBe(true);
+    if (Result.isFailure(quoted)) {
       return;
     }
-    expect(wrapped.success.bin).toBe("./client");
-    expect(wrapped.success.args[0]).toBe("./client-with-image");
+    expect(quoted.success.args[quoted.success.args.length - 1]).toBe('say "hi"');
   });
 
-  it("refuses ./ctrl and ./session: a diagnose is not this loop", () => {
-    for (const action of [
-      "./ctrl diagnose --verdict passed --summary ok --model openrouter/x",
-      "./session image --image-id 1 -o last.png",
-    ]) {
-      const refused = Reply.command(action);
-      expect(Result.isFailure(refused)).toBe(true);
-      if (Result.isFailure(refused)) {
-        expect(refused.failure.message).toContain("./ctrl");
+  it("refuses a reply that is not one tool call of the expected shape", () => {
+    const cases = [
+      "continue\nbooted the guest\nstart",
+      `${client("boot", ["start"])}\n${done()}`,
+      "hello",
+      "",
+      line({
+        name: "client",
+        arguments: { reason: "boot", args: ["start"], token: "secret-token" },
+      }),
+      line({ name: "client", arguments: { reason: "boot", args: ["start"], withImage: true } }),
+      line({ name: "bash", arguments: { args: ["ls"] } }),
+      line({ name: "client", arguments: { reason: "   ", args: ["start"] } }),
+      line({ name: "client", arguments: { reason: "boot", args: [] } }),
+      line({ name: "Done", arguments: { reason: "finished" } }),
+      line({ name: "Done", arguments: [] }),
+      line({ name: "Done", arguments: 1 }),
+      line({ name: "done", arguments: {} }),
+      line({ reason: "boot", completes: false, action: "start" }),
+    ];
+    for (const text of cases) {
+      const parsed = Reply.parse(text);
+      expect(Result.isFailure(parsed)).toBe(true);
+      if (Result.isFailure(parsed)) {
+        expect(parsed.failure.message.startsWith("reply:")).toBe(true);
       }
     }
+    const lines = Reply.parse("continue\nbooted the guest\nstart");
+    if (Result.isSuccess(lines)) {
+      expect.fail("three lines parsed");
+    }
+    expect(lines.failure.message).toContain("1 line");
+    const secret = Reply.parse(
+      line({
+        name: "client",
+        arguments: { reason: "boot", args: ["start"], token: "secret-token" },
+      }),
+    );
+    if (Result.isSuccess(secret)) {
+      expect.fail("an extra field parsed");
+    }
+    expect(secret.failure.message).toContain("token");
+    expect(secret.failure.message).not.toContain("secret-token");
+    const image = Reply.parse(
+      line({ name: "client", arguments: { reason: "boot", args: ["start"], withImage: true } }),
+    );
+    if (Result.isSuccess(image)) {
+      expect.fail("withImage parsed");
+    }
+    expect(image.failure.message).toContain("withImage");
+    const unknown = Reply.parse(line({ name: "bash", arguments: {} }));
+    if (Result.isSuccess(unknown)) {
+      expect.fail("an unknown tool parsed");
+    }
+    expect(unknown.failure.message).toContain("Done");
+    expect(unknown.failure.message).toContain("client");
+    const blank = Reply.parse(
+      line({ name: "client", arguments: { reason: "  ", args: ["start"] } }),
+    );
+    if (Result.isSuccess(blank)) {
+      expect.fail("a blank reason parsed");
+    }
+    expect(blank.failure.message).toContain("reason");
+    const empty = Reply.parse(line({ name: "client", arguments: { reason: "boot", args: [] } }));
+    if (Result.isSuccess(empty)) {
+      expect.fail("an empty action parsed");
+    }
+    expect(empty.failure.message).toContain("action");
   });
 
-  it("refuses a reply that is not three lines, a bad status, or an empty line", () => {
-    expect(Result.isFailure(Reply.parse("continue\nbooted"))).toBe(true);
-    expect(Result.isFailure(Reply.parse("continue\nbooted\nstart\nextra"))).toBe(true);
-    expect(Result.isFailure(Reply.parse("yes\nbooted\nstart"))).toBe(true);
-    expect(Result.isFailure(Reply.parse("continue\n\nstart"))).toBe(true);
-    expect(Result.isFailure(Reply.parse("continue\nbooted\n"))).toBe(true);
-    const bad = Reply.parse("continue\nbooted");
-    if (Result.isSuccess(bad)) {
-      expect.fail("a short reply parsed");
-    }
-    expect(bad.failure.message).toContain("3");
-    const status = Reply.parse("yes\nbooted\nstart");
-    if (Result.isSuccess(status)) {
-      expect.fail("a bad status parsed");
-    }
-    expect(status.failure.message).toContain("complete");
-    expect(status.failure.message).toContain("continue");
-  });
-
-  it("refuses an unfinished quote and an intent action", () => {
-    const quote = Reply.command('send-keys --keys "hello');
-    expect(Result.isFailure(quote)).toBe(true);
-    if (Result.isFailure(quote)) {
-      expect(quote.failure.message).toContain("quote");
-    }
-    const intent = Reply.command("intent start --message lock");
+  it("refuses an intent action", () => {
+    const intent = Reply.command(
+      parsedClient(client("lock", ["intent", "start", "--message", "lock"])),
+    );
     expect(Result.isFailure(intent)).toBe(true);
     if (Result.isFailure(intent)) {
       expect(intent.failure.message).toContain("intent");

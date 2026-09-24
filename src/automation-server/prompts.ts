@@ -80,29 +80,19 @@ export const diagnose = Effect.fn("Prompts.diagnose")(function* (
 });
 
 export type DriveMission = {
-  readonly action: "drive" | "mint";
-  readonly ticket: string;
   readonly name: string;
   readonly description: string;
   readonly instruction: string;
   readonly proof: string;
-  readonly iso: string;
-  readonly serverUrl: string;
 };
 
-// The task the model can see. It has no Linear tool and it does not call ./ctrl or intent.
-export const missionText = (mission: DriveMission): string => {
-  const start =
-    mission.action === "mint"
-      ? `./client start --agent-id ${mission.ticket} --server-url ${mission.serverUrl} --iso ${mission.iso}`
-      : `./client start --agent-id ${mission.ticket} --server-url ${mission.serverUrl} --iso ${mission.iso} --resume`;
-  return [
+// The task the model can see. The harness starts and stops the guest; this text does not.
+export const missionText = (mission: DriveMission): string =>
+  [
     "<mission>",
     `<name>${mission.name}</name>`,
     `<description>${mission.description}</description>`,
     `<instruction>${mission.instruction}</instruction>`,
     `<proof>${mission.proof}</proof>`,
-    `<start>${start}</start>`,
     "</mission>",
   ].join("\n");
-};

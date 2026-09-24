@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Redacted, Terminal } from "effect";
@@ -14,22 +16,30 @@ import * as Support from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+const without = (...names: ReadonlyArray<string>): NodeJS.ProcessEnv => {
+  const env = { ...process.env };
+  for (const name of names) {
+    delete env[name];
+  }
+  return env;
+};
+
+// The process, not Command.runWith: main.ts is what builds the layers, and --help must not.
+const driverProcess = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv) =>
+  spawnSync("bun", ["--no-env-file", "src/driver/main.ts", ...args], {
+    cwd: ROOT,
+    env,
+    encoding: "utf8",
+  });
+
 const MODEL = "openrouter/test-model";
-const RESULT = "22222222-2222-4222-8222-222222222222";
 const TOKEN = "super-secret-token";
 const PROMPT = "Lock the screen.";
 const LOG = "/tmp/driver-debug.log";
 
-const FLAGS = [
-  "--action",
-  "drive",
-  "--prompt",
-  PROMPT,
-  "--debug-log",
-  LOG,
-  "--test-result-id",
-  RESULT,
-];
+const FLAGS = ["--action", "drive", "--prompt", PROMPT, "--agent-id", "OLI-1", "--debug-log", LOG];
 
 const configText = (models: { readonly drive: string; readonly mint?: string }): string =>
   JSON.stringify({
@@ -114,8 +124,8 @@ describe("driver command", () => {
       yield* run(FLAGS, seen, { contents: configText({ drive: MODEL, mint: "openrouter/mint" }) });
       expect(seen.input?.model).toBe(MODEL);
       expect(seen.input?.prompt).toBe(PROMPT);
+      expect(seen.input?.agentId).toBe("OLI-1");
       expect(seen.input?.debugLog).toBe(LOG);
-      expect(seen.input?.testResultId).toBe(RESULT);
       expect(seen.input?.config.stepLimit).toBeGreaterThanOrEqual(1);
       expect(Redacted.value(seen.input?.token ?? Redacted.make(""))).toBe(TOKEN);
       expect(yield* TestConsole.logLines).toEqual(["model-stopped"]);
@@ -141,7 +151,7 @@ describe("driver command", () => {
 
   it.effect("a missing flag is a usage error that does not start the loop", () =>
     Effect.gen(function* () {
-      for (const flag of ["action", "prompt", "debug-log", "test-result-id"]) {
+      for (const flag of ["action", "prompt", "agent-id", "debug-log"]) {
         const seen: Seen = { input: undefined };
         const args = FLAGS.filter(
           (arg, index) => arg !== `--${flag}` && FLAGS[index - 1] !== `--${flag}`,
@@ -179,7 +189,7 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       const mint = "openrouter/meta/muse-spark-1.3-contributor";
       yield* run(
-        ["--action", "mint", "--prompt", PROMPT, "--debug-log", LOG, "--test-result-id", RESULT],
+        ["--action", "mint", "--prompt", PROMPT, "--agent-id", "OLI-1", "--debug-log", LOG],
         seen,
         { contents: configText({ drive: MODEL, mint }) },
       );
@@ -192,21 +202,55 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       const error = yield* Effect.flip(
         run(
-          [
-            "--action",
-            "diagnose",
-            "--prompt",
-            PROMPT,
-            "--debug-log",
-            LOG,
-            "--test-result-id",
-            RESULT,
-          ],
+          ["--action", "diagnose", "--prompt", PROMPT, "--agent-id", "OLI-1", "--debug-log", LOG],
           seen,
         ),
       );
       expect(error._tag).toBe("ShowHelp");
       expect(seen.input).toBeUndefined();
+    }),
+  );
+
+  it.effect("the driver process --help does not read DATABASE_URL", () =>
+    Effect.sync(() => {
+      const ran = driverProcess(["--help"], without("DATABASE_URL", "OPENROUTER_API_KEY"));
+      expect(ran.status, ran.stderr).toBe(0);
+      expect(ran.stdout).toContain("--agent-id");
+      expect(`${ran.stdout}\n${ran.stderr}`).not.toContain("DATABASE_URL");
+    }),
+  );
+
+  it.effect(
+    "a missing token is reported before DATABASE_URL when the process actually runs (unhappy)",
+    () =>
+      Effect.sync(() => {
+        const ran = driverProcess(FLAGS, without("DATABASE_URL", "OPENROUTER_API_KEY"));
+        expect(ran.status, ran.stderr).not.toBe(0);
+        expect(ran.stderr).toContain("OPENROUTER_API_KEY is not set");
+        expect(ran.stderr).not.toContain("DATABASE_URL");
+      }),
+  );
+
+  it.effect("a run with a token and no database reports DATABASE_URL (unhappy)", () =>
+    Effect.sync(() => {
+      const env = without("DATABASE_URL");
+      env.OPENROUTER_API_KEY = "present";
+      const ran = driverProcess(FLAGS, env);
+      expect(ran.status, ran.stderr).not.toBe(0);
+      expect(ran.stderr).toContain("DATABASE_URL is not set");
+    }),
+  );
+
+  it.effect("a database url that is not a url is a command error (unhappy)", () =>
+    Effect.sync(() => {
+      const env = without("DATABASE_URL");
+      env.DATABASE_URL = "not-a-url";
+      env.OPENROUTER_API_KEY = "present";
+      const ran = driverProcess(FLAGS, env);
+      expect(ran.status, ran.stderr).not.toBe(0);
+      expect(ran.stderr).toContain("db: database url is not a valid url");
+      expect(ran.stderr).toContain("CommandError");
+      expect(ran.stderr).not.toContain("DatabaseError");
     }),
   );
 
@@ -218,8 +262,12 @@ describe("driver command", () => {
       expect(stdout).toContain("--action");
       expect(stdout).not.toContain("--model");
       expect(stdout).toContain("--prompt");
+      expect(stdout).toContain("--agent-id");
       expect(stdout).toContain("--debug-log");
-      expect(stdout).toContain("--test-result-id");
+      expect(stdout).not.toContain("--test-definition");
+      expect(stdout).not.toContain("--test-proof");
+      expect(stdout).not.toContain("--server-url");
+      expect(stdout).not.toContain("--test-result-id");
       expect(seen.input).toBeUndefined();
     }),
   );

@@ -61,10 +61,13 @@ describe("drive happy path", () => {
       expect(text).toContain("driving agent");
       expect(text).toContain("Do not call intent");
       expect(text).toContain("Do not call ./ctrl");
+      expect(text).toContain("Do not call start, stop, or save.");
+      expect(text).toContain("The harness starts the machine");
+      expect(text).not.toContain("Start the machine exactly");
       expect(text).not.toContain("intent start");
       expect(text).not.toContain("test-results");
       expect(text).toContain(
-        "line 2 of your reply is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
+        "the client tool's reason is that step's line exactly, with only the leading asterisk and the spaces beside it removed",
       );
       expect(text).toContain("any crashes or erroneous behavior must be reported");
       expect(text).toContain("Any crash or erroneous behavior must be reported");
@@ -127,23 +130,24 @@ describe("mission text", () => {
     serverUrl: "http://127.0.0.1:55555",
   };
 
-  it.effect("a drive names the resumed start and does not ask for intent or ./ctrl", () =>
+  it.effect("names the instruction and the proof", () =>
     Effect.sync(() => {
-      const text = Prompts.missionText({ action: "drive", ...mission });
-      expect(text).toContain("--resume");
+      const text = Prompts.missionText(mission);
       expect(text).toContain("Press Super+Escape.");
-      expect(text).toContain(TICKET);
-      expect(text).not.toContain("intent start");
-      expect(text).not.toContain("./ctrl");
+      expect(text).toContain("the clock is showing");
+      expect(text).toContain("<name>lock-screen</name>");
     }),
   );
 
-  it.effect("a mint starts fresh (unhappy for a resumed boot)", () =>
+  it.effect("does not tell the model to start the machine (unhappy for a model-issued boot)", () =>
     Effect.sync(() => {
-      const text = Prompts.missionText({ action: "mint", ...mission });
+      const text = Prompts.missionText(mission);
+      expect(text).not.toContain("./client");
       expect(text).not.toContain("--resume");
-      expect(text).toContain("--iso");
-      expect(text).toContain(mission.iso);
+      expect(text).not.toContain("<start>");
+      expect(text).not.toContain("--agent-id");
+      expect(text).not.toContain("--server-url");
+      expect(text).not.toContain("--session-id");
     }),
   );
 });

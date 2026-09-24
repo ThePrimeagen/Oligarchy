@@ -18,7 +18,6 @@ import * as Reporter from "../support/reporter.ts";
 const TOKEN = "test-token";
 const TICKET = "OLI-42";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
-const RESULT = "22222222-2222-4222-8222-222222222222";
 
 const prompted = (args: ReadonlyArray<string> | undefined): string | undefined => {
   if (args === undefined) {
@@ -128,7 +127,10 @@ const run = (
   http.post("/run", {
     headers: extraHeaders,
     body: HttpBody.text(
-      JSON.stringify({ prompt, ticket, testResultId: RESULT }),
+      JSON.stringify({
+        prompt,
+        ticket,
+      }),
       "application/json",
     ),
   });
@@ -316,8 +318,8 @@ describe("POST /run happy path", () => {
           command: Driver.BIN,
           args: Driver.args({
             prompt: "fix the bug",
+            agentId: TICKET,
             action: "drive",
-            testResultId: RESULT,
           }),
           // The transcript the driver prints is the operator's to watch; this process keeps none of it.
           options: { stdout: "inherit" },
@@ -394,7 +396,9 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ ticket: TICKET, testResultId: RESULT }),
+            JSON.stringify({
+              ticket: TICKET,
+            }),
             "application/json",
           ),
         });
@@ -414,7 +418,9 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", testResultId: RESULT }),
+            JSON.stringify({
+              prompt: "do the work",
+            }),
             "application/json",
           ),
         });
@@ -440,7 +446,6 @@ describe("POST /run authentication and decoding", () => {
               prompt: "do the work",
               ticket: TICKET,
               model: sent,
-              testResultId: RESULT,
             }),
             "application/json",
           ),
@@ -448,29 +453,13 @@ describe("POST /run authentication and decoding", () => {
         expect(response.status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned[0]?.args).toEqual(
-        Driver.args({ prompt: "do the work", action: "drive", testResultId: RESULT }),
+        Driver.args({
+          prompt: "do the work",
+          agentId: TICKET,
+          action: "drive",
+        }),
       );
       expect(fixed.spawner.spawned[0]?.args).not.toContain(sent);
-    }),
-  );
-
-  it.effect("a body without testResultId is 400 and spawns nothing", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* http.post("/run", {
-          headers,
-          body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", ticket: TICKET }),
-            "application/json",
-          ),
-        });
-        expect(response.status).toBe(400);
-        const body = decodeErrorBody(yield* response.json);
-        expect(body.error).toContain("testResultId");
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.spawner.spawned).toEqual([]);
     }),
   );
 });

@@ -1437,7 +1437,6 @@ describeServing("automation server restart", () => {
             JSON.stringify({
               prompt: "do the work",
               ticket: linearId,
-              testResultId: resultId,
             }),
           );
           expect(refused.status).toBe(400);

@@ -1,91 +1,89 @@
-import { Result } from "effect";
-import * as Tools from "../harness/tools.ts";
+import { Cause, Exit, Result, Schema } from "effect";
+import type * as Tools from "../harness/tools.ts";
+import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 
-export type Status = "complete" | "continue";
-
-export type Reply = {
-  readonly status: Status;
-  readonly did: string;
-  readonly action: string;
-};
+// One line, the tool call. client runs that action. Done finishes the task.
+// The harness stops the session.
+export type Reply =
+  | { readonly _tag: "Done" }
+  | {
+      readonly _tag: "client";
+      readonly reason: string;
+      readonly args: ReadonlyArray<string>;
+    };
 
 const fail = (message: string): Result.Result<never, Errors.ToolError> =>
   Result.fail(Errors.ToolError.make({ message }));
 
-// Three lines: complete or continue, what the agent did, the action.
+const ClientCall = Schema.Struct({
+  name: Schema.Literal("client"),
+  arguments: Schema.Struct({
+    reason: Schema.String,
+    args: Schema.Array(Schema.String),
+  }),
+});
+
+const DoneCall = Schema.Struct({
+  name: Schema.Literal("Done"),
+  arguments: Schema.Struct({}),
+});
+
+const Call = Schema.Union([DoneCall, ClientCall]);
+
+const decodeCall = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.toCodecJson(Call)), {
+  onExcessProperty: "error",
+});
+
+const schemaFailure = (cause: Cause.Cause<unknown>): Result.Result<never, Errors.ToolError> =>
+  fail(`reply: ${Render.headline(Cause.squash(cause))}`);
+
 export const parse = (text: string): Result.Result<Reply, Errors.ToolError> => {
-  const lines = text.replace(/\n$/, "").split("\n");
-  if (lines.length !== 3) {
-    return fail("reply: expected 3 lines");
+  const line = text.trim();
+  if (line === "" || line.includes("\n")) {
+    return fail("reply: expected 1 line");
   }
-  const status = lines[0]?.trim() ?? "";
-  const did = lines[1]?.trim() ?? "";
-  const action = lines[2]?.trim() ?? "";
-  if (status !== "complete" && status !== "continue") {
-    return fail("reply: line 1 must be complete or continue");
+  const decoded = decodeCall(line);
+  if (Exit.isFailure(decoded)) {
+    return schemaFailure(decoded.cause);
   }
-  if (did === "") {
-    return fail("reply: line 2 is what the agent did");
+  if (decoded.value.name === "Done") {
+    // Struct({}) compiles to a not-nullish check, so excess keys are not rejected.
+    const args = decoded.value.arguments;
+    if (
+      typeof args !== "object" ||
+      args === null ||
+      Array.isArray(args) ||
+      Object.keys(args).length !== 0
+    ) {
+      return fail("reply: Done takes no arguments");
+    }
+    return Result.succeed({ _tag: "Done" });
   }
-  if (action === "") {
-    return fail("reply: line 3 is the action");
+  const reason = decoded.value.arguments.reason.trim();
+  if (reason === "") {
+    return fail("reply: reason is why");
   }
-  return Result.succeed({ status, did, action });
+  if (decoded.value.arguments.args.length === 0) {
+    return fail("reply: the action is empty");
+  }
+  return Result.succeed({
+    _tag: "client",
+    reason,
+    args: decoded.value.arguments.args,
+  });
 };
 
-const tokens = (action: string): Result.Result<ReadonlyArray<string>, Errors.ToolError> => {
-  const args: Array<string> = [];
-  let current = "";
-  let quote: string | undefined;
-  for (const char of action) {
-    if (quote !== undefined) {
-      if (char === quote) {
-        quote = undefined;
-      } else {
-        current += char;
-      }
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === " " || char === "\t") {
-      if (current !== "") {
-        args.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += char;
+// client.md still tells a driving agent to open intents. The harness does that itself, so a
+// model-issued intent would open a second one.
+export const command = (
+  call: Extract<Reply, { readonly _tag: "client" }>,
+): Result.Result<Tools.CommandLine, Errors.ToolError> => {
+  if (call.args[0] === "intent") {
+    return fail("client: the harness opens and closes intents");
   }
-  if (quote !== undefined) {
-    return fail("reply: an action quote is unfinished");
-  }
-  if (current !== "") {
-    args.push(current);
-  }
-  if (args.length === 0) {
-    return fail("reply: line 3 is the action");
-  }
-  return Result.succeed(args);
-};
-
-// Line 3 is one ./client command. A leading ./client is the bin and is not an argument.
-// ./ctrl and ./session are not this loop: a diagnose still runs under OpenCode.
-export const command = (action: string): Result.Result<Tools.CommandLine, Errors.ToolError> => {
-  const split = tokens(action);
-  if (Result.isFailure(split)) {
-    return fail(split.failure.message);
-  }
-  const [head, ...rest] = split.success;
-  if (head === "./ctrl" || head === "./session") {
-    return fail("reply: the harness runs ./ctrl");
-  }
-  const args = head === "./client" ? rest : split.success;
-  return Tools.commandLine({
-    name: "client",
-    arguments: JSON.stringify({ args }),
+  return Result.succeed({
+    bin: "./client",
+    args: [...call.args],
   });
 };

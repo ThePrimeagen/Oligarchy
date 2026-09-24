@@ -8,20 +8,20 @@ export const CEILING = "1.5 hours";
 
 // The driver appends one JSON line per step. /tmp exists on every host this process
 // runs on, so the path does not depend on a data dir this client does not have.
-export const debugLog = (testResultId: string): string =>
-  `/tmp/oligarchy-driver-${testResultId}.jsonl`;
+// The agent id is the ticket, which is the only identity this process is given.
+export const debugLog = (agentId: string): string => `/tmp/oligarchy-driver-${agentId}.jsonl`;
 
 export const args = (input: {
   readonly prompt: string;
+  readonly agentId: string;
   readonly action: "drive" | "mint";
-  readonly testResultId: string;
 }): ReadonlyArray<string> => [
   "--action",
   input.action,
   "--prompt",
   input.prompt,
+  "--agent-id",
+  input.agentId,
   "--debug-log",
-  debugLog(input.testResultId),
-  "--test-result-id",
-  input.testResultId,
+  debugLog(input.agentId),
 ];
