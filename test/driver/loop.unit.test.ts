@@ -216,7 +216,7 @@ describe("driver loop", () => {
         expect(firstBody.messages[0].content).toContain("Lock the screen.");
         expect(firstBody.messages[0].content).toContain("The lock screen is showing.");
         expect(firstBody.messages[0].content).toContain("This is step 1.");
-        expect(firstBody.messages[0].content).toContain("[]");
+        expect(firstBody.messages[0].content).toContain("Past steps:");
         expect(firstBody.tools).toMatchObject([{ type: "function", function: { name: "drive" } }]);
         const toolText = JSON.stringify(firstBody.tools);
         expect(toolText).not.toContain("agentId");
@@ -228,7 +228,7 @@ describe("driver loop", () => {
         const again = systemText(recorder.requests[1]?.body);
         expect(again).toContain("Lock the screen.");
         expect(again).toContain("This is step 2.");
-        expect(again).toContain(JSON.stringify(["lock the screen"]));
+        expect(again).toContain("lock the screen");
         expect(JSON.parse(recorder.requests[1]?.body ?? "{}")).toMatchObject({
           messages: [{ role: "system" }, { role: "user" }],
         });
@@ -286,7 +286,7 @@ describe("driver loop", () => {
         kind: "running",
         text: SESSION,
       });
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["boot"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
     }),
   );
 
@@ -370,7 +370,7 @@ describe("driver loop", () => {
       );
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
       expect(events(log).some((event) => event.kind === "running")).toBe(false);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["boot"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
     }),
   );
 
@@ -395,7 +395,7 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client", "./ctrl"]);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["boot"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
       expect(events(log).find((event) => event.kind === "running")?.text).toBe(SESSION);
     }),
   );
@@ -420,7 +420,7 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned.map((child) => child.command)).toEqual(["./client"]);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["boot"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("boot");
     }),
   );
 
@@ -451,9 +451,7 @@ describe("driver loop", () => {
         );
         expect(outcome).toEqual({ reason: "model-stopped" });
         expect(seen).toEqual(["relinquish"]);
-        expect(systemText(recorder.requests[2]?.body)).toContain(
-          JSON.stringify(["give it back", "type"]),
-        );
+        expect(systemText(recorder.requests[2]?.body)).toContain("give it back\ntype");
       }),
   );
 
@@ -537,7 +535,7 @@ describe("driver loop", () => {
         log,
       );
       expect(spawner.spawned).toHaveLength(1);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["lock the screen"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("lock the screen");
       expect(systemText(recorder.requests[1]?.body)).not.toContain("typed");
     }),
   );
@@ -594,7 +592,7 @@ describe("driver loop", () => {
         "send-keys",
         "intent",
       ]);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["press the key"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("press the key");
       expect(systemText(recorder.requests[1]?.body)).not.toContain("no intent open");
     }),
   );
@@ -613,7 +611,7 @@ describe("driver loop", () => {
         [],
       );
       const again = systemText(recorder.requests[1]?.body);
-      expect(again).toContain(JSON.stringify(["boot"]));
+      expect(again).toContain("boot");
       expect(again).not.toContain("x".repeat(100));
     }),
   );
@@ -683,7 +681,7 @@ describe("driver loop", () => {
       expect(spawner.spawned).toEqual([]);
       const again = systemText(recorder.requests[1]?.body);
       expect(again).toContain("This is step 2.");
-      expect(again).toContain(JSON.stringify(["look again"]));
+      expect(again).toContain("look again");
       expect(again).not.toContain(`${LOG}.png`);
     }),
   );
@@ -705,7 +703,7 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(spawner.spawned).toEqual([]);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["look again"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("look again");
     }),
   );
 
@@ -730,7 +728,7 @@ describe("driver loop", () => {
       );
       expect(outcome).toEqual({ reason: "model-stopped" });
       expect(seen).toEqual([]);
-      expect(systemText(recorder.requests[1]?.body)).toContain(JSON.stringify(["lock the screen"]));
+      expect(systemText(recorder.requests[1]?.body)).toContain("lock the screen");
     }),
   );
 

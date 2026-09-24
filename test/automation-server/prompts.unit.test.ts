@@ -116,7 +116,7 @@ describe("openrouter drive", () => {
       const text = yield* Prompts.openRouterDrive("Lock the screen.", "it shows", [], 1).pipe(
         Effect.provide(fs.layer),
       );
-      expect(text).toBe("Lock the screen.\nit shows\n1\n[]\nx and y are 0 to 1");
+      expect(text).toBe("Lock the screen.\nit shows\n1\n\nx and y are 0 to 1");
       expect(fileNames(fs.reads)).toEqual(["openrouter-driving-agent.html", "client-tools.md"]);
     }),
   );

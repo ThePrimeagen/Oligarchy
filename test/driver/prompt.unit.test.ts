@@ -10,14 +10,15 @@ describe("openrouter-driving-agent.html", () => {
       const text = yield* Prompts.openRouterDrive(
         "Lock the screen.",
         "The lock screen is showing.",
-        ['say "hi"'],
+        ['say "hi"', "lock it"],
         2,
       ).pipe(Effect.provide(NodeFileSystem.layer));
       expect(text.includes("{{")).toBe(false);
       expect(text).toContain("Lock the screen.");
       expect(text).toContain("The lock screen is showing.");
       expect(text).toContain("This is step 2.");
-      expect(text).toContain(JSON.stringify(['say "hi"']));
+      expect(text).toContain("Past steps:");
+      expect(text).toContain('say "hi"\nlock it');
       expect(text).toContain("completes is true");
       expect(text).toContain("reason is why");
       expect(text).toContain("When completes is true the action is not run");

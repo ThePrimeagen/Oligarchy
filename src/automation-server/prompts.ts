@@ -69,7 +69,7 @@ export const drive = Effect.fn("Prompts.drive")(function* (ticket: string, model
 });
 
 // The OpenRouter driver's prompt, filled again each step. The harness already holds the agent,
-// the session, and the server, so those are not template values. Reasons are the actions so far.
+// the session, and the server, so those are not template values. Past steps are one reason per line.
 export const openRouterDrive = Effect.fn("Prompts.openRouterDrive")(function* (
   definition: string,
   proof: string,
@@ -79,7 +79,7 @@ export const openRouterDrive = Effect.fn("Prompts.openRouterDrive")(function* (
   return yield* render("openrouter-driving-agent.html", {
     TEST_DEFINITION: definition,
     TEST_PROOF: proof,
-    REASONS: JSON.stringify(reasons),
+    REASONS: Arr.join(reasons, "\n"),
     STEP: String(step),
   });
 });
