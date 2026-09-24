@@ -103,10 +103,18 @@ export const run = Effect.fn("run")(function* (
   prompt: string,
   ticket: string,
   testResultId: string,
+  testDefinition: string,
+  testProof: string,
 ) {
   const client = yield* makeClient(url);
   return yield* client.Runs.run({
-    payload: Contract.RunBody.make({ prompt, ticket, testResultId }),
+    payload: Contract.RunBody.make({
+      prompt,
+      ticket,
+      testResultId,
+      testDefinition,
+      testProof,
+    }),
   }).pipe(
     Effect.catch((error) => {
       if (error._tag === "HttpClientError") {

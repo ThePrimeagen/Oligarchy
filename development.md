@@ -455,7 +455,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
 - `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
   the `custom-harness-driving-agent.html` prompt, filled with the step, the past reasons, the
-  test definition, the proof, and the client tools, then the task. The reply is one line: the
+  run's test definition and proof, and the client tools, then the task. The reply is one line: the
   tool call JSON. `client` runs that action; `Done` leaves the loop successfully and runs nothing. It appends one JSON line to `--debug-log` per step (the loop
   counter and the step), and exits 0 only when the reply is `Done` or the harness closed the
   result. An OpenRouter failure, a reply that is not that one tool call, the step limit, or the

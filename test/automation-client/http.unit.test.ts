@@ -128,7 +128,13 @@ const run = (
   http.post("/run", {
     headers: extraHeaders,
     body: HttpBody.text(
-      JSON.stringify({ prompt, ticket, testResultId: RESULT }),
+      JSON.stringify({
+        prompt,
+        ticket,
+        testResultId: RESULT,
+        testDefinition: prompt,
+        testProof: "none",
+      }),
       "application/json",
     ),
   });
@@ -316,6 +322,8 @@ describe("POST /run happy path", () => {
           command: Driver.BIN,
           args: Driver.args({
             prompt: "fix the bug",
+            testDefinition: "fix the bug",
+            testProof: "none",
             action: "drive",
             testResultId: RESULT,
           }),
@@ -394,7 +402,12 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ ticket: TICKET, testResultId: RESULT }),
+            JSON.stringify({
+              ticket: TICKET,
+              testResultId: RESULT,
+              testDefinition: "do the work",
+              testProof: "none",
+            }),
             "application/json",
           ),
         });
@@ -414,7 +427,12 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", testResultId: RESULT }),
+            JSON.stringify({
+              prompt: "do the work",
+              testResultId: RESULT,
+              testDefinition: "do the work",
+              testProof: "none",
+            }),
             "application/json",
           ),
         });
@@ -441,6 +459,8 @@ describe("POST /run authentication and decoding", () => {
               ticket: TICKET,
               model: sent,
               testResultId: RESULT,
+              testDefinition: "do the work",
+              testProof: "none",
             }),
             "application/json",
           ),
@@ -448,7 +468,13 @@ describe("POST /run authentication and decoding", () => {
         expect(response.status).toBe(200);
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned[0]?.args).toEqual(
-        Driver.args({ prompt: "do the work", action: "drive", testResultId: RESULT }),
+        Driver.args({
+          prompt: "do the work",
+          testDefinition: "do the work",
+          testProof: "none",
+          action: "drive",
+          testResultId: RESULT,
+        }),
       );
       expect(fixed.spawner.spawned[0]?.args).not.toContain(sent);
     }),
@@ -462,13 +488,68 @@ describe("POST /run authentication and decoding", () => {
         const response = yield* http.post("/run", {
           headers,
           body: HttpBody.text(
-            JSON.stringify({ prompt: "do the work", ticket: TICKET }),
+            JSON.stringify({
+              prompt: "do the work",
+              ticket: TICKET,
+              testDefinition: "do the work",
+              testProof: "none",
+            }),
             "application/json",
           ),
         });
         expect(response.status).toBe(400);
         const body = decodeErrorBody(yield* response.json);
         expect(body.error).toContain("testResultId");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("a body without testDefinition is 400 and spawns nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/run", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({
+              prompt: "do the work",
+              ticket: TICKET,
+              testResultId: RESULT,
+              testProof: "none",
+            }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("testDefinition");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.spawner.spawned).toEqual([]);
+    }),
+  );
+
+  it.effect("a body without testProof is 400 and spawns nothing (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/run", {
+          headers,
+          body: HttpBody.text(
+            JSON.stringify({
+              prompt: "do the work",
+              ticket: TICKET,
+              testResultId: RESULT,
+              testDefinition: "do the work",
+            }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(400);
+        const body = decodeErrorBody(yield* response.json);
+        expect(body.error).toContain("testProof");
       }).pipe(Effect.provide(serve(fixed)));
       expect(fixed.spawner.spawned).toEqual([]);
     }),

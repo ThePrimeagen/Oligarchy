@@ -78,6 +78,8 @@ type Placement = {
   readonly serverId: string;
   readonly prompt: string;
   readonly ticket: string;
+  readonly testDefinition: string;
+  readonly testProof: string;
 };
 
 type PlaceResult =
@@ -163,6 +165,12 @@ const place = Effect.fn("place")(function* (
         ...fact,
       })}`,
   });
+  // The harness prompt fills these beside the task. They are the stored wording when the
+  // definition is still there, and the task itself with no separate proof when it is not.
+  const carried = Option.match(facts, {
+    onNone: () => ({ testDefinition: prompt, testProof: "none" }),
+    onSome: (fact) => ({ testDefinition: fact.instruction, testProof: fact.proof }),
+  });
   // A drive resumes the run's iso. A mint boots fresh. A missing row reserves fresh rather
   // than failing a drive the definition lookup cannot see.
   const resume =
@@ -191,7 +199,7 @@ const place = Effect.fn("place")(function* (
     if (Result.isSuccess(reserved)) {
       const placed: PlaceResult = {
         _tag: "placed",
-        placement: { url: client.url, serverId: client.id, prompt, ticket },
+        placement: { url: client.url, serverId: client.id, prompt, ticket, ...carried },
       };
       return placed;
     }
@@ -718,6 +726,8 @@ export const dispatch = Effect.fn("dispatch")(function* (models: {
                   placement.prompt,
                   placement.ticket,
                   job.resultId,
+                  placement.testDefinition,
+                  placement.testProof,
                 ),
               ).pipe(
                 Effect.andThen(judge(job)),

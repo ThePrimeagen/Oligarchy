@@ -453,6 +453,8 @@ describe("dispatch happy path", () => {
           prompt: DRIVE_PROMPT,
           ticket: TICKET,
           testResultId: RESULT_ID,
+          testDefinition: DRIVE_PROMPT,
+          testProof: "none",
         });
         expect(FakeLog.texts(fixed.log)).toEqual([
           `dispatching drive; ${URL}; ${MODEL}`,
@@ -485,6 +487,8 @@ describe("dispatch happy path", () => {
         expect(posted.prompt).toContain("--resume");
         expect(posted.prompt).not.toContain("intent start");
         expect(posted.testResultId).toBe(RESULT_ID);
+        expect(posted.testDefinition).toBe("Lock the screen from the menu.");
+        expect(posted.testProof).toBe("The screen is locked.");
       }),
   );
 
@@ -503,6 +507,8 @@ describe("dispatch happy path", () => {
       expect(posted.prompt).toContain("Install Omarchy.");
       expect(posted.prompt).toContain("--iso https://example.com/omarchy.iso");
       expect(posted.prompt).not.toContain("--resume");
+      expect(posted.testDefinition).toBe("Install Omarchy.");
+      expect(posted.testProof).toBe("The screen is locked.");
     }),
   );
 
@@ -544,6 +550,8 @@ describe("dispatch happy path", () => {
         prompt: DIAGNOSE_PROMPT,
         ticket: TICKET,
         testResultId: RESULT_ID,
+        testDefinition: DIAGNOSE_PROMPT,
+        testProof: "none",
       });
       expect(FakeLog.texts(fixed.log)).toEqual([
         `dispatching diagnose; ${URL}; ${MODEL}`,
@@ -2778,7 +2786,7 @@ describe("a running job left by the last automation server", () => {
           http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
         ).toEqual([
           `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
-          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", testResultId: waitingResult })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", testResultId: waitingResult, testDefinition: `drive OLI-45 as ${MODEL}`, testProof: "none" })}`,
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
@@ -3629,7 +3637,14 @@ const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
       yield* AutomationClient.reserve(URL, ticket, "drive");
       connections.push(
         yield* Effect.forkChild(
-          AutomationClient.run(URL, promptOf(ticket), ticket, resultOf(ticket)),
+          AutomationClient.run(
+            URL,
+            promptOf(ticket),
+            ticket,
+            resultOf(ticket),
+            promptOf(ticket),
+            "none",
+          ),
         ),
       );
     }

@@ -1438,6 +1438,8 @@ describeServing("automation server restart", () => {
               prompt: "do the work",
               ticket: linearId,
               testResultId: resultId,
+              testDefinition: "do the work",
+              testProof: "none",
             }),
           );
           expect(refused.status).toBe(400);

@@ -15,6 +15,8 @@ import * as Reply from "./reply.ts";
 export type Input = {
   readonly model: string;
   readonly prompt: string;
+  readonly testDefinition: string;
+  readonly testProof: string;
   readonly testResultId: string;
   readonly debugLog: string;
   readonly config: HarnessConfig.AppConfig;
@@ -161,30 +163,21 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }
 
     const step = turns + 1;
-    const read = Prompt.mission(input.prompt);
-    if (Result.isFailure(read)) {
-      yield* log(input.debugLog, step, "failure", read.failure.message);
-      return yield* Effect.fail(commandError(read.failure.message));
-    }
     const reasons = decisions.length === 0 ? "none" : decisions.join("\n");
-    const rendered = Prompt.render({
-      TEST_DEFINITION: read.success.definition,
-      TEST_PROOF: read.success.proof,
+    const system = Prompt.render({
+      TEST_DEFINITION: input.testDefinition,
+      TEST_PROOF: input.testProof,
       STEP: String(step),
       REASONS: reasons,
       CLIENT_TOOLS: Tools.clientGuide.trimEnd(),
     });
-    if (Result.isFailure(rendered)) {
-      yield* log(input.debugLog, step, "failure", rendered.failure.message);
-      return yield* Effect.fail(commandError(rendered.failure.message));
-    }
     yield* log(input.debugLog, step, "request", input.model);
     const turn = yield* OpenRouter.complete({
       baseUrl: input.config.openRouterBaseUrl,
       token: input.token,
       model: input.model,
       messages: [
-        { role: "system", content: rendered.success },
+        { role: "system", content: system },
         { role: "user", content: input.prompt },
       ],
       tools: [],

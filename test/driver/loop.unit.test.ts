@@ -160,6 +160,8 @@ const run = (
   log: Array<string>,
   write?: Effect.Effect<void, PlatformError.PlatformError>,
   prompt = "Lock the screen.",
+  testDefinition = prompt,
+  testProof = "none",
 ) =>
   Effect.gen(function* () {
     const parsed = yield* app;
@@ -167,6 +169,8 @@ const run = (
     const stoppedRun = yield* Loop.run({
       model: MODEL,
       prompt,
+      testDefinition,
+      testProof,
       testResultId: RESULT,
       debugLog: LOG,
       config: parsed,
@@ -649,49 +653,26 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect("fills the system prompt from the task's instruction and proof", () =>
+  it.effect("fills the system prompt from the definition and proof it was given", () =>
     Effect.gen(function* () {
       const recorder = FakeHttp.recordRequests(() => done());
-      const task = [
-        "<mission>",
-        "<name>lock</name>",
-        "<instruction>Lock it from the menu.</instruction>",
-        "<proof>The screen is locked.</proof>",
-        "</mission>",
-      ].join("\n");
-      yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], undefined, task);
+      const task = "<instruction>not this</instruction><proof>not this either</proof>";
+      yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+        undefined,
+        task,
+        "Lock it from the menu.",
+        "The screen is locked.",
+      );
       const system = systemText(recorder.requests[0]?.body);
       expect(system).toContain("<def>\nLock it from the menu.\n</def>");
       expect(system).toContain("<proof>\nThe screen is locked.\n</proof>");
-      expect(system).not.toContain("<name>lock</name>");
-      expect(system).not.toContain("{{");
+      expect(system).not.toContain("not this");
       expect(userText(recorder.requests[0]?.body)).toBe(task);
     }),
-  );
-
-  it.effect(
-    "a task with an instruction and no proof fails before the model is asked (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(() => done());
-        const log: Array<string> = [];
-        const error = yield* Effect.flip(
-          run(
-            config(),
-            recorder.layer,
-            () => ({ exitCode: 0 }),
-            log,
-            undefined,
-            "<instruction>lock it</instruction>",
-          ),
-        );
-        expect(error._tag).toBe("CommandError");
-        if (error._tag === "CommandError") {
-          expect(error.message).toContain("proof");
-        }
-        expect(recorder.requests).toEqual([]);
-        expect(events(log).some((event) => event.kind === "failure")).toBe(true);
-      }),
   );
 
   it.effect("Done leaves the loop and runs nothing", () =>
@@ -822,6 +803,8 @@ describe("driver loop", () => {
       const fiber = yield* Loop.run({
         model: MODEL,
         prompt: "Lock the screen.",
+        testDefinition: "Lock the screen.",
+        testProof: "none",
         testResultId: RESULT,
         debugLog: LOG,
         config: parsed,

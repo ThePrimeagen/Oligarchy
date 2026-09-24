@@ -20,6 +20,14 @@ const flags = {
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("The user prompt"),
   ),
+  testDefinition: Flag.string("test-definition").pipe(
+    Flag.withSchema(Schema.String),
+    Flag.withDescription("Test definition the harness prompt fills"),
+  ),
+  testProof: Flag.string("test-proof").pipe(
+    Flag.withSchema(Schema.String),
+    Flag.withDescription("Test proof the harness prompt fills"),
+  ),
   debugLog: Flag.string("debug-log").pipe(
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("File that receives one JSON line per step"),
@@ -43,6 +51,8 @@ export const makeDriverCommand = <E, R>(
       const stopped = yield* run({
         model: input.action === "mint" ? config.models.mint : config.models.drive,
         prompt: input.prompt,
+        testDefinition: input.testDefinition,
+        testProof: input.testProof,
         testResultId: input.testResultId,
         debugLog: input.debugLog,
         config,

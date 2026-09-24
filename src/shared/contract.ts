@@ -194,6 +194,10 @@ export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/R
   // The harness passes this to intent start and to ./ctrl test start / test-results.
   // The model is oligarchy.json's for the reserved action, not a field of this body.
   testResultId: Schema.NonEmptyString,
+  // The custom harness prompt fills these. A run with no stored definition sends the
+  // prompt as the definition and "none" as the proof. A diagnose carries them and does not read them.
+  testDefinition: Schema.String,
+  testProof: Schema.String,
 }) {}
 
 // What an automation client is asked to hold for a ticket: a mint and a drive take a guest slot

@@ -26,7 +26,7 @@ const reserve = (
   );
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
-  AutomationClient.run(URL, PROMPT, TICKET, RESULT).pipe(
+  AutomationClient.run(URL, PROMPT, TICKET, RESULT, PROMPT, "none").pipe(
     Effect.provide(Layer.mergeAll(token, http)),
   );
 
@@ -111,6 +111,8 @@ describe("automation client POST /run happy path", () => {
           prompt: PROMPT,
           ticket: TICKET,
           testResultId: RESULT,
+          testDefinition: PROMPT,
+          testProof: "none",
         });
       }),
   );

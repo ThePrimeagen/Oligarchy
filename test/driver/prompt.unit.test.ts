@@ -57,85 +57,23 @@ describe("custom-harness-driving-agent.html", () => {
 
   it("fills the definition, the proof, the step, the reasons, and the client tools", () => {
     const rendered = Prompt.render(FILLED);
-    expect(Result.isSuccess(rendered)).toBe(true);
-    if (Result.isFailure(rendered)) {
-      return;
-    }
-    expect(rendered.success).toContain("Lock the screen from the menu.");
-    expect(rendered.success).toContain("The screen is locked.");
-    expect(rendered.success).toContain("This is step 4.");
-    expect(rendered.success).toContain("open the menu: menu is up");
-    expect(rendered.success).toContain("# Client");
-    expect(rendered.success).toContain("./client start --agent-id OLI-1");
-    expect(rendered.success).not.toContain("{{");
-    expect(rendered.success).toContain(EXAMPLE);
+    expect(rendered).toContain("Lock the screen from the menu.");
+    expect(rendered).toContain("The screen is locked.");
+    expect(rendered).toContain("This is step 4.");
+    expect(rendered).toContain("open the menu: menu is up");
+    expect(rendered).toContain("# Client");
+    expect(rendered).toContain("./client start --agent-id OLI-1");
+    expect(rendered).not.toContain("{{");
+    expect(rendered).toContain(EXAMPLE);
   });
 
-  it("reads the instruction and the proof out of the task", () => {
-    const task = [
-      "<mission>",
-      "<name>lock</name>",
-      "<instruction>",
-      "  Lock the screen from the menu.  ",
-      "</instruction>",
-      "<proof>The screen is locked.</proof>",
-      "</mission>",
-    ].join("\n");
-    const read = Prompt.mission(task);
-    expect(Result.isSuccess(read)).toBe(true);
-    if (Result.isSuccess(read)) {
-      expect(read.success).toEqual({
-        definition: "Lock the screen from the menu.",
-        proof: "The screen is locked.",
-      });
-    }
-  });
-
-  it("a task with no mission is its own definition and has no separate proof", () => {
-    const read = Prompt.mission("Lock the screen.");
-    expect(Result.isSuccess(read)).toBe(true);
-    if (Result.isSuccess(read)) {
-      expect(read.success).toEqual({ definition: "Lock the screen.", proof: "none" });
-    }
-  });
-});
-
-describe("custom harness prompt unhappy path", () => {
-  it("the first placeholder without a value is the one named", () => {
-    const { TEST_PROOF: _proof, ...rest } = FILLED;
-    const rendered = Prompt.render(rest);
-    expect(Result.isFailure(rendered)).toBe(true);
-    if (Result.isFailure(rendered)) {
-      expect(rendered.failure).toMatchObject({
-        _tag: "PromptError",
-        message:
-          "prompt: prompts/custom-harness-driving-agent.html uses {{TEST_PROOF}}, which has no value",
-      });
-    }
-  });
-
-  it("an instruction without a proof fails and names the proof", () => {
-    const read = Prompt.mission("<instruction>lock it</instruction>");
-    expect(Result.isFailure(read)).toBe(true);
-    if (Result.isFailure(read)) {
-      expect(read.failure._tag).toBe("PromptError");
-      expect(read.failure.message).toContain("proof");
-    }
-  });
-
-  it("a proof without an instruction fails and names the definition", () => {
-    const read = Prompt.mission("<proof>locked</proof>");
-    expect(Result.isFailure(read)).toBe(true);
-    if (Result.isFailure(read)) {
-      expect(read.failure.message).toContain("definition");
-    }
-  });
-
-  it("an unclosed instruction fails and names the definition", () => {
-    const read = Prompt.mission("<instruction>lock it<proof>locked</proof>");
-    expect(Result.isFailure(read)).toBe(true);
-    if (Result.isFailure(read)) {
-      expect(read.failure.message).toContain("definition");
-    }
+  it("leaves a placeholder that arrives inside a value", () => {
+    const rendered = Prompt.render({
+      ...FILLED,
+      TEST_DEFINITION: "see {{TEST_PROOF}}",
+      TEST_PROOF: "locked",
+    });
+    expect(rendered).toContain("see {{TEST_PROOF}}");
+    expect(rendered).toContain("<proof>\nlocked\n</proof>");
   });
 });

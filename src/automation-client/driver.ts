@@ -13,6 +13,8 @@ export const debugLog = (testResultId: string): string =>
 
 export const args = (input: {
   readonly prompt: string;
+  readonly testDefinition: string;
+  readonly testProof: string;
   readonly action: "drive" | "mint";
   readonly testResultId: string;
 }): ReadonlyArray<string> => [
@@ -20,6 +22,10 @@ export const args = (input: {
   input.action,
   "--prompt",
   input.prompt,
+  "--test-definition",
+  input.testDefinition,
+  "--test-proof",
+  input.testProof,
   "--debug-log",
   debugLog(input.testResultId),
   "--test-result-id",

@@ -25,6 +25,10 @@ const FLAGS = [
   "drive",
   "--prompt",
   PROMPT,
+  "--test-definition",
+  PROMPT,
+  "--test-proof",
+  "none",
   "--debug-log",
   LOG,
   "--test-result-id",
@@ -114,6 +118,8 @@ describe("driver command", () => {
       yield* run(FLAGS, seen, { contents: configText({ drive: MODEL, mint: "openrouter/mint" }) });
       expect(seen.input?.model).toBe(MODEL);
       expect(seen.input?.prompt).toBe(PROMPT);
+      expect(seen.input?.testDefinition).toBe(PROMPT);
+      expect(seen.input?.testProof).toBe("none");
       expect(seen.input?.debugLog).toBe(LOG);
       expect(seen.input?.testResultId).toBe(RESULT);
       expect(seen.input?.config.stepLimit).toBeGreaterThanOrEqual(1);
@@ -141,7 +147,14 @@ describe("driver command", () => {
 
   it.effect("a missing flag is a usage error that does not start the loop", () =>
     Effect.gen(function* () {
-      for (const flag of ["action", "prompt", "debug-log", "test-result-id"]) {
+      for (const flag of [
+        "action",
+        "prompt",
+        "test-definition",
+        "test-proof",
+        "debug-log",
+        "test-result-id",
+      ]) {
         const seen: Seen = { input: undefined };
         const args = FLAGS.filter(
           (arg, index) => arg !== `--${flag}` && FLAGS[index - 1] !== `--${flag}`,
@@ -179,7 +192,20 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       const mint = "openrouter/meta/muse-spark-1.3-contributor";
       yield* run(
-        ["--action", "mint", "--prompt", PROMPT, "--debug-log", LOG, "--test-result-id", RESULT],
+        [
+          "--action",
+          "mint",
+          "--prompt",
+          PROMPT,
+          "--test-definition",
+          PROMPT,
+          "--test-proof",
+          "none",
+          "--debug-log",
+          LOG,
+          "--test-result-id",
+          RESULT,
+        ],
         seen,
         { contents: configText({ drive: MODEL, mint }) },
       );
@@ -197,6 +223,10 @@ describe("driver command", () => {
             "diagnose",
             "--prompt",
             PROMPT,
+            "--test-definition",
+            PROMPT,
+            "--test-proof",
+            "none",
             "--debug-log",
             LOG,
             "--test-result-id",
@@ -218,6 +248,8 @@ describe("driver command", () => {
       expect(stdout).toContain("--action");
       expect(stdout).not.toContain("--model");
       expect(stdout).toContain("--prompt");
+      expect(stdout).toContain("--test-definition");
+      expect(stdout).toContain("--test-proof");
       expect(stdout).toContain("--debug-log");
       expect(stdout).toContain("--test-result-id");
       expect(seen.input).toBeUndefined();
