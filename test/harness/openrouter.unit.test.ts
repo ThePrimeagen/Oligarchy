@@ -46,6 +46,7 @@ const run = (
     readonly chunk?: Duration.Duration;
     readonly ceiling?: Duration.Duration;
     readonly defaultRetry?: Duration.Duration;
+    readonly toolChoice?: OpenRouter.ToolChoice;
   },
 ) =>
   OpenRouter.complete({
@@ -54,6 +55,7 @@ const run = (
     model: MODEL,
     messages,
     tools: [tool],
+    ...(overrides?.toolChoice === undefined ? {} : { toolChoice: overrides.toolChoice }),
     timeouts: {
       header: overrides?.header ?? Duration.minutes(3),
       chunk: overrides?.chunk ?? Duration.minutes(3),
@@ -187,6 +189,20 @@ describe("OpenRouter client", () => {
         tools: [tool],
         stream: true,
       });
+    }),
+  );
+
+  it.effect("sends tool_choice only when the caller forces a tool", () =>
+    Effect.gen(function* () {
+      const recorder = FakeHttp.recordRequests(() => doneTurn());
+      yield* run(recorder.layer, {
+        toolChoice: { type: "function", function: { name: "drive" } },
+      });
+      const request = recorder.requests[0];
+      expect(JSON.parse(request?.body ?? "")).toMatchObject({
+        tool_choice: { type: "function", function: { name: "drive" } },
+      });
+      expect(request?.headers["anthropic-beta"]).toBeUndefined();
     }),
   );
 

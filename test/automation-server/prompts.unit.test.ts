@@ -103,6 +103,65 @@ describe("diagnose happy path", () => {
   );
 });
 
+describe("openrouter drive", () => {
+  it.effect("fills the thin client guide and no other value", () =>
+    Effect.gen(function* () {
+      const fs = promptFs({
+        contents: {
+          "openrouter-driving-agent.html": "tools\n{{CLIENT_TOOLS}}",
+          "client-tools.md": "x and y are 0 to 1\n",
+        },
+      });
+      const text = yield* Prompts.openRouterDrive().pipe(Effect.provide(fs.layer));
+      expect(text).toBe("tools\nx and y are 0 to 1");
+      expect(fileNames(fs.reads)).toEqual(["openrouter-driving-agent.html", "client-tools.md"]);
+    }),
+  );
+
+  it.effect("the first placeholder without a value is the one named", () =>
+    Effect.gen(function* () {
+      const fs = promptFs({
+        contents: {
+          "openrouter-driving-agent.html": "{{CLIENT_TOOLS}} {{NOPE}}",
+          "client-tools.md": "guide",
+        },
+      });
+      const error = yield* Effect.flip(Prompts.openRouterDrive().pipe(Effect.provide(fs.layer)));
+      expect(error).toMatchObject({
+        _tag: "PromptError",
+        message: "prompt: prompts/openrouter-driving-agent.html uses {{NOPE}}, which has no value",
+      });
+    }),
+  );
+
+  it.effect("an unreadable guide the template names is a PromptError naming the guide", () =>
+    Effect.gen(function* () {
+      const fs = promptFs({
+        unreadable: /client-tools\.md$/,
+        contents: { "openrouter-driving-agent.html": "{{CLIENT_TOOLS}}" },
+      });
+      const error = yield* Effect.flip(Prompts.openRouterDrive().pipe(Effect.provide(fs.layer)));
+      expect(error._tag).toBe("PromptError");
+      expect(error.message).toMatch(/^prompt: .*client-tools\.md/);
+      expect(fileNames(fs.reads)).toEqual(["openrouter-driving-agent.html", "client-tools.md"]);
+    }),
+  );
+
+  it.effect(
+    "an unreadable client guide the driving template does not name cannot stop a drive",
+    () =>
+      Effect.gen(function* () {
+        const fs = promptFs({
+          unreadable: /client-tools\.md$/,
+          contents: { "driving-agent.html": "ticket {{LINEAR_TICKET}}" },
+        });
+        const text = yield* Prompts.drive(TICKET, MODEL).pipe(Effect.provide(fs.layer));
+        expect(text).toBe(`ticket ${TICKET}`);
+        expect(fileNames(fs.reads)).toEqual(["driving-agent.html"]);
+      }),
+  );
+});
+
 describe("drive and diagnose unhappy path", () => {
   it.effect("the first placeholder without a value is the one named", () =>
     Effect.gen(function* () {

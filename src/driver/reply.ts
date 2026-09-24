@@ -1,91 +1,234 @@
-import { Result } from "effect";
-import * as Tools from "../harness/tools.ts";
+import { Result, Schema } from "effect";
+import * as Render from "../observability/render.ts";
+import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
+import type * as Tools from "../harness/tools.ts";
 
-export type Status = "complete" | "continue";
+// One drive call. The harness already has the agent, the session, and the server, so none of
+// those are fields. x and y are fractions of the screenshot.
+const Unit = Schema.Finite.check(
+  Schema.isBetween(
+    { minimum: 0, maximum: 1 },
+    { message: "a point is a fraction of the screenshot, 0..1" },
+  ),
+).annotate({
+  identifier: "@oligarchy/driver/reply/Unit",
+  description: "Fraction of the screenshot, from 0 to 1.",
+});
 
-export type Reply = {
-  readonly status: Status;
-  readonly did: string;
-  readonly action: string;
+const Ticks = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 100 }, { message: "ticks are 1..100" }),
+).annotate({
+  identifier: "@oligarchy/driver/reply/Ticks",
+  description: "How many wheel clicks, from 1 to 100.",
+});
+
+const Point = { x: Unit, y: Unit };
+
+const Click = {
+  ...Point,
+  button: Schema.optionalKey(Domain.ClickButton),
+  modifier: Schema.optionalKey(Schema.Array(Domain.MouseModifier)),
 };
+
+export const Action = Schema.TaggedUnion({
+  "send-keys": { keys: Schema.NonEmptyString },
+  move: Point,
+  click: Click,
+  "double-click": Click,
+  scroll: { ...Point, direction: Domain.ScrollDirection, ticks: Schema.optionalKey(Ticks) },
+  drag: {
+    fromX: Unit,
+    fromY: Unit,
+    toX: Unit,
+    toY: Unit,
+    button: Schema.optionalKey(Domain.ClickButton),
+    modifier: Schema.optionalKey(Schema.Array(Domain.MouseModifier)),
+  },
+  hold: { ...Point, button: Schema.optionalKey(Domain.ClickButton) },
+  release: { ...Point, button: Schema.optionalKey(Domain.ClickButton) },
+  "get-image": {},
+  "get-serial": {},
+  start: {
+    resume: Schema.optionalKey(Schema.Boolean),
+    iso: Schema.optionalKey(Schema.NonEmptyString),
+    disk: Schema.optionalKey(Schema.NonEmptyString),
+  },
+  stop: {
+    status: Schema.optionalKey(Domain.StopStatus),
+    reason: Schema.optionalKey(Schema.NonEmptyString),
+  },
+  save: {},
+  reserve: {},
+  relinquish: {},
+  follow: {},
+}).annotate({ identifier: "@oligarchy/driver/reply/Action" });
+export type Action = typeof Action.Type;
+
+export const Reply = Schema.Struct({
+  status: Schema.Literals(["continue", "complete"]).annotate({
+    description: "continue runs the action. complete ends the run and does not run it.",
+  }),
+  actionTaken: Schema.NonEmptyString.annotate({
+    description: "What you did, in a few words.",
+  }),
+  action: Action,
+}).annotate({ identifier: "@oligarchy/driver/reply/Reply" });
+export type Reply = typeof Reply.Type;
+
+// Inline every named schema. A $ref root is not a tool schema.
+const document = Schema.toJsonSchemaDocument(Reply, { referencePolicy: () => undefined });
+
+export const TOOL = {
+  type: "function" as const,
+  function: {
+    name: "drive" as const,
+    description: "One guest action, or the end of the run.",
+    parameters: document.schema,
+  },
+};
+
+const decodeReply = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.toCodecJson(Reply)), {
+  onExcessProperty: "error",
+});
 
 const fail = (message: string): Result.Result<never, Errors.ToolError> =>
   Result.fail(Errors.ToolError.make({ message }));
 
-// Three lines: complete or continue, what the agent did, the action.
-export const parse = (text: string): Result.Result<Reply, Errors.ToolError> => {
-  const lines = text.replace(/\n$/, "").split("\n");
-  if (lines.length !== 3) {
-    return fail("reply: expected 3 lines");
-  }
-  const status = lines[0]?.trim() ?? "";
-  const did = lines[1]?.trim() ?? "";
-  const action = lines[2]?.trim() ?? "";
-  if (status !== "complete" && status !== "continue") {
-    return fail("reply: line 1 must be complete or continue");
-  }
-  if (did === "") {
-    return fail("reply: line 2 is what the agent did");
-  }
-  if (action === "") {
-    return fail("reply: line 3 is the action");
-  }
-  return Result.succeed({ status, did, action });
+export type Connection = {
+  readonly agentId: string;
+  readonly serverUrl: string;
+  readonly sessionId: string | undefined;
 };
 
-const tokens = (action: string): Result.Result<ReadonlyArray<string>, Errors.ToolError> => {
-  const args: Array<string> = [];
-  let current = "";
-  let quote: string | undefined;
-  for (const char of action) {
-    if (quote !== undefined) {
-      if (char === quote) {
-        quote = undefined;
-      } else {
-        current += char;
-      }
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === " " || char === "\t") {
-      if (current !== "") {
-        args.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += char;
+// start, reserve, and relinquish name no session. Everything else does.
+const needsSession = (action: Action): boolean =>
+  action._tag !== "start" && action._tag !== "reserve" && action._tag !== "relinquish";
+
+const flag = (name: string, value: string | undefined): ReadonlyArray<string> =>
+  value === undefined ? [] : [`--${name}`, value];
+
+const modifiers = (
+  modifier: ReadonlyArray<Domain.MouseModifier> | undefined,
+): ReadonlyArray<string> => {
+  if (modifier === undefined) {
+    return [];
   }
-  if (quote !== undefined) {
-    return fail("reply: an action quote is unfinished");
+  const flags: Array<string> = [];
+  for (const key of modifier) {
+    flags.push("--modifier", key);
   }
-  if (current !== "") {
-    args.push(current);
-  }
-  if (args.length === 0) {
-    return fail("reply: line 3 is the action");
-  }
-  return Result.succeed(args);
+  return flags;
 };
 
-// Line 3 is one ./client command. A leading ./client or ./client-with-image selects the bin.
-export const command = (action: string): Result.Result<Tools.CommandLine, Errors.ToolError> => {
-  const split = tokens(action);
-  if (Result.isFailure(split)) {
-    return fail(split.failure.message);
+const point = (x: number, y: number): ReadonlyArray<string> => ["--x", String(x), "--y", String(y)];
+
+export const parse = (call: {
+  readonly name: string;
+  readonly arguments: string;
+}): Result.Result<Reply, Errors.ToolError> => {
+  if (call.name !== "drive") {
+    return fail(`reply: unknown tool "${call.name}"`);
   }
-  const [head, ...rest] = split.success;
-  const image = head === "./client-with-image";
-  const args = head === "./client" || image ? rest : split.success;
-  return Tools.commandLine({
-    name: "client",
-    arguments: JSON.stringify({
-      ...(image ? { withImage: true } : {}),
-      args,
-    }),
+  const decoded = decodeReply(call.arguments);
+  if (Result.isFailure(decoded)) {
+    return fail(`reply: ${Render.headline(decoded.failure)}`);
+  }
+  return Result.succeed(decoded.success);
+};
+
+// The typed action plus the connection the harness already holds.
+export const command = (
+  action: Action,
+  connection: Connection,
+): Result.Result<Tools.CommandLine, Errors.ToolError> => {
+  const sessionId = connection.sessionId;
+  if (needsSession(action) && sessionId === undefined) {
+    return fail("client: this action needs a session");
+  }
+  const shared = [
+    "--agent-id",
+    connection.agentId,
+    "--server-url",
+    connection.serverUrl,
+    ...(sessionId === undefined || !needsSession(action) ? [] : ["--session-id", sessionId]),
+  ];
+  const args = Action.match(action, {
+    "send-keys": (value) => ["send-keys", ...shared, "--keys", value.keys],
+    move: (value) => ["mouse", "move", ...shared, ...point(value.x, value.y)],
+    click: (value) => [
+      "mouse",
+      "click",
+      ...shared,
+      ...point(value.x, value.y),
+      ...flag("button", value.button),
+      ...modifiers(value.modifier),
+    ],
+    "double-click": (value) => [
+      "mouse",
+      "double-click",
+      ...shared,
+      ...point(value.x, value.y),
+      ...flag("button", value.button),
+      ...modifiers(value.modifier),
+    ],
+    scroll: (value) => [
+      "mouse",
+      "scroll",
+      ...shared,
+      ...point(value.x, value.y),
+      "--direction",
+      value.direction,
+      ...flag("ticks", value.ticks === undefined ? undefined : String(value.ticks)),
+    ],
+    drag: (value) => [
+      "mouse",
+      "drag",
+      ...shared,
+      "--from-x",
+      String(value.fromX),
+      "--from-y",
+      String(value.fromY),
+      "--to-x",
+      String(value.toX),
+      "--to-y",
+      String(value.toY),
+      ...flag("button", value.button),
+      ...modifiers(value.modifier),
+    ],
+    hold: (value) => [
+      "mouse",
+      "hold",
+      ...shared,
+      ...point(value.x, value.y),
+      ...flag("button", value.button),
+    ],
+    release: (value) => [
+      "mouse",
+      "release",
+      ...shared,
+      ...point(value.x, value.y),
+      ...flag("button", value.button),
+    ],
+    "get-image": () => ["get-image", ...shared],
+    "get-serial": () => ["get-serial", ...shared],
+    start: (value) => [
+      "start",
+      ...shared,
+      ...(value.resume === true ? ["--resume"] : []),
+      ...flag("iso", value.iso),
+      ...flag("disk", value.disk),
+    ],
+    stop: (value) => [
+      "stop",
+      ...shared,
+      ...flag("status", value.status),
+      ...flag("reason", value.reason),
+    ],
+    save: () => ["save", ...shared],
+    reserve: () => ["reserve", ...shared],
+    relinquish: () => ["relinquish", ...shared],
+    follow: () => ["follow", ...shared],
   });
+  return Result.succeed({ bin: "./client", args });
 };

@@ -6,7 +6,6 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Sse from "effect/unstable/encoding/Sse";
 import * as History from "./history.ts";
-import type * as Tools from "./tools.ts";
 import * as Errors from "../shared/errors.ts";
 
 // One streaming chat completion. The header timeout is the wait for a status line, the chunk
@@ -19,12 +18,29 @@ import * as Errors from "../shared/errors.ts";
 
 export type Failure = Errors.OpenRouterRefusal | Errors.OpenRouterUnreachable;
 
+export type WireTool = {
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly description: string;
+    readonly strict?: boolean;
+    readonly parameters: unknown;
+  };
+};
+
+export type ToolChoice = {
+  readonly type: "function";
+  readonly function: { readonly name: string };
+};
+
 export type Options = {
   readonly baseUrl: string;
   readonly token: Redacted.Redacted;
   readonly model: string;
   readonly messages: ReadonlyArray<History.WireMessage>;
-  readonly tools: ReadonlyArray<Tools.ToolDefinition>;
+  readonly tools: ReadonlyArray<WireTool>;
+  // Forces the named tool. Absent, the model may answer in text.
+  readonly toolChoice?: ToolChoice;
   readonly timeouts: {
     readonly header: Duration.Duration;
     readonly chunk: Duration.Duration;
@@ -375,14 +391,16 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
     );
 
   const attempt: Effect.Effect<History.AssistantTurn, AttemptFailure> = Effect.gen(function* () {
+    const body = {
+      model: options.model,
+      messages: options.messages,
+      tools: options.tools,
+      stream: true as const,
+      ...(options.toolChoice === undefined ? {} : { tool_choice: options.toolChoice }),
+    };
     const request = HttpClientRequest.post(url).pipe(
       HttpClientRequest.bearerToken(options.token),
-      HttpClientRequest.bodyJsonUnsafe({
-        model: options.model,
-        messages: options.messages,
-        tools: options.tools,
-        stream: true,
-      }),
+      HttpClientRequest.bodyJsonUnsafe(body),
     );
     const response = yield* client.execute(request).pipe(
       Effect.timeoutOrElse({

@@ -1,6 +1,7 @@
 import { Clock, Duration, Effect, FileSystem, Redacted, Result, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Prompts from "../automation-server/prompts.ts";
 import * as HarnessConfig from "../harness/config.ts";
 import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
@@ -9,7 +10,6 @@ import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Log from "./log.ts";
-import * as Prompt from "./prompt.ts";
 import * as Reply from "./reply.ts";
 
 export type Input = {
@@ -17,6 +17,10 @@ export type Input = {
   readonly prompt: string;
   readonly testResultId: string;
   readonly debugLog: string;
+  readonly agentId: string;
+  readonly serverUrl: string;
+  // Set when the guest is already up. A start that prints a session id replaces it.
+  readonly sessionId: string | undefined;
   readonly config: HarnessConfig.AppConfig;
   readonly token: Redacted.Redacted;
 };
@@ -135,7 +139,11 @@ const ask = (prompt: string, decisions: ReadonlyArray<string>): string => {
 
 export const run = Effect.fn("Driver.run")(function* (input: Input) {
   const startedAt = yield* Clock.currentTimeMillis;
+  const prompt = yield* Prompts.openRouterDrive().pipe(
+    Effect.mapError((error) => commandError(error.message)),
+  );
   const decisions: Array<string> = [];
+  let sessionId = input.sessionId;
   let turns = 0;
 
   while (true) {
@@ -158,10 +166,11 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       token: input.token,
       model: input.model,
       messages: [
-        { role: "system", content: `${Prompt.text}\n\n${Tools.clientGuide}` },
+        { role: "system", content: prompt },
         { role: "user", content: ask(input.prompt, decisions) },
       ],
-      tools: [],
+      tools: [Reply.TOOL],
+      toolChoice: { type: "function", function: { name: "drive" } },
       timeouts: input.config.timeouts,
       runCeiling: input.config.runCeiling,
       defaultRetry: input.config.harness.defaultRetry,
@@ -169,8 +178,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }).pipe(
       Effect.tapError((error) => log(input.debugLog, step, "failure", Render.headline(error))),
     );
-    yield* log(input.debugLog, step, "assistant", turn.content ?? "");
-    const parsed = Reply.parse(turn.content ?? "");
+    const call = turn.toolCalls.length === 1 ? turn.toolCalls[0] : undefined;
+    yield* log(input.debugLog, step, "assistant", call?.arguments ?? turn.content ?? "");
+    if (call === undefined) {
+      const message = "reply: expected one drive call";
+      yield* log(input.debugLog, step, "failure", message);
+      return yield* Effect.fail(commandError(message));
+    }
+    const parsed = Reply.parse(call);
     if (Result.isFailure(parsed)) {
       yield* log(input.debugLog, step, "failure", parsed.failure.message);
       return yield* Effect.fail(commandError(parsed.failure.message));
@@ -182,10 +197,14 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }
 
     turns = step;
-    const planned = Reply.command(reply.action);
+    const planned = Reply.command(reply.action, {
+      agentId: input.agentId,
+      serverUrl: input.serverUrl,
+      sessionId,
+    });
     if (Result.isFailure(planned)) {
       yield* log(input.debugLog, step, "refusal", planned.failure.message);
-      decisions.push(decision(reply.did, planned.failure.message));
+      decisions.push(decision(reply.actionTaken, planned.failure.message));
       continue;
     }
     const command = planned.success;
@@ -206,23 +225,24 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         "command",
         `${shown(command)} exit ${String(started.exitCode)}`,
       );
-      const sessionId = (started.stdout.split("\n")[0] ?? "").trim();
+      const printed = (started.stdout.split("\n")[0] ?? "").trim();
       outcome = Tools.toolContent(started);
-      if (started.exitCode === 0 && sessionId !== "") {
+      if (started.exitCode === 0 && printed !== "") {
+        sessionId = printed;
         const markRunning = {
           bin: "./ctrl",
           args: [
             "test",
             "start",
             "--session-id",
-            sessionId,
+            printed,
             "--test-result-id",
             input.testResultId,
             "--model",
             input.model,
           ],
         };
-        yield* log(input.debugLog, step, "running", sessionId);
+        yield* log(input.debugLog, step, "running", printed);
         const marked = yield* runCommand(markRunning).pipe(
           Effect.catchTag("CommandError", (error) =>
             Effect.succeed({ exitCode: 1, stdout: "", stderr: `${error.message}\n` }),
@@ -238,15 +258,15 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           outcome = `${outcome}\n${Tools.toolContent(marked)}`;
         }
       }
-      decisions.push(decision(reply.did, outcome));
+      decisions.push(decision(reply.actionTaken, outcome));
       continue;
     }
 
-    const message = Intent.intentMessage(reply.did, command.args);
+    const message = Intent.intentMessage(reply.actionTaken, command.args);
     const bracketed = Intent.bracket(command, input.testResultId, message);
     if (Result.isFailure(bracketed)) {
       yield* log(input.debugLog, step, "refusal", bracketed.failure.message);
-      decisions.push(decision(reply.did, bracketed.failure.message));
+      decisions.push(decision(reply.actionTaken, bracketed.failure.message));
       continue;
     }
 
@@ -260,7 +280,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         `${shown(bracketed.success.start)} exit ${String(opened.exitCode)}`,
       );
       if (opened.exitCode !== 0) {
-        decisions.push(decision(reply.did, Tools.toolContent(opened)));
+        decisions.push(decision(reply.actionTaken, Tools.toolContent(opened)));
         continue;
       }
       // A spawn or log failure still has to close the intent this start opened.
@@ -283,7 +303,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         ended.exitCode === 0
           ? Tools.toolContent(ran)
           : `${Tools.toolContent(ran)}\nintent end failed\n${Tools.toolContent(ended)}`;
-      decisions.push(decision(reply.did, outcome));
+      decisions.push(decision(reply.actionTaken, outcome));
       continue;
     }
 
@@ -293,6 +313,10 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       yield* log(input.debugLog, step, "stop", "result-closed");
       return { reason: "result-closed" } satisfies Stopped;
     }
-    decisions.push(decision(reply.did, Tools.toolContent(ran)));
+    // relinquish stops the guest. The id it printed is no longer a session.
+    if (command.args[0] === "relinquish" && ran.exitCode === 0) {
+      sessionId = undefined;
+    }
+    decisions.push(decision(reply.actionTaken, Tools.toolContent(ran)));
   }
 });

@@ -1,20 +1,32 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import * as Prompt from "../../src/driver/prompt.ts";
+import { describe, expect } from "vitest";
+import { it } from "@effect/vitest";
+import { NodeFileSystem } from "@effect/platform-node";
+import { Effect } from "effect";
+import * as Prompts from "../../src/automation-server/prompts.ts";
 
 describe("openrouter-driving-agent.html", () => {
-  it("is the driving prompt, and it states the three lines", () => {
-    const file = readFileSync(
-      new URL("../../prompts/openrouter-driving-agent.html", import.meta.url),
-      "utf8",
-    );
-    expect(Prompt.text).toBe(file.trimEnd());
-    expect(Prompt.text).toContain("complete ends the run");
-    expect(Prompt.text).toContain("continue");
-    expect(Prompt.text).toContain("what you did");
-    expect(Prompt.text).toContain("next action");
-    expect(Prompt.text).toContain("action you took");
-    expect(Prompt.text).toContain("./client");
-    expect(Prompt.text).not.toContain("{{");
-  });
+  it.effect("fills the thin client guide and leaves no placeholder", () =>
+    Effect.gen(function* () {
+      const text = yield* Prompts.openRouterDrive().pipe(Effect.provide(NodeFileSystem.layer));
+      expect(text.includes("{{")).toBe(false);
+      expect(text).toContain("complete ends the run");
+      expect(text).toContain("continue");
+      expect(text).toContain("what you did");
+      expect(text).toContain("next action");
+      expect(text).toContain("action you took");
+      expect(text).toContain("fractions of the screenshot");
+      expect(text).toContain("from 0 to 1");
+      expect(text).toContain("send-keys");
+      expect(text).toContain("<ENTER>");
+      expect(text).toContain("<LT>");
+      expect(text).toContain("`left`, `middle`, or `right`");
+      expect(text).toContain("`shift`, `ctrl`, `alt`, `super`");
+      expect(text).toContain("`up`, `down`, `left`, or `right`");
+      expect(text).not.toContain("RESULT_ID");
+      expect(text).not.toContain("--agent-id");
+      expect(text).not.toContain("--session-id");
+      expect(text).not.toContain("--server-url");
+      expect(text).not.toContain("{{CLIENT_TOOLS}}");
+    }),
+  );
 });
