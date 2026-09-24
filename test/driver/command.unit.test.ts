@@ -241,6 +241,19 @@ describe("driver command", () => {
     }),
   );
 
+  it.effect("a database url that is not a url is a command error (unhappy)", () =>
+    Effect.sync(() => {
+      const env = without("DATABASE_URL");
+      env.DATABASE_URL = "not-a-url";
+      env.OPENROUTER_API_KEY = "present";
+      const ran = driverProcess(FLAGS, env);
+      expect(ran.status, ran.stderr).not.toBe(0);
+      expect(ran.stderr).toContain("db: database url is not a valid url");
+      expect(ran.stderr).toContain("CommandError");
+      expect(ran.stderr).not.toContain("DatabaseError");
+    }),
+  );
+
   it.effect("--help prints the help and does not read the token or the config", () =>
     Effect.gen(function* () {
       const seen: Seen = { input: undefined };

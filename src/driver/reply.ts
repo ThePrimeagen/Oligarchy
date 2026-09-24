@@ -3,7 +3,8 @@ import type * as Tools from "../harness/tools.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 
-// One line, the tool call. client runs that action. Done leaves the loop and runs nothing.
+// One line, the tool call. client runs that action. Done finishes the task.
+// The harness stops the session.
 export type Reply =
   | { readonly _tag: "Done" }
   | {

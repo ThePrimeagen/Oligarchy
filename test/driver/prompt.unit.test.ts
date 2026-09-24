@@ -34,6 +34,8 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).toContain("Do not call intent");
     expect(text).toContain("Do not call start, stop, or save.");
     expect(text).toContain("The harness starts the guest and stops it when you call Done.");
+    expect(text).toContain("The harness stops the session and closes the result.");
+    expect(text).not.toContain("Nothing is run.");
     expect(text).toContain("{{TEST_DEFINITION}}");
     expect(text).toContain("{{TEST_PROOF}}");
     expect(text).toContain("{{STEP}}");

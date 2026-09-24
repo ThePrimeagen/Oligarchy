@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import * as NodePath from "@effect/platform-node/NodePath";
-import { Effect, Fiber, FileSystem, Layer, PlatformError, Redacted } from "effect";
+import { Cause, Effect, Exit, Fiber, FileSystem, Layer, PlatformError, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
 import * as DbSchema from "../../src/db/schema.ts";
@@ -693,6 +693,84 @@ describe("driver loop", () => {
       expect(again).toContain("x".repeat(100));
       expect(again).not.toContain("x".repeat(501));
       expect(askText(recorder.requests, 1)).toBe("Lock the screen.");
+    }),
+  );
+
+  it.effect(
+    "a failed stop on a failed run still closes the result and keeps the original error (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          () =>
+            sse([
+              frame({ choices: [{ delta: { content: "hello" }, finish_reason: null }] }),
+              frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+              "[DONE]",
+            ]),
+          (url) => {
+            if (url.pathname === "/start") {
+              return FakeHttp.json({ id: SESSION });
+            }
+            return url.pathname === "/stop"
+              ? FakeHttp.json({ error: "guest already gone" }, 400)
+              : FakeHttp.json({ ok: "true" });
+          },
+        );
+        const log: Array<string> = [];
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), log),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("reply:");
+          expect(error.message).not.toContain("guest already gone");
+        }
+        expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+        expect(log.join("")).toContain("test-results");
+        expect(log.join("")).toContain("--status");
+        expect(log.join("")).toContain("failed");
+        expect(log.join("")).toContain("stop:");
+        expect(log.join("")).toContain("guest already gone");
+      }),
+  );
+
+  it.effect("an interrupt after the session starts still stops it", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(done()));
+      const log: Array<string> = [];
+      const spawner = FakeSpawner.fakeSpawner((_command, args) =>
+        args[0] === "test-results" ? { exitCode: 0 } : {},
+      );
+      const parsed = yield* config();
+      const store = storeFor("present", seedOf("OLI-1"));
+      const fiber = yield* Loop.run({
+        model: MODEL,
+        prompt: "Lock the screen.",
+        agentId: "OLI-1",
+        debugLog: LOG,
+        config: parsed,
+        token: Redacted.make(TOKEN),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            capturingFs(log),
+            recorder.layer,
+            spawner.layer,
+            NodePath.layer,
+            Support.withEnv({ OLIGARCHY_TOKEN: TOKEN }),
+            store.layer,
+          ),
+        ),
+        Effect.forkScoped,
+      );
+      yield* spawner.nextSpawn;
+      yield* Fiber.interrupt(fiber);
+      const exit = yield* Fiber.await(fiber);
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+      expect(guestPaths(recorder.requests)).toEqual(["/start", "/stop"]);
+      expect(log.join("")).toContain("test-results");
+      expect(log.join("")).toContain("failed");
+      expect(log.join("")).toContain("session-stopped");
     }),
   );
 

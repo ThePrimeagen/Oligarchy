@@ -190,14 +190,4 @@ describe("intent brackets", () => {
     const start = Intent.owned(["start"], held);
     expect(Result.isSuccess(start)).toBe(true);
   });
-
-  it("closes the result only when stop or save exits 0", () => {
-    expect(Intent.closesResult(line(["stop", "--session-id", SESSION]), 0)).toBe(true);
-    expect(Intent.closesResult(line(["save", "--session-id", SESSION]), 0)).toBe(true);
-    expect(Intent.closesResult(line(["stop", "--session-id", SESSION]), 1)).toBe(false);
-    expect(Intent.closesResult(line(["save"]), 1)).toBe(false);
-    expect(Intent.closesResult(line(["send-keys", "--keys", "a"]), 0)).toBe(false);
-    expect(Intent.closesResult(line(["relinquish"]), 0)).toBe(false);
-    expect(Intent.closesResult(line(["start"]), 0)).toBe(false);
-  });
 });

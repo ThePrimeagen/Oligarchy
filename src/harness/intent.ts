@@ -105,10 +105,6 @@ export const bracket = (
   });
 };
 
-// stop and save end the session. The harness, not the model, closes the result then.
-export const closesResult = (command: Tools.CommandLine, exitCode: number): boolean =>
-  exitCode === 0 && (command.args[0] === "stop" || command.args[0] === "save");
-
 // The model names the action and that action's own flags. These three are the harness's:
 // the ticket, the server this run was filed against, and the session start printed.
 const HELD = ["agent-id", "session-id", "server-url"] as const;

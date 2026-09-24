@@ -11,6 +11,7 @@ import * as Client from "../db/client.ts";
 import * as Tests from "../db/tests.ts";
 import * as Render from "../observability/render.ts";
 import * as Api from "../shared/api.ts";
+import * as Errors from "../shared/errors.ts";
 import * as DriverCommand from "./command.ts";
 import * as Loop from "./loop.ts";
 
@@ -24,6 +25,10 @@ const withStore = (input: Loop.Input) =>
           Tests.TestStore.layer.pipe(Layer.provide(Client.Database.layer(url))),
         ),
       ),
+    ),
+    // A bad url fails while the layer is built, before a query can map it.
+    Effect.catchTag("DatabaseError", (error) =>
+      Effect.fail(Errors.CommandError.make({ message: error.message })),
     ),
   );
 
