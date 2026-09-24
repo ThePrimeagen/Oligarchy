@@ -7,8 +7,17 @@ import * as Prompts from "../../src/automation-server/prompts.ts";
 describe("openrouter-driving-agent.html", () => {
   it.effect("fills the thin client guide and leaves no placeholder", () =>
     Effect.gen(function* () {
-      const text = yield* Prompts.openRouterDrive().pipe(Effect.provide(NodeFileSystem.layer));
+      const text = yield* Prompts.openRouterDrive(
+        "Lock the screen.",
+        "The lock screen is showing.",
+        ['say "hi"'],
+        2,
+      ).pipe(Effect.provide(NodeFileSystem.layer));
       expect(text.includes("{{")).toBe(false);
+      expect(text).toContain("Lock the screen.");
+      expect(text).toContain("The lock screen is showing.");
+      expect(text).toContain("This is step 2.");
+      expect(text).toContain(JSON.stringify(['say "hi"']));
       expect(text).toContain("completes is true");
       expect(text).toContain("reason is why");
       expect(text).toContain("When completes is true the action is not run");

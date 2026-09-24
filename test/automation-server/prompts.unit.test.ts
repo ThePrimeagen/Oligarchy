@@ -104,16 +104,19 @@ describe("diagnose happy path", () => {
 });
 
 describe("openrouter drive", () => {
-  it.effect("fills the thin client guide and no other value", () =>
+  it.effect("fills the definition, the proof, the step, the reasons, and the guide", () =>
     Effect.gen(function* () {
       const fs = promptFs({
         contents: {
-          "openrouter-driving-agent.html": "tools\n{{CLIENT_TOOLS}}",
+          "openrouter-driving-agent.html":
+            "{{TEST_DEFINITION}}\n{{TEST_PROOF}}\n{{STEP}}\n{{REASONS}}\n{{CLIENT_TOOLS}}",
           "client-tools.md": "x and y are 0 to 1\n",
         },
       });
-      const text = yield* Prompts.openRouterDrive().pipe(Effect.provide(fs.layer));
-      expect(text).toBe("tools\nx and y are 0 to 1");
+      const text = yield* Prompts.openRouterDrive("Lock the screen.", "it shows", [], 1).pipe(
+        Effect.provide(fs.layer),
+      );
+      expect(text).toBe("Lock the screen.\nit shows\n1\n[]\nx and y are 0 to 1");
       expect(fileNames(fs.reads)).toEqual(["openrouter-driving-agent.html", "client-tools.md"]);
     }),
   );
@@ -126,7 +129,11 @@ describe("openrouter drive", () => {
           "client-tools.md": "guide",
         },
       });
-      const error = yield* Effect.flip(Prompts.openRouterDrive().pipe(Effect.provide(fs.layer)));
+      const error = yield* Effect.flip(
+        Prompts.openRouterDrive("Lock the screen.", "it shows", [], 1).pipe(
+          Effect.provide(fs.layer),
+        ),
+      );
       expect(error).toMatchObject({
         _tag: "PromptError",
         message: "prompt: prompts/openrouter-driving-agent.html uses {{NOPE}}, which has no value",
@@ -140,7 +147,11 @@ describe("openrouter drive", () => {
         unreadable: /client-tools\.md$/,
         contents: { "openrouter-driving-agent.html": "{{CLIENT_TOOLS}}" },
       });
-      const error = yield* Effect.flip(Prompts.openRouterDrive().pipe(Effect.provide(fs.layer)));
+      const error = yield* Effect.flip(
+        Prompts.openRouterDrive("Lock the screen.", "it shows", [], 1).pipe(
+          Effect.provide(fs.layer),
+        ),
+      );
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*client-tools\.md/);
       expect(fileNames(fs.reads)).toEqual(["openrouter-driving-agent.html", "client-tools.md"]);

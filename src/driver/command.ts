@@ -14,7 +14,11 @@ const flags = {
   ),
   prompt: Flag.string("prompt").pipe(
     Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("The user prompt"),
+    Flag.withDescription("The test definition"),
+  ),
+  proof: Flag.string("proof").pipe(
+    Flag.withSchema(Schema.NonEmptyString),
+    Flag.withDescription("The proof that closes the test"),
   ),
   debugLog: Flag.string("debug-log").pipe(
     Flag.withSchema(Schema.NonEmptyString),
@@ -51,7 +55,8 @@ export const makeDriverCommand = <E, R>(
       const token = yield* Config.openRouterToken;
       const stopped = yield* run({
         model: input.model,
-        prompt: input.prompt,
+        definition: input.prompt,
+        proof: input.proof,
         testResultId: input.testResultId,
         debugLog: input.debugLog,
         agentId: input.agentId,

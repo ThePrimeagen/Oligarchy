@@ -68,10 +68,20 @@ export const drive = Effect.fn("Prompts.drive")(function* (ticket: string, model
   return yield* render("driving-agent.html", { LINEAR_TICKET: ticket, MODEL: model });
 });
 
-// The OpenRouter driver's prompt. The thin client guide is the only fill; the harness already
-// holds the agent, the session, and the server, so those are not template values.
-export const openRouterDrive = Effect.fn("Prompts.openRouterDrive")(function* () {
-  return yield* render("openrouter-driving-agent.html", {});
+// The OpenRouter driver's prompt, filled again each step. The harness already holds the agent,
+// the session, and the server, so those are not template values. Reasons are the actions so far.
+export const openRouterDrive = Effect.fn("Prompts.openRouterDrive")(function* (
+  definition: string,
+  proof: string,
+  reasons: ReadonlyArray<string>,
+  step: number,
+) {
+  return yield* render("openrouter-driving-agent.html", {
+    TEST_DEFINITION: definition,
+    TEST_PROOF: proof,
+    REASONS: JSON.stringify(reasons),
+    STEP: String(step),
+  });
 });
 
 export const diagnose = Effect.fn("Prompts.diagnose")(function* (

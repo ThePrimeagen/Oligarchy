@@ -5,7 +5,6 @@ import * as Prompts from "../automation-server/prompts.ts";
 import * as HarnessConfig from "../harness/config.ts";
 import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
-import * as Tools from "../harness/tools.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
@@ -14,7 +13,8 @@ import * as Reply from "./reply.ts";
 
 export type Input = {
   readonly model: string;
-  readonly prompt: string;
+  readonly definition: string;
+  readonly proof: string;
   readonly testResultId: string;
   readonly debugLog: string;
   readonly agentId: string;
@@ -100,49 +100,9 @@ const runCommand = Effect.fn("Driver.runCommand")(function* (command: {
   );
 });
 
-// The next ask keeps a short headline. A command can print a screenshot or a serial log.
-const BRIEF = 500;
-
-const brief = (text: string): string => {
-  const lines: Array<string> = [];
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") {
-      continue;
-    }
-    lines.push(trimmed);
-    if (lines.length === 4) {
-      break;
-    }
-  }
-  const joined = lines.join(" / ");
-  if (joined.length <= BRIEF) {
-    return joined;
-  }
-  return joined.slice(0, BRIEF);
-};
-
-const decision = (did: string, outcome: string): string => {
-  const rest = brief(outcome);
-  if (rest === "" || rest === did) {
-    return did;
-  }
-  return `${did}: ${rest}`;
-};
-
-const ask = (prompt: string, decisions: ReadonlyArray<string>): string => {
-  if (decisions.length === 0) {
-    return prompt;
-  }
-  return `${prompt}\n\n${decisions.join("\n")}`;
-};
-
 export const run = Effect.fn("Driver.run")(function* (input: Input) {
   const startedAt = yield* Clock.currentTimeMillis;
-  const prompt = yield* Prompts.openRouterDrive().pipe(
-    Effect.mapError((error) => commandError(error.message)),
-  );
-  const decisions: Array<string> = [];
+  const reasons: Array<string> = [];
   let sessionId = input.sessionId;
   let turns = 0;
 
@@ -160,6 +120,12 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     }
 
     const step = turns + 1;
+    const prompt = yield* Prompts.openRouterDrive(
+      input.definition,
+      input.proof,
+      reasons,
+      step,
+    ).pipe(Effect.mapError((error) => commandError(error.message)));
     yield* log(input.debugLog, step, "request", input.model);
     const turn = yield* OpenRouter.complete({
       baseUrl: input.config.openRouterBaseUrl,
@@ -167,7 +133,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
       model: input.model,
       messages: [
         { role: "system", content: prompt },
-        { role: "user", content: ask(input.prompt, decisions) },
+        { role: "user", content: "Take this step." },
       ],
       tools: [Reply.TOOL],
       toolChoice: { type: "function", function: { name: "drive" } },
@@ -206,14 +172,13 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     });
     if (Result.isFailure(planned)) {
       yield* log(input.debugLog, step, "refusal", planned.failure.message);
-      decisions.push(decision(reply.reason, planned.failure.message));
+      reasons.push(reply.reason);
       continue;
     }
     const screenshot = `${input.debugLog}.png`;
     const command = waiting
       ? { bin: planned.success.bin, args: [...planned.success.args, "-o", screenshot] }
       : planned.success;
-    let outcome = "";
 
     if (command.args[0] === "start") {
       const routing = Intent.flag(command.args, "server-url");
@@ -231,7 +196,6 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         `${shown(command)} exit ${String(started.exitCode)}`,
       );
       const printed = (started.stdout.split("\n")[0] ?? "").trim();
-      outcome = Tools.toolContent(started);
       if (started.exitCode === 0 && printed !== "") {
         sessionId = printed;
         const markRunning = {
@@ -259,11 +223,8 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           "command",
           `${shown(markRunning)} exit ${String(marked.exitCode)}`,
         );
-        if (marked.exitCode !== 0) {
-          outcome = `${outcome}\n${Tools.toolContent(marked)}`;
-        }
       }
-      decisions.push(decision(reply.reason, outcome));
+      reasons.push(reply.reason);
       continue;
     }
 
@@ -271,7 +232,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     const bracketed = Intent.bracket(command, input.testResultId, message);
     if (Result.isFailure(bracketed)) {
       yield* log(input.debugLog, step, "refusal", bracketed.failure.message);
-      decisions.push(decision(reply.reason, bracketed.failure.message));
+      reasons.push(reply.reason);
       continue;
     }
 
@@ -285,7 +246,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         `${shown(bracketed.success.start)} exit ${String(opened.exitCode)}`,
       );
       if (opened.exitCode !== 0) {
-        decisions.push(decision(reply.reason, Tools.toolContent(opened)));
+        reasons.push(reply.reason);
         continue;
       }
       // A spawn or log failure still has to close the intent this start opened.
@@ -307,10 +268,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         "command",
         `${shown(bracketed.success.end)} exit ${String(ended.exitCode)}`,
       );
-      const shot = waiting && ran.exitCode === 0 ? screenshot : Tools.toolContent(ran);
-      outcome =
-        ended.exitCode === 0 ? shot : `${shot}\nintent end failed\n${Tools.toolContent(ended)}`;
-      decisions.push(decision(reply.reason, outcome));
+      reasons.push(reply.reason);
       continue;
     }
 
@@ -324,6 +282,6 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     if (command.args[0] === "relinquish" && ran.exitCode === 0) {
       sessionId = undefined;
     }
-    decisions.push(decision(reply.reason, Tools.toolContent(ran)));
+    reasons.push(reply.reason);
   }
 });

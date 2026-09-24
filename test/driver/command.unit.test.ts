@@ -18,6 +18,7 @@ const MODEL = "openrouter/test-model";
 const RESULT = "22222222-2222-4222-8222-222222222222";
 const TOKEN = "super-secret-token";
 const PROMPT = "Lock the screen.";
+const PROOF = "The lock screen is showing.";
 const LOG = "/tmp/driver-debug.log";
 
 const AGENT = "OLI-1";
@@ -28,6 +29,8 @@ const FLAGS = [
   MODEL,
   "--prompt",
   PROMPT,
+  "--proof",
+  PROOF,
   "--debug-log",
   LOG,
   "--test-result-id",
@@ -106,7 +109,8 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       yield* run(FLAGS, seen);
       expect(seen.input?.model).toBe(MODEL);
-      expect(seen.input?.prompt).toBe(PROMPT);
+      expect(seen.input?.definition).toBe(PROMPT);
+      expect(seen.input?.proof).toBe(PROOF);
       expect(seen.input?.debugLog).toBe(LOG);
       expect(seen.input?.testResultId).toBe(RESULT);
       expect(seen.input?.agentId).toBe(AGENT);
@@ -140,6 +144,7 @@ describe("driver command", () => {
       for (const flag of [
         "model",
         "prompt",
+        "proof",
         "debug-log",
         "test-result-id",
         "agent-id",
@@ -171,6 +176,8 @@ describe("driver command", () => {
             "muse",
             "--prompt",
             PROMPT,
+            "--proof",
+            PROOF,
             "--debug-log",
             LOG,
             "--test-result-id",
@@ -197,6 +204,7 @@ describe("driver command", () => {
       const stdout = (yield* TestConsole.logLines).join("\n");
       expect(stdout).toContain("--model");
       expect(stdout).toContain("--prompt");
+      expect(stdout).toContain("--proof");
       expect(stdout).toContain("--debug-log");
       expect(stdout).toContain("--test-result-id");
       expect(stdout).toContain("--agent-id");
