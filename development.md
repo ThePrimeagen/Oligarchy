@@ -464,7 +464,8 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   `--server-url` when it passed them; the log names `resume` and `routing <url>` only then. When
   that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
   the test result id, and the model, which marks the result running. The action itself is the
-  client command's handlers, called in this process. Before a guest action (`send-keys`, `mouse`,
+  client function for that action (`mouse click` is `mouseClick`), called in this process. The
+  driver does not run the client CLI and does not spawn `./client`. Before a guest action (`send-keys`, `mouse`,
   `get-image`, `get-serial`, `follow`) the driver calls `intent start`, and `intent end` after the
   action returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A
   `stop` or `save` that exits 0 is followed by `./ctrl test-results` (success when the status is

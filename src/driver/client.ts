@@ -1,24 +1,8 @@
-import {
-  Cause,
-  Console,
-  Effect,
-  Exit,
-  Option,
-  Runtime,
-  Sink,
-  Stdio,
-  Stream,
-  Terminal,
-} from "effect";
-import * as CliConfig from "effect/unstable/cli/CliConfig";
+import { Cause, Console, Effect, Exit, Option, Sink, Stdio, Stream } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
-import * as CliOutput from "effect/unstable/cli/CliOutput";
-import * as Command from "effect/unstable/cli/Command";
-import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
-import * as ClientCommand from "../client/command.ts";
+import * as Actions from "../client/actions.ts";
 import * as Tools from "../harness/tools.ts";
 import * as Render from "../observability/render.ts";
-import * as Api from "../shared/api.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -28,22 +12,6 @@ const text = (chunks: ReadonlyArray<Uint8Array>): string =>
 
 const written = (args: ReadonlyArray<unknown>): Uint8Array =>
   encoder.encode(`${args.map(String).join(" ")}\n`);
-
-// A captured command is not a terminal, so help is uncolored and the wizard flag is off,
-// the same as ./client.
-const formatter = CliOutput.defaultFormatter({ colors: false });
-
-const cliConfig = CliConfig.make({
-  builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard),
-});
-
-const terminal = Terminal.make({
-  columns: Effect.succeed(80),
-  rows: Effect.succeed(24),
-  readInput: Effect.die("unexpected Terminal.readInput"),
-  readLine: Effect.die("unexpected Terminal.readLine"),
-  display: () => Effect.die("unexpected Terminal.display"),
-});
 
 const capturingConsole = (
   stdout: Array<Uint8Array>,
@@ -81,15 +49,13 @@ const capturingStdio = (stdout: Array<Uint8Array>, stderr: Array<Uint8Array>) =>
     stdoutIsTerminal: Effect.succeed(false),
   });
 
-// The same handlers ./client runs, in this process. A failure is the command's exit, the way a
-// child that printed its error and exited 1 was: the loop keeps going and the model reads it.
+// The client function for this action, in this process. mouse click is mouseClick.
+// Nothing here starts a terminal or a child process.
 const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<string>) {
   const stdout: Array<Uint8Array> = [];
   const stderr: Array<Uint8Array> = [];
   const exitCode = yield* Effect.gen(function* () {
-    const exit = yield* Effect.exit(
-      Command.runWith(ClientCommand.makeClientCommand(), { version: Api.VERSION })(args),
-    );
+    const exit = yield* Effect.exit(Actions.call(args));
     if (Exit.isSuccess(exit)) {
       return 0;
     }
@@ -97,19 +63,19 @@ const runClient = Effect.fn("Driver.runClient")(function* (args: ReadonlyArray<s
       return yield* Effect.interrupt;
     }
     const failure = Cause.findErrorOption(exit.cause);
-    if (Option.isNone(failure) || !CliError.isCliError(failure.value)) {
-      yield* Render.reportFailure(exit.cause);
+    if (
+      Option.isSome(failure) &&
+      CliError.isCliError(failure.value) &&
+      failure.value._tag === "UserError"
+    ) {
+      stderr.push(encoder.encode(`${failure.value.userMessage}\n`));
+      return 1;
     }
-    return Option.match(failure, {
-      onNone: () => 1,
-      onSome: (error) => Runtime.getErrorExitCode(error),
-    });
+    yield* Render.reportFailure(exit.cause);
+    return 1;
   }).pipe(
     Effect.provideService(Console.Console, capturingConsole(stdout, stderr)),
     Effect.provideService(Stdio.Stdio, capturingStdio(stdout, stderr)),
-    Effect.provideService(CliOutput.Formatter, formatter),
-    Effect.provideService(CliConfig.CliConfig, cliConfig),
-    Effect.provideService(Terminal.Terminal, terminal),
   );
   return {
     exitCode,
