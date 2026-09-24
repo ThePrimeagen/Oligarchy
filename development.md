@@ -453,27 +453,31 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   retries an HTTP 429 or 5xx only when `retry-after` fits inside the run ceiling. A missing or
   malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`. A refused
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
-- `./driver` runs that loop for one prompt and one model. Each turn is one back and forth:
-  the `custom-harness-driving-agent.html` prompt, filled with the step, the past reasons, the
-  run's test definition and proof, and the client tools, then the task. The reply is one line: the
-  tool call JSON. `client` runs that action; `Done` leaves the loop successfully and runs nothing. It appends one JSON line to `--debug-log` per step (the loop
-  counter and the step), and exits 0 only when the reply is `Done` or the harness closed the
-  result. An OpenRouter failure, a reply that is not that one tool call, the step limit, or the
-  run ceiling exits 1 and the reason is the failure. A `start` is the model's action,
-  including `--resume` when it passed that flag. The harness adds `--agent-id` and, when this
-  run has a server, `--server-url`; the log names `resume` when the model passed it and
-  `routing <url>` when a server was added. The model's args are the action and its own flags.
-  When
-  that start exits 0 and prints a session id, the harness runs `./ctrl test start` with that id,
-  the test result id, and the model, which marks the result running. The action itself is the
-  client function for that action (`mouse click` is `mouseClick`), called in this process. The
-  driver does not run the client CLI and does not spawn `./client`. Before a guest action (`send-keys`, `mouse`,
-  `get-image`, `get-serial`, `follow`) the driver calls `intent start`, and `intent end` after the
-  action returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A
-  `stop` or `save` that exits 0 is followed by `./ctrl test-results` (success when the status is
-  succeeded or completed, or the command is save; failed otherwise), and the model is not called
-  again. A diagnose is not this program: it still runs under OpenCode. The OpenRouter token is
-  `OPENROUTER_API_KEY`.
+- `./driver` runs that loop for one prompt and one model. The only identity it is given is
+  `--agent-id`, the ticket on the result. From that row it loads the definition, the proof, the
+  iso, the server, and whether start resumes. It calls `start` before the model (with `--resume`
+  when the row says so, and `--server-url` when the run has a server), and the session id is the
+  one that start prints. It then runs `./ctrl test start` with that id, the result id, and the
+  model, which marks the result running. Each turn is one back and forth: the
+  `custom-harness-driving-agent.html` prompt, filled with the step, the past reasons, the looked-up
+  definition and proof, and the client tools, then the task. The reply is one line: the tool call
+  JSON. `client` runs that action; `Done` tells the harness the task is finished. The model's args
+  are the action and its own flags. It does not call `start`, `stop`, or `save`, and it does not
+  pass `--agent-id`, `--session-id`, or `--server-url`. The log names `resume` when the looked-up
+  run resumes and `routing <url>` when a server was added. When the model calls `Done`, the harness
+  stops the session (`save` when the definition is mint, otherwise `stop --status succeeded`) and
+  runs `./ctrl test-results`. A failure after the session exists stops it with `--status failed`
+  and closes the result failed, and the loop still exits 1 with the original reason. It appends
+  one JSON line to `--debug-log` per step (the loop counter and the step), and exits 0 only when
+  the harness closed the result. An OpenRouter failure, a reply that is not that one tool call,
+  the step limit, or the run ceiling exits 1 and the reason is the failure. A ticket with no
+  result, or a result with no definition, fails before start and does not ask the model. The
+  action itself is the client function for that action (`mouse click` is `mouseClick`), called in
+  this process. The driver does not run the client CLI and does not spawn `./client`. Before a
+  guest action (`send-keys`, `mouse`, `get-image`, `get-serial`, `follow`) the driver calls
+  `intent start`, and `intent end` after the action returns. `start`, `reserve`, `relinquish`,
+  `stop`, and `save` are not guest actions. A diagnose is not this program: it still runs under
+  OpenCode. The OpenRouter token is `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
 

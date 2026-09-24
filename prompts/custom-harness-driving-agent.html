@@ -20,8 +20,9 @@ Past steps:
 
 <reply>
 You MUST use a tool. The reply is one line, the tool call JSON, and nothing else.
-client runs one ./client command from the client tools. Done leaves the loop successfully and runs nothing.
-Do not call intent. The harness opens and closes intents, and it marks a started session running.
+client runs one ./client command from the client tools. Done leaves the loop successfully.
+Do not call intent. The harness opens and closes intents.
+Do not call start, stop, or save. The harness starts the guest and stops it when you call Done.
 Do not pass --agent-id, --session-id, or --server-url. The harness adds them.
 </reply>
 
@@ -43,9 +44,9 @@ The lock screen is up. The password is prime. Type the password and press enter.
 
 <tools>
 <tool name="client">
-{"name":"client","arguments":{"reason":"why, in a few words","args":["start","--resume"]}}
+{"name":"client","arguments":{"reason":"why, in a few words","args":["get-image"]}}
 reason is why, in a few words. It is the intent message.
-args is the action, then its own flags. Do not pass --agent-id, --session-id, or --server-url.
+args is the action, then its own flags. Do not pass --agent-id, --session-id, or --server-url. Do not call start, stop, or save.
 </tool>
 <tool name="Done">
 {"name":"Done","arguments":{}}

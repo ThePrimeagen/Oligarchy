@@ -78,9 +78,6 @@ type Placement = {
   readonly serverId: string;
   readonly prompt: string;
   readonly ticket: string;
-  readonly testDefinition: string;
-  readonly testProof: string;
-  readonly serverUrl: string;
 };
 
 type PlaceResult =
@@ -154,28 +151,12 @@ const place = Effect.fn("place")(function* (
     job.action === "diagnose"
       ? yield* Prompts.diagnose(ticket, job.resultId, model)
       : yield* Prompts.drive(ticket, model);
-  // A drive or mint whose definition is still there carries the mission. The model has no
-  // Linear tool, so the start line, instruction and proof have to be in the prompt.
+  // A drive or mint whose definition is still there carries the mission. The harness
+  // looks the definition, proof, server, and resume up from the ticket; this prompt does not.
   const facts = job.action === "diagnose" ? Option.none() : yield* tests.driveFacts(job.resultId);
   const prompt = Option.match(facts, {
     onNone: () => base,
-    onSome: (fact) =>
-      `${base}\n\n${Prompts.missionText({
-        action: job.action === "mint" ? "mint" : "drive",
-        ticket,
-        ...fact,
-      })}`,
-  });
-  // The harness prompt fills these beside the task. They are the stored wording when the
-  // definition is still there, and the task itself with no separate proof when it is not.
-  // The harness holds the server. A run with no stored definition has nothing to route.
-  const carried = Option.match(facts, {
-    onNone: () => ({ testDefinition: prompt, testProof: "none", serverUrl: "" }),
-    onSome: (fact) => ({
-      testDefinition: fact.instruction,
-      testProof: fact.proof,
-      serverUrl: fact.serverUrl,
-    }),
+    onSome: (fact) => `${base}\n\n${Prompts.missionText(fact)}`,
   });
   // A drive resumes the run's iso. A mint boots fresh. A missing row reserves fresh rather
   // than failing a drive the definition lookup cannot see.
@@ -205,7 +186,7 @@ const place = Effect.fn("place")(function* (
     if (Result.isSuccess(reserved)) {
       const placed: PlaceResult = {
         _tag: "placed",
-        placement: { url: client.url, serverId: client.id, prompt, ticket, ...carried },
+        placement: { url: client.url, serverId: client.id, prompt, ticket },
       };
       return placed;
     }
@@ -720,15 +701,7 @@ export const dispatch = Effect.fn("dispatch")(function* (models: {
                 },
               );
               return yield* Effect.interruptible(
-                AutomationClient.run(
-                  placement.url,
-                  placement.prompt,
-                  placement.ticket,
-                  job.resultId,
-                  placement.testDefinition,
-                  placement.testProof,
-                  placement.serverUrl,
-                ),
+                AutomationClient.run(placement.url, placement.prompt, placement.ticket),
               ).pipe(
                 Effect.andThen(judge(job)),
                 Effect.matchCauseEffect({

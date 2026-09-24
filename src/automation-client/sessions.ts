@@ -233,14 +233,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       Effect.forkScoped,
     );
 
-    const run = Effect.fn("Sessions.run")(function* (
-      ticket: string,
-      prompt: string,
-      testResultId: string,
-      testDefinition: string,
-      testProof: string,
-      serverUrl: string,
-    ) {
+    const run = Effect.fn("Sessions.run")(function* (ticket: string, prompt: string) {
       // Read before consume: the reservation is what says drive, diagnose, or mint,
       // and consume removes it. A missing one fails in consume and spawns nothing.
       // A diagnose still runs under OpenCode. A drive or mint is the harness.
@@ -272,12 +265,8 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               )
             : Driver.args({
                 prompt,
-                testDefinition,
-                testProof,
                 agentId: ticket,
-                serverUrl,
                 action: action === "mint" ? "mint" : "drive",
-                testResultId,
               });
           const handle = yield* Cli.spawn(bin, args, env);
           const claimed = yield* Ref.modify(running, (map) =>

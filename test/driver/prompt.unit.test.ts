@@ -5,7 +5,7 @@ import * as Prompt from "../../src/driver/prompt.ts";
 import * as Reply from "../../src/driver/reply.ts";
 
 const CLIENT =
-  '{"name":"client","arguments":{"reason":"why, in a few words","args":["start","--resume"]}}';
+  '{"name":"client","arguments":{"reason":"why, in a few words","args":["get-image"]}}';
 const DONE = '{"name":"Done","arguments":{}}';
 const EXAMPLE =
   '{"name":"client","arguments":{"reason":"type the password","args":["send-keys","--keys","prime<ENTER>"]}}';
@@ -32,6 +32,8 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).toContain(DONE);
     expect(text).toContain("./client");
     expect(text).toContain("Do not call intent");
+    expect(text).toContain("Do not call start, stop, or save.");
+    expect(text).toContain("The harness starts the guest and stops it when you call Done.");
     expect(text).toContain("{{TEST_DEFINITION}}");
     expect(text).toContain("{{TEST_PROOF}}");
     expect(text).toContain("{{STEP}}");

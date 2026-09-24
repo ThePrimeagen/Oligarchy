@@ -10,7 +10,6 @@ const URL = "http://127.0.0.1:55333";
 const TOKEN = "test-token";
 const PROMPT = "drive OLI-42";
 const TICKET = "OLI-42";
-const RESULT = "22222222-2222-4222-8222-222222222222";
 
 const token = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
@@ -26,9 +25,7 @@ const reserve = (
   );
 
 const run = (http: Layer.Layer<HttpClient.HttpClient>) =>
-  AutomationClient.run(URL, PROMPT, TICKET, RESULT, PROMPT, "none", "").pipe(
-    Effect.provide(Layer.mergeAll(token, http)),
-  );
+  AutomationClient.run(URL, PROMPT, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
 
 const abort = (http: Layer.Layer<HttpClient.HttpClient>) =>
   AutomationClient.abort(URL, TICKET).pipe(Effect.provide(Layer.mergeAll(token, http)));
@@ -110,10 +107,6 @@ describe("automation client POST /run happy path", () => {
         expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
           prompt: PROMPT,
           ticket: TICKET,
-          testResultId: RESULT,
-          testDefinition: PROMPT,
-          testProof: "none",
-          serverUrl: "",
         });
       }),
   );

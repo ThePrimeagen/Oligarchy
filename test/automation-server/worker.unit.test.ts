@@ -454,10 +454,6 @@ describe("dispatch happy path", () => {
         expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
           prompt: DRIVE_PROMPT,
           ticket: TICKET,
-          testResultId: RESULT_ID,
-          testDefinition: DRIVE_PROMPT,
-          testProof: "none",
-          serverUrl: "",
         });
         expect(FakeLog.texts(fixed.log)).toEqual([
           `dispatching drive; ${URL}; ${MODEL}`,
@@ -472,30 +468,30 @@ describe("dispatch happy path", () => {
       }),
   );
 
-  it.effect(
-    "a drive whose definition is there posts the mission, including the resume start line",
-    () =>
-      Effect.gen(function* () {
-        const fixed = harness();
-        seedResult(fixed.tests);
-        seedFacts(fixed.tests, "Lock the screen from the menu.");
-        seedJob(fixed.automation, "drive");
-        seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
-        yield* start(fixed, http.layer);
-        yield* settle(fixed.automation.jobs, "completed");
-        const posted = JSON.parse(http.requests[1]?.body ?? "");
-        expect(posted.prompt).toContain(DRIVE_PROMPT);
-        expect(posted.prompt).toContain("Lock the screen from the menu.");
-        expect(posted.prompt).toContain("--resume");
-        expect(posted.prompt).not.toContain("intent start");
-        expect(posted.testResultId).toBe(RESULT_ID);
-        expect(posted.testDefinition).toBe("Lock the screen from the menu.");
-        expect(posted.testProof).toBe("The screen is locked.");
-        expect(posted.serverUrl).toBe("http://127.0.0.1:42069");
-        expect(posted.prompt).not.toContain("--agent-id");
-        expect(posted.prompt).not.toContain("--server-url");
-      }),
+  it.effect("a drive whose definition is there posts the mission and the ticket", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedFacts(fixed.tests, "Lock the screen from the menu.");
+      seedJob(fixed.automation, "drive");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      const posted = JSON.parse(http.requests[1]?.body ?? "");
+      expect(posted.prompt).toContain(DRIVE_PROMPT);
+      expect(posted.prompt).toContain("Lock the screen from the menu.");
+      expect(posted.prompt).toContain("The screen is locked.");
+      expect(posted.prompt).not.toContain("--resume");
+      expect(posted.prompt).not.toContain("./client start");
+      expect(posted.prompt).not.toContain("intent start");
+      expect(posted.ticket).toBe(TICKET);
+      expect(posted.testDefinition).toBeUndefined();
+      expect(posted.testProof).toBeUndefined();
+      expect(posted.serverUrl).toBeUndefined();
+      expect(posted.prompt).not.toContain("--agent-id");
+      expect(posted.prompt).not.toContain("--server-url");
+    }),
   );
 
   it.effect("a mint whose definition is there posts the mission without --resume", () =>
@@ -511,11 +507,11 @@ describe("dispatch happy path", () => {
       yield* settle(fixed.automation.jobs, "completed");
       const posted = JSON.parse(http.requests[1]?.body ?? "");
       expect(posted.prompt).toContain("Install Omarchy.");
-      expect(posted.prompt).toContain("--iso https://example.com/omarchy.iso");
+      expect(posted.prompt).toContain("The screen is locked.");
+      expect(posted.prompt).not.toContain("--iso");
       expect(posted.prompt).not.toContain("--resume");
-      expect(posted.testDefinition).toBe("Install Omarchy.");
-      expect(posted.testProof).toBe("The screen is locked.");
-      expect(posted.serverUrl).toBe("http://127.0.0.1:42069");
+      expect(posted.prompt).not.toContain("./client start");
+      expect(posted.testDefinition).toBeUndefined();
     }),
   );
 
@@ -556,10 +552,6 @@ describe("dispatch happy path", () => {
       expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({
         prompt: DIAGNOSE_PROMPT,
         ticket: TICKET,
-        testResultId: RESULT_ID,
-        testDefinition: DIAGNOSE_PROMPT,
-        testProof: "none",
-        serverUrl: "",
       });
       expect(FakeLog.texts(fixed.log)).toEqual([
         `dispatching diagnose; ${URL}; ${MODEL}`,
@@ -2794,7 +2786,7 @@ describe("a running job left by the last automation server", () => {
           http.requests.map((request) => `${request.method} ${request.url} ${request.body}`),
         ).toEqual([
           `POST ${URL}/reserve ${JSON.stringify({ ticket: "OLI-45", action: "drive" })}`,
-          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45", testResultId: waitingResult, testDefinition: `drive OLI-45 as ${MODEL}`, testProof: "none", serverUrl: "" })}`,
+          `POST ${URL}/run ${JSON.stringify({ prompt: `drive OLI-45 as ${MODEL}`, ticket: "OLI-45" })}`,
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
@@ -3644,17 +3636,7 @@ const leftBehind = (client: SixJobClient, left: ReadonlyArray<string>) =>
     for (const ticket of left) {
       yield* AutomationClient.reserve(URL, ticket, "drive");
       connections.push(
-        yield* Effect.forkChild(
-          AutomationClient.run(
-            URL,
-            promptOf(ticket),
-            ticket,
-            resultOf(ticket),
-            promptOf(ticket),
-            "none",
-            "",
-          ),
-        ),
+        yield* Effect.forkChild(AutomationClient.run(URL, promptOf(ticket), ticket)),
       );
     }
     const children = yield* Effect.all(left.map(() => client.spawner.nextSpawn));

@@ -156,16 +156,10 @@ const installOpencode = (script: string): string => {
   return bin;
 };
 
-const RESULT = "22222222-2222-4222-8222-222222222222";
-
 const runJson = (prompt: string, ticket = "OLI-42") =>
   JSON.stringify({
     prompt,
     ticket,
-    testResultId: RESULT,
-    testDefinition: prompt,
-    testProof: "none",
-    serverUrl: "",
   });
 
 const lines = (output: string): ReadonlyArray<string> =>
@@ -372,12 +366,8 @@ describeWithDatabase("automation client POST /run", () => {
             [
               ...Driver.args({
                 prompt: "do the work",
-                testDefinition: "do the work",
-                testProof: "none",
                 agentId: "OLI-42",
-                serverUrl: "",
                 action: "drive",
-                testResultId: RESULT,
               }),
               "",
             ].join("\n"),

@@ -36,14 +36,7 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
       ({ payload }) =>
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
-          yield* sessions.run(
-            payload.ticket,
-            payload.prompt,
-            payload.testResultId,
-            payload.testDefinition,
-            payload.testProof,
-            payload.serverUrl,
-          );
+          yield* sessions.run(payload.ticket, payload.prompt);
           return ok;
         }),
       uninterruptible,

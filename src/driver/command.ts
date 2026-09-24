@@ -20,29 +20,13 @@ const flags = {
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("The user prompt"),
   ),
-  testDefinition: Flag.string("test-definition").pipe(
-    Flag.withSchema(Schema.String),
-    Flag.withDescription("Test definition the harness prompt fills"),
-  ),
-  testProof: Flag.string("test-proof").pipe(
-    Flag.withSchema(Schema.String),
-    Flag.withDescription("Test proof the harness prompt fills"),
-  ),
   agentId: Flag.string("agent-id").pipe(
     Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("Ticket the harness passes as --agent-id"),
-  ),
-  serverUrl: Flag.string("server-url").pipe(
-    Flag.withSchema(Schema.String),
-    Flag.withDescription("QEMU server the harness passes as --server-url; empty omits it"),
+    Flag.withDescription("Ticket the harness looks up and passes as --agent-id"),
   ),
   debugLog: Flag.string("debug-log").pipe(
     Flag.withSchema(Schema.NonEmptyString),
     Flag.withDescription("File that receives one JSON line per step"),
-  ),
-  testResultId: Flag.string("test-result-id").pipe(
-    Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("Test result this run closes"),
   ),
 };
 
@@ -59,11 +43,7 @@ export const makeDriverCommand = <E, R>(
       const stopped = yield* run({
         model: input.action === "mint" ? config.models.mint : config.models.drive,
         prompt: input.prompt,
-        testDefinition: input.testDefinition,
-        testProof: input.testProof,
         agentId: input.agentId,
-        serverUrl: input.serverUrl,
-        testResultId: input.testResultId,
         debugLog: input.debugLog,
         config,
         token,
@@ -72,7 +52,7 @@ export const makeDriverCommand = <E, R>(
     }),
   ).pipe(
     Command.withDescription(
-      "Run the harness loop for one prompt: the model is oligarchy.json's for --action; each reply is one tool call, client or Done; a debug log of every step; a started session marked running; and intent start and end around each guest action",
+      "Run the harness loop for one prompt: the model is oligarchy.json's for --action; the run is looked up from --agent-id; the harness starts the guest and stops it; each reply is one tool call, client or Done",
     ),
     EnvFile.withEnvFile,
   );
