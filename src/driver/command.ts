@@ -4,13 +4,17 @@ import * as Flag from "effect/unstable/cli/Flag";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
 import * as HarnessConfig from "../harness/config.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Loop from "./loop.ts";
 
+// drive and mint are the harness. A diagnose is opencode, and this program does not run it.
+const DriverAction = Schema.String.check(
+  Schema.isPattern(/^(drive|mint)$/, { message: "action must be drive or mint" }),
+).annotate({ identifier: "@oligarchy/driver/command/DriverAction" });
+
 const flags = {
-  model: Flag.string("model").pipe(
-    Flag.withSchema(Domain.ModelId),
-    Flag.withDescription("The model for this run, provider/model"),
+  action: Flag.string("action").pipe(
+    Flag.withSchema(DriverAction),
+    Flag.withDescription("drive or mint; the model is that action's in oligarchy.json"),
   ),
   prompt: Flag.string("prompt").pipe(
     Flag.withSchema(Schema.NonEmptyString),
@@ -22,7 +26,7 @@ const flags = {
   ),
   testResultId: Flag.string("test-result-id").pipe(
     Flag.withSchema(Schema.NonEmptyString),
-    Flag.withDescription("Test result id passed to intent start"),
+    Flag.withDescription("Test result this run closes"),
   ),
 };
 
@@ -37,7 +41,7 @@ export const makeDriverCommand = <E, R>(
       const config = yield* HarnessConfig.load;
       const token = yield* Config.openRouterToken;
       const stopped = yield* run({
-        model: input.model,
+        model: input.action === "mint" ? config.models.mint : config.models.drive,
         prompt: input.prompt,
         testResultId: input.testResultId,
         debugLog: input.debugLog,
@@ -48,7 +52,7 @@ export const makeDriverCommand = <E, R>(
     }),
   ).pipe(
     Command.withDescription(
-      "Run the harness loop for one prompt and one model: each reply is complete or continue, what the agent did, and the action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
+      "Run the harness loop for one prompt: the model is oligarchy.json's for --action; each reply is complete or continue, what the agent did, and the action; a debug log of every step; a started session marked running; and intent start and end around each guest action",
     ),
     EnvFile.withEnvFile,
   );

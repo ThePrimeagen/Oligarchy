@@ -15,7 +15,7 @@ are the same files, installed under `/tmp/mintedrun` with this fleet's ports in 
 | qemu-c | 55343 | `--max-jobs 1` | `$OLIGARCHY_DATA_ROOT/qemu-c` |
 | qemu-d | 55344 | `--max-jobs 1` | `$OLIGARCHY_DATA_ROOT/qemu-d` |
 | automation-client-4 | 52224 | `--max-jobs 4` | |
-| automation-server | 54321 | `--model openrouter/meta/muse-spark-1.3-contributor` | |
+| automation-server | 54321 | models from `oligarchy.json` | |
 
 `OLIGARCHY_DATA_ROOT` defaults to `$HOME/personal/oligarchy-data` (`install.sh` creates the four
 dirs and seeds each `isos/` with the ISO and its `manifest.json` entry from `SUPER_RUN_ISO_CACHE`,

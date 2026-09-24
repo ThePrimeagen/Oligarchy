@@ -191,7 +191,9 @@ export class MintedServers extends Schema.Class<MintedServers>(
 export class RunBody extends Schema.Class<RunBody>("@oligarchy/shared/contract/RunBody")({
   prompt: Schema.String,
   ticket: Schema.NonEmptyString,
-  model: Domain.ModelId,
+  // The harness passes this to intent start and to ./ctrl test start / test-results.
+  // The model is oligarchy.json's for the reserved action, not a field of this body.
+  testResultId: Schema.NonEmptyString,
 }) {}
 
 // What an automation client is asked to hold for a ticket: a mint and a drive take a guest slot

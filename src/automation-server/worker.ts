@@ -126,7 +126,11 @@ const diagnosable = Effect.fn("diagnosable")(function* (resultId: string) {
 const place = Effect.fn("place")(function* (
   job: Automation.AutomationJobRow,
   clients: ReadonlyArray<Servers.LiveServer>,
-  model: string,
+  models: {
+    readonly drive: string;
+    readonly diagnose: string;
+    readonly mint: string;
+  },
 ) {
   const tests = yield* Tests.TestStore;
   const setups = yield* SetupRequests.SetupRequestStore;
@@ -142,10 +146,23 @@ const place = Effect.fn("place")(function* (
     return yield* Errors.AutomationClientError.make({ message: "no Linear ticket" });
   }
   const ticket = result.value.linearId;
-  const prompt =
+  const model = models[job.action];
+  const base =
     job.action === "diagnose"
       ? yield* Prompts.diagnose(ticket, job.resultId, model)
       : yield* Prompts.drive(ticket, model);
+  // A drive or mint whose definition is still there carries the mission. The model has no
+  // Linear tool, so the start line, instruction and proof have to be in the prompt.
+  const facts = job.action === "diagnose" ? Option.none() : yield* tests.driveFacts(job.resultId);
+  const prompt = Option.match(facts, {
+    onNone: () => base,
+    onSome: (fact) =>
+      `${base}\n\n${Prompts.missionText({
+        action: job.action === "mint" ? "mint" : "drive",
+        ticket,
+        ...fact,
+      })}`,
+  });
   // A drive resumes the run's iso. A mint boots fresh. A missing row reserves fresh rather
   // than failing a drive the definition lookup cannot see.
   const resume =
@@ -229,8 +246,8 @@ const judge = Effect.fn("judge")(function* (job: Automation.AutomationJobRow) {
   if (job.action === "diagnose") {
     return finished(job);
   }
-  // opencode exiting 0 with the result still open is an agent that quit early, and the job says
-  // so rather than reading as a run.
+  // The driver exiting 0 with the result still open is an agent that quit early, and the job
+  // says so rather than reading as a run. The harness closes the result on stop or save.
   const after = yield* tests.findResult(job.resultId);
   if (Option.isNone(after)) {
     return yield* Effect.die(new Error(`judge: result ${job.resultId} vanished during the drive`));
@@ -431,10 +448,10 @@ const abortAt = (url: string, ticket: string) =>
     }),
   );
 
-// A shutdown ended the /run wait, and OpenCode outlives a dropped /run, so the automation
+// A shutdown ended the /run wait, and ./driver outlives a dropped /run, so the automation
 // client is asked to stop the job before its row closes aborted. A 404 is an automation client
 // holding nothing for a job this process has running: reported, then closed aborted. One that
-// fails the stop or does not answer leaves OpenCode unconfirmed: reported, and the row stays
+// fails the stop or does not answer leaves the driver unconfirmed: reported, and the row stays
 // running, so the next startup stops it and fails it.
 const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
   job: Automation.AutomationJobRow,
@@ -462,7 +479,7 @@ const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
 // qemu server errored its session, which moves the ticket to Errored. Nothing is asked of its
 // automation client: whatever the driver still does after closing the result, it does on its
 // own. A diagnose's result was closed before it was queued, so it says nothing about the
-// diagnose. Every other row is stopped at the automation client that took it, so opencode is
+// diagnose. Every other row is stopped at the automation client that took it, so the driver is
 // killed or the reservation and its qemu slot are given back, then errored, and its ticket
 // moved to Errored with the reason. A 404 is an automation client holding nothing for the
 // ticket, which is reported. One that does not answer is reported and the job is errored
@@ -519,7 +536,11 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
 // row that fails is one error line and the next row is tried, and a listing that fails is one
 // error line. Dispatch starts either way. A shutdown asks each automation client to stop the
 // jobs it runs, all at once, and closes each aborted once its client answers.
-export const dispatch = Effect.fn("dispatch")(function* (model: string) {
+export const dispatch = Effect.fn("dispatch")(function* (models: {
+  readonly drive: string;
+  readonly diagnose: string;
+  readonly mint: string;
+}) {
   const servers = yield* Servers.ServerStore;
   const store = yield* Automation.AutomationStore;
   const log = yield* Log.Log;
@@ -551,7 +572,7 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
           const at = start < 0 ? 0 : start;
           // place awaits each reservation before the next, including the next job.
           const candidates = live.slice(at).concat(live.slice(0, at));
-          const placed = yield* restore(place(job, candidates, model)).pipe(
+          const placed = yield* restore(place(job, candidates, models)).pipe(
             Effect.matchCause({
               onSuccess: (result) => result,
               onFailure: (cause) =>
@@ -684,12 +705,20 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
                   return yield* Effect.void;
                 }
               }
-              yield* log.info(`dispatching ${job.action}; ${placement.url}; ${model}`, {
-                location: Log.Locations.automation,
-                agentId: placement.ticket,
-              });
+              yield* log.info(
+                `dispatching ${job.action}; ${placement.url}; ${models[job.action]}`,
+                {
+                  location: Log.Locations.automation,
+                  agentId: placement.ticket,
+                },
+              );
               return yield* Effect.interruptible(
-                AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
+                AutomationClient.run(
+                  placement.url,
+                  placement.prompt,
+                  placement.ticket,
+                  job.resultId,
+                ),
               ).pipe(
                 Effect.andThen(judge(job)),
                 Effect.matchCauseEffect({

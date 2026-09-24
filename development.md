@@ -107,7 +107,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - The root holds `AGENTS.md`, the executable wrappers (`./client`, `./driver`, `./ctrl`,
   `./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`, `./automation-client`, `./session`, `./viz`), the two
   fleet starters (`./start-server-proxy-client <max-jobs>` runs the proxy on `:55555` and one qemu
-  server; `./start-automation-server-client <max-jobs> [model]` runs the automation server on
+  server; `./start-automation-server-client <max-jobs>` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
   other), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
@@ -466,8 +466,10 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the test result id, and the model, which marks the result running. The action itself is the
   client command's handlers, called in this process. Before a guest action (`send-keys`, `mouse`,
   `get-image`, `get-serial`, `follow`) the driver calls `intent start`, and `intent end` after the
-  action returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A `stop` or `save` that exits 0 is the
-  harness closing the result, and the model is not called again. The OpenRouter token is
+  action returns. `start`, `reserve`, `relinquish`, `stop`, and `save` are not guest actions. A
+  `stop` or `save` that exits 0 is followed by `./ctrl test-results` (success when the status is
+  succeeded or completed, or the command is save; failed otherwise), and the model is not called
+  again. A diagnose is not this program: it still runs under OpenCode. The OpenRouter token is
   `OPENROUTER_API_KEY`.
 
 `src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.

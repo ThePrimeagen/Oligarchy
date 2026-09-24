@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# start-automation-server-client <max-jobs> [model]
+# start-automation-server-client <max-jobs>
 #
 # The automation half of the fleet on this machine: one automation server on 127.0.0.1:54321 (what
 # the tunnel's automation hostname points at) and one automation client on 127.0.0.1:54322 that
 # carries <max-jobs> runs at once, both in the foreground of this shell. Ctrl-C or a TERM stops
 # both; one of them exiting stops the other. Exit 0 when both ended cleanly, 1 otherwise.
 #
+# The model is oligarchy.json, read by the server and by ./driver. This script does not take one.
 # Runs from the current directory, as ./automation-server does: its .env fills what the
 # environment lacks. SERVER_URL must name the qemu reverse proxy the client reserves guests from.
 set -u
@@ -13,23 +14,18 @@ set -u
 ROOT=$(dirname "$0")
 SERVER_PORT=54321
 CLIENT_PORT=54322
-# Paid Muse: the server's own default is the free contributor model, which is rate-limited at a
-# handful of concurrent jobs.
-DEFAULT_MODEL=openrouter/meta/muse-spark-1.3-contributor
 
 usage() {
-  echo "usage: start-automation-server-client <max-jobs> [model]" >&2
+  echo "usage: start-automation-server-client <max-jobs>" >&2
   echo "  max-jobs  how many runs the client carries at once, a positive integer" >&2
-  echo "  model     provider/model the server runs every drive and diagnose as; default $DEFAULT_MODEL" >&2
   exit 1
 }
 
-[ $# -ge 1 ] && [ $# -le 2 ] || usage
+[ $# -eq 1 ] || usage
 case "$1" in
   '' | *[!0-9]* | 0*) usage ;;
 esac
 MAX_JOBS=$1
-MODEL=${2:-$DEFAULT_MODEL}
 
 # Without it the client falls back to a qemu server's default port, which is nothing on the
 # machine that runs this half; an empty value, quoted or not, counts as unset, as it does for
@@ -39,7 +35,7 @@ if [ -z "${SERVER_URL:-}" ] && ! grep -qE "^SERVER_URL=[\"']?https?://" .env 2>/
   exit 1
 fi
 
-"$ROOT/automation-server" --port "$SERVER_PORT" --model "$MODEL" &
+"$ROOT/automation-server" --port "$SERVER_PORT" &
 SERVER=$!
 "$ROOT/automation-client" --name "automation-client-$(uname -n)" --max-jobs "$MAX_JOBS" \
   --port "$CLIENT_PORT" --url "http://127.0.0.1:$CLIENT_PORT" &

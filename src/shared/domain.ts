@@ -205,9 +205,8 @@ export const AutomationAction = Schema.Literals(["drive", "diagnose", "mint"]).a
 });
 export type AutomationAction = typeof AutomationAction.Type;
 
-// An OpenCode model as `opencode run --model` takes it: the provider, a slash, the model's own
-// id (which may hold slashes of its own: openrouter/deepseek/deepseek-v4.1-flash). Refused at
-// the flag so a run is never dispatched as a model no client can launch.
+// A model id as oligarchy.json names it and as it is sent. It contains a slash
+// (meta/muse-spark-1.3-contributor). Nothing rewrites it.
 export const ModelId = Schema.String.check(
   Schema.isPattern(/^[^\s/]+\/\S+$/, { message: "model must be provider/model" }),
 ).annotate({ identifier: "@oligarchy/shared/domain/ModelId" });

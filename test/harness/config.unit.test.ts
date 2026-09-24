@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import { Duration, Effect, FileSystem, PlatformError } from "effect";
 import * as HarnessConfig from "../../src/harness/config.ts";
 
-const MODEL = "openrouter/meta/muse-spark-1.3-contributor";
+const MODEL = "meta/muse-spark-1.3-contributor";
 
 const valid = () => ({
   models: { drive: MODEL, diagnose: MODEL, mint: MODEL },

@@ -75,6 +75,19 @@ describe("reply", () => {
     expect(wrapped.success.args[0]).toBe("./client-with-image");
   });
 
+  it("refuses ./ctrl and ./session: a diagnose is not this loop", () => {
+    for (const action of [
+      "./ctrl diagnose --verdict passed --summary ok --model openrouter/x",
+      "./session image --image-id 1 -o last.png",
+    ]) {
+      const refused = Reply.command(action);
+      expect(Result.isFailure(refused)).toBe(true);
+      if (Result.isFailure(refused)) {
+        expect(refused.failure.message).toContain("./ctrl");
+      }
+    }
+  });
+
   it("refuses a reply that is not three lines, a bad status, or an empty line", () => {
     expect(Result.isFailure(Reply.parse("continue\nbooted"))).toBe(true);
     expect(Result.isFailure(Reply.parse("continue\nbooted\nstart\nextra"))).toBe(true);

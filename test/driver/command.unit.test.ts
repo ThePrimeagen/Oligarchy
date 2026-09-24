@@ -21,8 +21,8 @@ const PROMPT = "Lock the screen.";
 const LOG = "/tmp/driver-debug.log";
 
 const FLAGS = [
-  "--model",
-  MODEL,
+  "--action",
+  "drive",
   "--prompt",
   PROMPT,
   "--debug-log",
@@ -30,6 +30,20 @@ const FLAGS = [
   "--test-result-id",
   RESULT,
 ];
+
+const configText = (models: { readonly drive: string; readonly mint?: string }): string =>
+  JSON.stringify({
+    models: {
+      drive: models.drive,
+      diagnose: models.drive,
+      mint: models.mint ?? models.drive,
+    },
+    openRouterBaseUrl: "https://openrouter.ai/api/v1",
+    timeouts: { header: "3 minutes", chunk: "3 minutes" },
+    runCeiling: "1.5 hours",
+    stepLimit: 200,
+    harness: { defaultRetry: "1 second" },
+  });
 
 const TerminalStub = Layer.succeed(Terminal.Terminal)(
   Terminal.make({
@@ -94,10 +108,10 @@ const run = (
   );
 
 describe("driver command", () => {
-  it.effect("runs one prompt and one model and prints why the loop ended", () =>
+  it.effect("runs one prompt as the drive model from the file and prints why the loop ended", () =>
     Effect.gen(function* () {
       const seen: Seen = { input: undefined };
-      yield* run(FLAGS, seen);
+      yield* run(FLAGS, seen, { contents: configText({ drive: MODEL, mint: "openrouter/mint" }) });
       expect(seen.input?.model).toBe(MODEL);
       expect(seen.input?.prompt).toBe(PROMPT);
       expect(seen.input?.debugLog).toBe(LOG);
@@ -127,7 +141,7 @@ describe("driver command", () => {
 
   it.effect("a missing flag is a usage error that does not start the loop", () =>
     Effect.gen(function* () {
-      for (const flag of ["model", "prompt", "debug-log", "test-result-id"]) {
+      for (const flag of ["action", "prompt", "debug-log", "test-result-id"]) {
         const seen: Seen = { input: undefined };
         const args = FLAGS.filter(
           (arg, index) => arg !== `--${flag}` && FLAGS[index - 1] !== `--${flag}`,
@@ -144,18 +158,54 @@ describe("driver command", () => {
     }),
   );
 
-  it.effect("a model that is not provider/model is a usage error", () =>
+  it.effect(
+    "a drive model that is not provider/model names the field and does not start (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const seen: Seen = { input: undefined };
+        const error = yield* Effect.flip(
+          run(FLAGS, seen, { contents: configText({ drive: "muse" }) }),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain('["models"]["drive"]');
+        }
+        expect(seen.input).toBeUndefined();
+      }),
+  );
+
+  it.effect("--action mint uses the mint model from the file, not the drive model", () =>
+    Effect.gen(function* () {
+      const seen: Seen = { input: undefined };
+      const mint = "openrouter/meta/muse-spark-1.3-contributor";
+      yield* run(
+        ["--action", "mint", "--prompt", PROMPT, "--debug-log", LOG, "--test-result-id", RESULT],
+        seen,
+        { contents: configText({ drive: MODEL, mint }) },
+      );
+      expect(seen.input?.model).toBe(mint);
+    }),
+  );
+
+  it.effect("--action diagnose is a usage error and does not start (unhappy)", () =>
     Effect.gen(function* () {
       const seen: Seen = { input: undefined };
       const error = yield* Effect.flip(
         run(
-          ["--model", "muse", "--prompt", PROMPT, "--debug-log", LOG, "--test-result-id", RESULT],
+          [
+            "--action",
+            "diagnose",
+            "--prompt",
+            PROMPT,
+            "--debug-log",
+            LOG,
+            "--test-result-id",
+            RESULT,
+          ],
           seen,
         ),
       );
       expect(error._tag).toBe("ShowHelp");
-      const stderr = yield* TestConsole.errorLines;
-      expect(stderr.join("\n")).toContain("model must be provider/model");
       expect(seen.input).toBeUndefined();
     }),
   );
@@ -165,7 +215,8 @@ describe("driver command", () => {
       const seen: Seen = { input: undefined };
       yield* run(["--help"], seen, { env: {}, contents: undefined });
       const stdout = (yield* TestConsole.logLines).join("\n");
-      expect(stdout).toContain("--model");
+      expect(stdout).toContain("--action");
+      expect(stdout).not.toContain("--model");
       expect(stdout).toContain("--prompt");
       expect(stdout).toContain("--debug-log");
       expect(stdout).toContain("--test-result-id");

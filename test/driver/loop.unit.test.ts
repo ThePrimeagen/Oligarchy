@@ -392,12 +392,23 @@ describe("driver loop", () => {
       const { stopped: outcome, spawner } = yield* run(
         config(),
         recorder.layer,
-        () => ({ exitCode: 0 }),
+        (_command, args) => {
+          expect(args).toEqual([
+            "test-results",
+            "--agent-id",
+            "OLI-1",
+            "--id",
+            RESULT,
+            "--status",
+            "success",
+          ]);
+          return { exitCode: 0, stdout: "" };
+        },
         log,
       );
       expect(outcome).toEqual({ reason: "result-closed" });
       expect(modelRequests(recorder.requests)).toHaveLength(1);
-      expect(spawner.spawned).toEqual([]);
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
       expect(guestPaths(recorder.requests)).toEqual(["/stop"]);
       expect(JSON.parse(guestRequests(recorder.requests)[0]?.body ?? "{}")).toMatchObject({
         id: SESSION,
@@ -405,6 +416,95 @@ describe("driver loop", () => {
         status: "succeeded",
       });
       expect(events(log).at(-1)).toMatchObject({ kind: "stop", text: "result-closed" });
+    }),
+  );
+
+  it.effect("a failed stop closes the result failed, with the reason", () =>
+    Effect.gen(function* () {
+      const recorder = routed(() =>
+        speak(
+          "continue",
+          "the installer hung",
+          `stop --agent-id OLI-1 --session-id ${SESSION} --status failed --reason "installer hung"`,
+        ),
+      );
+      const { spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0, stdout: "" }),
+        [],
+      );
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
+      expect(spawner.spawned[0]?.args).toEqual([
+        "test-results",
+        "--agent-id",
+        "OLI-1",
+        "--id",
+        RESULT,
+        "--status",
+        "failed",
+        "--reason",
+        "installer hung",
+      ]);
+    }),
+  );
+
+  it.effect("a save closes the result as a success", () =>
+    Effect.gen(function* () {
+      const recorder = routed(() =>
+        speak("continue", "kept the disk", `save --agent-id OLI-1 --session-id ${SESSION}`),
+      );
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => ({ exitCode: 0, stdout: "" }),
+        [],
+      );
+      expect(outcome).toEqual({ reason: "result-closed" });
+      expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl"]);
+      expect(spawner.spawned[0]?.args).toContain("success");
+      expect(modelRequests(recorder.requests)).toHaveLength(1);
+      expect(guestPaths(recorder.requests)).toEqual(["/save"]);
+    }),
+  );
+
+  it.effect(
+    "a test-results failure is a loop failure and does not ask the model again (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(() => stop());
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 1, stderr: "result is aborted\n" }), []),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("aborted");
+        }
+        expect(modelRequests(recorder.requests)).toHaveLength(1);
+      }),
+  );
+
+  it.effect("a stop without --agent-id does not close the result (unhappy)", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const recorder = routed(() => {
+        calls += 1;
+        return calls === 1
+          ? speak("continue", "halt", `stop --session-id ${SESSION} --status succeeded`)
+          : stopped("done");
+      });
+      const { stopped: outcome, spawner } = yield* run(
+        config(),
+        recorder.layer,
+        () => {
+          expect.fail("closing without --agent-id does not run ./ctrl");
+        },
+        [],
+      );
+      expect(outcome).toEqual({ reason: "model-stopped" });
+      expect(spawner.spawned).toEqual([]);
+      expect(guestRequests(recorder.requests)).toEqual([]);
+      expect(askText(recorder.requests, 1)).toContain("--agent-id");
     }),
   );
 

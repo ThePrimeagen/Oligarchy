@@ -52,16 +52,16 @@ server.on("error", (cause) => {
 
 // Dispatch, the sweep and the board watch start once the listener is up, in the same scope:
 // a port refusal starts none of them, and a shutdown stops them before the pool closes.
-const ServerLive = (port: number, model: string) =>
+const ServerLive = (port: number, models: { drive: string; diagnose: string; mint: string }) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.acquireColor(Log.AutomationAgentId);
       yield* log.info(
-        `automation server listening on ${HOST}:${String(port)}; running agents as ${model}`,
+        `automation server listening on ${HOST}:${String(port)}; drive ${models.drive}; diagnose ${models.diagnose}; mint ${models.mint}`,
         automationAttr,
       );
-      yield* Worker.dispatch(model);
+      yield* Worker.dispatch(models);
       yield* StaleServers.forget("automation-client");
       yield* Backlog.watch();
     }),

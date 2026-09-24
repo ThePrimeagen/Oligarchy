@@ -41,21 +41,10 @@ optional operator note, webhook log.
 
 ## Token usage
 
-Oligarchy does not store tokens. OpenCode does, locally:
-
-`~/.local/share/opencode/opencode.db` table `session`
-(`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `cost`).
-
-```bash
-sqlite3 ~/.local/share/opencode/opencode.db \
-  "select model, count(*), printf('%.2f', sum(cost)),
-          sum(tokens_input), sum(tokens_output), sum(tokens_cache_read)
-   from session
-   where directory like '%/oligarchy%'
-   group by model;"
-```
-
-OpenRouter's usage page is billed truth.
+Oligarchy does not store drive tokens. The driver writes one JSON line per step to
+`/tmp/oligarchy-driver-<result id>.jsonl`. A diagnose still runs under OpenCode, which
+stores its tokens in `~/.local/share/opencode/opencode.db`. OpenRouter's usage page is
+billed truth.
 
 ## Incidents (do not repeat)
 
@@ -74,7 +63,7 @@ OpenRouter's usage page is billed truth.
 - **OLI-1224:** locked, typed `test1234` (wrong password), never restored.
 - **OLI-1226:** locked, then TTY/`journalctl` loop; desktop never restored.
 - **Free Muse:** rate limit at 4-wide; daily IP quota; image-upload 400
-  after many screenshots. Paid Muse only: `openrouter/meta/muse-spark-1.3-contributor`.
+  after many screenshots. Paid Muse only: `meta/muse-spark-1.3-contributor`.
 - **Tmpfs QEMU abort:** screendump write error → libpng `abort()`. Sessions
   must live on disk (`TMPDIR` on qemu-server).
 - **Retire by N, not by guessing:** 049 was OLI-1224, not OLI-1229. Always
@@ -119,7 +108,6 @@ Cloudflare tunnel in front of `:55555` is not started by this skill.
 `--name` is unique on `servers`. `--url` is the upsert key and how they
 announce. Proxy and `./automation-server` have neither flag.
 
-`./automation-server --help` has `--port` and `--model` only. Dispatch
+`./automation-server --help` has `--port` only. Dispatch
 claims every pending job a live client will reserve. `--max-jobs` on
-qemu/client is the reserve cap. Default `--model` is the free Muse; this
-skill passes paid `openrouter/meta/muse-spark-1.3-contributor`.
+qemu/client is the reserve cap. The model is `oligarchy.json`, not a flag.

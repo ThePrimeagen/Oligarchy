@@ -74,9 +74,11 @@ const spawnProcess = (
   name: string,
   args: ReadonlyArray<string>,
   overrides: Record<string, string>,
+  prepare?: (cwd: string) => void,
 ): Process => {
   const home = mkdtempSync(join(tmpdir(), "oligarchy-automation-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "oligarchy-automation-cwd-"));
+  prepare?.(cwd);
   const child = spawn(executable, args, {
     cwd,
     env: environment(home, overrides),
@@ -141,10 +143,24 @@ const spawnAutomationServer = (
   overrides: Record<string, string> = {},
 ): Process => spawnProcess(AUTOMATION_SERVER, "automation server", args, overrides);
 
+const writeDriver = (script: string) => (cwd: string) => {
+  const file = join(cwd, "driver");
+  writeFileSync(file, `#!/bin/sh\n${script}\n`);
+  chmodSync(file, 0o755);
+};
+
 const spawnAutomationClient = (
   args: ReadonlyArray<string>,
   overrides: Record<string, string> = {},
-): Process => spawnProcess(AUTOMATION_CLIENT, "automation client", args, overrides);
+  driver?: string,
+): Process =>
+  spawnProcess(
+    AUTOMATION_CLIENT,
+    "automation client",
+    args,
+    overrides,
+    driver === undefined ? undefined : writeDriver(driver),
+  );
 
 const portOf = (address: string | AddressInfo | null): number =>
   typeof address === "object" && address !== null ? address.port : 0;
@@ -240,14 +256,14 @@ const jobsFor = async (resultId: string) => {
 };
 
 describe("automation server startup refusals", () => {
-  it.live("--help exits 0 and lists --port and --model", () =>
+  it.live("--help exits 0 and lists --port", () =>
     Effect.promise(async () => {
       const process = spawnAutomationServer(["--help"]);
       const { code } = await process.exited;
       expect(code).toBe(0);
       expect(process.stdout()).toContain("automation-server");
       expect(process.stdout()).toContain("--port");
-      expect(process.stdout()).toContain("--model");
+      expect(process.stdout()).not.toContain("--model");
       expect(process.stdout()).not.toContain("--jobs");
       expect(process.stdout()).not.toContain("--max-jobs");
       expect(process.stdout()).not.toContain("--diagnostics-port");
@@ -265,12 +281,11 @@ describe("automation server startup refusals", () => {
     }),
   );
 
-  it.live("a --model without a provider exits 1 with the rule", () =>
+  it.live("a --model flag exits 1 and does not listen", () =>
     Effect.promise(async () => {
       const process = spawnAutomationServer(["--model", "muse-spark-1.3"]);
       const { code } = await process.exited;
       expect(code).toBe(1);
-      expect(process.stderr()).toContain("model must be provider/model");
       expect(process.stdout()).not.toContain("listening");
     }),
   );
@@ -376,7 +391,7 @@ describeServing("automation server serving", () => {
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; running agents as opencode/muse-spark-1.3-contributor-free`,
+        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; drive meta/muse-spark-1.3-contributor; diagnose meta/muse-spark-1.3-contributor; mint meta/muse-spark-1.3-contributor`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -631,7 +646,7 @@ const removeServer = async (url: string) => {
   }
 };
 
-// What the driver does before opencode exits: ./ctrl test-results closes the result.
+// What the driver does before ./driver exits: ./ctrl test-results closes the result.
 const closeResult = async (resultId: string) => {
   const client = new Client({ connectionString: Postgres.getDbUrl() });
   await client.connect();
@@ -707,7 +722,7 @@ const serveClient = (
     });
   });
 
-const MODEL = "openrouter/deepseek/deepseek-v4.1-flash";
+const MODEL = "meta/muse-spark-1.3-contributor";
 
 const readBody = (req: IncomingMessage): Promise<string> =>
   new Promise((resolve) => {
@@ -815,7 +830,7 @@ const ticketOf = (body: string): string | undefined => {
 
 describeServing("automation server dispatch", () => {
   it.live(
-    "a live client that closes the result and answers 200 marks the drive completed; the body carries --model",
+    "a live client that closes the result and answers 200 marks the drive completed; the prompt names the configured model and the body does not",
     () =>
       Effect.promise(async () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
@@ -835,19 +850,19 @@ describeServing("automation server dispatch", () => {
         await seedJob(resultId, "drive");
         await seedLiveClient(client.url);
         const port = await freePort();
-        const process = spawnAutomationServer(["--port", String(port), "--model", MODEL]);
+        const process = spawnAutomationServer(["--port", String(port)]);
         try {
           await process.waitFor(/automation server listening/);
           const job = await waitForJob(resultId, "completed");
           expect(job).toMatchObject({ action: "drive", status: "completed", reason: null });
           // The queue is shared with every integration file that ran before: a pending job one of
           // them left is dispatched here too, so this ticket's body is found by its ticket.
-          const parsed: Array<{ prompt: string; model: string }> = bodies.map((text) =>
+          const parsed: Array<{ prompt: string; model?: string }> = bodies.map((text) =>
             JSON.parse(text),
           );
           const body = parsed.find((candidate) => candidate.prompt.includes(linearId));
           expect(body, bodies.join("\n")).toBeDefined();
-          expect(body?.model).toBe(MODEL);
+          expect(body?.model).toBeUndefined();
           expect(body?.prompt).toContain(MODEL);
           expect(process.stdout()).toContain(`dispatching drive; ${client.url}; ${MODEL}`);
         } finally {
@@ -1163,14 +1178,6 @@ const stop = async (process: Process) => {
   await process.exited;
 };
 
-const installOpencode = (script: string): string => {
-  const bin = mkdtempSync(join(tmpdir(), "oligarchy-opencode-"));
-  const file = join(bin, "opencode");
-  writeFileSync(file, `#!/bin/sh\n${script}\n`);
-  chmodSync(file, 0o755);
-  return bin;
-};
-
 describeServing("automation server restart", () => {
   it.live(
     "SIGKILL while /run waits leaves the drive running; the next automation server stops it at its automation client and errors it",
@@ -1179,7 +1186,7 @@ describeServing("automation server restart", () => {
         const linearId = `OLI-${randomUUID().slice(0, 8)}`;
         const resultId = await seedResult(linearId);
         const aborts: Array<string> = [];
-        // /run is never answered: opencode is still driving when the automation server dies.
+        // /run is never answered: the driver is still driving when the automation server dies.
         const client = await serveClient((req, res) => {
           void readBody(req).then((body) => {
             if (req.url === "/abort") {
@@ -1318,7 +1325,6 @@ describeServing("automation server restart", () => {
             ok();
           });
         });
-        const bin = installOpencode("exit 0");
         const clientPort = await freePort();
         const url = `http://127.0.0.1:${String(clientPort)}`;
         const client = spawnAutomationClient(
@@ -1332,7 +1338,8 @@ describeServing("automation server restart", () => {
             "--url",
             url,
           ],
-          { SERVER_URL: qemu.url, PATH: `${bin}:${process.env.PATH ?? ""}` },
+          { SERVER_URL: qemu.url },
+          "exit 0",
         );
         let first: Process | undefined;
         let second: Process | undefined;
@@ -1373,7 +1380,6 @@ describeServing("automation server restart", () => {
           await removeJobs(resultId);
           await removeServer(url);
           await qemu.close();
-          rmSync(bin, { recursive: true, force: true });
         }
       }),
     120_000,
@@ -1395,12 +1401,12 @@ describeServing("automation server restart", () => {
             res.end(JSON.stringify({ ok: "true" }));
           });
         });
-        const bin = installOpencode("exit 0");
         const clientPort = await freePort();
         const url = `http://127.0.0.1:${String(clientPort)}`;
         const client = spawnAutomationClient(
           ["--max-jobs", "4", "--name", `inherited-${linearId}`, "--port", String(clientPort)],
-          { SERVER_URL: qemu.url, PATH: `${bin}:${process.env.PATH ?? ""}` },
+          { SERVER_URL: qemu.url },
+          "exit 0",
         );
         const bearer = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
         let automationServer: Process | undefined;
@@ -1428,7 +1434,11 @@ describeServing("automation server restart", () => {
             "POST",
             "/run",
             bearer,
-            JSON.stringify({ prompt: "do the work", ticket: linearId, model: MODEL }),
+            JSON.stringify({
+              prompt: "do the work",
+              ticket: linearId,
+              testResultId: resultId,
+            }),
           );
           expect(refused.status).toBe(400);
           expect(await refused.json()).toEqual({ error: "no reservation" });
@@ -1440,7 +1450,6 @@ describeServing("automation server restart", () => {
           await removeJobs(resultId);
           await removeServer(url);
           await qemu.close();
-          rmSync(bin, { recursive: true, force: true });
         }
       }),
     120_000,
