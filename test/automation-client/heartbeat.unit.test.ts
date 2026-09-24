@@ -45,6 +45,7 @@ const fakeSessions = (jobs: Effect.Effect<number> = Effect.succeed(0)) =>
       reserve: () => Effect.die("Unexpected Sessions.reserve"),
       run: () => Effect.die("Unexpected Sessions.run"),
       abort: () => Effect.die("Unexpected Sessions.abort"),
+      shutdown: () => Effect.die("Unexpected Sessions.shutdown"),
       jobs,
     }),
   );

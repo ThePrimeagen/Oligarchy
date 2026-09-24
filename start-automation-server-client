@@ -3,8 +3,9 @@
 #
 # The automation half of the fleet on this machine: one automation server on 127.0.0.1:54321 (what
 # the tunnel's automation hostname points at) and one automation client on 127.0.0.1:54322 that
-# carries <max-jobs> runs at once, both in the foreground of this shell. Ctrl-C or a TERM stops
-# both; one of them exiting stops the other. Exit 0 when both ended cleanly, 1 otherwise.
+# carries <max-jobs> runs at once, both in the foreground of this shell. Ctrl-C or a TERM asks
+# both to stop; another one kills them. One of them exiting stops the other. Exit 0 when both
+# ended cleanly, 1 otherwise.
 #
 # The model is oligarchy.json, read by the server and by ./driver. This script does not take one.
 # Runs from the current directory, as ./automation-server does: its .env fills what the
@@ -41,17 +42,43 @@ SERVER=$!
   --port "$CLIENT_PORT" --url "http://127.0.0.1:$CLIENT_PORT" &
 CLIENT=$!
 
-stop() {
-  kill -TERM "$SERVER" "$CLIENT" 2>/dev/null
+# The first signal asks. A second one kills: a child waiting on a response must not hold this
+# shell, and ignoring the signal would make that second Ctrl-C do nothing.
+asked=0
+request_stop() {
+  asked=1
+  kill -TERM "$SERVER" "$CLIENT" 2>/dev/null || true
 }
-trap stop INT TERM
+on_signal() {
+  if [ "$asked" -eq 0 ]; then
+    request_stop
+  else
+    kill -KILL "$SERVER" "$CLIENT" 2>/dev/null || true
+  fi
+}
+trap on_signal INT TERM
 # Returns when the first of the two exits, or at once when a signal arrives (its trap has run).
-wait -n "$SERVER" "$CLIENT"
-# One is down or a signal came: stop the other and wait for both, undisturbed by a second signal.
-trap '' INT TERM
-stop
-wait "$SERVER"
+wait -n "$SERVER" "$CLIENT" || true
+if [ "$asked" -eq 0 ]; then
+  request_stop
+fi
+# Wait out each child. A signal interrupts wait while it is still alive; the trap has run, and
+# the loop collects the status once the process is gone.
+reap() {
+  local code=0
+  while kill -0 "$1" 2>/dev/null; do
+    wait "$1"
+    code=$?
+  done
+  wait "$1" 2>/dev/null
+  local reaped=$?
+  if [ "$reaped" -ne 127 ]; then
+    code=$reaped
+  fi
+  return "$code"
+}
+reap "$SERVER"
 SERVER_CODE=$?
-wait "$CLIENT"
+reap "$CLIENT"
 CLIENT_CODE=$?
 [ "$SERVER_CODE" -eq 0 ] && [ "$CLIENT_CODE" -eq 0 ]

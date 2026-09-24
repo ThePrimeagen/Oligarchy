@@ -693,6 +693,55 @@ const announcedProcess = (name: string) =>
     return rows[0];
   }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl)));
 
+describeWithDatabase("automation client shutdown", () => {
+  it.live("SIGTERM stops a running driver and the client exits", () =>
+    Effect.promise(async () => {
+      const qemu = await stubQemuReserve();
+      const startedDir = mkdtempSync(join(tmpdir(), "oligarchy-driver-started-"));
+      const started = join(startedDir, "ready");
+      const pidFile = join(startedDir, "pid");
+      const port = await freePort();
+      const process = spawnAutomationClient(
+        [...REQUIRED, "--port", String(port)],
+        { SERVER_URL: qemu.url },
+        `echo $$ > "${pidFile}"; touch "${started}"; exec sleep 120`,
+      );
+      const running = request(port, "/run", AUTH_JSON, runJson("do the work")).then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        await process.waitFor(
+          new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
+        );
+        expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
+        const began = Date.now();
+        while (!existsSync(started)) {
+          if (Date.now() - began > 10_000) {
+            throw new Error("driver did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const stopping = Date.now();
+        process.child.kill("SIGTERM");
+        const { code } = await process.exited;
+        expect(code, process.stdout()).toBe(0);
+        expect(Date.now() - stopping).toBeLessThan(15_000);
+        const driverPid = Number(readFileSync(pidFile, "utf8").trim());
+        expect(() => {
+          globalThis.process.kill(driverPid, 0);
+        }).toThrow();
+      } finally {
+        process.child.kill("SIGTERM");
+        await process.exited;
+        await running;
+        rmSync(startedDir, { recursive: true, force: true });
+        await qemu.close();
+      }
+    }),
+  );
+});
+
 describe("automation client announce", () => {
   it.live.skipIf(dbUrl === "")(
     "--url names the url on the listen line, writes the automation-client row as its first heartbeat, and deletes it on SIGTERM",

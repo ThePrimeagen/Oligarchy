@@ -11,6 +11,7 @@ import * as Middleware from "../qemu-server/middleware.ts";
 import * as Api from "../shared/api.ts";
 import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
+import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
 import * as Enqueue from "./enqueue.ts";
 import * as Ready from "./ready.ts";
@@ -175,7 +176,12 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           });
         }
         const url = server.value.url;
-        const notFound = yield* AutomationClient.abort(url, payload.ticket).pipe(
+        // The handler is uninterruptible, and node:http has no ceiling. The wait prints the
+        // seconds left and gives up at ten, as dispatch's own stop does.
+        const notFound = yield* AbortWait.within(
+          url,
+          AutomationClient.abort(url, payload.ticket),
+        ).pipe(
           Effect.as(Option.none<Errors.AutomationClientError>()),
           Effect.catchTag("AutomationClientError", (error) =>
             error.status === 404

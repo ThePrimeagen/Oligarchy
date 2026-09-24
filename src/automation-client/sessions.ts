@@ -72,8 +72,14 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       readonly count: number;
       readonly reserved: ReadonlyMap<string, Reservation>;
     }>({ count: 0, reserved: new Map() });
+    // Set for the whole of shutdown, before any stop, so a reserve that arrives while the
+    // drivers are being killed is refused instead of starting another one.
+    const halting = yield* Ref.make(false);
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const log = yield* Log.Log;
+
+    const shuttingDown = (ticket: string): Errors.AtCapacity =>
+      Errors.AtCapacity.make({ message: "shutting down", agentId: ticket });
 
     const atCapacity = (ticket: string): Errors.AtCapacity =>
       Errors.AtCapacity.make({
@@ -93,6 +99,9 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     ) {
       const ran = yield* reserveGate.withPermitsIfAvailable(1)(
         Effect.gen(function* () {
+          if (yield* Ref.get(halting)) {
+            return yield* shuttingDown(ticket);
+          }
           // The same reserve again, action, iso and pin alike, is the one this ticket already
           // holds: a dispatcher that died before its running write asks again once restarted.
           // It keeps its first deadline, since a drive's guest slot expires on the qemu
@@ -116,6 +125,22 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           // drive names the iso whose disk the slot must boot. The pin is that server.
           if (action === "drive" || action === "mint") {
             yield* reserveQemu(ticket, action === "drive" ? resume : undefined, server);
+          }
+          // The guest was taken before shutdown was noticed. Give it back rather than hold a
+          // slot this process is leaving. A miss is a line; the reserve is still refused.
+          if (yield* Ref.get(halting)) {
+            if (action === "drive" || action === "mint") {
+              yield* relinquishQemu(ticket).pipe(
+                Effect.catch((error) =>
+                  log.error(`relinquish failed: ${Render.headline(error)}`, {
+                    location: Log.Locations.automationClient,
+                    agentId: ticket,
+                    cause: error,
+                  }),
+                ),
+              );
+            }
+            return yield* shuttingDown(ticket);
           }
           const since = yield* Clock.currentTimeMillis;
           const admitted = yield* Ref.modify(slots, (current) => {
@@ -337,10 +362,57 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       );
     });
 
+    // The automation server is what usually stops a run, by POST /abort. This process can be
+    // asked to stop after that server is already gone. A /run handler will not notice: it stays
+    // up so a dropped connection does not kill the driver, and the driver keeps waiting on its
+    // next response. Shutdown stops every run itself. One that cannot be killed is a line; the
+    // others still stop.
+    const shutdown = Effect.fn("Sessions.shutdown")(function* () {
+      yield* Ref.set(halting, true);
+      // Twice: a run that passed the stopping check and spawned while the first pass was
+      // killing the others is in the map for the second. A ticket already gone is not an error.
+      // One that could not be killed is not asked again.
+      const failed = new Set<string>();
+      for (let pass = 0; pass < 2; pass++) {
+        const tickets: Array<string> = [];
+        const seen = new Set<string>();
+        for (const ticket of [
+          ...(yield* Ref.get(running)).keys(),
+          ...(yield* Ref.get(slots)).reserved.keys(),
+        ]) {
+          if (seen.has(ticket) || failed.has(ticket)) {
+            continue;
+          }
+          seen.add(ticket);
+          tickets.push(ticket);
+        }
+        yield* Effect.forEach(
+          tickets,
+          (ticket) =>
+            abort(ticket).pipe(
+              Effect.catch((error) => {
+                if (error._tag === "UnknownSession") {
+                  return Effect.void;
+                }
+                failed.add(ticket);
+                return log.error(`shutdown stop failed: ${Render.headline(error)}`, {
+                  location: Log.Locations.automationClient,
+                  agentId: ticket,
+                  cause: error,
+                });
+              }),
+            ),
+          { concurrency: "unbounded", discard: true },
+        );
+        yield* Effect.yieldNow;
+      }
+    });
+
     return {
       reserve,
       run,
       abort,
+      shutdown,
       // How many runs this process currently holds against --max-jobs: reserved plus running.
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };
