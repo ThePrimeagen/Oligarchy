@@ -355,7 +355,18 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const linear = yield* Linear.Linear;
     const log = yield* Log.Log;
 
-    const definitions = yield* selectDefinitions(input.name, true);
+    // A mint job needs the server pinned by a setup request; suite tickets have no setup request.
+    const definitions = yield* Option.match(input.name, {
+      onNone: () =>
+        selectDefinitions(input.name, false).pipe(
+          Effect.map((rows) => rows.filter((row) => row.name !== MINT_DEFINITION)),
+          Effect.filterOrFail(
+            (rows) => rows.length > 0,
+            () => noDefinitions(input.name),
+          ),
+        ),
+      onSome: () => selectDefinitions(input.name, true),
+    });
     const created = yield* tests.createRun({
       iso: input.iso,
       serverUrl: input.serverUrl,
@@ -1032,7 +1043,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
 
   // test run testsuite --server-url <url> --iso <https-url> --version <version>
   //
-  // Every definition, each its newest wording. A name cannot be picked; one definition is
+  // Every definition but mint, each its newest wording. A name cannot be picked; one definition is
   // `test run --name`, and omitting --name there is a usage error.
   const testRunTestSuiteCommand = Command.make(
     "testsuite",
@@ -1050,7 +1061,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     (input) => openRun({ ...input, name: Option.none() }),
   ).pipe(
     Command.withDescription(
-      "Create one test run for every definition, each in its newest wording, and one Linear ticket each",
+      "Create one test run for every definition but mint, each in its newest wording, and one Linear ticket each",
     ),
     Command.provide(withDbAndLinear),
   );

@@ -114,7 +114,7 @@ Prints one definition's newest wording: `<name> v<n>` on the first line, `added 
 ./ctrl test run --name <definition> --server-url <url> --iso <https-url> --version <version>
 ```
 
-Creates one pending test run and one Linear issue for one stored test definition, in its newest wording, and prints them as JSON. `--name` is required; omitting it is a usage error, and the run of every definition is `test run testsuite`. The issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into the issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
+Creates one pending test run and one Linear issue for one stored test definition, in its newest wording, and prints them as JSON. `--name` is required; omitting it is a usage error, and the run of every definition but `mint` is `test run testsuite`. The issue is assigned to `prime@terminal.shop`. `--server-url` is stored on the run and written into the issue as the qemu server the driving agent's `./client` talks to; `./ctrl` itself never calls it. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
 The issue is created in `Backlog` and moved to `Automation Needed` once its result carries its identifier. One left in `Backlog` by a failure or a Ctrl-C is logged as `ticket trapped in Backlog; <reason>` and reported to Sentry; a failure also fails the run naming the ticket (`…; created OLI-n`).
 
@@ -132,11 +132,11 @@ The issue is created in `Backlog` and moved to `Automation Needed` once its resu
 ./ctrl test run testsuite --server-url <url> --iso <https-url> --version <version>
 ```
 
-One pending result for every stored test definition, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test run --name`. A definition named `mint` is included when one is stored, and it is ticketed with the test template, not the mint template. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
+One pending result for every stored test definition but `mint`, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test run --name`. `mint` is left out because a mint job runs only on the server a setup request pinned, which [mint](#mint) and the proxy open and a suite ticket never has; `test run --name mint` still files it. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
 The dashboard answers the same run at `POST /create-test-suite-run` by running `./ctrl test run testsuite`, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
 
-Tickets are born in `Backlog` and moved to `Automation Needed` as in `test run`. An empty table is refused before Linear: `test: no test definitions found`.
+Tickets are born in `Backlog` and moved to `Automation Needed` as in `test run`. An empty table, or one holding only `mint`, is refused before Linear: `test: no test definitions found`.
 
 ```bash
 ./ctrl test run testsuite --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3

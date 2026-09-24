@@ -62,6 +62,15 @@ const installRevised: TestDefinitionRow = {
   createdAt: new Date("2026-09-02T00:00:00Z"),
 };
 
+const suiteMint: TestDefinitionRow = {
+  id: 8,
+  name: "mint",
+  description: "Install Omarchy and keep the disk",
+  instruction: "User oligarchy, password oligarchy, disk passphrase oligarchy",
+  proof: "The desktop is on screen after the reboot",
+  createdAt: new Date("2026-09-01T00:00:00Z"),
+};
+
 const jsonRow = (row: TestDefinitionRow, version: number) => ({
   ...row,
   createdAt: row.createdAt.toISOString(),
@@ -212,6 +221,16 @@ describe("test --list", () => {
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(yield* stdout).toEqual(["Install Omarchy", "Open a terminal"]);
       expect(h.touched).toEqual(["database"]);
+    }),
+  );
+
+  it.effect("keeps mint in the list the suite leaves it out of (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(suiteMint);
+      const exit = yield* h.run(["test", "--list"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(yield* stdout).toEqual(["mint"]);
     }),
   );
 
@@ -1163,6 +1182,67 @@ describe("test run testsuite", () => {
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.stores.tests.runs[0]?.serverUrl).toBe(SERVER);
       expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([terminal.id]);
+    }),
+  );
+
+  it.effect("leaves the mint definition out of the suite (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, suiteMint, terminal);
+      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([
+        install.id,
+        terminal.id,
+      ]);
+      expect(
+        h.linear.calls
+          .filter((call) => call.method === "createIssue")
+          .map((call) => (call.method === "createIssue" ? call.input.title : "")),
+      ).toEqual(["Omarchy: Install Omarchy", "Omarchy: Open a terminal"]);
+    }),
+  );
+
+  it.effect("refuses a suite whose only definition is mint, before Linear (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(suiteMint);
+      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+      expect(failure(exit)).toMatchObject({
+        _tag: "CommandError",
+        message: "test: no test definitions found",
+      });
+      expect(h.stores.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("test run --name mint still files the mint definition (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(install, suiteMint);
+      const exit = yield* h.run(
+        [
+          "test",
+          "run",
+          "--name",
+          "mint",
+          "--iso",
+          "https://example.com/omarchy.iso",
+          "--version",
+          "1.2.3",
+          "--server-url",
+          SERVER,
+        ],
+        WITH_LINEAR,
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([suiteMint.id]);
+      expect(h.linear.calls.filter((call) => call.method === "createIssue")).toEqual([
+        expect.objectContaining({
+          input: expect.objectContaining({ title: "Omarchy: mint" }),
+        }),
+      ]);
     }),
   );
 

@@ -1081,9 +1081,10 @@ app.post("/suites/abort", async (context) => {
 
 // The same run as `./ctrl test run testsuite`, which is all this route does. Not linked from a
 // page yet. The button belongs beside the definitions heading, not on a selected definition: the
-// suite is every name's newest wording, and a button on one definition would read as running that
-// one name (`./ctrl test run --name`). It posts iso, version and serverUrl here and shows the run
-// id and ticket identifiers this answers with, and it stays disabled when the list is empty.
+// suite is every name's newest wording but mint's, and a button on one definition would read as
+// running that one name (`./ctrl test run --name`). It posts iso, version and serverUrl here and
+// shows the run id and ticket identifiers this answers with, and it stays disabled when no
+// definition but mint is stored.
 // Until that form exists the route takes JSON only, those three fields.
 app.post("/create-test-suite-run", async (context) => {
   let body: unknown;

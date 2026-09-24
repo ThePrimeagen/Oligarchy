@@ -89,7 +89,7 @@ describe("the harness's pointer", () => {
     }
   });
 
-  it("nudges the pointer a hundredth from where it is, up lowering y", () => {
+  it("nudges the pointer two hundredths from where it is, up lowering y", () => {
     const held = ["--agent-id", "OLI-1", "--session-id", "s"];
     expect(placed(["mouse", "move-up", ...held], AT)).toEqual([
       "mouse",
@@ -98,7 +98,7 @@ describe("the harness's pointer", () => {
       "--x",
       "0.25",
       "--y",
-      "0.74",
+      "0.73",
     ]);
     expect(placed(["mouse", "move-down"], AT)).toEqual([
       "mouse",
@@ -106,13 +106,13 @@ describe("the harness's pointer", () => {
       "--x",
       "0.25",
       "--y",
-      "0.76",
+      "0.77",
     ]);
     expect(placed(["mouse", "move-left"], AT)).toEqual([
       "mouse",
       "move",
       "--x",
-      "0.24",
+      "0.23",
       "--y",
       "0.75",
     ]);
@@ -120,7 +120,7 @@ describe("the harness's pointer", () => {
       "mouse",
       "move",
       "--x",
-      "0.26",
+      "0.27",
       "--y",
       "0.75",
     ]);
@@ -130,7 +130,7 @@ describe("the harness's pointer", () => {
       "--x",
       "0.56",
       "--y",
-      "0.57",
+      "0.58",
     ]);
   });
 
@@ -143,7 +143,7 @@ describe("the harness's pointer", () => {
       "--y",
       "0",
     ]);
-    expect(placed(["mouse", "move-down"], Option.some({ x: "0.5", y: "0.995" }))).toEqual([
+    expect(placed(["mouse", "move-down"], Option.some({ x: "0.5", y: "0.99" }))).toEqual([
       "mouse",
       "move",
       "--x",
@@ -151,7 +151,7 @@ describe("the harness's pointer", () => {
       "--y",
       "1",
     ]);
-    expect(placed(["mouse", "move-left"], Option.some({ x: "0.004", y: "0.5" }))).toEqual([
+    expect(placed(["mouse", "move-left"], Option.some({ x: "0.01", y: "0.5" }))).toEqual([
       "mouse",
       "move",
       "--x",
@@ -187,7 +187,7 @@ describe("the harness's pointer", () => {
     const moved = Pointer.after(once.success, AT);
     const twice = Pointer.placed(["mouse", "move-up"], moved);
     assert(Result.isSuccess(twice));
-    expect(Pointer.after(twice.success, moved)).toEqual(Option.some({ x: "0.25", y: "0.73" }));
+    expect(Pointer.after(twice.success, moved)).toEqual(Option.some({ x: "0.25", y: "0.71" }));
   });
 
   it("leaves every other action as the model wrote it, with or without a pointer", () => {

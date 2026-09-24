@@ -31,8 +31,8 @@ const pointOf = (args: ReadonlyArray<string>, x: string, y: string): Option.Opti
 };
 
 // The harness's own moves, not the client's: the model is often that close to where it means to
-// be. A hundredth of the screenshot, y growing downward, clamped so an edge stays an edge.
-const NUDGE = 0.01;
+// be. Two hundredths of the screenshot, y growing downward, clamped so an edge stays an edge.
+const NUDGE = 0.02;
 const NUDGES: Record<string, { readonly x: number; readonly y: number }> = {
   "mouse move-up": { x: 0, y: -NUDGE },
   "mouse move-down": { x: 0, y: NUDGE },
@@ -40,7 +40,7 @@ const NUDGES: Record<string, { readonly x: number; readonly y: number }> = {
   "mouse move-right": { x: NUDGE, y: 0 },
 };
 
-// Rounded to a millionth so 0.56 + 0.01 is 0.57, not 0.5700000000000001.
+// Rounded to a millionth so 0.56 + 0.02 is 0.58, not 0.5800000000000001.
 const nudged = (at: string, by: number): string =>
   String(Math.round(Math.min(1, Math.max(0, Number(at) + by)) * 1_000_000) / 1_000_000);
 

@@ -67,10 +67,10 @@ reason is why, in a few words.
 args is the action, then its own flags. Do not pass --agent-id, --session-id, or --server-url. Do not call start, stop, or save.
 mouse click and mouse double-click take no --x or --y: they press where the pointer is, which is where your last mouse move, scroll, hold, release, or drag left it. mouse drag takes only --to-x and --to-y: it starts where the pointer is. The client guide below writes those points out; here the harness fills them in, and refuses a click or a drag that names them or that comes before any mouse move.
 Four more mouse movements are the harness's own, so the client guide below does not list them. They take no --x or --y, move from where the pointer is, and need a mouse move before them. Use one when the pointer is close to where you want it:
-mouse move-up: move the mouse up a little bit, 0.01 of the screen. {"name":"client","arguments":{"step":1,"reason":"just above the pointer","args":["mouse","move-up"]}}
-mouse move-down: move the mouse down a little bit, 0.01 of the screen. {"name":"client","arguments":{"step":1,"reason":"just below the pointer","args":["mouse","move-down"]}}
-mouse move-left: move the mouse left a little bit, 0.01 of the screen. {"name":"client","arguments":{"step":1,"reason":"just left of the pointer","args":["mouse","move-left"]}}
-mouse move-right: move the mouse right a little bit, 0.01 of the screen. {"name":"client","arguments":{"step":1,"reason":"just right of the pointer","args":["mouse","move-right"]}}
+mouse move-up: move the mouse up a little bit, 0.02 of the screen. {"name":"client","arguments":{"step":1,"reason":"just above the pointer","args":["mouse","move-up"]}}
+mouse move-down: move the mouse down a little bit, 0.02 of the screen. {"name":"client","arguments":{"step":1,"reason":"just below the pointer","args":["mouse","move-down"]}}
+mouse move-left: move the mouse left a little bit, 0.02 of the screen. {"name":"client","arguments":{"step":1,"reason":"just left of the pointer","args":["mouse","move-left"]}}
+mouse move-right: move the mouse right a little bit, 0.02 of the screen. {"name":"client","arguments":{"step":1,"reason":"just right of the pointer","args":["mouse","move-right"]}}
 </tool>
 <tool name="Done">
 {"name":"Done","arguments":{}}

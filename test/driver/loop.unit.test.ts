@@ -1705,10 +1705,10 @@ describe("driver loop", () => {
         expect(Exit.isSuccess(exit) && exit.value.stopped).toEqual({ reason: "result-closed" });
         expect(bodiesAt(recorder.requests, "/mouse/move")).toEqual([
           expect.objectContaining({ x: 0.25, y: 0.25 }),
-          expect.objectContaining({ x: 0.25, y: 0.24 }),
+          expect.objectContaining({ x: 0.25, y: 0.23 }),
         ]);
         expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
-          expect.objectContaining({ x: 0.25, y: 0.24 }),
+          expect.objectContaining({ x: 0.25, y: 0.23 }),
         ]);
       }),
     );

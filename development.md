@@ -484,7 +484,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   which still takes it (`client.md` documents that CLI; the harness prompt tells the model the
   difference). A click or drag that names the point, or that comes before any mouse action, is a
   bad reply. `mouse move-up`, `move-down`, `move-left` and `move-right` are the harness's alone,
-  not the client's: each is a `mouse move` a hundredth of the screenshot from where the pointer
+  not the client's: each is a `mouse move` two hundredths of the screenshot from where the pointer
   is (up lowers `y`), clamped to 0..1, so at an edge it moves nowhere rather than fail. One that
   names `--x` or `--y`, or comes before any mouse action, is a bad reply. A failure after the session exists, including an interrupt, stops
   it with `--status failed` and closes the result failed even when that stop fails, and the loop
