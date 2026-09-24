@@ -65,6 +65,11 @@ describe("drive happy path", () => {
       expect(text).toContain("any crashes or erroneous behavior must be reported");
       expect(text).toContain("Any crash or erroneous behavior must be reported");
       expect(text).toContain("always take a screen shot of every step");
+      expect(text).toContain("best effort to complete the ticket");
+      expect(text).not.toContain("In Progress");
+      expect(text).not.toContain("Needs Review");
+      expect(text.toLowerCase()).not.toContain("label");
+      expect(text.toLowerCase()).not.toContain("set status");
     }),
   );
 });
@@ -99,6 +104,10 @@ describe("diagnose happy path", () => {
         expect(text).toContain("# Control");
         expect(text).toContain("## session");
         expect(text).toContain("Post-run reviewer");
+        expect(text).toContain("./ctrl diagnose");
+        expect(text).not.toContain("In Review");
+        expect(text).not.toContain("Done");
+        expect(text.toLowerCase()).not.toContain("label");
       }),
   );
 });

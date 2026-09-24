@@ -12,8 +12,10 @@ import * as Config from "../config.ts";
 import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
+import * as Diagnosis from "../db/diagnosis.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
+import * as Sessions from "../db/sessions.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
@@ -77,7 +79,11 @@ const ServerLive = (port: number, model: string) =>
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
 const LinearLive = Layer.unwrap(
-  Effect.map(Config.linearAccess, ({ token, team }) => Linear.Linear.layer(token, team)),
+  Effect.gen(function* () {
+    const { token, team } = yield* Config.linearAccess;
+    const apiUrl = yield* Config.linearApiUrl;
+    return Linear.Linear.layer(token, team, apiUrl);
+  }),
 );
 
 // LINEAR_WEBHOOK_SECRET signs POST /linear; LINEAR_API_TOKEN reads the columns the webhook
@@ -92,6 +98,8 @@ const MainLive = Layer.mergeAll(
   Tests.TestStore.layer,
   Automation.AutomationStore.layer,
   Servers.ServerStore.layer,
+  Sessions.SessionStore.layer,
+  Diagnosis.DiagnosisStore.layer,
   SetupRequests.SetupRequestStore.layer,
   LinearLive,
 ).pipe(

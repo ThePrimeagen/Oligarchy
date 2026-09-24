@@ -11,9 +11,10 @@ import {
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as Config from "../config.ts";
 import * as Errors from "../shared/errors.ts";
 
-export const LINEAR_API_URL = "https://api.linear.app/graphql";
+export const LINEAR_API_URL = Config.DEFAULT_LINEAR_API_URL;
 // A request Linear never answers must not hold the automation server's dispatch or its watches.
 const REQUEST_TIMEOUT = "10 seconds";
 export const AGENT_TEST_LABEL = "agent test";
@@ -24,8 +25,15 @@ export const ASSIGNEE_EMAIL = "prime@terminal.shop";
 export const BACKLOG_STATE = "Backlog";
 export const AUTOMATION_NEEDED_STATE = "Automation Needed";
 export const NEEDS_REVIEW_STATE = "Needs Review";
-// Where the automation server puts a ticket whose job it failed without a run to judge.
+// Where the automation server puts a ticket once a client has reserved it, before /run.
+export const IN_PROGRESS_STATE = "In Progress";
+// Where the automation server puts a ticket the system failed, with a comment saying how.
+export const ERRORED_STATE = "Errored";
+// A diagnose's verdict is a column, not a job status. Failed is the diagnosis that did not
+// land; Succeeded is the one that did. Looked up by name, like Errored, so filing a ticket
+// does not require the column to exist.
 export const FAILED_STATE = "Failed";
+export const SUCCEEDED_STATE = "Succeeded";
 // A ticket in Automation Needed that already has its pending job. The watch's list leaves
 // these out, so a restart does not keep a map of tickets that are waiting to run.
 export const READY_LABEL = "ready";
@@ -102,6 +110,12 @@ const ISSUE_UPDATE_MUTATION = `mutation ExperimentIssueUpdate($id: String!, $inp
   }
 }`;
 
+const COMMENT_CREATE_MUTATION = `mutation ExperimentCommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+  }
+}`;
+
 const ISSUES_QUERY = `query ExperimentIssues($filter: IssueFilter!, $after: String) {
   issues(first: 100, after: $after, filter: $filter) {
     nodes {
@@ -146,6 +160,9 @@ const IssueCreate = Schema.Struct({
   issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.NullOr(LinearTicket) }),
 });
 const IssueUpdate = Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean }) });
+const CommentCreate = Schema.Struct({
+  commentCreate: Schema.Struct({ success: Schema.Boolean }),
+});
 const Backlog = Schema.Struct({
   issues: Schema.Struct({
     nodes: Schema.Array(LinearBacklogTicket),
@@ -192,7 +209,16 @@ export type LinearService = {
   // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
   readonly markReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  // The move lands before the comment, so a retry after a refused comment moves nothing new.
+  readonly moveToErrored: (
+    identifier: string,
+    message: string,
+  ) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToInProgress: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  // The close half of the board. No comment rides along: the column is the record.
+  readonly moveToNeedsReview: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  readonly moveToSucceeded: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -204,6 +230,7 @@ export type LinearService = {
 const makeLinear = (
   token: Redacted.Redacted,
   teamName: string,
+  apiUrl: string,
 ): Effect.Effect<LinearService, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
@@ -218,7 +245,7 @@ const makeLinear = (
       Effect.gen(function* () {
         const response = yield* client
           .execute(
-            HttpClientRequest.post(LINEAR_API_URL).pipe(
+            HttpClientRequest.post(apiUrl).pipe(
               HttpClientRequest.setHeader("Authorization", Redacted.value(token)),
               HttpClientRequest.setHeader("Content-Type", "application/json"),
               HttpClientRequest.bodyJsonUnsafe({ query, variables }),
@@ -378,12 +405,11 @@ const makeLinear = (
       );
     });
 
-    // Looked up on its own, not in stateIds: `test run` and `mint` must not need a Failed column.
-    const moveToFailed = Effect.fn("Linear.moveToFailed")(function* (identifier: string) {
+    const moveToInProgress = Effect.fn("Linear.moveToInProgress")(function* (identifier: string) {
       const team = yield* teamId;
-      const stateId = yield* stateNamed(team, FAILED_STATE);
+      const stateId = yield* stateNamed(team, IN_PROGRESS_STATE);
       yield* request(
-        "moveToFailed",
+        "moveToInProgress",
         ISSUE_UPDATE_MUTATION,
         { id: identifier, input: { stateId } },
         IssueUpdate,
@@ -392,8 +418,78 @@ const makeLinear = (
           (updated) => updated.issueUpdate.success,
           () =>
             Errors.LinearError.make({
-              operation: "moveToFailed",
-              message: `linear: moving ${identifier} to Failed failed`,
+              operation: "moveToInProgress",
+              message: `linear: moving ${identifier} to In Progress failed`,
+            }),
+        ),
+      );
+    });
+
+    // Looked up on their own, not in stateIds: `test run` and `mint` must not need the columns
+    // the automation server closes onto.
+    const moveByName = (
+      operation: "moveToNeedsReview" | "moveToFailed" | "moveToSucceeded",
+      stateName: string,
+    ) =>
+      Effect.fn(`Linear.${operation}`)(function* (identifier: string) {
+        const team = yield* teamId;
+        const stateId = yield* stateNamed(team, stateName);
+        yield* request(
+          operation,
+          ISSUE_UPDATE_MUTATION,
+          { id: identifier, input: { stateId } },
+          IssueUpdate,
+        ).pipe(
+          Effect.filterOrFail(
+            (updated) => updated.issueUpdate.success,
+            () =>
+              Errors.LinearError.make({
+                operation,
+                message: `linear: moving ${identifier} to ${stateName} failed`,
+              }),
+          ),
+        );
+      });
+
+    const moveToNeedsReview = moveByName("moveToNeedsReview", NEEDS_REVIEW_STATE);
+    const moveToFailed = moveByName("moveToFailed", FAILED_STATE);
+    const moveToSucceeded = moveByName("moveToSucceeded", SUCCEEDED_STATE);
+
+    // Looked up on its own, not in stateIds: `test run` and `mint` must not need an Errored
+    // column.
+    const moveToErrored = Effect.fn("Linear.moveToErrored")(function* (
+      identifier: string,
+      message: string,
+    ) {
+      const team = yield* teamId;
+      const stateId = yield* stateNamed(team, ERRORED_STATE);
+      yield* request(
+        "moveToErrored",
+        ISSUE_UPDATE_MUTATION,
+        { id: identifier, input: { stateId } },
+        IssueUpdate,
+      ).pipe(
+        Effect.filterOrFail(
+          (updated) => updated.issueUpdate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveToErrored",
+              message: `linear: moving ${identifier} to Errored failed`,
+            }),
+        ),
+      );
+      yield* request(
+        "moveToErrored",
+        COMMENT_CREATE_MUTATION,
+        { input: { issueId: identifier, body: message } },
+        CommentCreate,
+      ).pipe(
+        Effect.filterOrFail(
+          (created) => created.commentCreate.success,
+          () =>
+            Errors.LinearError.make({
+              operation: "moveToErrored",
+              message: `linear: commenting on ${identifier} failed`,
             }),
         ),
       );
@@ -535,7 +631,11 @@ const makeLinear = (
       moveIssue,
       markReady,
       clearReady,
+      moveToErrored,
+      moveToInProgress,
+      moveToNeedsReview,
       moveToFailed,
+      moveToSucceeded,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,
@@ -548,6 +648,7 @@ export class Linear extends Context.Service<Linear>()("@oligarchy/ctrl/Linear", 
   static readonly layer = (
     token: Redacted.Redacted,
     teamName: string,
+    apiUrl = LINEAR_API_URL,
   ): Layer.Layer<Linear, never, HttpClient.HttpClient> =>
-    Layer.effect(this)(this.make(token, teamName));
+    Layer.effect(this)(this.make(token, teamName, apiUrl));
 }

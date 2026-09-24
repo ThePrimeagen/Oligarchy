@@ -106,6 +106,9 @@ const happyLinear = (body: GraphQl): Response => {
   if (body.query.includes("issueUpdate")) {
     return describeResponse();
   }
+  if (body.query.includes("commentCreate")) {
+    return FakeHttp.json({ data: { commentCreate: { success: true } } });
+  }
   return issueResponse("OLI-42");
 };
 
@@ -460,7 +463,89 @@ describe("Linear happy path", () => {
     }),
   );
 
-  it.effect("moveToFailed finds the team's Failed state and moves the ticket by identifier", () =>
+  it.effect(
+    "moveToErrored finds the team's Errored state, moves the ticket, and comments the reason",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp(happyLinear);
+        yield* Effect.flatMap(Linear.Linear, (client) =>
+          client.moveToErrored("OLI-45", "drive errored; automation server restarted"),
+        ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+        const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+          JSON.parse(request.body),
+        );
+        expect(bodies).toEqual([
+          { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+          {
+            query: expect.stringContaining("workflowStates"),
+            variables: { name: "Errored", teamId: "team-id" },
+          },
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: "OLI-45", input: { stateId: stateId("Errored") } },
+          },
+          {
+            query: expect.stringContaining("commentCreate"),
+            variables: {
+              input: {
+                issueId: "OLI-45",
+                body: "drive errored; automation server restarted",
+              },
+            },
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "moveToInProgress finds the team's In Progress state and moves the ticket by identifier",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp(happyLinear);
+        yield* Effect.flatMap(Linear.Linear, (client) => client.moveToInProgress("OLI-45")).pipe(
+          Effect.provide(linear().pipe(Layer.provide(http.layer))),
+        );
+        const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+          JSON.parse(request.body),
+        );
+        expect(bodies).toEqual([
+          { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+          {
+            query: expect.stringContaining("workflowStates"),
+            variables: { name: "In Progress", teamId: "team-id" },
+          },
+          {
+            query: expect.stringContaining("issueUpdate"),
+            variables: { id: "OLI-45", input: { stateId: stateId("In Progress") } },
+          },
+        ]);
+      }),
+  );
+
+  it.effect("moveToNeedsReview finds the team's Needs Review state and moves the ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      yield* Effect.flatMap(Linear.Linear, (client) => client.moveToNeedsReview("OLI-45")).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies).toEqual([
+        { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+        {
+          query: expect.stringContaining("workflowStates"),
+          variables: { name: "Needs Review", teamId: "team-id" },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: "OLI-45", input: { stateId: stateId("Needs Review") } },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("moveToFailed finds the team's Failed state and moves the ticket", () =>
     Effect.gen(function* () {
       const http = withHttp(happyLinear);
       yield* Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")).pipe(
@@ -478,6 +563,29 @@ describe("Linear happy path", () => {
         {
           query: expect.stringContaining("issueUpdate"),
           variables: { id: "OLI-45", input: { stateId: stateId("Failed") } },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("moveToSucceeded finds the team's Succeeded state and moves the ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      yield* Effect.flatMap(Linear.Linear, (client) => client.moveToSucceeded("OLI-45")).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies).toEqual([
+        { query: expect.stringContaining("teams("), variables: { name: TEAM } },
+        {
+          query: expect.stringContaining("workflowStates"),
+          variables: { name: "Succeeded", teamId: "team-id" },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: "OLI-45", input: { stateId: stateId("Succeeded") } },
         },
       ]);
     }),
@@ -502,7 +610,9 @@ describe("Linear unhappy path", () => {
   it.effect("a request Linear never answers fails after ten seconds, naming the operation", () =>
     Effect.gen(function* () {
       const asked = yield* failureOf(
-        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.moveToErrored("OLI-45", "drive errored; no answer"),
+        ),
       ).pipe(Effect.provide(FakeHttp.never), Effect.forkChild);
       yield* TestClock.adjust("10 seconds");
       expect(yield* Fiber.join(asked)).toMatchObject({
@@ -774,27 +884,147 @@ describe("Linear unhappy path", () => {
     }),
   );
 
-  it.effect("moveToFailed refuses a board without a Failed state before any update", () =>
+  it.effect("moveToErrored refuses a board without an Errored state before any update", () =>
     Effect.gen(function* () {
       const http = withHttp((body) =>
-        body.query.includes("workflowStates") && body.variables?.name === "Failed"
+        body.query.includes("workflowStates") && body.variables?.name === "Errored"
           ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
           : happyLinear(body),
       );
       const error = yield* failureOf(
-        Effect.flatMap(Linear.Linear, (client) => client.moveToFailed("OLI-45")),
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.moveToErrored("OLI-45", "drive errored; no answer"),
+        ),
       ).pipe(Effect.provide(http.layer));
       expect(error).toMatchObject({
         _tag: "LinearError",
         operation: "stateIds",
-        message: "linear: no state named Failed",
+        message: "linear: no state named Errored",
       });
       const queries = http.requests.map((request) => JSON.parse(request.body).query);
       expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
     }),
   );
 
-  it.effect("moveToFailed reports an update that did not succeed by ticket", () =>
+  it.effect("moveToErrored reports an update that did not succeed by ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.moveToErrored("OLI-45", "drive errored; no answer"),
+        ),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToErrored",
+        message: "linear: moving OLI-45 to Errored failed",
+      });
+    }),
+  );
+
+  it.effect("moveToErrored reports a comment that did not succeed (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("commentCreate")
+          ? FakeHttp.json({ data: { commentCreate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.moveToErrored("OLI-45", "drive errored; no answer"),
+        ),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToErrored",
+        message: "linear: commenting on OLI-45 failed",
+      });
+    }),
+  );
+
+  it.effect("moveToInProgress refuses a board without an In Progress state before any update", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("workflowStates") && body.variables?.name === "In Progress"
+          ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToInProgress("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "stateIds",
+        message: "linear: no state named In Progress",
+      });
+      const queries = http.requests.map((request) => JSON.parse(request.body).query);
+      expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
+    }),
+  );
+
+  it.effect("moveToInProgress reports an update that did not succeed by ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToInProgress("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToInProgress",
+        message: "linear: moving OLI-45 to In Progress failed",
+      });
+    }),
+  );
+
+  it.effect(
+    "moveToNeedsReview refuses a board without a Needs Review state before any update",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp((body) =>
+          body.query.includes("workflowStates") && body.variables?.name === "Needs Review"
+            ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+            : happyLinear(body),
+        );
+        const error = yield* failureOf(
+          Effect.flatMap(Linear.Linear, (client) => client.moveToNeedsReview("OLI-45")),
+        ).pipe(Effect.provide(http.layer));
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "stateIds",
+          message: "linear: no state named Needs Review",
+        });
+        const queries = http.requests.map((request) => JSON.parse(request.body).query);
+        expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
+      }),
+  );
+
+  it.effect("moveToNeedsReview reports an update that did not succeed by ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToNeedsReview("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToNeedsReview",
+        message: "linear: moving OLI-45 to Needs Review failed",
+      });
+    }),
+  );
+
+  it.effect("moveToFailed reports an update that did not succeed by ticket (unhappy)", () =>
     Effect.gen(function* () {
       const http = withHttp((body) =>
         body.query.includes("issueUpdate")
@@ -809,6 +1039,26 @@ describe("Linear unhappy path", () => {
         operation: "moveToFailed",
         message: "linear: moving OLI-45 to Failed failed",
       });
+    }),
+  );
+
+  it.effect("moveToSucceeded refuses a board without a Succeeded state before any update", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("workflowStates") && body.variables?.name === "Succeeded"
+          ? FakeHttp.json({ data: { workflowStates: { nodes: [] } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToSucceeded("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "stateIds",
+        message: "linear: no state named Succeeded",
+      });
+      const queries = http.requests.map((request) => JSON.parse(request.body).query);
+      expect(queries.some((query: string) => query.includes("issueUpdate"))).toBe(false);
     }),
   );
 

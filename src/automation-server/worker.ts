@@ -1,7 +1,9 @@
 import { Cause, Effect, Option, Result, Schedule, Schema, Scope } from "effect";
 import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
+import * as Diagnosis from "../db/diagnosis.ts";
 import * as Servers from "../db/servers.ts";
+import * as Sessions from "../db/sessions.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
 import * as ExternalFailure from "../external-failure.ts";
@@ -22,25 +24,35 @@ const detail = (error: unknown): string =>
     ? Render.errorDetail(ExternalFailure.causeOf(error))
     : Render.errorDetail(error);
 
-type Outcome = {
-  readonly status: Automation.FinishStatus;
-  readonly reason: string | null;
-};
+// errored is the system failing the job, never the test, and always says why.
+type Outcome =
+  | { readonly status: "errored"; readonly reason: string }
+  | {
+      readonly status: Exclude<Automation.FinishStatus, "errored">;
+      readonly reason: string | null;
+    };
 
 const aborted: Outcome = {
   status: "aborted",
   reason: "automation server shutting down",
 };
 
+// The automation server that owned the row is gone. That is the harness, the same way a qemu
+// server restart errors the sessions it left, not a run that failed.
 const restarted: Outcome = {
-  status: "failed",
+  status: "errored",
   reason: "automation server restarted",
 };
 
-const succeeded: Outcome = { status: "succeeded", reason: null };
+// A drive or mint that ran to its end is completed: the diagnosis judges it. A diagnose that
+// ran is succeeded. failed is a diagnosis verdict, not a job close.
+const finished = (job: Automation.AutomationJobRow): Outcome => ({
+  status: job.action === "diagnose" ? "succeeded" : "completed",
+  reason: null,
+});
 
-const failedFrom = (cause: Cause.Cause<unknown>): Outcome => ({
-  status: "failed",
+const erroredFrom = (cause: Cause.Cause<unknown>): Outcome => ({
+  status: "errored",
   reason: Render.errorDetail(Cause.squash(cause)),
 });
 
@@ -70,6 +82,9 @@ type Placement = {
 
 type PlaceResult =
   | { readonly _tag: "placed"; readonly placement: Placement }
+  // A diagnose whose drive has not run yet waits, pending, without a line.
+  | { readonly _tag: "held" }
+  | { readonly _tag: "closed"; readonly outcome: Outcome }
   | {
       readonly _tag: "deferred";
       readonly continueTick: boolean;
@@ -77,6 +92,32 @@ type PlaceResult =
       readonly agentId: string;
     }
   | { readonly _tag: "unavailable"; readonly continueTick: boolean };
+
+// A diagnose judges a drive or mint that ran to its end, so only a completed one is diagnosed.
+// One still pending holds the diagnose; one that ended any other way, or none at all, closes it
+// aborted with nothing spawned. undefined is a diagnose to place.
+const diagnosable = Effect.fn("diagnosable")(function* (resultId: string) {
+  const store = yield* Automation.AutomationStore;
+  const drive = yield* store.jobStatus(resultId, "drive");
+  const [action, status] = Option.isSome(drive)
+    ? ["drive", drive.value]
+    : ["mint", Option.getOrUndefined(yield* store.jobStatus(resultId, "mint"))];
+  if (status === "completed") {
+    return undefined;
+  }
+  if (status === "pending" || status === "running") {
+    const held: PlaceResult = { _tag: "held" };
+    return held;
+  }
+  const closed: PlaceResult = {
+    _tag: "closed",
+    outcome: {
+      status: "aborted",
+      reason: `not diagnosed; ${status === undefined ? "no drive" : `${action} ${status}`}`,
+    },
+  };
+  return closed;
+});
 
 // Build the prompt and take a client slot, the client reserving a guest too when the job is a
 // drive. The row stays pending. /run is not waited here: a reserved job starts in its own fiber
@@ -90,6 +131,12 @@ const place = Effect.fn("place")(function* (
   const tests = yield* Tests.TestStore;
   const setups = yield* SetupRequests.SetupRequestStore;
   const log = yield* Log.Log;
+  if (job.action === "diagnose") {
+    const gate = yield* diagnosable(job.resultId);
+    if (gate !== undefined) {
+      return gate;
+    }
+  }
   const result = yield* tests.findResult(job.resultId);
   if (Option.isNone(result) || result.value.linearId === null) {
     return yield* Errors.AutomationClientError.make({ message: "no Linear ticket" });
@@ -177,9 +224,10 @@ const isOpen = (status: string): boolean => status === "pending" || status === "
 // What the job made of a /run that answered 200.
 const judge = Effect.fn("judge")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
+  const sessions = yield* Sessions.SessionStore;
   // A diagnose is judged by nothing here: the result was closed before it was queued.
   if (job.action === "diagnose") {
-    return yield* Effect.void;
+    return finished(job);
   }
   // opencode exiting 0 with the result still open is an agent that quit early, and the job says
   // so rather than reading as a run.
@@ -188,11 +236,27 @@ const judge = Effect.fn("judge")(function* (job: Automation.AutomationJobRow) {
     return yield* Effect.die(new Error(`judge: result ${job.resultId} vanished during the drive`));
   }
   if (isOpen(after.value.status)) {
-    return yield* Errors.AutomationClientError.make({
-      message: `driver exited; result ${job.resultId} is ${after.value.status}`,
-    });
+    const open: Outcome = {
+      status: "errored",
+      reason: `driver exited; result ${job.resultId} is ${after.value.status}`,
+    };
+    return open;
   }
-  return yield* Effect.void;
+  // A driver closes the result whatever happened to its guest. A session the qemu server errored
+  // is the system failing the drive, whatever verdict the driver wrote.
+  const sessionId = after.value.sessionId;
+  if (sessionId !== null) {
+    const session = yield* sessions.getSession(sessionId);
+    if (Option.isSome(session) && session.value.status === "errored") {
+      const why = session.value.reason === null ? "" : `; ${session.value.reason}`;
+      const lost: Outcome = {
+        status: "errored",
+        reason: `session ${sessionId} errored${why}`,
+      };
+      return lost;
+    }
+  }
+  return finished(job);
 });
 
 const logOutcome = Effect.fn("logOutcome")(function* (
@@ -201,15 +265,109 @@ const logOutcome = Effect.fn("logOutcome")(function* (
 ) {
   const log = yield* Log.Log;
   const attr = { location: Log.Locations.automation };
-  if (outcome.status === "succeeded") {
-    yield* log.info(`${job.action} succeeded`, attr);
+  if (
+    outcome.status === "succeeded" ||
+    outcome.status === "completed" ||
+    outcome.status === "aborted"
+  ) {
+    yield* log.info(`${job.action} ${outcome.status}`, attr);
     return;
   }
-  if (outcome.status === "aborted") {
-    yield* log.info(`${job.action} aborted`, attr);
+  yield* log.error(`${job.action} ${outcome.status}; ${outcome.reason}`, attr);
+});
+
+// The system failed the job. A drive's or mint's result is errored with it, since whatever
+// verdict it had is not the test's; a diagnose leaves the result it was judging alone. The
+// ticket moves to Errored with the reason. Neither failing unwinds the close: each is a line.
+const reportErrored = Effect.fn("reportErrored")(function* (
+  job: Automation.AutomationJobRow,
+  ticket: string | null,
+  reason: string,
+) {
+  const tests = yield* Tests.TestStore;
+  const linear = yield* Linear.Linear;
+  const log = yield* Log.Log;
+  const attr = Object.assign(
+    { location: Log.Locations.automation },
+    ticket === null ? undefined : { agentId: ticket },
+  );
+  if (job.action !== "diagnose") {
+    yield* tests.errorResult(job.resultId, reason).pipe(
+      Effect.retry(Schedule.recurs(2)),
+      Effect.catchTag("DatabaseError", (error) =>
+        log.error(`result errored write failed; ${job.resultId}: ${detail(error)}`, {
+          ...attr,
+          cause: error,
+        }),
+      ),
+    );
+  }
+  if (ticket === null) {
     return;
   }
-  yield* log.error(`${job.action} failed; ${outcome.reason}`, attr);
+  yield* linear.moveToErrored(ticket, `${job.action} errored; ${reason}`).pipe(
+    Effect.retry(Schedule.recurs(2)),
+    Effect.catchTag("LinearError", (error) =>
+      log.error(`move to Errored failed: ${detail(error)}`, { ...attr, cause: error }),
+    ),
+  );
+});
+
+// Three attempts, then a line. The job is already closed; a board that will not move does not
+// reopen it.
+const moveTicket = Effect.fn("moveTicket")(function* (
+  ticket: string,
+  column: string,
+  move: Effect.Effect<void, Errors.LinearError>,
+) {
+  const log = yield* Log.Log;
+  yield* move.pipe(
+    Effect.retry(Schedule.recurs(2)),
+    Effect.catchTag("LinearError", (error) =>
+      log.error(`move to ${column} failed: ${detail(error)}`, {
+        location: Log.Locations.automation,
+        agentId: ticket,
+        cause: error,
+      }),
+    ),
+  );
+});
+
+// The diagnosing agent writes the verdict on the drive's session before it exits. Passed is
+// Succeeded and failed is Failed. No session, no row, or a read that will not land is a line:
+// guessing a column would be a lie, and the job is already succeeded.
+const reportDiagnosis = Effect.fn("reportDiagnosis")(function* (
+  job: Automation.AutomationJobRow,
+  ticket: string,
+  sessionId: string | null,
+) {
+  const log = yield* Log.Log;
+  const attr = { location: Log.Locations.automation, agentId: ticket };
+  if (sessionId === null) {
+    yield* log.error(`diagnose verdict missing; ${job.resultId}`, attr);
+    return;
+  }
+  const diagnosis = yield* Diagnosis.DiagnosisStore;
+  const read = yield* diagnosis
+    .getDiagnosis(sessionId)
+    .pipe(Effect.retry(Schedule.recurs(2)), Effect.result);
+  if (Result.isFailure(read)) {
+    yield* log.error(`diagnose verdict read failed; ${sessionId}: ${detail(read.failure)}`, {
+      ...attr,
+      cause: read.failure,
+    });
+    return;
+  }
+  if (Option.isNone(read.success)) {
+    yield* log.error(`diagnose verdict missing; ${sessionId}`, attr);
+    return;
+  }
+  const linear = yield* Linear.Linear;
+  if (read.success.value.verdict === "passed") {
+    yield* moveTicket(ticket, Linear.SUCCEEDED_STATE, linear.moveToSucceeded(ticket));
+    return;
+  }
+  yield* moveTicket(ticket, Linear.FAILED_STATE, linear.moveToFailed(ticket));
 });
 
 // True when this call closed the row. Three attempts at the write; a row that still will not
@@ -235,15 +393,27 @@ const closeJob = Effect.fn("closeJob")(function* (
     return false;
   }
   yield* logOutcome(job, outcome);
-  // Ready means a pending drive or mint. A diagnose was never labeled. A placement that
-  // could not reserve does not close.
-  if (job.action === "diagnose") {
-    return true;
-  }
   const tests = yield* Tests.TestStore;
   const result = yield* tests.findResult(job.resultId);
-  if (Option.isSome(result) && result.value.linearId !== null) {
-    yield* Ready.release(result.value.linearId);
+  const ticket = Option.isSome(result) ? result.value.linearId : null;
+  // Ready means a pending drive or mint. A diagnose was never labeled. A placement that
+  // could not reserve does not close.
+  if (job.action !== "diagnose" && ticket !== null) {
+    yield* Ready.release(ticket);
+  }
+  if (outcome.status === "errored") {
+    yield* reportErrored(job, ticket, outcome.reason);
+  }
+  // The harness owns both halves. A drive or mint that completed goes to Needs Review. A
+  // diagnose that succeeded goes to Succeeded or Failed from the verdict. Errored already
+  // went to Errored, and aborted stays where it was.
+  if (ticket !== null && outcome.status === "completed") {
+    const linear = yield* Linear.Linear;
+    yield* moveTicket(ticket, Linear.NEEDS_REVIEW_STATE, linear.moveToNeedsReview(ticket));
+  }
+  if (ticket !== null && outcome.status === "succeeded" && job.action === "diagnose") {
+    const sessionId = Option.isSome(result) ? result.value.sessionId : null;
+    yield* reportDiagnosis(job, ticket, sessionId);
   }
   return true;
 });
@@ -288,24 +458,25 @@ const stopAtShutdown = Effect.fn("stopAtShutdown")(function* (
 
 // A running row at startup was taken by the automation server that died: the fiber that
 // would have closed it went with it. A drive or mint whose result its driver closed has
-// finished, and is closed succeeded as that fiber would have closed it. Nothing is asked of
-// its automation client and its ticket is not moved: whatever the driver still does after
-// closing the result, it does on its own. A diagnose's result was closed before it was
-// queued, so it says nothing about the diagnose. Every other row is stopped at the
-// automation client that took it, so opencode is killed or the reservation and its qemu slot
-// are given back, then failed, and its ticket moved to Failed. A 404 is an automation client
-// holding nothing for the ticket, which is reported. One that does not answer is reported and
-// the job is failed anyway; nothing asks again. No ticket, no automation client recorded, or
-// that client's row gone: nothing to ask. Once the row is closed it is no longer found at the
-// next startup, so the close and the Linear move finish even when a shutdown lands between them.
+// finished, and is judged as that fiber would have judged it: completed, or errored when the
+// qemu server errored its session, which moves the ticket to Errored. Nothing is asked of its
+// automation client: whatever the driver still does after closing the result, it does on its
+// own. A diagnose's result was closed before it was queued, so it says nothing about the
+// diagnose. Every other row is stopped at the automation client that took it, so opencode is
+// killed or the reservation and its qemu slot are given back, then errored, and its ticket
+// moved to Errored with the reason. A 404 is an automation client holding nothing for the
+// ticket, which is reported. One that does not answer is reported and the job is errored
+// anyway; nothing asks again. No ticket, no automation client recorded, or that client's row
+// gone: nothing to ask. Once the row is closed it is no longer found at the next startup, so
+// the close and the Linear move finish even when a shutdown lands between them.
 const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.AutomationJobRow) {
   const tests = yield* Tests.TestStore;
   const servers = yield* Servers.ServerStore;
-  const linear = yield* Linear.Linear;
   const log = yield* Log.Log;
   const result = yield* tests.findResult(job.resultId);
   if (job.action !== "diagnose" && Option.isSome(result) && !isOpen(result.value.status)) {
-    yield* Effect.uninterruptible(closeJob(job, succeeded));
+    const outcome = yield* judge(job);
+    yield* Effect.uninterruptible(closeJob(job, outcome));
     return;
   }
   const ticket = Option.isSome(result) ? result.value.linearId : null;
@@ -326,38 +497,25 @@ const closeInherited = Effect.fn("closeInherited")(function* (job: Automation.Au
       );
     }
   }
-  yield* Effect.uninterruptible(
-    Effect.gen(function* () {
-      const closed = yield* closeJob(job, restarted);
-      if (!closed || ticket === null) {
-        return;
-      }
-      yield* linear.moveToFailed(ticket).pipe(
-        Effect.retry(Schedule.recurs(2)),
-        Effect.catchTag("LinearError", (error) =>
-          log.error(`move to Failed failed: ${detail(error)}`, {
-            location: Log.Locations.automation,
-            agentId: ticket,
-            cause: error,
-          }),
-        ),
-      );
-    }),
-  );
+  yield* Effect.uninterruptible(closeJob(job, restarted));
 });
 
 // Jobs launch one reservation at a time, round robin from where the last one stopped.
 // The next reservation is not sent until this one has answered, so two reservation
 // responses are never in flight. The row stays pending until a client has reserved;
-// pending -> running names that client, and only then does /run start. /run does not
-// hold the next reservation. A 503 or 409 from a client is ordinary and the next client
+// pending -> running names that client. A drive or mint is then moved to In Progress,
+// three attempts, and only then does /run start. A diagnose is not moved here. A move
+// that still fails gives the reservation back and errors the
+// job: Linear did not move, so the run never started. The move does not hold the next
+// reservation, and neither does /run. A 503 or 409
+// from a client is ordinary and the next client
 // is asked; when none can take the job the row stays pending for a later pass. Any
 // other reserve failure is logged and the next client is asked. A mint's own refusal
 // does not end the tick. A tick with no live client does not select. The selection and
 // the running write are uninterruptible; the HTTP wait is restored so SIGTERM can
 // abandon a reserve that has not landed. A tick that fails is one error line; the next
 // tick runs. Before the first tick, every running row the last automation server left is
-// closed, one at a time: a finished drive or mint succeeded, any other stopped and failed. A
+// closed, one at a time: a finished drive or mint completed, any other stopped and errored. A
 // row that fails is one error line and the next row is tried, and a listing that fails is one
 // error line. Dispatch starts either way. A shutdown asks each automation client to stop the
 // jobs it runs, all at once, and closes each aborted once its client answers.
@@ -399,11 +557,15 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
               onFailure: (cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? { _tag: "interrupted" as const }
-                  : { _tag: "closed" as const, outcome: failedFrom(cause) },
+                  : { _tag: "closed" as const, outcome: erroredFrom(cause) },
             }),
           );
           if (placed._tag === "interrupted") {
             return yield* Effect.interrupt;
+          }
+          if (placed._tag === "held") {
+            skipped.push(job.id);
+            continue;
           }
           if (placed._tag === "deferred") {
             yield* log.info(placed.line, {
@@ -454,8 +616,9 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             });
             yield* releaseReservation(placed.placement.url, placed.placement.ticket);
             // The reservation is gone. Record the database failure on the row, three
-            // attempts. A successful write is not logged again.
-            yield* store.finish(job.id, "failed", "DATABASE FAILURE").pipe(
+            // attempts. A successful write is not logged again; its result and ticket are
+            // errored with it.
+            const recorded = yield* store.finish(job.id, "errored", "DATABASE FAILURE").pipe(
               Effect.tapError((error) =>
                 log.error(`failure write failed; ${placed.placement.url}`, {
                   location: Log.Locations.automation,
@@ -464,8 +627,11 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
                 }),
               ),
               Effect.retry(Schedule.recurs(2)),
-              Effect.catch(() => Effect.void),
+              Effect.catch(() => Effect.succeed(false)),
             );
+            if (recorded) {
+              yield* reportErrored(job, placed.placement.ticket, "DATABASE FAILURE");
+            }
             return yield* Effect.void;
           }
           if (!written.success) {
@@ -474,41 +640,77 @@ export const dispatch = Effect.fn("dispatch")(function* (model: string) {
             yield* releaseReservation(placed.placement.url, placed.placement.ticket);
             continue;
           }
-          yield* log.info(`dispatching ${job.action}; ${placed.placement.url}; ${model}`, {
-            location: Log.Locations.automation,
-            agentId: placed.placement.ticket,
-          });
           const taken = live.findIndex((server) => server.url === placed.placement.url);
           const following = taken < 0 ? undefined : live[(taken + 1) % live.length];
           if (following !== undefined) {
             nextUrl = following.url;
           }
-          // The reservation already returned. /run does not hold the next one. The fiber
-          // lives on the runs scope so a shutdown interrupts it. It starts uninterruptible: a
-          // shutdown that lands before it runs is held until the /run wait, the one
-          // interruptible part, so the job is still stopped at its automation client. Once
-          // /run answered, a shutdown waits for the result to judge the job. A 409 is a run
-          // POST /abort ended: that abort closes the row once the automation client answers it.
+          // The reservation already returned. The move and /run do not hold the next one.
+          // The fiber lives on the runs scope so a shutdown interrupts it. It starts
+          // uninterruptible: a shutdown that lands before it runs is held until the move
+          // or the /run wait, the interruptible parts, so the job is still stopped at its
+          // automation client. Once /run answered, a shutdown waits for the result to judge
+          // the job. A 409 is a run POST /abort ended: that abort closes the row once the
+          // automation client answers it.
           const placement = placed.placement;
           yield* Effect.forkIn(
-            Effect.interruptible(
-              AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
-            ).pipe(
-              Effect.andThen(judge(job)),
-              Effect.matchCauseEffect({
-                onSuccess: () => closeJob(job, succeeded),
-                onFailure: (cause) => {
-                  if (Cause.hasInterruptsOnly(cause)) {
-                    return stopAtShutdown(job, placement);
-                  }
-                  const error = Cause.findErrorOption(cause);
-                  return Option.isSome(error) &&
-                    error.value._tag === "AutomationClientError" &&
-                    error.value.status === 409
-                    ? Effect.void
-                    : closeJob(job, failedFrom(cause));
-                },
-              }),
+            Effect.gen(function* () {
+              // A diagnose is not moved to In Progress. The harness moves it when the job succeeds.
+              if (job.action !== "diagnose") {
+                const linear = yield* Linear.Linear;
+                const moved = yield* linear.moveToInProgress(placement.ticket).pipe(
+                  Effect.retry(Schedule.recurs(2)),
+                  Effect.interruptible,
+                  Effect.matchCause({
+                    onSuccess: () => ({ _tag: "moved" as const }),
+                    onFailure: (cause) =>
+                      Cause.hasInterruptsOnly(cause)
+                        ? { _tag: "interrupted" as const }
+                        : { _tag: "failed" as const, cause },
+                  }),
+                );
+                if (moved._tag === "interrupted") {
+                  return yield* stopAtShutdown(job, placement);
+                }
+                if (moved._tag === "failed") {
+                  const error = Cause.squash(moved.cause);
+                  yield* log.error(`move to In Progress failed; ${placement.url}`, {
+                    location: Log.Locations.automation,
+                    agentId: placement.ticket,
+                    cause: error,
+                  });
+                  yield* releaseReservation(placement.url, placement.ticket);
+                  yield* closeJob(job, { status: "errored", reason: detail(error) });
+                  return yield* Effect.void;
+                }
+              }
+              yield* log.info(`dispatching ${job.action}; ${placement.url}; ${model}`, {
+                location: Log.Locations.automation,
+                agentId: placement.ticket,
+              });
+              return yield* Effect.interruptible(
+                AutomationClient.run(placement.url, placement.prompt, placement.ticket, model),
+              ).pipe(
+                Effect.andThen(judge(job)),
+                Effect.matchCauseEffect({
+                  onSuccess: (outcome) => closeJob(job, outcome),
+                  onFailure: (cause) => {
+                    if (Cause.hasInterruptsOnly(cause)) {
+                      return stopAtShutdown(job, placement);
+                    }
+                    const error = Cause.findErrorOption(cause);
+                    // 409 is a run POST /abort ended: that abort closes the row. Any other
+                    // failure is the harness: no answer, a 500, a database error reading the
+                    // result, or a vanished row.
+                    return Option.isSome(error) &&
+                      error.value._tag === "AutomationClientError" &&
+                      error.value.status === 409
+                      ? Effect.void
+                      : closeJob(job, erroredFrom(cause));
+                  },
+                }),
+              );
+            }).pipe(
               Effect.catchCause((cause) => {
                 const error = Cause.squash(cause);
                 return log.error(`dispatch job failed: ${detail(error)}`, {

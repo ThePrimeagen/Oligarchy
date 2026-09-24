@@ -37,6 +37,7 @@ const TICKET = "OLI-42";
 const TICKET_B = "OLI-43";
 const RESULT_ID = "22222222-2222-4222-8222-222222222222";
 const RESULT_B = "33333333-3333-4333-8333-333333333333";
+const SESSION_ID = "66666666-6666-4666-8666-666666666666";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const MODEL = "opencode/muse-spark-1.3-contributor-free";
 const STATS = {
@@ -94,22 +95,31 @@ const seedResult = (
   });
 };
 
+type JobStatus = Stores.FakeAutomationStore["jobs"][number]["status"];
+
 const seedJob = (
   automation: Stores.FakeAutomationStore,
   action: "drive" | "diagnose" | "mint" = "drive",
   resultId = RESULT_ID,
+  status: JobStatus = "pending",
 ) => {
   automation.jobs.push({
     id: `00000000-0000-4000-8000-${String(automation.jobs.length + 1).padStart(12, "0")}`,
     resultId,
     action,
-    status: "pending",
+    status,
     reason: null,
     serverId: null,
     createdAt: new Date(),
     startedAt: null,
     finishedAt: null,
   });
+};
+
+// A diagnose is dispatched only after the drive that ran its result completed.
+const seedDiagnose = (automation: Stores.FakeAutomationStore, resultId = RESULT_ID) => {
+  seedJob(automation, "diagnose", resultId);
+  seedJob(automation, "drive", resultId, "completed");
 };
 
 const seedLiveClient = (servers: Stores.FakeServerStore, url = URL) => {
@@ -135,9 +145,19 @@ const reserving =
   (request, url) =>
     url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : respond(request, url);
 
+const erroredMoves = (linear: FakeLinear.FakeLinear) =>
+  linear.calls.filter((call) => call.method === "moveToErrored");
+
+const verdictMoves = (linear: FakeLinear.FakeLinear) =>
+  linear.calls.filter(
+    (call) => call.method === "moveToFailed" || call.method === "moveToSucceeded",
+  );
+
 type Harness = {
   readonly automation: Stores.FakeAutomationStore;
   readonly servers: Stores.FakeServerStore;
+  readonly sessions: Stores.FakeSessionStore;
+  readonly diagnosis: Stores.FakeDiagnosisStore;
   readonly tests: Stores.FakeTestStore;
   readonly log: FakeLog.FakeLog;
   readonly linear: FakeLinear.FakeLinear;
@@ -150,11 +170,34 @@ const harness = (
 ): Harness => ({
   automation,
   servers: Stores.fakeServerStore(),
+  sessions: Stores.fakeSessionStore(),
+  diagnosis: Stores.fakeDiagnosisStore(),
   tests: Stores.fakeTestStore(),
   log: FakeLog.fakeLog(),
   linear,
   pins: new Map(),
 });
+
+// The diagnosing agent writes this during /run, on the drive's session, before the job closes.
+const seedVerdict = (
+  fixed: Harness,
+  verdict: "passed" | "failed",
+  resultId = RESULT_ID,
+  sessionId = SESSION_ID,
+) => {
+  const result = fixed.tests.results.find((row) => row.id === resultId);
+  if (result !== undefined) {
+    result.sessionId = sessionId;
+  }
+  fixed.diagnosis.diagnoses.push({
+    sessionId,
+    verdict,
+    errorType: verdict === "failed" ? "guest-crash" : null,
+    summary: "the proof",
+    model: MODEL,
+    createdAt: new Date(),
+  });
+};
 
 const cleared = (identifier: string) => ({ method: "clearReady" as const, identifier });
 
@@ -186,6 +229,8 @@ const layers = (
   Layer.mergeAll(
     fixed.automation.layer,
     fixed.servers.layer,
+    fixed.sessions.layer,
+    fixed.diagnosis.layer,
     fixed.tests.layer,
     fixed.log.layer,
     fixed.linear.layer,
@@ -297,7 +342,7 @@ describe("dispatch happy path", () => {
       });
       expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`]);
       yield* Deferred.succeed(release, undefined);
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
     }),
   );
 
@@ -356,13 +401,13 @@ describe("dispatch happy path", () => {
           `${OTHER_URL}/run`,
         ]);
         yield* Deferred.succeed(releaseRun, undefined);
-        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* settle(fixed.automation.jobs, "completed");
         expect(fixed.linear.calls.filter((call) => call.method === "moveIssue")).toEqual([]);
       }),
   );
 
   it.effect(
-    "a drive job posts the driving prompt, the ticket and the model and succeeds on 200 once the result is closed",
+    "a drive job posts the driving prompt, the ticket and the model and completes on 200 once the result is closed",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -371,9 +416,9 @@ describe("dispatch happy path", () => {
         seedLiveClient(fixed.servers);
         const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
         yield* start(fixed, http.layer);
-        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* settle(fixed.automation.jobs, "completed");
         expect(fixed.automation.jobs[0]).toMatchObject({
-          status: "succeeded",
+          status: "completed",
           reason: null,
           finishedAt: expect.any(Date),
         });
@@ -389,16 +434,18 @@ describe("dispatch happy path", () => {
         });
         expect(FakeLog.texts(fixed.log)).toEqual([
           `dispatching drive; ${URL}; ${MODEL}`,
-          "drive succeeded",
+          "drive completed",
         ]);
-        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+        expect(fixed.linear.calls).toEqual([
+          { method: "moveToInProgress", identifier: TICKET },
           cleared(TICKET),
+          { method: "moveToNeedsReview", identifier: TICKET },
         ]);
         expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
       }),
   );
 
-  it.effect("a drive whose driver closed the result failed still succeeded as a job", () =>
+  it.effect("a drive whose driver closed the result failed is still completed as a job", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
@@ -406,8 +453,13 @@ describe("dispatch happy path", () => {
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests, "failed")));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]?.status).toBe("completed");
+      expect(fixed.linear.calls).toEqual([
+        { method: "moveToInProgress", identifier: TICKET },
+        cleared(TICKET),
+        { method: "moveToNeedsReview", identifier: TICKET },
+      ]);
     }),
   );
 
@@ -415,7 +467,8 @@ describe("dispatch happy path", () => {
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
-      seedJob(fixed.automation, "diagnose");
+      seedVerdict(fixed, "passed");
+      seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
@@ -436,6 +489,11 @@ describe("dispatch happy path", () => {
         "diagnose succeeded",
       ]);
       expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
+      expect(fixed.linear.calls.filter((call) => call.method === "moveToInProgress")).toEqual([]);
+      expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual([]);
+      expect(verdictMoves(fixed.linear)).toEqual([
+        { method: "moveToSucceeded", identifier: TICKET },
+      ]);
     }),
   );
 
@@ -454,7 +512,7 @@ describe("dispatch happy path", () => {
       const third = seedLiveClient(fixed.servers, THIRD_URL);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      yield* settleAll(fixed.automation.jobs, "succeeded");
+      yield* settleAll(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs.map((job) => job.serverId)).toEqual([
         first,
         second,
@@ -536,8 +594,8 @@ describe("dispatch happy path", () => {
       expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(1);
       yield* Deferred.succeed(releaseSecond, undefined);
       yield* Deferred.await(secondRun);
-      yield* settleAll(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+      yield* settleAll(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs.every((job) => job.status === "completed")).toBe(true);
     }),
   );
 
@@ -577,8 +635,8 @@ describe("dispatch happy path", () => {
       expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
       yield* Deferred.succeed(firstRelease, undefined);
       yield* Deferred.succeed(secondRelease, undefined);
-      yield* settleAll(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs.every((job) => job.status === "succeeded")).toBe(true);
+      yield* settleAll(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs.every((job) => job.status === "completed")).toBe(true);
     }),
   );
 
@@ -629,16 +687,16 @@ describe("dispatch happy path", () => {
       expect(http.requests.filter((request) => request.url.endsWith("/run"))).toHaveLength(2);
       yield* Deferred.succeed(firstRelease, undefined);
       yield* Deferred.succeed(secondRelease, undefined);
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
-        ["drive", "succeeded"],
+        ["drive", "completed"],
         ["diagnose", "pending"],
-        ["drive", "succeeded"],
+        ["drive", "completed"],
       ]);
     }),
   );
 
-  it.effect("a hang is still running after two hours, then succeeds when the client answers", () =>
+  it.effect("a hang is still running after two hours, then completes when the client answers", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
@@ -660,35 +718,425 @@ describe("dispatch happy path", () => {
       yield* TestClock.adjust("2 hours");
       expect(fixed.automation.jobs[0]?.status).toBe("running");
       yield* Deferred.succeed(release, undefined);
-      yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]?.status).toBe("completed");
     }),
   );
+
+  it.effect(
+    "a reserved drive stays running and does not start /run until Linear is In Progress",
+    () =>
+      Effect.gen(function* () {
+        const moving = yield* Deferred.make<void>();
+        const releaseMove = yield* Deferred.make<void>();
+        let moves = 0;
+        const fixed = harness(
+          FakeLinear.fakeLinear({
+            overrides: {
+              moveToInProgress: (identifier) =>
+                Effect.gen(function* () {
+                  moves += 1;
+                  expect(identifier).toBe(TICKET);
+                  yield* Deferred.succeed(moving, undefined);
+                  yield* Deferred.await(releaseMove);
+                }),
+            },
+          }),
+        );
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        const clientId = seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        yield* start(fixed, http.layer);
+        yield* Deferred.await(moving);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "running",
+          serverId: clientId,
+          startedAt: expect.any(Date),
+        });
+        expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`]);
+        expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+        yield* Deferred.succeed(releaseMove, undefined);
+        yield* settle(fixed.automation.jobs, "completed");
+        expect(moves).toBe(1);
+        expect(http.requests.map((request) => request.url)).toEqual([
+          `${URL}/reserve`,
+          `${URL}/run`,
+        ]);
+        expect(FakeLog.texts(fixed.log)).toEqual([
+          `dispatching drive; ${URL}; ${MODEL}`,
+          "drive completed",
+        ]);
+      }),
+  );
+
+  it.effect("a move to In Progress that fails twice then succeeds starts /run", () => {
+    const refused = Errors.LinearError.make({
+      operation: "moveToInProgress",
+      message: `linear: moving ${TICKET} to In Progress failed`,
+    });
+    let attempts = 0;
+    const fixed = harness(
+      FakeLinear.fakeLinear({
+        overrides: {
+          moveToInProgress: () =>
+            Effect.gen(function* () {
+              attempts += 1;
+              if (attempts < 3) {
+                return yield* Effect.fail(refused);
+              }
+              return yield* Effect.void;
+            }),
+        },
+      }),
+    );
+    return Effect.gen(function* () {
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      const clientId = seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(attempts).toBe(3);
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", serverId: clientId });
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
+    });
+  });
 });
 
-describe("a drive that returns with its result still open", () => {
-  it.effect("running: the job is failed and the reason names the result and its status", () =>
+describe("the harness closes the board", () => {
+  it.effect("a mint that ran to its end moves the ticket to Needs Review", () =>
     Effect.gen(function* () {
       const fixed = harness();
-      seedResult(fixed.tests, TICKET, "running");
-      seedJob(fixed.automation, "drive");
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "mint");
+      fixed.pins.set(RESULT_ID, "http://127.0.0.1:55332");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        action: "mint",
+        status: "completed",
+        reason: null,
+      });
+      expect(fixed.linear.calls).toEqual([
+        { method: "moveToInProgress", identifier: TICKET },
+        cleared(TICKET),
+        { method: "moveToNeedsReview", identifier: TICKET },
+      ]);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        `dispatching mint; ${URL}; ${MODEL}`,
+        "mint completed",
+      ]);
+      expect(sentryErrors(fixed.log)).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a Needs Review move that fails three times leaves the job completed and reports the failure (unhappy)",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "stateIds",
+        message: "linear: no state named Needs Review",
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToNeedsReview: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "completed");
+        yield* eventually(() => attempts === 3, "three Needs Review attempts");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: "move to Needs Review failed: linear: no state named Needs Review",
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
+      });
+    },
+  );
+
+  it.effect("a finished drive with no ticket is completed and not moved (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, null, "passed");
+      seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+      yield* start(fixed, FakeHttp.die);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
+      expect(fixed.linear.calls).toEqual([]);
+    }),
+  );
+
+  it.effect("a diagnose whose verdict is failed moves the ticket to Failed", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedVerdict(fixed, "failed");
+      seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "failed");
-      expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "failed",
-        reason: `driver exited; result ${RESULT_ID} is running`,
-      });
-      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs[0]).toMatchObject({ action: "diagnose", status: "succeeded" });
+      expect(verdictMoves(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+      expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual([]);
       expect(FakeLog.texts(fixed.log)).toEqual([
-        `dispatching drive; ${URL}; ${MODEL}`,
-        `drive failed; driver exited; result ${RESULT_ID} is running`,
+        `dispatching diagnose; ${URL}; ${MODEL}`,
+        "diagnose succeeded",
       ]);
     }),
   );
 
-  it.effect("pending: a driver that never even started its result fails the same way", () =>
+  it.effect("a diagnose with no session logs the missing verdict and does not move (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* eventually(
+        () => FakeLog.texts(fixed.log).some((text) => text.startsWith("diagnose verdict")),
+        "the missing verdict",
+      );
+      expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+      expect(verdictMoves(fixed.linear)).toEqual([]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `diagnose verdict missing; ${RESULT_ID}`,
+          agentId: TICKET,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("a diagnose whose session has no verdict logs that and does not move (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      const result = fixed.tests.results[0];
+      if (result !== undefined) {
+        result.sessionId = SESSION_ID;
+      }
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* eventually(
+        () => FakeLog.texts(fixed.log).some((text) => text.startsWith("diagnose verdict")),
+        "the missing verdict",
+      );
+      expect(verdictMoves(fixed.linear)).toEqual([]);
+      expect(sentryErrors(fixed.log)).toEqual([
+        expect.objectContaining({
+          text: `diagnose verdict missing; ${SESSION_ID}`,
+          agentId: TICKET,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a diagnosis read that fails three times leaves the job succeeded and does not move (unhappy)",
+    () => {
+      const failure = Errors.DatabaseError.make({
+        operation: "getDiagnosis",
+        message: "Failed query: getDiagnosis",
+        cause: new Error("connection reset"),
+      });
+      let reads = 0;
+      const diagnosis = Stores.fakeDiagnosisStore({
+        getDiagnosis: () =>
+          Effect.sync(() => {
+            reads += 1;
+          }).pipe(Effect.andThen(Effect.fail(failure))),
+      });
+      return Effect.gen(function* () {
+        const fixed = { ...harness(), diagnosis };
+        seedResult(fixed.tests, TICKET, "failed");
+        const result = fixed.tests.results[0];
+        if (result !== undefined) {
+          result.sessionId = SESSION_ID;
+        }
+        seedDiagnose(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* eventually(() => reads === 3, "three diagnosis reads");
+        expect(reads).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+        expect(verdictMoves(fixed.linear)).toEqual([]);
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `diagnose verdict read failed; ${SESSION_ID}: connection reset`,
+            agentId: TICKET,
+            cause: failure,
+          }),
+        ]);
+      });
+    },
+  );
+
+  it.effect(
+    "a move to Succeeded that fails three times leaves the job succeeded and reports the failure (unhappy)",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "moveToSucceeded",
+        message: `linear: moving ${TICKET} to Succeeded failed`,
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToSucceeded: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests, TICKET, "passed");
+        seedVerdict(fixed, "passed");
+        seedDiagnose(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* eventually(() => attempts === 3, "three Succeeded attempts");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `move to Succeeded failed: linear: moving ${TICKET} to Succeeded failed`,
+            agentId: TICKET,
+            cause: refused,
+          }),
+        ]);
+      });
+    },
+  );
+});
+
+describe("a drive that returns with its result still open", () => {
+  it.effect(
+    "running: the job and the result are errored with the reason, and the ticket moves to Errored",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests, TICKET, "running");
+        seedJob(fixed.automation, "drive");
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        const reason = `driver exited; result ${RESULT_ID} is running`;
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason });
+        expect(fixed.tests.results[0]).toMatchObject({ status: "errored", reason });
+        expect(http.requests.map((request) => request.url)).toEqual([
+          `${URL}/reserve`,
+          `${URL}/run`,
+        ]);
+        expect(FakeLog.texts(fixed.log)).toEqual([
+          `dispatching drive; ${URL}; ${MODEL}`,
+          `drive errored; ${reason}`,
+        ]);
+        expect(erroredMoves(fixed.linear)).toEqual([
+          { method: "moveToErrored", identifier: TICKET, message: `drive errored; ${reason}` },
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "moveToNeedsReview")).toEqual(
+          [],
+        );
+      }),
+  );
+
+  it.effect("a result lookup that fails after /run errors the job (unhappy)", () => {
+    const failure = Errors.DatabaseError.make({
+      operation: "findResult",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    let lookups = 0;
+    const held: { tests: Stores.FakeTestStore | undefined } = { tests: undefined };
+    const tests = Stores.fakeTestStore(
+      {},
+      {
+        findResult: (resultId) =>
+          Effect.gen(function* () {
+            lookups += 1;
+            if (lookups === 2) {
+              return yield* Effect.fail(failure);
+            }
+            return Option.fromUndefinedOr(held.tests?.results.find((row) => row.id === resultId));
+          }),
+      },
+    );
+    held.tests = tests;
+    return Effect.gen(function* () {
+      const fixed = { ...harness(), tests };
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "errored");
+      expect(lookups).toBeGreaterThanOrEqual(2);
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "errored",
+        reason: "connection reset",
+      });
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        `dispatching drive; ${URL}; ${MODEL}`,
+        "drive errored; connection reset",
+      ]);
+    });
+  });
+
+  it.effect("a result that vanishes during the drive errors the job (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(
+        reserving(() =>
+          Effect.sync(() => {
+            fixed.tests.results.splice(0, fixed.tests.results.length);
+            return FakeHttp.json({ ok: "true" });
+          }),
+        ),
+      );
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "errored");
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "errored",
+        reason: `judge: result ${RESULT_ID} vanished during the drive`,
+      });
+    }),
+  );
+
+  it.effect("pending: a driver that never even started its result errors the same way", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
@@ -696,10 +1144,11 @@ describe("a drive that returns with its result still open", () => {
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "failed");
+      yield* settle(fixed.automation.jobs, "errored");
       expect(fixed.automation.jobs[0]?.reason).toBe(
         `driver exited; result ${RESULT_ID} is pending`,
       );
+      expect(fixed.tests.results[0]?.status).toBe("errored");
     }),
   );
 
@@ -709,7 +1158,7 @@ describe("a drive that returns with its result still open", () => {
       Effect.gen(function* () {
         const fixed = harness();
         seedResult(fixed.tests, TICKET, "running");
-        seedJob(fixed.automation, "diagnose");
+        seedDiagnose(fixed.automation);
         seedLiveClient(fixed.servers);
         const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
         yield* start(fixed, http.layer);
@@ -717,12 +1166,334 @@ describe("a drive that returns with its result still open", () => {
         expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
       }),
   );
+
+  it.effect(
+    "a closed result whose session the qemu server errored is errored with the session's reason",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const sessionId = "44444444-4444-4444-8444-444444444444";
+        seedResult(fixed.tests);
+        seedJob(fixed.automation, "drive");
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(
+          reserving(() =>
+            Effect.gen(function* () {
+              fixed.sessions.sessions.push({
+                id: sessionId,
+                config: { iso: "x" },
+                status: "errored",
+                reason: "qemu exited 137",
+                startedAt: new Date(),
+                endedAt: new Date(),
+              });
+              const result = fixed.tests.results[0];
+              if (result !== undefined) {
+                result.sessionId = sessionId;
+              }
+              return yield* closing(fixed.tests, "failed");
+            }),
+          ),
+        );
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        const reason = `session ${sessionId} errored; qemu exited 137`;
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason });
+        expect(fixed.tests.results[0]).toMatchObject({ status: "errored", reason });
+        expect(erroredMoves(fixed.linear)).toEqual([
+          { method: "moveToErrored", identifier: TICKET, message: `drive errored; ${reason}` },
+        ]);
+      }),
+  );
+
+  it.effect("a closed result whose session ended any other way is completed", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      const sessionId = "44444444-4444-4444-8444-444444444444";
+      seedResult(fixed.tests);
+      seedJob(fixed.automation, "drive");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(
+        reserving(() =>
+          Effect.gen(function* () {
+            fixed.sessions.sessions.push({
+              id: sessionId,
+              config: { iso: "x" },
+              status: "failed",
+              reason: "gave up",
+              startedAt: new Date(),
+              endedAt: new Date(),
+            });
+            const result = fixed.tests.results[0];
+            if (result !== undefined) {
+              result.sessionId = sessionId;
+            }
+            return yield* closing(fixed.tests, "failed");
+          }),
+        ),
+      );
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.tests.results[0]?.status).toBe("failed");
+      expect(erroredMoves(fixed.linear)).toEqual([]);
+    }),
+  );
+});
+
+describe("a diagnose is dispatched only after its drive completed", () => {
+  it.effect("a drive that completed dispatches the diagnose", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(sentTo(http, "/run")).toHaveLength(1);
+    }),
+  );
+
+  it.effect("a mint that completed dispatches the diagnose of the mint install", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "passed");
+      seedJob(fixed.automation, "diagnose");
+      seedJob(fixed.automation, "mint", RESULT_ID, "completed");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(sentTo(http, "/run")).toHaveLength(1);
+    }),
+  );
+
+  it.effect(
+    "a drive that failed, errored, was aborted or timed out closes the diagnose aborted and spawns nothing",
+    () =>
+      Effect.gen(function* () {
+        for (const status of ["failed", "errored", "aborted", "timed_out"] as const) {
+          const fixed = harness();
+          seedResult(fixed.tests, TICKET, "failed");
+          seedJob(fixed.automation, "diagnose");
+          seedJob(fixed.automation, "drive", RESULT_ID, status);
+          seedLiveClient(fixed.servers);
+          const http = FakeHttp.recordRequests(() => Effect.die("nothing is asked of a client"));
+          const scope = yield* start(fixed, http.layer);
+          yield* settle(fixed.automation.jobs, "aborted");
+          expect(fixed.automation.jobs[0]).toMatchObject({
+            action: "diagnose",
+            status: "aborted",
+            reason: `not diagnosed; drive ${status}`,
+          });
+          expect(http.requests).toEqual([]);
+          expect(FakeLog.texts(fixed.log)).toEqual(["diagnose aborted"]);
+          expect(erroredMoves(fixed.linear)).toEqual([]);
+          yield* Scope.close(scope, Exit.void);
+        }
+      }),
+  );
+
+  it.effect("a result with no drive or mint closes the diagnose aborted (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedJob(fixed.automation, "diagnose");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(() => Effect.die("nothing is asked of a client"));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "aborted");
+      expect(fixed.automation.jobs[0]?.reason).toBe("not diagnosed; no drive");
+      expect(http.requests).toEqual([]);
+    }),
+  );
+
+  it.effect("a drive still pending holds the diagnose, and the drive is placed", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests);
+      seedVerdict(fixed, "passed");
+      seedJob(fixed.automation, "diagnose");
+      seedJob(fixed.automation, "drive");
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
+        ["diagnose", "pending"],
+        ["drive", "completed"],
+      ]);
+      expect(JSON.parse(http.requests[0]?.body ?? "")).toMatchObject({ action: "drive" });
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        `dispatching drive; ${URL}; ${MODEL}`,
+        "drive completed",
+      ]);
+      // The next tick finds the drive completed and dispatches the diagnose.
+      yield* TestClock.adjust("5 seconds");
+      yield* settle(fixed.automation.jobs, "succeeded");
+      expect(fixed.automation.jobs[0]).toMatchObject({ action: "diagnose", status: "succeeded" });
+    }),
+  );
 });
 
 describe("dispatch unhappy path", () => {
-  it.effect("a 500 marks the job failed with the client's error", () =>
+  it.effect(
+    "a move to In Progress that fails three times releases the reservation and errors the job",
+    () => {
+      const refused = Errors.LinearError.make({
+        operation: "moveToInProgress",
+        message: `linear: moving ${TICKET} to In Progress failed`,
+      });
+      let attempts = 0;
+      const fixed = harness(
+        FakeLinear.fakeLinear({
+          overrides: {
+            moveToInProgress: () =>
+              Effect.sync(() => {
+                attempts += 1;
+              }).pipe(Effect.andThen(Effect.fail(refused))),
+          },
+        }),
+      );
+      return Effect.gen(function* () {
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        const clientId = seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve" || url.pathname === "/abort") {
+            return FakeHttp.json({ ok: "true" });
+          }
+          return closing(fixed.tests);
+        });
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        expect(attempts).toBe(3);
+        expect(fixed.automation.jobs[0]).toMatchObject({
+          status: "errored",
+          reason: refused.message,
+          serverId: clientId,
+        });
+        expect(fixed.automation.jobs[0]?.finishedAt).toBeInstanceOf(Date);
+        expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+          `POST ${URL}/reserve`,
+          `POST ${URL}/abort`,
+        ]);
+        expect(JSON.parse(http.requests[1]?.body ?? "")).toEqual({ ticket: TICKET });
+        expect(sentryErrors(fixed.log)).toEqual([
+          expect.objectContaining({
+            text: `move to In Progress failed; ${URL}`,
+            agentId: TICKET,
+            location: "automation",
+            skipSentry: false,
+            cause: refused,
+          }),
+          expect.objectContaining({
+            text: `drive errored; ${refused.message}`,
+            location: "automation",
+            skipSentry: false,
+          }),
+        ]);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+          cleared(TICKET),
+        ]);
+        expect(FakeLog.texts(fixed.log).some((text) => text.startsWith("dispatching"))).toBe(false);
+      });
+    },
+  );
+
+  it.effect("a /run the client never answers errors the job (unhappy)", () =>
     Effect.gen(function* () {
       const fixed = harness();
+      seedResult(fixed.tests);
+      seedJob(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
+      const http = FakeHttp.recordRequests((request, url) =>
+        url.pathname === "/reserve"
+          ? FakeHttp.json({ ok: "true" })
+          : Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, cause }),
+              }),
+            ),
+      );
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "errored");
+      expect(fixed.automation.jobs[0]).toMatchObject({
+        status: "errored",
+        reason: `automation client: POST ${URL}/run failed`,
+      });
+      expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
+      expect(FakeLog.texts(fixed.log)).toEqual([
+        `dispatching drive; ${URL}; ${MODEL}`,
+        `drive errored; automation client: POST ${URL}/run failed`,
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a 500 errors the job and its open result with the client's error, and moves the ticket to Errored",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = FakeHttp.recordRequests(
+          reserving(() => FakeHttp.json({ error: "opencode exited 1" }, 500)),
+        );
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        const reason = `automation client: POST ${URL}/run failed: opencode exited 1`;
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason });
+        expect(fixed.tests.results[0]).toMatchObject({ status: "errored", reason });
+        expect(FakeLog.texts(fixed.log)).toEqual([
+          `dispatching drive; ${URL}; ${MODEL}`,
+          `drive errored; ${reason}`,
+        ]);
+        expect(erroredMoves(fixed.linear)).toEqual([
+          { method: "moveToErrored", identifier: TICKET, message: `drive errored; ${reason}` },
+        ]);
+      }),
+  );
+
+  it.effect("a diagnose that errors leaves the closed result alone and moves the ticket", () =>
+    Effect.gen(function* () {
+      const fixed = harness();
+      seedResult(fixed.tests, TICKET, "failed");
+      seedVerdict(fixed, "failed");
+      seedDiagnose(fixed.automation);
+      seedLiveClient(fixed.servers);
+      const http = FakeHttp.recordRequests(
+        reserving(() => FakeHttp.json({ error: "opencode exited 1" }, 500)),
+      );
+      yield* start(fixed, http.layer);
+      yield* settle(fixed.automation.jobs, "errored");
+      const reason = `automation client: POST ${URL}/run failed: opencode exited 1`;
+      expect(fixed.tests.results[0]?.status).toBe("failed");
+      expect(erroredMoves(fixed.linear)).toEqual([
+        { method: "moveToErrored", identifier: TICKET, message: `diagnose errored; ${reason}` },
+      ]);
+      expect(verdictMoves(fixed.linear)).toEqual([]);
+    }),
+  );
+
+  it.effect("a result that cannot be errored is logged, and the ticket still moves", () =>
+    Effect.gen(function* () {
+      const tests = Stores.fakeTestStore(
+        {},
+        {
+          errorResult: () =>
+            Effect.fail(
+              Errors.DatabaseError.make({
+                operation: "errorResult",
+                message: "Failed query: errorResult",
+                cause: new Error("connection reset"),
+              }),
+            ),
+        },
+      );
+      const fixed = { ...harness(), tests };
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
@@ -730,15 +1501,15 @@ describe("dispatch unhappy path", () => {
         reserving(() => FakeHttp.json({ error: "opencode exited 1" }, 500)),
       );
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "failed");
-      expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "failed",
-        reason: `automation client: POST ${URL}/run failed: opencode exited 1`,
+      yield* settle(fixed.automation.jobs, "errored");
+      yield* eventually(() => erroredMoves(fixed.linear).length === 1, "the Errored move");
+      expect(
+        fixed.log.lines.find((line) => line.text.startsWith("result errored write")),
+      ).toMatchObject({
+        level: "error",
+        text: `result errored write failed; ${RESULT_ID}: connection reset`,
+        agentId: TICKET,
       });
-      expect(FakeLog.texts(fixed.log)).toEqual([
-        `dispatching drive; ${URL}; ${MODEL}`,
-        `drive failed; automation client: POST ${URL}/run failed: opencode exited 1`,
-      ]);
     }),
   );
 
@@ -845,27 +1616,29 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
-  it.effect("a prompt that cannot be rendered marks the claimed job failed and does not POST", () =>
-    Effect.gen(function* () {
-      const fixed = harness();
-      seedResult(fixed.tests);
-      seedJob(fixed.automation);
-      seedLiveClient(fixed.servers);
-      const fs = FileSystem.layerNoop({
-        readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
-      });
-      yield* start(fixed, FakeHttp.die, fs);
-      yield* settle(fixed.automation.jobs, "failed");
-      expect(fixed.automation.jobs[0]?.status).toBe("failed");
-      expect(fixed.automation.jobs[0]?.reason).toMatch(/^prompt:/);
-      expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
-        cleared(TICKET),
-      ]);
-    }),
+  it.effect(
+    "a prompt that cannot be rendered marks the claimed job errored and does not POST",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const fs = FileSystem.layerNoop({
+          readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
+        });
+        yield* start(fixed, FakeHttp.die, fs);
+        yield* settle(fixed.automation.jobs, "errored");
+        expect(fixed.automation.jobs[0]?.status).toBe("errored");
+        expect(fixed.automation.jobs[0]?.reason).toMatch(/^prompt:/);
+        expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([
+          cleared(TICKET),
+        ]);
+      }),
   );
 
   it.effect(
-    "a ready label that keeps failing is retried and then logged, and the job stays failed",
+    "a ready label that keeps failing is retried and then logged, and the job stays errored",
     () =>
       Effect.gen(function* () {
         const refused = Errors.LinearError.make({
@@ -890,9 +1663,9 @@ describe("dispatch unhappy path", () => {
           readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
         });
         yield* start(fixed, FakeHttp.die, fs);
-        yield* settle(fixed.automation.jobs, "failed");
+        yield* settle(fixed.automation.jobs, "errored");
         expect(attempts).toBe(3);
-        expect(fixed.automation.jobs[0]?.status).toBe("failed");
+        expect(fixed.automation.jobs[0]?.status).toBe("errored");
         expect(
           fixed.log.lines.some((line) => line.text.startsWith("ready label clear failed")),
         ).toBe(true);
@@ -932,28 +1705,28 @@ describe("dispatch unhappy path", () => {
         readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
       });
       yield* start(fixed, FakeHttp.die, fs);
-      yield* settle(fixed.automation.jobs, "failed");
+      yield* settle(fixed.automation.jobs, "errored");
       expect(attempts).toBe(2);
-      expect(fixed.automation.jobs[0]?.status).toBe("failed");
+      expect(fixed.automation.jobs[0]?.status).toBe("errored");
       expect(
         FakeLog.texts(fixed.log).some((text) => text.startsWith("ready label clear failed")),
       ).toBe(false);
     }),
   );
 
-  it.effect("a result with no Linear ticket fails after claim and does not POST", () =>
+  it.effect("a result with no Linear ticket errors after claim and does not POST", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests, null);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
       yield* start(fixed, FakeHttp.die);
-      yield* settle(fixed.automation.jobs, "failed");
+      yield* settle(fixed.automation.jobs, "errored");
       expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "failed",
+        status: "errored",
         reason: "no Linear ticket",
       });
-      expect(FakeLog.texts(fixed.log)).toEqual(["drive failed; no Linear ticket"]);
+      expect(FakeLog.texts(fixed.log)).toEqual(["drive errored; no Linear ticket"]);
       expect(fixed.linear.calls.filter((call) => call.method === "clearReady")).toEqual([]);
     }),
   );
@@ -1141,8 +1914,8 @@ describe("dispatch unhappy path", () => {
         TICKET_B,
       );
       yield* Deferred.succeed(release, undefined);
-      yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["succeeded", "pending"]);
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["completed", "pending"]);
     }),
   );
 
@@ -1160,9 +1933,9 @@ describe("dispatch unhappy path", () => {
         return reserving(() => closing(fixed.tests))(request, url);
       });
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "succeeded",
+        status: "completed",
         serverId: second,
       });
       expect(fixed.automation.jobs[0]?.serverId).not.toBe(first);
@@ -1190,7 +1963,7 @@ describe("dispatch unhappy path", () => {
           return reserving(() => closing(fixed.tests))(request, url);
         });
         yield* start(fixed, http.layer);
-        yield* settleAll(fixed.automation.jobs, "succeeded");
+        yield* settleAll(fixed.automation.jobs, "completed");
         expect(fixed.automation.jobs.map((job) => job.serverId)).toEqual([second, third]);
         const posted = (pathname: string) =>
           http.requests
@@ -1305,8 +2078,8 @@ describe("dispatch unhappy path", () => {
         return reserving(() => closing(fixed.tests))(request, url);
       });
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
-      expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: second });
+      yield* settle(fixed.automation.jobs, "completed");
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", serverId: second });
       expect(fixed.automation.jobs[0]?.serverId).not.toBe(first);
       expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
         `POST ${URL}/reserve`,
@@ -1359,6 +2132,7 @@ describe("dispatch unhappy path", () => {
       expect(sentryErrors(fixed.log).every((line) => line.cause !== undefined)).toBe(true);
       expect(fixed.linear.calls).toEqual([]);
       expect(FakeLog.texts(fixed.log).some((text) => text.includes("drive failed"))).toBe(false);
+      expect(FakeLog.texts(fixed.log).some((text) => text.includes("drive errored"))).toBe(false);
     }),
   );
 
@@ -1449,9 +2223,9 @@ describe("dispatch unhappy path", () => {
       const clientId = seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
       expect(attempts).toBe(3);
-      expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: clientId });
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", serverId: clientId });
       expect(http.requests.map((request) => request.url)).toEqual([`${URL}/reserve`, `${URL}/run`]);
       expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([]);
     });
@@ -1502,9 +2276,9 @@ describe("dispatch unhappy path", () => {
         const clientId = seedLiveClient(fixed.servers);
         const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
         yield* start(fixed, http.layer);
-        yield* settle(fixed.automation.jobs, "succeeded");
+        yield* settle(fixed.automation.jobs, "completed");
         expect(attempts).toBeGreaterThan(1);
-        expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", serverId: clientId });
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", serverId: clientId });
         expect(http.requests.map((request) => request.url)).toEqual([
           `${URL}/reserve`,
           `${URL}/run`,
@@ -1540,11 +2314,11 @@ describe("dispatch unhappy path", () => {
       expect(
         sentryErrors(fixed.log).some((line) => line.text === `reserve release failed; ${URL}`),
       ).toBe(true);
-      for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "failed"; i++) {
+      for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "errored"; i++) {
         yield* Effect.yieldNow;
       }
       expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "failed",
+        status: "errored",
         reason: "DATABASE FAILURE",
       });
       expect(http.requests.some((request) => request.url.endsWith("/run"))).toBe(false);
@@ -1552,7 +2326,7 @@ describe("dispatch unhappy path", () => {
   });
 
   it.effect(
-    "a running write that fails three times releases the reservation and fails the job",
+    "a running write that fails three times releases the reservation and errors the job",
     () => {
       const failure = Errors.DatabaseError.make({
         operation: "markAutomationJobRunning",
@@ -1580,11 +2354,11 @@ describe("dispatch unhappy path", () => {
           return closing(fixed.tests);
         });
         yield* start(fixed, http.layer);
-        for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "failed"; i++) {
+        for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "errored"; i++) {
           yield* Effect.yieldNow;
         }
         expect(attempts).toBe(3);
-        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["failed", "pending"]);
+        expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["errored", "pending"]);
         expect(fixed.automation.jobs[0]).toMatchObject({
           serverId: null,
           startedAt: null,
@@ -1605,7 +2379,17 @@ describe("dispatch unhappy path", () => {
             cause: failure,
           }),
         ]);
-        expect(fixed.linear.calls).toEqual([]);
+        expect(fixed.tests.results[0]).toMatchObject({
+          status: "errored",
+          reason: "DATABASE FAILURE",
+        });
+        expect(fixed.linear.calls).toEqual([
+          {
+            method: "moveToErrored",
+            identifier: TICKET,
+            message: "drive errored; DATABASE FAILURE",
+          },
+        ]);
       });
     },
   );
@@ -1654,12 +2438,12 @@ describe("dispatch unhappy path", () => {
           : closing(fixed.tests),
       );
       yield* start(fixed, http.layer);
-      for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "failed"; i++) {
+      for (let i = 0; i < 200 && fixed.automation.jobs[0]?.status !== "errored"; i++) {
         yield* Effect.yieldNow;
       }
       expect(finishes).toBe(3);
       expect(fixed.automation.jobs[0]).toMatchObject({
-        status: "failed",
+        status: "errored",
         reason: "DATABASE FAILURE",
       });
       expect(fixed.automation.jobs[1]?.status).toBe("pending");
@@ -1669,7 +2453,9 @@ describe("dispatch unhappy path", () => {
         [`failure write failed; ${URL}`, finishFailure],
         [`failure write failed; ${URL}`, finishFailure],
       ]);
-      expect(fixed.linear.calls).toEqual([]);
+      expect(erroredMoves(fixed.linear)).toEqual([
+        { method: "moveToErrored", identifier: TICKET, message: "drive errored; DATABASE FAILURE" },
+      ]);
     });
   });
 
@@ -1790,8 +2576,9 @@ describe("dispatch unhappy path", () => {
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "failed");
+      yield* settle(fixed.automation.jobs, "errored");
       expect(http.requests).toEqual([]);
+      expect(fixed.automation.jobs[0]?.status).toBe("errored");
       expect(fixed.automation.jobs[0]?.reason).toContain("has no pinned server");
     }),
   );
@@ -1826,7 +2613,7 @@ const eventually = (check: () => boolean, what: string) =>
   });
 
 const moved = (linear: FakeLinear.FakeLinear) =>
-  linear.calls.filter((call) => call.method === "moveToFailed");
+  linear.calls.filter((call) => call.method === "moveToErrored");
 
 const RESTARTED = "automation server restarted";
 const SHUTTING_DOWN = "automation server shutting down";
@@ -1838,7 +2625,7 @@ const sentTo = (http: FakeHttp.Recorder, path: string) =>
 
 describe("a running job left by the last automation server", () => {
   it.effect(
-    "is stopped at its automation client, failed, and moved to Failed before any pending job is reserved",
+    "is stopped at its automation client, errored, and moved to Errored before any pending job is reserved",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -1854,7 +2641,7 @@ describe("a running job left by the last automation server", () => {
         );
         yield* start(fixed, http.layer);
         yield* eventually(
-          () => fixed.automation.jobs[1]?.status === "succeeded",
+          () => fixed.automation.jobs[1]?.status === "completed",
           "the pending job ran",
         );
         expect(http.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
@@ -1864,22 +2651,28 @@ describe("a running job left by the last automation server", () => {
         ]);
         expect(JSON.parse(http.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
         expect(fixed.automation.jobs[0]).toMatchObject({
-          status: "failed",
+          status: "errored",
           reason: RESTARTED,
           serverId: clientId,
           finishedAt: expect.any(Date),
         });
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
-          { method: "moveToFailed", identifier: TICKET },
+          {
+            method: "moveToErrored",
+            identifier: TICKET,
+            message: `drive errored; ${RESTARTED}`,
+          },
+          { method: "moveToInProgress", identifier: TICKET_B },
           cleared(TICKET_B),
+          { method: "moveToNeedsReview", identifier: TICKET_B },
         ]);
-        expect(FakeLog.texts(fixed.log)).toContain(`drive failed; ${RESTARTED}`);
+        expect(FakeLog.texts(fixed.log)).toContain(`drive errored; ${RESTARTED}`);
       }),
   );
 
   it.effect(
-    "a drive or mint whose result the driver closed has finished: it is closed succeeded, and nothing is sent, moved, or reported",
+    "a drive or mint whose result the driver closed has finished: it is closed completed, moved to Needs Review, and nothing is sent or reported",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -1907,13 +2700,13 @@ describe("a running job left by the last automation server", () => {
         );
         yield* start(fixed, http.layer);
         yield* eventually(
-          () => fixed.automation.jobs[3]?.status === "succeeded",
+          () => fixed.automation.jobs[3]?.status === "completed",
           "the pending job ran",
         );
         expect(fixed.automation.jobs.slice(0, 3)).toEqual(
           [0, 1, 2].map(() =>
             expect.objectContaining({
-              status: "succeeded",
+              status: "completed",
               reason: null,
               serverId: clientId,
               finishedAt: expect.any(Date),
@@ -1928,19 +2721,57 @@ describe("a running job left by the last automation server", () => {
         ]);
         expect(fixed.linear.calls).toEqual([
           cleared(TICKET),
+          { method: "moveToNeedsReview", identifier: TICKET },
           cleared(TICKET_B),
+          { method: "moveToNeedsReview", identifier: TICKET_B },
           cleared("OLI-44"),
+          { method: "moveToNeedsReview", identifier: "OLI-44" },
+          { method: "moveToInProgress", identifier: "OLI-45" },
           cleared("OLI-45"),
+          { method: "moveToNeedsReview", identifier: "OLI-45" },
         ]);
         expect(sentryErrors(fixed.log)).toEqual([]);
         expect(FakeLog.texts(fixed.log)).toEqual(
-          expect.arrayContaining(["drive succeeded", "mint succeeded"]),
+          expect.arrayContaining(["drive completed", "mint completed"]),
         );
       }),
   );
 
   it.effect(
-    "a diagnose left running is stopped, failed, and moved to Failed, though its result was closed before it was queued",
+    "a drive whose result the driver closed on a session the qemu server errored is errored and moved, and nothing is sent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        const sessionId = "44444444-4444-4444-8444-444444444444";
+        seedResult(fixed.tests, TICKET, "passed");
+        const result = fixed.tests.results[0];
+        if (result !== undefined) {
+          result.sessionId = sessionId;
+        }
+        fixed.sessions.sessions.push({
+          id: sessionId,
+          config: { iso: "x" },
+          status: "errored",
+          reason: "qemu exited 137",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        });
+        seedRunning(fixed.automation, seedLiveClient(fixed.servers));
+        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        yield* start(fixed, http.layer);
+        yield* settle(fixed.automation.jobs, "errored");
+        const reason = `session ${sessionId} errored; qemu exited 137`;
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason });
+        expect(fixed.tests.results[0]).toMatchObject({ status: "errored", reason });
+        expect(http.requests).toEqual([]);
+        expect(erroredMoves(fixed.linear)).toEqual([
+          { method: "moveToErrored", identifier: TICKET, message: `drive errored; ${reason}` },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a diagnose left running is stopped, errored, and moved to Errored, though its result was closed before it was queued",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -1948,18 +2779,25 @@ describe("a running job left by the last automation server", () => {
         seedRunning(fixed.automation, seedLiveClient(fixed.servers), RESULT_ID, "diagnose");
         const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
         yield* start(fixed, http.layer);
-        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
+        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Errored");
         expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
-        expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
-        expect(fixed.linear.calls).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
+        expect(fixed.tests.results[0]?.status).toBe("failed");
+        expect(fixed.linear.calls).toEqual([
+          {
+            method: "moveToErrored",
+            identifier: TICKET,
+            message: `diagnose errored; ${RESTARTED}`,
+          },
+        ]);
         expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([
-          `diagnose failed; ${RESTARTED}`,
+          `diagnose errored; ${RESTARTED}`,
         ]);
       }),
   );
 
   it.effect(
-    "a finished drive whose close write fails three times is reported as should be succeeded, left running, and not moved",
+    "a finished drive whose close write fails three times is reported as should be completed, left running, and not moved",
     () => {
       const failure = Errors.DatabaseError.make({
         operation: "finishAutomationJob",
@@ -1984,7 +2822,7 @@ describe("a running job left by the last automation server", () => {
         expect(fixed.automation.jobs[0]?.status).toBe("running");
         expect(sentryErrors(fixed.log)).toEqual([
           expect.objectContaining({
-            text: `close write failed; ${id} should be succeeded`,
+            text: `close write failed; ${id} should be completed`,
             location: "automation",
             cause: failure,
           }),
@@ -1995,7 +2833,7 @@ describe("a running job left by the last automation server", () => {
   );
 
   it.effect(
-    "an automation client that answers 404 holds nothing: reported JobNotFound, and the job is failed",
+    "an automation client that answers 404 holds nothing: reported JobNotFound, and the job is errored",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -2006,11 +2844,17 @@ describe("a running job left by the last automation server", () => {
           FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
         );
         yield* start(fixed, http.layer);
-        yield* settle(fixed.automation.jobs, "failed");
-        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
+        yield* settle(fixed.automation.jobs, "errored");
+        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Errored");
         expect(fixed.automation.jobs[0]?.reason).toBe(RESTARTED);
         expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
-        expect(moved(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET }]);
+        expect(moved(fixed.linear)).toEqual([
+          {
+            method: "moveToErrored",
+            identifier: TICKET,
+            message: `drive errored; ${RESTARTED}`,
+          },
+        ]);
         expect(sentryErrors(fixed.log)).toEqual([
           expect.objectContaining({
             text: JOB_NOT_FOUND,
@@ -2023,13 +2867,13 @@ describe("a running job left by the last automation server", () => {
               url: URL,
             }),
           }),
-          expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+          expect.objectContaining({ text: `drive errored; ${RESTARTED}` }),
         ]);
       }),
   );
 
   it.effect(
-    "an unreachable automation client is reported, the job is failed anyway, and nothing retries it",
+    "an unreachable automation client is reported, the job is errored anyway, and nothing retries it",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -2044,9 +2888,9 @@ describe("a running job left by the last automation server", () => {
           ),
         );
         yield* start(fixed, http.layer);
-        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Failed");
+        yield* eventually(() => moved(fixed.linear).length > 0, "moved to Errored");
         yield* TestClock.adjust("5 seconds");
-        expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
         expect(http.requests.map((request) => request.url)).toEqual([`${URL}/abort`]);
         expect(sentryErrors(fixed.log)).toEqual([
           expect.objectContaining({
@@ -2055,7 +2899,7 @@ describe("a running job left by the last automation server", () => {
             location: "automation",
             cause,
           }),
-          expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+          expect.objectContaining({ text: `drive errored; ${RESTARTED}` }),
         ]);
       }),
   );
@@ -2073,7 +2917,7 @@ describe("a running job left by the last automation server", () => {
       yield* Deferred.await(asked);
       expect(fixed.automation.jobs[0]?.status).toBe("running");
       yield* TestClock.adjust("10 seconds");
-      yield* settle(fixed.automation.jobs, "failed");
+      yield* settle(fixed.automation.jobs, "errored");
       expect(sentryErrors(fixed.log)[0]).toMatchObject({
         text: `inherited abort failed; ${URL}`,
         agentId: TICKET,
@@ -2085,7 +2929,7 @@ describe("a running job left by the last automation server", () => {
   );
 
   it.effect(
-    "a job no automation client can hold is failed without a request: no client recorded, the client forgotten, or no ticket",
+    "a job no automation client can hold is errored without a request: no client recorded, the client forgotten, or no ticket",
     () =>
       Effect.gen(function* () {
         const fixed = harness();
@@ -2097,7 +2941,7 @@ describe("a running job left by the last automation server", () => {
         seedRunning(fixed.automation, crypto.randomUUID(), RESULT_B);
         seedRunning(fixed.automation, seedLiveClient(fixed.servers), resultC);
         yield* start(fixed, FakeHttp.die);
-        yield* settleAll(fixed.automation.jobs, "failed");
+        yield* settleAll(fixed.automation.jobs, "errored");
         yield* eventually(() => moved(fixed.linear).length === 2, "both tickets moved");
         expect(fixed.automation.jobs.map((job) => job.reason)).toEqual([
           RESTARTED,
@@ -2105,13 +2949,21 @@ describe("a running job left by the last automation server", () => {
           RESTARTED,
         ]);
         expect(moved(fixed.linear)).toEqual([
-          { method: "moveToFailed", identifier: TICKET },
-          { method: "moveToFailed", identifier: TICKET_B },
+          {
+            method: "moveToErrored",
+            identifier: TICKET,
+            message: `drive errored; ${RESTARTED}`,
+          },
+          {
+            method: "moveToErrored",
+            identifier: TICKET_B,
+            message: `drive errored; ${RESTARTED}`,
+          },
         ]);
       }),
   );
 
-  it.effect("a job someone else closed during the abort is not failed or moved", () =>
+  it.effect("a job someone else closed during the abort is not errored or moved", () =>
     Effect.gen(function* () {
       const fixed = harness();
       seedResult(fixed.tests);
@@ -2134,7 +2986,7 @@ describe("a running job left by the last automation server", () => {
       }
       expect(fixed.automation.jobs[0]).toMatchObject({ status: "aborted", reason: "aborted" });
       expect(moved(fixed.linear)).toEqual([]);
-      expect(FakeLog.texts(fixed.log)).not.toContain(`drive failed; ${RESTARTED}`);
+      expect(FakeLog.texts(fixed.log)).not.toContain(`drive errored; ${RESTARTED}`);
     }),
   );
 
@@ -2144,13 +2996,13 @@ describe("a running job left by the last automation server", () => {
       Effect.gen(function* () {
         const refused = Errors.LinearError.make({
           operation: "stateIds",
-          message: "linear: no state named Failed",
+          message: "linear: no state named Errored",
         });
         let attempts = 0;
         const fixed = harness(
           FakeLinear.fakeLinear({
             overrides: {
-              moveToFailed: () =>
+              moveToErrored: () =>
                 Effect.sync(() => {
                   attempts += 1;
                 }).pipe(Effect.andThen(Effect.fail(refused))),
@@ -2165,16 +3017,16 @@ describe("a running job left by the last automation server", () => {
         const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
         yield* start(fixed, http.layer);
         yield* eventually(
-          () => fixed.automation.jobs[1]?.status === "succeeded",
+          () => fixed.automation.jobs[1]?.status === "completed",
           "the pending job ran",
         );
         expect(attempts).toBe(3);
-        expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
         expect(
-          sentryErrors(fixed.log).filter((line) => line.text.startsWith("move to Failed")),
+          sentryErrors(fixed.log).filter((line) => line.text.startsWith("move to Errored")),
         ).toEqual([
           expect.objectContaining({
-            text: "move to Failed failed: linear: no state named Failed",
+            text: "move to Errored failed: linear: no state named Errored",
             agentId: TICKET,
             cause: refused,
           }),
@@ -2208,7 +3060,7 @@ describe("a running job left by the last automation server", () => {
         expect(fixed.automation.jobs[0]?.status).toBe("running");
         expect(sentryErrors(fixed.log)).toEqual([
           expect.objectContaining({
-            text: `close write failed; ${id} should be failed`,
+            text: `close write failed; ${id} should be errored`,
             location: "automation",
             cause: failure,
           }),
@@ -2232,7 +3084,7 @@ describe("a running job left by the last automation server", () => {
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
       expect(sentryErrors(fixed.log)).toEqual([
         expect.objectContaining({
           text: "inherited jobs check failed: connection reset",
@@ -2242,7 +3094,7 @@ describe("a running job left by the last automation server", () => {
     });
   });
 
-  it.effect("a job whose lookup fails is reported by id, and the next job is still failed", () => {
+  it.effect("a job whose lookup fails is reported by id, and the next job is still errored", () => {
     const failure = Errors.DatabaseError.make({
       operation: "findResult",
       message: "connection reset",
@@ -2269,16 +3121,22 @@ describe("a running job left by the last automation server", () => {
       seedRunning(fixed.automation, null, RESULT_B);
       const id = fixed.automation.jobs[0]?.id;
       yield* start(fixed, FakeHttp.die);
-      yield* settle(fixed.automation.jobs, "failed");
+      yield* settle(fixed.automation.jobs, "errored");
       yield* eventually(() => moved(fixed.linear).length > 0, "the next job moved");
-      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "failed"]);
-      expect(moved(fixed.linear)).toEqual([{ method: "moveToFailed", identifier: TICKET_B }]);
+      expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "errored"]);
+      expect(moved(fixed.linear)).toEqual([
+        {
+          method: "moveToErrored",
+          identifier: TICKET_B,
+          message: `drive errored; ${RESTARTED}`,
+        },
+      ]);
       expect(sentryErrors(fixed.log)).toEqual([
         expect.objectContaining({
           text: `inherited job cleanup failed; ${id}: connection reset`,
           cause: failure,
         }),
-        expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+        expect.objectContaining({ text: `drive errored; ${RESTARTED}` }),
       ]);
     });
   });
@@ -2291,7 +3149,7 @@ describe("a running job left by the last automation server", () => {
       const fixed = harness(
         FakeLinear.fakeLinear({
           overrides: {
-            moveToFailed: (identifier) =>
+            moveToErrored: (identifier) =>
               Deferred.succeed(moving, undefined).pipe(
                 Effect.andThen(Deferred.await(answer)),
                 Effect.andThen(
@@ -2315,7 +3173,7 @@ describe("a running job left by the last automation server", () => {
       yield* Deferred.succeed(answer, undefined);
       yield* Fiber.join(shutdown);
       expect(landed).toEqual([TICKET]);
-      expect(fixed.automation.jobs[0]).toMatchObject({ status: "failed", reason: RESTARTED });
+      expect(fixed.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
     }),
   );
 });
@@ -2530,7 +3388,10 @@ describe("a shutdown with drives running", () => {
           }),
         ]);
         expect(FakeLog.texts(fixed.log)).not.toContain("drive aborted");
-        expect(fixed.linear.calls).toEqual([]);
+        expect(fixed.linear.calls).toEqual([
+          { method: "moveToInProgress", identifier: TICKET },
+          { method: "moveToInProgress", identifier: TICKET_B },
+        ]);
       }),
   );
 
@@ -2576,7 +3437,7 @@ describe("a shutdown with drives running", () => {
   );
 
   it.effect(
-    "a drive whose /run already answered is not stopped: it is judged by its result and closed succeeded",
+    "a drive whose /run already answered is not stopped: it is judged by its result and closed completed",
     () => {
       const judging = Deferred.makeUnsafe<void>();
       const judged = Deferred.makeUnsafe<void>();
@@ -2612,9 +3473,9 @@ describe("a shutdown with drives running", () => {
         expect(fixed.automation.jobs[0]?.status).toBe("running");
         yield* Deferred.succeed(judged, undefined);
         yield* Fiber.join(shutdown);
-        expect(fixed.automation.jobs[0]).toMatchObject({ status: "succeeded", reason: null });
+        expect(fixed.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
         expect(sentTo(http, "/abort")).toEqual([]);
-        expect(FakeLog.texts(fixed.log)).toContain("drive succeeded");
+        expect(FakeLog.texts(fixed.log)).toContain("drive completed");
       });
     },
   );
@@ -2793,12 +3654,12 @@ describe("an automation client with six jobs across an automation server restart
         expect(counted.afterEachWrite).toEqual([1, 2, 3, 4, 5, 6]);
         const [left, waiting] = [fixed.automation.jobs.slice(0, 6), fixed.automation.jobs.slice(6)];
         expect(left.map((job) => [job.status, job.reason])).toEqual([
-          ["failed", RESTARTED],
-          ["failed", RESTARTED],
-          ["failed", RESTARTED],
-          ["succeeded", null],
-          ["succeeded", null],
-          ["failed", RESTARTED],
+          ["errored", RESTARTED],
+          ["errored", RESTARTED],
+          ["errored", RESTARTED],
+          ["completed", null],
+          ["completed", null],
+          ["errored", RESTARTED],
         ]);
         const failed = [...LEFT.slice(0, 3), LEFT[5]];
         expect(moved(fixed.linear).map((call) => call.identifier)).toEqual(failed);
@@ -2819,18 +3680,18 @@ describe("an automation client with six jobs across an automation server restart
         expect(yield* client.sessions.jobs).toBe(MAX_JOBS);
         // The 404 is reported: a row running that its automation client does not hold.
         expect(sentryErrors(fixed.log).map((line) => [line.text, line.agentId])).toEqual([
-          [`drive failed; ${RESTARTED}`, undefined],
-          [`drive failed; ${RESTARTED}`, undefined],
-          [`drive failed; ${RESTARTED}`, undefined],
+          [`drive errored; ${RESTARTED}`, undefined],
+          [`drive errored; ${RESTARTED}`, undefined],
+          [`drive errored; ${RESTARTED}`, undefined],
           [JOB_NOT_FOUND, LEFT[5]],
-          [`drive failed; ${RESTARTED}`, undefined],
+          [`drive errored; ${RESTARTED}`, undefined],
         ]);
       });
     },
   );
 
   it.effect(
-    "an automation client that cannot stop its OpenCode keeps its six runs: the rows are failed and reported, and every waiting drive is turned away",
+    "an automation client that cannot stop its OpenCode keeps its six runs: the rows are errored and reported, and every waiting drive is turned away",
     () => {
       const counted = countingRunning();
       const fixed = harness(FakeLinear.fakeLinear(), counted.automation);
@@ -2842,12 +3703,12 @@ describe("an automation client with six jobs across an automation server restart
         yield* start(fixed, client.http);
         yield* aMinuteOfTicks(fixed);
         expect(fixed.automation.jobs.slice(0, 6).map((job) => [job.status, job.reason])).toEqual(
-          LEFT.map(() => ["failed", RESTARTED]),
+          LEFT.map(() => ["errored", RESTARTED]),
         );
         expect(sentryErrors(fixed.log)).toEqual(
           LEFT.flatMap((ticket) => [
             expect.objectContaining({ text: `inherited abort failed; ${URL}`, agentId: ticket }),
-            expect.objectContaining({ text: `drive failed; ${RESTARTED}` }),
+            expect.objectContaining({ text: `drive errored; ${RESTARTED}` }),
           ]),
         );
         expect(fixed.automation.jobs.slice(6).map((job) => job.status)).toEqual(
@@ -2897,10 +3758,10 @@ describe("the write that closes a finished job", () => {
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
-      yield* settle(fixed.automation.jobs, "succeeded");
+      yield* settle(fixed.automation.jobs, "completed");
       expect(finishes).toBe(3);
       expect(sentryErrors(fixed.log)).toEqual([]);
-      expect(FakeLog.texts(fixed.log)).toContain("drive succeeded");
+      expect(FakeLog.texts(fixed.log)).toContain("drive completed");
     });
   });
 
@@ -2925,13 +3786,13 @@ describe("the write that closes a finished job", () => {
       expect(fixed.automation.jobs[0]?.status).toBe("running");
       expect(sentryErrors(fixed.log)).toEqual([
         expect.objectContaining({
-          text: `close write failed; ${id} should be succeeded`,
+          text: `close write failed; ${id} should be completed`,
           location: "automation",
           cause: failure,
         }),
       ]);
-      expect(FakeLog.texts(fixed.log)).not.toContain("drive succeeded");
-      expect(fixed.linear.calls).toEqual([]);
+      expect(FakeLog.texts(fixed.log)).not.toContain("drive completed");
+      expect(fixed.linear.calls).toEqual([{ method: "moveToInProgress", identifier: TICKET }]);
     });
   });
 });

@@ -96,7 +96,7 @@ flowchart TB
   N7["+ Retry database pending → running three times"]:::added
   N8["+ Automation server moves Linear to In Progress"]:::added
   N9["+ Tell the reserved client to run"]:::added
-  N10["+ Startup cancels and fails inherited running work<br/>before normal dispatch starts"]:::added
+  N10["+ Startup cancels and errors inherited running work<br/>before normal dispatch starts"]:::added
   N11["+ Terminal writes retry three times;<br/>then Sentry and manual repair"]:::added
 
   R1 -. "replace" .-> N1
@@ -111,9 +111,10 @@ flowchart TB
   EXEC["OpenCode executes the test"]:::kept
   DONE["Result, Linear, client execution,<br/>and job close consistently"]:::kept
   FAIL["automation_jobs: failed<br/>Linear: Failed"]:::kept
-  DBFAIL["+ Database still fails after three attempts:<br/>cancel reservations, report Sentry, fail"]:::added
-  LINEARFAIL["+ Linear move fails after retries:<br/>cancel reservations and fail"]:::added
-  RUNFAIL["+ Client cannot start execution:<br/>cancel reservations and fail"]:::added
+  ERR["automation_jobs: errored<br/>Linear: Errored"]:::added
+  DBFAIL["+ Database still fails after three attempts:<br/>cancel reservations, report Sentry, error"]:::added
+  LINEARFAIL["+ Linear move fails after retries:<br/>cancel reservations and error"]:::added
+  RUNFAIL["+ Client cannot start execution:<br/>cancel reservations and error"]:::added
 
   P --> N1 --> N2
   N2 -->|"reserved"| N6 --> N7
@@ -122,17 +123,17 @@ flowchart TB
   MORE -->|"yes"| N2
   MORE -->|"no"| N5 --> P
   N7 -->|"written"| N8
-  N7 -->|"three failures"| DBFAIL --> FAIL
+  N7 -->|"three failures"| DBFAIL --> ERR
   N8 -->|"moved"| N9
-  N8 -->|"retry exhausted"| LINEARFAIL --> FAIL
+  N8 -->|"retry exhausted"| LINEARFAIL --> ERR
   N9 -->|"started"| RUN --> EXEC --> N11 --> DONE
-  N9 -->|"start failed"| RUNFAIL --> FAIL
+  N9 -->|"start failed"| RUNFAIL --> ERR
 
   START["Automation server startup"]:::decision
   INHERITED["Find every inherited running job"]:::decision
   CANCEL["+ Cancel client reservation/process<br/>and QEMU work"]:::added
-  INHERITEDFAIL["+ Database failed and Linear Failed:<br/>automation server restarted"]:::added
-  UNREACHABLE["+ If the automation client does not answer,<br/>report Sentry and fail anyway"]:::added
+  INHERITEDFAIL["+ Database errored and Linear Errored:<br/>automation server restarted"]:::added
+  UNREACHABLE["+ If the automation client does not answer,<br/>report Sentry and error anyway"]:::added
   NORMAL["+ Normal pending dispatch may start"]:::added
 
   START --> INHERITED
@@ -153,16 +154,16 @@ flowchart TB
       server reserves the same ticket there again, which answers ok without asking QEMU, and the
       drive runs.
 - [x] Add an integration test for death after the database becomes `running` but before Linear
-      moves to In Progress. The driver moves the ticket from inside `/run`, so this is death
-      anywhere from the `running` write until the driver moves it. Before `/run` starts, the
-      automation client holds an unused reservation: the next automation server aborts it there,
-      which gives back the slot and its guest slot, and fails the job `automation server
-      restarted`. Once `/run` waits, it is the `/run` waiting case below. An automation client
-      that refuses connections is reported, and the job is failed all the same.
-- [ ] ~~Add an integration test for death after Linear moves to In Progress but before `/run`.~~
-      Dropped: user decision, not applicable. The driver moves the ticket to In Progress from
-      inside `/run`, so nothing moves it before `/run` starts. It returns if the automation server
-      takes that move over (N8 in the planned flow).
+      moves to In Progress. The automation server moves a drive or mint, three attempts, after
+      `markRunning` and before `/run`; a diagnose is left for its driver. The row is already
+      `running` and the In Progress update can be in flight, so `/run` has not started. Startup
+      stops the reservation at its automation client and errors the job `automation server
+      restarted`, and before `/run` that abort gives back the slot and its guest slot. A move
+      that still fails gives the reservation back and errors the job. Once `/run` waits, it is
+      the `/run` waiting case below. An automation client that refuses connections is reported,
+      and the job is errored all the same.
+- [ ] Add an integration test for death after Linear moves to In Progress but before `/run`.
+      The automation server now takes that move (N8), so the window is open again.
 - [x] Add an integration test for death while `/run` is waiting on the automation client.
 - [x] Add an unhappy-path test that a failed terminal `finish` database write is retried or later
       reconciled.
@@ -174,11 +175,11 @@ flowchart TB
 - [x] Run startup reconciliation before the dispatch loop may select any pending job.
 - [x] Do not assume an inherited row is dead: its OpenCode child may still be active on the
       automation client after the previous server connection disappeared.
-- [x] Cancel a confirmed reservation or active execution before moving its database row and Linear
-      issue to Failed.
+- [x] Cancel a confirmed reservation or active execution before closing its database row `errored`
+      and moving its Linear issue to Errored.
 - [x] Treat an absent execution as already stopped, ~~and retain an unreachable execution as
       unresolved for retry~~. Changed: user decision. An automation client that does not answer
-      is reported to Sentry and the job is failed anyway; nothing retries it.
+      is reported to Sentry and the job is errored anyway; nothing retries it.
 - [ ] ~~Keep new dispatch gated while inherited work is unresolved so a restart cannot exceed real
       client or QEMU capacity.~~ Dropped: user decision. An unreachable automation client does not
       block dispatch.
@@ -192,8 +193,9 @@ flowchart TB
       always reported).
 - [x] Never requeue work whose side effects are uncertain; close it terminally unless the durable
       state proves `/run` never started.
-- [x] An inherited drive or mint whose result its driver already closed has finished: close it
-      `succeeded`, and send nothing to its automation client or Linear. User decision.
+- [x] An inherited drive or mint whose result its driver already closed has finished: judge it
+      as dispatch would, `completed`, or `errored` when its qemu session errored, and send nothing
+      to its automation client. An errored one moves the ticket to Errored. User decision.
 - [x] Prove that one automation client configured for six jobs cannot leave more than six
       client-confirmed `running` rows after reconciliation.
 
@@ -211,7 +213,7 @@ flowchart TB
 - [x] Keep shutdown bounded and record a distinct failure when client cleanup cannot be confirmed.
       Ten seconds for every client together. A stop that fails or gets no answer is reported
       `shutdown abort failed; <url>`, and the row stays `running`, so the next startup stops and
-      fails it.
+      errors it.
 
 ## 3. Make automation-client execution observable and restart-safe
 
@@ -330,7 +332,7 @@ flowchart TB
 - [x] On QEMU routing database failure, report to Sentry, relinquish QEMU, and return
       `500 DATABASE FAILURE`.
 - [x] When `pending → running` exhausts three database attempts, report to Sentry, release capacity,
-      and fail the job with reason `DATABASE FAILURE`.
+      and error the job with reason `DATABASE FAILURE`.
 - [ ] Require the automation client's QEMU proxy URL at startup instead of silently defaulting to
       an unrelated local port.
 

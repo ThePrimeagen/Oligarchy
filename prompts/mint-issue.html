@@ -28,8 +28,6 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 </install>
 
 <rules>
-  <rule>On starting {{LINEAR_TICKET}}, move it to "In Progress".</rule>
-  <rule>On completing {{LINEAR_TICKET}}, move it to "Needs Review".</rule>
   <rule>Do not read files in this repository. Do not write, edit, or commit code. Do not open a pull request.</rule>
   <rule>Run only ./client, ./client-with-image, ./ctrl, and sleep. You may open only the screenshots and serial dumps the client writes. Do not upload images to Linear.</rule>
   <rule>Every guest action — every key, click, and image — runs inside an intent. Only relinquish, reserve, start, ./ctrl, save, and stop sit outside one.</rule>
@@ -39,13 +37,13 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 </rules>
 
 <procedure>
-  <step>Move the ticket to "In Progress". Give back the placed reservation with ./client relinquish — `no reservation` is fine, you held nothing — then take the pinned one: ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}.</step>
+  <step>Give back the placed reservation with ./client relinquish — `no reservation` is fine, you held nothing — then take the pinned one: ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}.</step>
   <step>Start fresh. The server fetches the ISO if it does not have it; a first start can take a while, and the command waits. Comment the session id on the ticket, then tie the result to the session with ./ctrl test start.</step>
   <step>Inside intents, drive the installer with images: the boot menu, then the installer, with the user name, password and disk passphrase exactly as the install's instruction says and the defaults everywhere else.</step>
   <step>The installer reboots the machine when it is done. Image through the reboot: the disk normally comes up on its own; should the ISO's boot menu show, choose the entry that boots the installed disk, not the installer. Type the disk passphrase when asked and reach the desktop; if a login screen stands in the way, log in with the instruction's user and password.</step>
   <step>With the desktop on screen: end your intent, take a fresh image, and have the {{SUB_AGENT}} subagent confirm the proof.</step>
   <step>Confirmed: in one last intent, shut the machine down from inside as the install's instruction says, then keep imaging every few seconds until an image fails — an image of a machine that is off fails, and that failure is the machine off. End the intent. Only then ./client save.</step>
-  <step>Close the result with ./ctrl test-results from what save answered, and move the ticket to "Needs Review".</step>
+  <step>Close the result with ./ctrl test-results from what save answered.</step>
 </procedure>
 
 <when-it-goes-wrong>
@@ -80,7 +78,6 @@ Minting driver. This is not a test: nothing is being judged, a disk is being mad
 
 <example-session>
 ```
-# Use Linear MCP to move the ticket to "In Progress"
 $ ./client relinquish --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}}
 # `no reservation` here is fine
 $ ./client reserve --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --server {{PINNED_SERVER}}
@@ -112,6 +109,5 @@ $ ./client save --agent-id {{LINEAR_TICKET}} --server-url {{SERVER_URL}} --sessi
 saved
 $ ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status success
 # had save failed: ./ctrl test-results --agent-id {{LINEAR_TICKET}} --id {{RESULT_ID}} --status failed --reason "<its headline>"
-# Use Linear MCP to move the ticket to "Needs Review"
 ```
 </example-session>

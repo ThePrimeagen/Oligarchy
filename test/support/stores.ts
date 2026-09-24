@@ -479,8 +479,8 @@ export const fakeTestStore = (
     closeResult: (resultId, status, reason, sessionId) =>
       Effect.sync(() => {
         const row = results.find((result) => sameId(result.id, resultId));
-        // Same predicate as TestStore.closeResult: an abort is the operator's close.
-        if (row === undefined || row.status === "aborted") {
+        // Same predicate as TestStore.closeResult: an abort or an error is final.
+        if (row === undefined || row.status === "aborted" || row.status === "errored") {
           return false;
         }
         row.status = status;
@@ -490,6 +490,18 @@ export const fakeTestStore = (
         if (sessionId !== null) {
           row.sessionId = sessionId;
         }
+        row.finishedAt = new Date();
+        return true;
+      }),
+    errorResult: (resultId, reason) =>
+      Effect.sync(() => {
+        const row = results.find((result) => sameId(result.id, resultId));
+        // Same predicate as TestStore.errorResult: an abort is the operator's close.
+        if (row === undefined || row.status === "aborted") {
+          return false;
+        }
+        row.status = "errored";
+        row.reason = reason;
         row.finishedAt = new Date();
         return true;
       }),
@@ -741,10 +753,13 @@ export const fakeAutomationStore = (
         const completed = jobs
           .filter(
             (job) =>
+              // The same terminal set AutomationStore.listJobs keeps.
               job.status === "succeeded" ||
               job.status === "failed" ||
               job.status === "aborted" ||
-              job.status === "timed_out",
+              job.status === "timed_out" ||
+              job.status === "completed" ||
+              job.status === "errored",
           )
           .sort((left, right) => {
             const byTime = (right.finishedAt?.getTime() ?? 0) - (left.finishedAt?.getTime() ?? 0);

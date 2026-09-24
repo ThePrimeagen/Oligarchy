@@ -20,7 +20,11 @@ export type LinearCall =
     }
   | { readonly method: "markReady"; readonly identifier: string }
   | { readonly method: "clearReady"; readonly identifier: string }
+  | { readonly method: "moveToErrored"; readonly identifier: string; readonly message: string }
+  | { readonly method: "moveToInProgress"; readonly identifier: string }
+  | { readonly method: "moveToNeedsReview"; readonly identifier: string }
   | { readonly method: "moveToFailed"; readonly identifier: string }
+  | { readonly method: "moveToSucceeded"; readonly identifier: string }
   | { readonly method: "listBacklog" }
   | { readonly method: "listAutomationNeeded" }
   | { readonly method: "listNeedsReview" };
@@ -88,7 +92,14 @@ export const fakeLinear = (
       record({ method: "moveIssue", ticket: issue, stateId: state }, Effect.void),
     markReady: (identifier) => record({ method: "markReady", identifier }, Effect.void),
     clearReady: (identifier) => record({ method: "clearReady", identifier }, Effect.void),
+    moveToErrored: (identifier, message) =>
+      record({ method: "moveToErrored", identifier, message }, Effect.void),
+    moveToInProgress: (identifier) =>
+      record({ method: "moveToInProgress", identifier }, Effect.void),
+    moveToNeedsReview: (identifier) =>
+      record({ method: "moveToNeedsReview", identifier }, Effect.void),
     moveToFailed: (identifier) => record({ method: "moveToFailed", identifier }, Effect.void),
+    moveToSucceeded: (identifier) => record({ method: "moveToSucceeded", identifier }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
     listAutomationNeeded: record({ method: "listAutomationNeeded" }, Effect.succeed([])),
     listNeedsReview: record({ method: "listNeedsReview" }, Effect.succeed([])),
@@ -104,7 +115,11 @@ export const fakeLinear = (
     moveIssue: overrides.moveIssue ?? defaults.moveIssue,
     markReady: overrides.markReady ?? defaults.markReady,
     clearReady: overrides.clearReady ?? defaults.clearReady,
+    moveToErrored: overrides.moveToErrored ?? defaults.moveToErrored,
+    moveToInProgress: overrides.moveToInProgress ?? defaults.moveToInProgress,
+    moveToNeedsReview: overrides.moveToNeedsReview ?? defaults.moveToNeedsReview,
     moveToFailed: overrides.moveToFailed ?? defaults.moveToFailed,
+    moveToSucceeded: overrides.moveToSucceeded ?? defaults.moveToSucceeded,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
     listAutomationNeeded: overrides.listAutomationNeeded ?? defaults.listAutomationNeeded,
     listNeedsReview: overrides.listNeedsReview ?? defaults.listNeedsReview,

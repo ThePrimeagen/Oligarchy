@@ -1014,6 +1014,52 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
+    scoped.effect("errorResult errors a verdict, and no later verdict or abort replaces it", () =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const database = yield* Client.Database;
+        const lock = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const run = () =>
+          tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: lock.id }],
+          });
+        const [errored] = (yield* run()).results;
+        const [aborted] = (yield* run()).results;
+        if (errored === undefined || aborted === undefined) {
+          return yield* Effect.die(new Error("createRun made no results"));
+        }
+        expect(yield* tests.closeResult(errored.id, "passed", "it locked", null)).toBe(true);
+        expect(yield* tests.errorResult(errored.id, "session s errored; qemu exited 137")).toBe(
+          true,
+        );
+        expect(Option.getOrThrow(yield* tests.findResult(errored.id))).toMatchObject({
+          status: "errored",
+          reason: "session s errored; qemu exited 137",
+        });
+        expect(yield* tests.closeResult(errored.id, "passed", "late report", null)).toBe(false);
+        expect(Option.getOrThrow(yield* tests.findResult(errored.id))).toMatchObject({
+          status: "errored",
+          reason: "session s errored; qemu exited 137",
+        });
+        expect(yield* tests.errorResult(uuid(), "no row")).toBe(false);
+
+        yield* database.run("markAborted", (db) =>
+          db
+            .update(DbSchema.testResults)
+            .set({ status: "aborted", reason: "aborted" })
+            .where(eq(DbSchema.testResults.id, aborted.id)),
+        );
+        expect(yield* tests.errorResult(aborted.id, "DATABASE FAILURE")).toBe(false);
+        expect(Option.getOrThrow(yield* tests.findResult(aborted.id))).toMatchObject({
+          status: "aborted",
+          reason: "aborted",
+        });
+        return yield* Effect.void;
+      }),
+    );
+
     scoped.effect("createRun leaves model null; startResult writes the model that ran", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
@@ -1492,10 +1538,9 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    // The driver moves its ticket to Needs Review before its drive job closes, so a diagnose is
-    // pending while the same result's drive still runs. One running job per result outranks the
-    // diagnose's place at the front: that diagnose waits, the next drive does not, and the
-    // diagnose is the first claim once its drive is closed.
+    // A diagnose can be pending while the same result's drive still runs. One running job per
+    // result outranks the diagnose's place at the front: that diagnose waits, the next drive does
+    // not, and the diagnose is the first claim once its drive is closed.
     scoped.effect(
       "AutomationStore skips a pending diagnose whose result's drive still runs, takes the oldest other drive, and claims the diagnose first once that drive is closed",
       () =>

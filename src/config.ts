@@ -12,6 +12,7 @@ import {
 import * as Errors from "./shared/errors.ts";
 
 export const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
+export const DEFAULT_LINEAR_API_URL = "https://api.linear.app/graphql";
 
 const ENV_FILE = "--env-file";
 
@@ -104,6 +105,10 @@ export const linearApiToken = requiredRedacted("LINEAR_API_TOKEN");
 export const linearTeam = required("LINEAR_TEAM");
 // Sequential on purpose: LINEAR_API_TOKEN is reported before LINEAR_TEAM.
 export const linearAccess = Effect.all({ token: linearApiToken, team: linearTeam });
+// Unset in production. A test points the automation server at a stub that can hold a move.
+export const linearApiUrl = EffectConfig.string("LINEAR_API_URL").pipe(
+  Effect.orElseSucceed(() => DEFAULT_LINEAR_API_URL),
+);
 export const linearWebhookSecret = requiredRedacted("LINEAR_WEBHOOK_SECRET");
 
 // For Flag.withFallbackConfig: SERVER_URL="" is unset and the flag's default applies.
