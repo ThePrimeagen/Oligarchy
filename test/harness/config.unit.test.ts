@@ -74,7 +74,7 @@ describe("oligarchy.json", () => {
       expect(config.models.drive).toBe(MODEL);
       expect(config.models.diagnose).toBe(MODEL);
       expect(config.models.mint).toBe(MODEL);
-      expect(config.reasoning).toEqual({ drive: "minimal", diagnose: "minimal", mint: "minimal" });
+      expect(config.reasoning).toEqual({ drive: "minimal", diagnose: "xhigh", mint: "minimal" });
       expect(config.openRouterBaseUrl).toBe("https://openrouter.ai/api/v1");
       expect(Duration.toMillis(config.timeouts.header)).toBe(Duration.toMillis("3 minutes"));
       expect(Duration.toMillis(config.timeouts.chunk)).toBe(Duration.toMillis("3 minutes"));
