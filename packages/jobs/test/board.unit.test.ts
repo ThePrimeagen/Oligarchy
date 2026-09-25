@@ -7,6 +7,26 @@ import * as TestingStores from "@oligarchy/testing/stores";
 import * as Board from "../src/board.ts";
 import * as H from "./harness.ts";
 
+describe("Board.asks", () => {
+  it("Automation Needed and Needs Review ask for an action", () => {
+    expect(Board.asks(Linear.AUTOMATION_NEEDED_STATE)).toBe(true);
+    expect(Board.asks(Linear.NEEDS_REVIEW_STATE)).toBe(true);
+  });
+
+  it("any other column asks for nothing (unhappy)", () => {
+    for (const column of [
+      Linear.BACKLOG_STATE,
+      Linear.IN_PROGRESS_STATE,
+      Linear.IN_REVIEW_STATE,
+      Linear.ERRORED_STATE,
+      "Done",
+      "",
+    ]) {
+      expect(Board.asks(column), column).toBe(false);
+    }
+  });
+});
+
 describe("Board.actionFor happy path", () => {
   it.effect("Automation Needed is a drive and Needs Review is a diagnose", () =>
     Effect.gen(function* () {

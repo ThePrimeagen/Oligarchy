@@ -284,6 +284,20 @@ describe("POST /linear", () => {
     }),
   );
 
+  it.effect("records a column that asks for nothing when no result has the ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const body = issueBody("In Progress");
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.stores.automation.jobs).toEqual([]);
+      expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook recorded; In Progress"]);
+      expect(labeled(fixed)).toEqual([]);
+    }),
+  );
+
   it.effect(
     "records an edit of a ticket already in Automation Needed without queueing (unhappy)",
     () =>
