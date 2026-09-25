@@ -40,49 +40,25 @@ const packageGraph: PackageGraph = new Map(
   workspacePackages.map((pkg) => [pkg.name, pkg.dependsOn]),
 );
 
-// Bottom up: a package's dependencies name only packages in a lower layer, so the graph reads
-// one way and nothing below knows what sits above it. Every package must appear here.
-const LAYERS: ReadonlyArray<ReadonlyArray<string>> = [["@oligarchy/routes"]];
-
-// The loops one depth-first walk finds, each written out as the path that closes it. A package
-// already walked through is not walked again, so two loops sharing a package may name only the
-// first; an empty result still means the graph has no loop at all.
-const packageCycles = (graph: PackageGraph): ReadonlyArray<string> => {
-  const cycles: Array<string> = [];
-  const done = new Set<string>();
-  const visit = (name: string, path: ReadonlyArray<string>) => {
-    const at = path.indexOf(name);
-    if (at !== -1) {
-      cycles.push([...path.slice(at), name].join(" -> "));
-      return;
-    }
-    if (done.has(name)) {
-      return;
-    }
-    for (const dep of graph.get(name) ?? []) {
-      visit(dep, [...path, name]);
-    }
-    done.add(name);
-  };
-  for (const name of graph.keys()) {
-    visit(name, []);
-  }
-  return cycles;
-};
+// The layer each package sits on, numbered as in monorepo-plan.md's picture (shared 0, log 1,
+// env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6). A package's
+// dependencies name only packages on a strictly lower layer, so the graph reads one way and a
+// loop cannot hide in it. A package joins the list in the phase that creates it; routes holds
+// http's slot until it is renamed.
+const LAYERS: Readonly<Record<string, number>> = { "@oligarchy/routes": 5 };
 
 // A package outside the list, and an edge that does not go strictly downward, each named.
 const layerProblems = (
   graph: PackageGraph,
-  layers: ReadonlyArray<ReadonlyArray<string>>,
-): ReadonlyArray<string> => {
-  const layerOf = new Map(layers.flatMap((names, layer) => names.map((name) => [name, layer])));
-  return [...graph].flatMap(([name, deps]) => {
-    const from = layerOf.get(name);
+  layers: Readonly<Record<string, number>>,
+): ReadonlyArray<string> =>
+  [...graph].flatMap(([name, deps]) => {
+    const from = layers[name];
     if (from === undefined) {
       return [`${name} is not in the layer list`];
     }
     return deps.flatMap((dep) => {
-      const to = layerOf.get(dep);
+      const to = layers[dep];
       if (to === undefined) {
         return [`${name} -> ${dep}: ${dep} is not in the layer list`];
       }
@@ -94,7 +70,6 @@ const layerProblems = (
         : [];
     });
   });
-};
 
 // The viz's Solid components are `.tsx`; the same rules bind them, and every workspace package's.
 const sources = (): ReadonlyArray<string> =>
@@ -361,53 +336,39 @@ describe("workspace packages", () => {
     ).toEqual([]);
   });
 
-  it("the package graph has no dependency cycle (happy)", () => {
+  it("every package is in the layer list and depends only on strictly lower layers (happy)", () => {
     expect(packageGraph.size).toBeGreaterThan(0);
-    expect(packageCycles(packageGraph)).toEqual([]);
-  });
-
-  it("names the loop when two packages depend on each other (unhappy)", () => {
-    expect(
-      packageCycles(
-        new Map([
-          ["@oligarchy/a", ["@oligarchy/b"]],
-          ["@oligarchy/b", ["@oligarchy/a"]],
-          ["@oligarchy/c", ["@oligarchy/a"]],
-        ]),
-      ),
-    ).toEqual(["@oligarchy/a -> @oligarchy/b -> @oligarchy/a"]);
-    expect(
-      packageCycles(
-        new Map([
-          ["@oligarchy/a", ["@oligarchy/b"]],
-          ["@oligarchy/b", ["@oligarchy/c"]],
-          ["@oligarchy/c", ["@oligarchy/b"]],
-        ]),
-      ),
-    ).toEqual(["@oligarchy/b -> @oligarchy/c -> @oligarchy/b"]);
-  });
-
-  it("every package is in the layer list and depends only on lower layers (happy)", () => {
     expect(layerProblems(packageGraph, LAYERS)).toEqual([]);
   });
 
-  it("names an upward edge, a same-layer edge and a package missing from the list (unhappy)", () => {
-    const layers = [["@oligarchy/shared"], ["@oligarchy/env", "@oligarchy/stats"]];
+  // A loop among listed packages is always an upward or a same-layer edge, so this one check
+  // names any loop too: the two-package loop below is named through both of its edges.
+  it("names an upward edge, a same-layer edge, a two-package loop and a package missing from the list (unhappy)", () => {
+    const layers = {
+      "@oligarchy/shared": 0,
+      "@oligarchy/log": 1,
+      "@oligarchy/env": 2,
+      "@oligarchy/db": 3,
+      "@oligarchy/linear": 3,
+    };
     expect(
       layerProblems(
         new Map([
-          ["@oligarchy/shared", ["@oligarchy/env"]],
-          ["@oligarchy/env", ["@oligarchy/stats", "@oligarchy/shared"]],
-          ["@oligarchy/stats", ["@oligarchy/db"]],
-          ["@oligarchy/db", []],
+          ["@oligarchy/shared", []],
+          ["@oligarchy/log", ["@oligarchy/shared", "@oligarchy/jobs"]],
+          ["@oligarchy/env", ["@oligarchy/log", "@oligarchy/db"]],
+          ["@oligarchy/db", ["@oligarchy/env", "@oligarchy/linear"]],
+          ["@oligarchy/linear", ["@oligarchy/db"]],
+          ["@oligarchy/jobs", []],
         ]),
         layers,
       ),
     ).toEqual([
-      "@oligarchy/shared -> @oligarchy/env is an upward edge (layer 0 -> 1)",
-      "@oligarchy/env -> @oligarchy/stats is a same-layer edge (layer 1)",
-      "@oligarchy/stats -> @oligarchy/db: @oligarchy/db is not in the layer list",
-      "@oligarchy/db is not in the layer list",
+      "@oligarchy/log -> @oligarchy/jobs: @oligarchy/jobs is not in the layer list",
+      "@oligarchy/env -> @oligarchy/db is an upward edge (layer 2 -> 3)",
+      "@oligarchy/db -> @oligarchy/linear is a same-layer edge (layer 3)",
+      "@oligarchy/linear -> @oligarchy/db is a same-layer edge (layer 3)",
+      "@oligarchy/jobs is not in the layer list",
     ]);
   });
 

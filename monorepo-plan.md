@@ -1,8 +1,10 @@
 # Monorepo plan
 
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
-workspace and `@oligarchy/routes`). Nothing else in this file is implemented yet. It is the plan
-for the rest of the split and the reasoning behind each choice.
+workspace and `@oligarchy/routes`) and so is phase 1 ([PR
+#236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks). The rest of this
+file is the plan for the remaining phases and the reasoning behind each choice; a phase's
+checklist is ticked as it lands.
 
 Revised 2026-09-25 after review. What changed from the first version, and why:
 
@@ -525,13 +527,17 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 1: cycle checks**
 
-- [ ] Add the `import` plugin and `"import/no-cycle": "error"` to `.oxlintrc.json`. It finds
+- [x] Add the `import` plugin and `"import/no-cycle": "error"` to `.oxlintrc.json`. It finds
       nothing: the repo's one file cycle was `dig/lobby.ts` and `dig/room.ts`, deleted with the
-      game.
-- [ ] Add the layer list to `test/repo/architecture.unit.test.ts`, with `routes` in `http`'s
+      game. The plugin brings two more rules from the enabled categories:
+      `import/no-named-as-default-member`, fixed at its source (`import { Pool } from "pg"` in
+      `db/client.ts`, the form every other file uses), and `import/no-unassigned-import`, turned
+      off because a side-effect import (`vitest.d.ts`, the viz preload) is exactly an unassigned
+      one.
+- [x] Add the layer list to `test/repo/architecture.unit.test.ts`, with `routes` in `http`'s
       slot. The list is the one in "Target in one picture"; a package is added to it in the phase
       that creates it.
-- [ ] `development.md`: document the no-cycle rule and the layer list, and write in the standing
+- [x] `development.md`: document the no-cycle rule and the layer list, and write in the standing
       test decisions ("never test wrangler", "never test `oligarchy.json`").
 
 **Phase 2: `@oligarchy/shared`**
