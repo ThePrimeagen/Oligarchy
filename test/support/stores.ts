@@ -1,15 +1,15 @@
 import { Effect, Layer, Option } from "effect";
-import * as Actions from "../../src/db/actions.ts";
-import * as Automation from "../../src/db/automation.ts";
-import * as DebugLogs from "../../src/db/debug-logs.ts";
-import * as Diagnosis from "../../src/db/diagnosis.ts";
-import * as Logs from "../../src/db/logs.ts";
-import * as DbSchema from "../../src/db/schema.ts";
-import * as Process from "../../src/db/process-stats.ts";
-import * as Servers from "../../src/db/servers.ts";
-import * as Sessions from "../../src/db/sessions.ts";
-import * as Tests from "../../src/db/tests.ts";
-import * as Errors from "../../src/shared/errors.ts";
+import * as Actions from "@oligarchy/db/actions";
+import * as Automation from "@oligarchy/db/automation";
+import * as DebugLogs from "@oligarchy/db/debug-logs";
+import * as Diagnosis from "@oligarchy/db/diagnosis";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Logs from "@oligarchy/db/logs";
+import * as Process from "@oligarchy/db/process-stats";
+import * as DbSchema from "@oligarchy/db/schema";
+import * as Servers from "@oligarchy/db/servers";
+import * as Sessions from "@oligarchy/db/sessions";
+import * as Tests from "@oligarchy/db/tests";
 
 type SessionRow = typeof DbSchema.sessions.$inferSelect;
 type AgentRunRow = typeof DbSchema.agentRuns.$inferSelect;
@@ -34,7 +34,7 @@ type FakeAutomationJob = AutomationJobRow & {
 const sameId = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
 
 const conflict = (operation: string, detail: string) =>
-  Errors.DatabaseError.make({
+  DbErrors.DatabaseError.make({
     operation,
     message: `Failed query: ${detail}`,
     cause: new Error("duplicate key value violates unique constraint"),
@@ -267,7 +267,7 @@ const recorded = (row: LogRow, id: number) => ({
 
 export const fakeLogStore = (
   options: {
-    readonly insertLog?: (row: LogRow) => Effect.Effect<void, Errors.DatabaseError>;
+    readonly insertLog?: (row: LogRow) => Effect.Effect<void, DbErrors.DatabaseError>;
     readonly listLogs?: typeof Logs.LogStore.Service.listLogs;
     readonly listRecent?: typeof Logs.LogStore.Service.listRecent;
     readonly listIntents?: typeof Logs.LogStore.Service.listIntents;

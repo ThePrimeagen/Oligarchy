@@ -1,11 +1,11 @@
 import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as ProcessStats from "@oligarchy/db/process-stats";
+import * as Servers from "@oligarchy/db/servers";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as ProcessStats from "../db/process-stats.ts";
-import * as Servers from "../db/servers.ts";
 import * as Stats from "../qemu/stats.ts";
-import * as Errors from "../shared/errors.ts";
 import * as ProcessUsage from "../shared/process-usage.ts";
 import * as Sessions from "./sessions.ts";
 
@@ -13,7 +13,7 @@ import * as Sessions from "./sessions.ts";
 // poll behind, and three missed writes are what the page calls silent.
 const HEARTBEAT_INTERVAL = "30 seconds";
 
-const isDatabaseError = Schema.is(Errors.DatabaseError);
+const isDatabaseError = Schema.is(DbErrors.DatabaseError);
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>

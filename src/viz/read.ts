@@ -1,8 +1,8 @@
 import { Effect, Option } from "effect";
-import * as Automation from "../db/automation.ts";
-import * as ProcessStats from "../db/process-stats.ts";
-import * as Servers from "../db/servers.ts";
-import type * as Errors from "../shared/errors.ts";
+import * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as ProcessStats from "@oligarchy/db/process-stats";
+import * as Servers from "@oligarchy/db/servers";
 import * as View from "./view.ts";
 
 // A screen registers what it wants. `once` is read when viz opens and kept: a
@@ -10,7 +10,7 @@ import * as View from "./view.ts";
 // the latest tickets.
 export type Mode = "once" | "cycle";
 
-export type Need<A, E = Errors.DatabaseError, R = never> = {
+export type Need<A, E = DbErrors.DatabaseError, R = never> = {
   readonly mode: Mode;
   readonly read: Effect.Effect<A, E, R>;
 };

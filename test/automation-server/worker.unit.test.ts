@@ -13,6 +13,9 @@ import {
   Scope,
   Stdio,
 } from "effect";
+import * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Log from "@oligarchy/log/log";
@@ -24,9 +27,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as AutomationClient from "../../src/automation-server/client.ts";
-import * as Automation from "../../src/db/automation.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
-import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
@@ -1061,7 +1062,7 @@ describe("the harness closes the board", () => {
   it.effect(
     "a diagnosis read that fails three times leaves the job succeeded and does not move (unhappy)",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "getDiagnosis",
         message: "Failed query: getDiagnosis",
         cause: new Error("connection reset"),
@@ -1174,7 +1175,7 @@ describe("a drive that returns with its result still open", () => {
   );
 
   it.effect("a result lookup that fails after /run errors the job (unhappy)", () => {
-    const failure = Errors.DatabaseError.make({
+    const failure = DbErrors.DatabaseError.make({
       operation: "findResult",
       message: "connection reset",
       cause: new Error("connection reset"),
@@ -1637,7 +1638,7 @@ describe("dispatch unhappy path", () => {
         {
           errorResult: () =>
             Effect.fail(
-              Errors.DatabaseError.make({
+              DbErrors.DatabaseError.make({
                 operation: "errorResult",
                 message: "Failed query: errorResult",
                 cause: new Error("connection reset"),
@@ -2341,7 +2342,7 @@ describe("dispatch unhappy path", () => {
   );
 
   it.effect("a running write that fails twice then succeeds starts /run", () => {
-    const failure = Errors.DatabaseError.make({
+    const failure = DbErrors.DatabaseError.make({
       operation: "markAutomationJobRunning",
       message: "connection reset",
       cause: new Error("connection reset"),
@@ -2386,7 +2387,7 @@ describe("dispatch unhappy path", () => {
   it.effect(
     "a running write that commits and then fails keeps the reservation and starts /run",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "markAutomationJobRunning",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -2440,7 +2441,7 @@ describe("dispatch unhappy path", () => {
   );
 
   it.effect("a release that never answers is reported after ten seconds and does not hang", () => {
-    const failure = Errors.DatabaseError.make({
+    const failure = DbErrors.DatabaseError.make({
       operation: "markAutomationJobRunning",
       message: "connection reset",
       cause: new Error("connection reset"),
@@ -2480,7 +2481,7 @@ describe("dispatch unhappy path", () => {
   it.effect(
     "a running write that fails three times releases the reservation and errors the job",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "markAutomationJobRunning",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -2547,12 +2548,12 @@ describe("dispatch unhappy path", () => {
   );
 
   it.effect("a failure write retries twice and then closes the job", () => {
-    const markFailure = Errors.DatabaseError.make({
+    const markFailure = DbErrors.DatabaseError.make({
       operation: "markAutomationJobRunning",
       message: "connection reset",
       cause: new Error("connection reset"),
     });
-    const finishFailure = Errors.DatabaseError.make({
+    const finishFailure = DbErrors.DatabaseError.make({
       operation: "finishAutomationJob",
       message: "finish reset",
       cause: new Error("finish reset"),
@@ -2612,12 +2613,12 @@ describe("dispatch unhappy path", () => {
   });
 
   it.effect("an exhausted failure write is reported and the job stays pending", () => {
-    const markFailure = Errors.DatabaseError.make({
+    const markFailure = DbErrors.DatabaseError.make({
       operation: "markAutomationJobRunning",
       message: "connection reset",
       cause: new Error("connection reset"),
     });
-    const finishFailure = Errors.DatabaseError.make({
+    const finishFailure = DbErrors.DatabaseError.make({
       operation: "finishAutomationJob",
       message: "finish reset",
       cause: new Error("finish reset"),
@@ -2951,7 +2952,7 @@ describe("a running job left by the last automation server", () => {
   it.effect(
     "a finished drive whose close write fails three times is reported as should be completed, left running, and not moved",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "finishAutomationJob",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -3189,7 +3190,7 @@ describe("a running job left by the last automation server", () => {
   it.effect(
     "a close write that fails three times is reported with the job, left running, and not moved",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "finishAutomationJob",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -3223,7 +3224,7 @@ describe("a running job left by the last automation server", () => {
   );
 
   it.effect("a listing that fails is reported and dispatch still starts", () => {
-    const failure = Errors.DatabaseError.make({
+    const failure = DbErrors.DatabaseError.make({
       operation: "listRunningAutomationJobs",
       message: "connection reset",
       cause: new Error("connection reset"),
@@ -3247,7 +3248,7 @@ describe("a running job left by the last automation server", () => {
   });
 
   it.effect("a job whose lookup fails is reported by id, and the next job is still errored", () => {
-    const failure = Errors.DatabaseError.make({
+    const failure = DbErrors.DatabaseError.make({
       operation: "findResult",
       message: "connection reset",
       cause: new Error("connection reset"),
@@ -3901,7 +3902,7 @@ describe("an automation client with six jobs across an automation server restart
 });
 
 describe("the write that closes a finished job", () => {
-  const failure = Errors.DatabaseError.make({
+  const failure = DbErrors.DatabaseError.make({
     operation: "finishAutomationJob",
     message: "connection reset",
     cause: new Error("connection reset"),

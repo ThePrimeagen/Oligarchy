@@ -2,9 +2,10 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import type * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Backlog from "../../src/automation-server/backlog.ts";
 import * as Linear from "../../src/ctrl/linear.ts";
-import type * as Automation from "../../src/db/automation.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
@@ -759,7 +760,7 @@ describe("backlog watch unhappy path", () => {
     "a failed enqueue does not spend the check: the next ticket is the one job, and a third waits",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.DatabaseError.make({
+        const refused = DbErrors.DatabaseError.make({
           operation: "findResultByLinearId",
           message: "Failed query: select",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -1556,7 +1557,7 @@ describe("automation needed and needs review watch unhappy path", () => {
     "a drive status lookup that fails is one error line, and the next poll still queues",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.DatabaseError.make({
+        const refused = DbErrors.DatabaseError.make({
           operation: "automationJobStatus",
           message: "Failed query: select from automation_jobs",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -1671,7 +1672,7 @@ describe("automation needed and needs review watch unhappy path", () => {
     "a failed enqueue keeps the ticket unsettled and retries the enqueue on the next poll",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.DatabaseError.make({
+        const refused = DbErrors.DatabaseError.make({
           operation: "findResultByLinearId",
           message: "Failed query: select",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -1797,7 +1798,7 @@ describe("automation needed and needs review watch unhappy path", () => {
     "a diagnose status lookup that fails is one error line, and the next poll still queues",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.DatabaseError.make({
+        const refused = DbErrors.DatabaseError.make({
           operation: "automationJobStatus",
           message: "Failed query: select from automation_jobs",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),

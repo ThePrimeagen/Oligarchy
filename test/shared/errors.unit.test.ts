@@ -29,18 +29,6 @@ describe("staged errors, each waiting for its package", () => {
     ).toBe("missing host requirements:\nqemu-system-x86_64 not on PATH\nOVMF code not found: /x");
   });
 
-  it("DatabaseError keeps the driver message and an optional cause", () => {
-    const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
-    const error = Errors.DatabaseError.make({
-      operation: "insertLog",
-      message: "Failed query: insert into logs",
-      cause,
-    });
-    expect(error.message).toBe("Failed query: insert into logs");
-    expect(error.cause).toBe(cause);
-    expect(Errors.DatabaseError.make({ operation: "ping", message: "x" }).cause).toBeUndefined();
-  });
-
   it("JobNotFound fills its one message and refuses any other", () => {
     const error = Errors.JobNotFound.make({
       jobId: "job-1",

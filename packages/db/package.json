@@ -1,0 +1,43 @@
+{
+  "name": "@oligarchy/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./actions": "./src/actions.ts",
+    "./automation": "./src/automation.ts",
+    "./client": "./src/client.ts",
+    "./debug-logs": "./src/debug-logs.ts",
+    "./diagnosis": "./src/diagnosis.ts",
+    "./errors": "./src/errors.ts",
+    "./logs": "./src/logs.ts",
+    "./migrate": "./src/migrate.ts",
+    "./process-stats": "./src/process-stats.ts",
+    "./schema": "./src/schema.ts",
+    "./servers": "./src/servers.ts",
+    "./sessions": "./src/sessions.ts",
+    "./setup-requests": "./src/setup-requests.ts",
+    "./tests": "./src/tests.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check"
+  },
+  "dependencies": {
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

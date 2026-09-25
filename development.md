@@ -62,15 +62,17 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today four: `@oligarchy/shared`, the
+  dashboard, the tests); `packages/*` are its libraries, today five: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
-  from outside and the runner that installs it (Config and Runtime entry, below), and
-  `@oligarchy/routes`, the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  from outside and the runner that installs it (Config and Runtime entry, below),
+  `@oligarchy/db`, the whole database (Database and Migrations, below), and `@oligarchy/routes`,
+  the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
-  it as `"workspace:*"`. A version two packages share (`effect`, `typescript`, `vitest`,
-  `@types/node`) is named once in the root's `workspaces.catalog` and each package says
+  it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
+  `@effect/vitest`, `typescript`, `vitest`, `@types/node`, `drizzle-orm`, `pg`, `@types/pg`) is
+  named once in the root's `workspaces.catalog` and each package says
   `"catalog:"`. Why: two `effect`s would make two sets of Schema types that do not assign to each
   other. `bunfig.toml` sets `linker = "isolated"`: a package sees only what its own `package.json`
   declares, so an import it never named fails instead of borrowing the root's copy. Every
@@ -84,7 +86,8 @@ exist.
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
-  `@oligarchy/log` at 1, `@oligarchy/env` at 2 and `@oligarchy/routes` at 5, holding `http`'s
+  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` at 3 and `@oligarchy/routes` at
+  5, holding `http`'s
   slot). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
@@ -142,10 +145,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   server; `./start-automation-server-client <max-jobs>` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
   other), the tooling files,
-  `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`,
-  `test/` and `packages/`.
-- `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/observability/`,
-  `src/db/`); `main.ts` files are the entries.
+  `public/` and `prompts/`, the operator documents, this document, `src/`, `test/` and
+  `packages/`.
+- `src/` is one directory per process plus the shared kernel (`src/shared/`,
+  `src/observability/`); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
   schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
@@ -173,12 +176,22 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   admission rule: a value a process is given from outside (a variable, an env file, the settings
   file) and installing those before the command runs; refused are a command's flags, anything a
   command does while running, and anything that writes, except the runner's one print of a
-  failure at the process boundary. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  failure at the process boundary. `packages/db/` is the whole database: `src/` holds the client,
+  the migrate entry, every store, the schema and `errors.ts` (`DatabaseError`); `drizzle/` the
+  generated migrations and `meta/_journal.json`; `drizzle.config.ts` drizzle-kit's pointer from
+  the schema to that folder, read from the package's own directory (`db:generate` and `db:check`
+  are its scripts, run through `bun run --cwd packages/db`). It imports `effect`, `drizzle-orm`,
+  `pg`, `@oligarchy/env`, `@oligarchy/log`, `@oligarchy/shared` and its own files, and no
+  platform module: `migrate.ts` is an `Env.run` entry. It takes no `Log`: `client.ts` keeps
+  `Effect.logError` for pool errors on purpose, because a pool failure routed through the
+  row-writing `Log` would try to insert a row through the failing pool. Its admission rule: a
+  store reads and writes rows and returns them; refused are a loop, a clock, a call to another
+  system and a log line. `packages/routes/src/` holds `api.ts`, `contract.ts` and
   `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
-  package that raises it exists: `src/shared/errors.ts` holds those (`DatabaseError`, the app
-  errors) and shrinks as each package is created, re-exporting nothing.
+  package that raises it exists: `src/shared/errors.ts` holds those (the app errors) and shrinks
+  as each package is created, re-exporting nothing.
 - `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
@@ -213,9 +226,12 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `import * as Config from "@oligarchy/env/config"`, `import * as Env from
   "@oligarchy/env/run"`, `import * as EnvFile from "@oligarchy/env/env-file"`, `import * as
   Oligarchy from "@oligarchy/env/oligarchy"`, `import * as Colors from "@oligarchy/env/colors"`,
-  `import * as EnvErrors from "@oligarchy/env/errors"`. The four errors modules are `ApiErrors`,
-  `SharedErrors`, `LogErrors` and `EnvErrors` everywhere so none shadows the main package's
-  staged `Errors`; when that file is gone, `SharedErrors` becomes `Errors`. The root's `src/observability/log.ts` is the row-writing `Log` layer, imported as
+  `import * as EnvErrors from "@oligarchy/env/errors"`, `import * as Client from
+  "@oligarchy/db/client"` and one namespace per store (`Logs`, `Servers`, `Tests`, ...),
+  `import * as DbSchema from "@oligarchy/db/schema"`, `import * as DbErrors from
+  "@oligarchy/db/errors"`. The five errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`,
+  `EnvErrors` and `DbErrors` everywhere so none shadows the main package's staged `Errors`; when
+  that file is gone, `SharedErrors` becomes `Errors`. The root's `src/observability/log.ts` is the row-writing `Log` layer, imported as
   `RowLog` by the five graphs that build it.
 - Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
   every other Effect module as a namespace by its module path
@@ -297,10 +313,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
   one graph share one router and both listeners serve both route sets. A process has one
   listener; a page for an operator is the dashboard's, not a second port (below).
-- `Effect.log*` is called only in `src/db/client.ts`: the pool's `error` listener and its release
+- `Effect.log*` is called only in `packages/db/src/client.ts`: the pool's `error` listener and its release
   sit below `Log`, which does not exist yet when the pool is built.
 
-The `Database` service in `src/db/client.ts` is the model: `makeDatabase(url)` normalises the URL,
+The `Database` service in `packages/db/src/client.ts` is the model: `makeDatabase(url)` normalises the URL,
 acquires the pool without connecting under `Effect.acquireRelease`, re-enters Effect from
 `pool.on("error")` with `Effect.runForkWith(context)`, and its release logs instead of failing.
 
@@ -897,13 +913,13 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
 
 ## Database
 
-- One `Database` service in `src/db/client.ts` owns one scoped `pg.Pool`: `Effect.acquireRelease`,
+- One `Database` service in `packages/db/src/client.ts` owns one scoped `pg.Pool`: `Effect.acquireRelease`,
   `pool.on("error")` re-entering Effect with `Effect.runForkWith(context)`, released with
   `pool.end()` whose failure is logged (`db: pool close failed: <detail>`), never raised. The pool
   does not connect at acquire; a process that needs the database pings it (`select 1`) at startup
   (`database unreachable: <detail>`).
 - Drizzle 0.45 (`drizzle-orm/node-postgres`) with drizzle-kit 0.31 and `pg`, behind the service.
-  Why not drizzle 1.0: its kit rewrites `drizzle/`, and migrations are append-only. Why not
+  Why not drizzle 1.0: its kit rewrites the migrations folder, and migrations are append-only. Why not
   `@effect/sql-pg`: the schema and the migrations stay as they are and the service is the Effect
   boundary. Every query uses Drizzle; never the driver's query API, another ORM, or ad-hoc SQL.
 - The service exposes `run`, `transaction` and `ping`, not the raw drizzle instance.
@@ -934,7 +950,7 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
   migration and can never be removed; a row is an insert). A lookup that may find nothing
   answers an `Option`.
 
-`Client.runInTransaction` in `src/db/client.ts`: one re-entry, the body's cause re-raised as
+`Client.runInTransaction` in `packages/db/src/client.ts`: one re-entry, the body's cause re-raised as
 itself.
 
 ```ts
@@ -942,11 +958,11 @@ export const runInTransaction = <TX, A, E, R>(
   operation: string,
   begin: (body: (tx: TX) => Promise<A>) => Promise<A>,
   body: (tx: TX) => Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | Errors.DatabaseError, R> =>
+): Effect.Effect<A, E | DbErrors.DatabaseError, R> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<R>();
     const rolledBack: { cause: Cause.Cause<E> | undefined } = { cause: undefined };
-    const attempted: Effect.Effect<A, Cause.Cause<E> | Errors.DatabaseError> = Effect.tryPromise({
+    const attempted: Effect.Effect<A, Cause.Cause<E> | DbErrors.DatabaseError> = Effect.tryPromise({
       try: () =>
         begin(async (tx) => {
           const exit = await Effect.runPromiseExitWith(context)(body(tx));
@@ -960,7 +976,7 @@ export const runInTransaction = <TX, A, E, R>(
     });
     return yield* Effect.catch(
       attempted,
-      (failure): Effect.Effect<never, E | Errors.DatabaseError> =>
+      (failure): Effect.Effect<never, E | DbErrors.DatabaseError> =>
         Cause.isCause(failure) ? Effect.failCause(failure) : Effect.fail(failure),
     );
   });
@@ -1165,7 +1181,7 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   Effect; the only other sanctioned runners are `Effect.runForkWith(context)` and
   `Effect.runPromiseExitWith(context)` re-entering Effect from a non-Effect callback after
   `const context = yield* Effect.context<R>()`; the architecture test allows them in
-  `src/db/client.ts` alone, nowhere else.
+  `packages/db/src/client.ts` alone, nowhere else.
 - A CLI's command runs directly under the runner; a server `Layer.launch`es inside its command
   handler, its stop condition `Effect.raceFirst(Layer.launch(serve),
   Deferred.await(serverFailed))`, the `Deferred` completed by the Node server's `error` listener
@@ -1325,7 +1341,7 @@ change ships (Tests, above).
   and `vitest.global-setup.ts`); `typescript/no-floating-promises` off for `test/**`,
   `packages/*/test/**` and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
-  final newline; `drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
+  final newline; `packages/db/drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
   `wrangler.jsonc` ignored. `.editorconfig` matches.
 - tsconfig: `tsconfig.base.json`, which every `tsconfig.json` extends: `strict`,
   `exactOptionalPropertyTypes`, `noUnusedLocals`, `noFallthroughCasesInSwitch`,
@@ -1356,21 +1372,26 @@ Schema and module rules above already cover most of them; the rest:
 
 ## Migrations
 
-- The database schema lives in `src/db/schema.ts`. Migrations under `drizzle/` are generated from
-  it with `bun run db:generate`, never written or edited by hand, and never applied with
-  `drizzle-kit push`.
-- Migrations are append-only. Never edit, delete, or rename anything under `drizzle/`, not the
-  `.sql` files, not the `meta/` snapshots. To change the schema, edit `src/db/schema.ts` and
-  generate a new migration. The one exception is `drizzle/meta/_journal.json`, which the
-  generator itself appends to.
+- The database schema lives in `packages/db/src/schema.ts`. Migrations under
+  `packages/db/drizzle/` are generated from it with `bun run db:generate`, which runs drizzle-kit
+  from the package (`bun run --cwd packages/db db:generate`, so `drizzle.config.ts` resolves its
+  paths from there), never written or edited by hand, and never applied with `drizzle-kit push`.
+- Migrations are append-only. Never edit, delete, or rename anything under `packages/db/drizzle/`,
+  not the `.sql` files, not the `meta/` snapshots. To change the schema, edit
+  `packages/db/src/schema.ts` and generate a new migration. The one exception is
+  `packages/db/drizzle/meta/_journal.json`, which the generator itself appends to.
 - CI enforces both rules: an edited migration fails the build, and so does a schema that does not
   match the committed migrations (`.github/workflows/migrations.yml`, `append-only` and
-  `schema-in-sync`). A third job, `checks`, runs `bun run check:fast`.
-- Applying migrations is deployment-owned: `bun run db:migrate` runs `src/db/migrate.ts`, whose
-  `program` reads `Config.databaseMigrationUrl` (`DATABASE_MIGRATION_URL`, not `DATABASE_URL`, so
-  a pooler url cannot be migrated by accident), builds `Database.make(url)` in a scope, and runs
-  `migrateDatabase` (`database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle"
-  }))`); it prints `database migrations applied` and fails with `DATABASE_MIGRATION_URL is not set`
+  `schema-in-sync`). The append-only diff runs without rename detection, so a file that arrives
+  under the folder is an addition and a rename out of it is a deletion; it has no skip path. A
+  third job, `checks`, runs `bun run check:fast`.
+- Applying migrations is deployment-owned: `bun run db:migrate` runs `packages/db/src/migrate.ts`,
+  whose `program` reads `Config.databaseMigrationUrl` (`DATABASE_MIGRATION_URL`, not
+  `DATABASE_URL`, so a pooler url cannot be migrated by accident), builds `Database.make(url)` in a
+  scope, and runs `migrateDatabase` (`database.run("migrate", (db) => migrate(db, {
+  migrationsFolder }))`, the folder beside the package's sources, resolved from the module rather
+  than the working directory); it prints `database migrations applied` and fails with
+  `DATABASE_MIGRATION_URL is not set`
   (a `.env` fills missing variables only; an empty value counts as unset). `bun run test:db:migrate`
   is that same program with `--env-file .env`, and `bun run prod:db:migrate` with
   `--env-file .prod-env`. Both drop an already-set `DATABASE_MIGRATION_URL` first, so the named

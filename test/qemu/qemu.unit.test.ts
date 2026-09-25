@@ -3,12 +3,12 @@ import { it } from "@effect/vitest";
 import { NodePath } from "@effect/platform-node";
 import { Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Log from "@oligarchy/log/log";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Args from "../../src/qemu/args.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
 import * as Client from "../../src/qmp/client.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeSocket from "../support/fake-qmp-socket.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
@@ -382,7 +382,7 @@ describe("Qemu.start unhappy path", () => {
   it.effect("surfaces a refused boot action as the DatabaseError itself", () =>
     Effect.gen(function* () {
       const { socket, qemu } = yield* fixture();
-      const refused = Errors.DatabaseError.make({
+      const refused = DbErrors.DatabaseError.make({
         operation: "startAction",
         message: "Failed query: insert into actions",
       });

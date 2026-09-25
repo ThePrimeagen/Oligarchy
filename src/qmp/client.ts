@@ -1,5 +1,6 @@
 import { Deferred, Effect, Result, Stream } from "effect";
 import type { Schema } from "effect";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Errors from "../shared/errors.ts";
@@ -15,8 +16,8 @@ export const COMMAND_TIMEOUT_MS = 30_000;
 // front); the returned close records the outcome when the reply lands.
 export type Close = (
   outcome: Domain.QmpExchangeOutcome,
-) => Effect.Effect<void, Errors.DatabaseError>;
-export type Recorder = (command: Domain.QmpCommand) => Effect.Effect<Close, Errors.DatabaseError>;
+) => Effect.Effect<void, DbErrors.DatabaseError>;
+export type Recorder = (command: Domain.QmpCommand) => Effect.Effect<Close, DbErrors.DatabaseError>;
 
 type WithoutId<Command> = Command extends { readonly id: number } ? Omit<Command, "id"> : never;
 // A command before the client numbers it.
@@ -26,7 +27,7 @@ export type ExecuteError =
   | Errors.QmpError
   | Errors.QmpTimeout
   | Errors.QmpClosed
-  | Errors.DatabaseError;
+  | DbErrors.DatabaseError;
 
 export type QmpClient = {
   readonly execute: (

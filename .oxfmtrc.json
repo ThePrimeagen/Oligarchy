@@ -10,7 +10,7 @@
   "ignorePatterns": [
     "**/node_modules/**",
     "**/.wrangler/**",
-    "drizzle/**",
+    "packages/db/drizzle/**",
     "public/**",
     "prompts/**",
     "**/*.md",

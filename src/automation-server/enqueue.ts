@@ -1,9 +1,9 @@
 import { Effect, Option } from "effect";
-import * as Automation from "../db/automation.ts";
-import * as Tests from "../db/tests.ts";
-import * as Errors from "../shared/errors.ts";
+import * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Tests from "@oligarchy/db/tests";
 
-const isDuplicateJob = (error: Errors.DatabaseError): boolean =>
+const isDuplicateJob = (error: DbErrors.DatabaseError): boolean =>
   String(error.cause).includes("duplicate key");
 
 // Automation Needed is a drive, unless this result is the mint install: that job is a

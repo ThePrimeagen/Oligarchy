@@ -19,15 +19,16 @@ import {
   Stream,
   Tracer,
 } from "effect";
+import * as Actions from "@oligarchy/db/actions";
+import * as DebugLogs from "@oligarchy/db/debug-logs";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as SessionStore from "@oligarchy/db/sessions";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Domain from "@oligarchy/shared/domain";
-import * as Actions from "../db/actions.ts";
-import * as DebugLogs from "../db/debug-logs.ts";
-import * as SessionStore from "../db/sessions.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as Iso from "../qemu/iso.ts";
 import * as Keys from "../qemu/keys.ts";
@@ -192,7 +193,7 @@ export const Shutdown = Context.Reference<Shutdown>("@oligarchy/qemu-server/sess
   }),
 });
 
-const isDatabaseError = Schema.is(Errors.DatabaseError);
+const isDatabaseError = Schema.is(DbErrors.DatabaseError);
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>
@@ -464,7 +465,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
       automation: boolean,
     ): Effect.Effect<
       Qemu.QemuHandle,
-      Errors.QemuStartError | Errors.IsoError | Errors.DatabaseError
+      Errors.QemuStartError | Errors.IsoError | DbErrors.DatabaseError
     > =>
       Effect.gen(function* () {
         // Checked before anything else: a wrong disk path must not cost an iso download, and it
@@ -1229,7 +1230,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // the sweep
     // -------------------------------------------------------------------------
 
-    const timeOut = (live: LiveSession): Effect.Effect<void, Errors.DatabaseError> =>
+    const timeOut = (live: LiveSession): Effect.Effect<void, DbErrors.DatabaseError> =>
       Effect.gen(function* () {
         const captured = yield* captureDebugLog(live);
         // The kill already destroyed the socket and signalled QEMU, so still close the record.
@@ -1352,7 +1353,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     const drainOne = (
       live: LiveSession,
       reason: string,
-    ): Effect.Effect<void, Errors.DatabaseError> =>
+    ): Effect.Effect<void, DbErrors.DatabaseError> =>
       Effect.gen(function* () {
         const status = yield* Ref.make<Domain.SessionEndStatus>("errored");
         yield* Effect.gen(function* () {
@@ -1419,7 +1420,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     selfUrl?: string,
   ): Layer.Layer<
     Sessions,
-    Errors.DatabaseError,
+    DbErrors.DatabaseError,
     | Qemu.Qemu
     | Iso.Iso
     | Minted.Minted

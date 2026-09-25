@@ -2,17 +2,17 @@ import { randomUUID } from "node:crypto";
 import { Client as PgClient } from "pg";
 import { describe, inject } from "vitest";
 import { Layer, Redacted } from "effect";
-import * as Actions from "../../src/db/actions.ts";
-import * as Client from "../../src/db/client.ts";
-import * as DebugLogs from "../../src/db/debug-logs.ts";
-import * as Diagnosis from "../../src/db/diagnosis.ts";
-import * as Logs from "../../src/db/logs.ts";
-import * as ProcessStats from "../../src/db/process-stats.ts";
-import * as Servers from "../../src/db/servers.ts";
-import * as SetupRequests from "../../src/db/setup-requests.ts";
-import * as Sessions from "../../src/db/sessions.ts";
-import * as Automation from "../../src/db/automation.ts";
-import * as Tests from "../../src/db/tests.ts";
+import * as Actions from "@oligarchy/db/actions";
+import * as Automation from "@oligarchy/db/automation";
+import * as Client from "@oligarchy/db/client";
+import * as DebugLogs from "@oligarchy/db/debug-logs";
+import * as Diagnosis from "@oligarchy/db/diagnosis";
+import * as Logs from "@oligarchy/db/logs";
+import * as ProcessStats from "@oligarchy/db/process-stats";
+import * as Servers from "@oligarchy/db/servers";
+import * as Sessions from "@oligarchy/db/sessions";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
+import * as Tests from "@oligarchy/db/tests";
 
 const withDatabase = (url: string, name: string): string => {
   const next = new URL(url);

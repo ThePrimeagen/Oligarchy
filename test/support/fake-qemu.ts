@@ -1,5 +1,6 @@
 import { Cause, Deferred, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { PlatformError } from "effect";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Contract from "@oligarchy/routes/contract";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Iso from "../../src/qemu/iso.ts";
@@ -14,7 +15,7 @@ export type ExchangeError =
   | Errors.QmpError
   | Errors.QmpTimeout
   | Errors.QmpClosed
-  | Errors.DatabaseError;
+  | DbErrors.DatabaseError;
 
 export type Call =
   | { readonly _tag: "prepare"; readonly id: string; readonly source: Qemu.DiskSource }
@@ -50,7 +51,7 @@ export type Script = {
   // Runs once the handle's release is registered and before the handshake is recorded.
   readonly boot?: (
     input: StartInput,
-  ) => Effect.Effect<void, Errors.QemuStartError | Errors.DatabaseError>;
+  ) => Effect.Effect<void, Errors.QemuStartError | DbErrors.DatabaseError>;
   // The handle's release: leaving the session scope. `Effect.die` scripts a failing stop.
   readonly stop?: (id: string) => Effect.Effect<void>;
   // One send-key exchange per chord; the first failure stops the run.
@@ -105,7 +106,7 @@ const exchange = <A, E extends ExchangeError | PlatformError.PlatformError>(
   record: Qmp.Recorder,
   command: Domain.QmpCommand,
   work: Effect.Effect<A, E>,
-): Effect.Effect<A, E | Errors.DatabaseError> =>
+): Effect.Effect<A, E | DbErrors.DatabaseError> =>
   Effect.gen(function* () {
     const close = yield* record(command);
     const exit = yield* Effect.exit(work);

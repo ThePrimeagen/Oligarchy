@@ -6,30 +6,13 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, it } from "vitest";
+import * as DbSchema from "@oligarchy/db/schema";
 import { app, scheduled } from "../../src/dashboard/dashboard.tsx";
-import {
-  actions,
-  agentRuns,
-  agentServers,
-  automationJobs,
-  debugLogs,
-  images,
-  logs,
-  postRunDiagnosis,
-  postRunErrorTypes,
-  processStats,
-  servers,
-  sessionServers,
-  sessions,
-  testDefinitions,
-  testResults,
-  testRuns,
-} from "../../src/db/schema.ts";
 import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
 const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
-const SCHEMA = fileURLToPath(new URL("../../src/db/schema.ts", import.meta.url));
+const SCHEMA = fileURLToPath(new URL("../../packages/db/src/schema.ts", import.meta.url));
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REFUSED_URL = `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`;
 const SEEDED_SESSION_ID = "11111111-1111-4111-8111-111111111111";
@@ -208,7 +191,7 @@ console.log(JSON.stringify(counted));
     const qemu = `proc-qemu-${randomUUID().slice(0, 8)}`;
     const auto = `proc-auto-${randomUUID().slice(0, 8)}`;
     await seed(dbUrl, async (db) => {
-      await db.insert(processStats).values([
+      await db.insert(DbSchema.processStats).values([
         {
           name: qemu,
           type: "qemu",
@@ -256,7 +239,7 @@ console.log(rows.map((row) => [row.name, row.type, row.jobs, row.memoryBytes, ro
     const qemu = `series-qemu-${randomUUID().slice(0, 8)}`;
     const auto = `series-auto-${randomUUID().slice(0, 8)}`;
     await seed(dbUrl, async (db) => {
-      await db.insert(processStats).values([
+      await db.insert(DbSchema.processStats).values([
         ...Array.from({ length: 61 }, (_, index) => ({
           name: qemu,
           type: "qemu" as const,
@@ -435,10 +418,10 @@ const wordingsOf = async (databaseUrl: string, name: string): Promise<ReadonlyAr
   await client.connect();
   try {
     const rows = await drizzle(client)
-      .select({ instruction: testDefinitions.instruction })
-      .from(testDefinitions)
-      .where(eq(testDefinitions.name, name))
-      .orderBy(testDefinitions.id);
+      .select({ instruction: DbSchema.testDefinitions.instruction })
+      .from(DbSchema.testDefinitions)
+      .where(eq(DbSchema.testDefinitions.name, name))
+      .orderBy(DbSchema.testDefinitions.id);
     return rows.map((row) => row.instruction);
   } finally {
     await client.end();
@@ -464,7 +447,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions page unhappy path", () => {
 describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
   it("saves a changed wording as the next version and returns to the name", async () => {
     await seed(dbUrl, async (db) => {
-      await db.insert(testDefinitions).values([
+      await db.insert(DbSchema.testDefinitions).values([
         { name: "wide-save", description: "d", instruction: "first", proof: "p" },
         { name: "wide-save", description: "d", instruction: "second", proof: "p" },
       ]);
@@ -482,7 +465,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
   it("saves a wording that changes one field only (happy)", async () => {
     await seed(dbUrl, async (db) => {
       await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values({ name: "wide-one-field", description: "d", instruction: "i", proof: "p" });
     });
     const saved = await postForm(
@@ -498,7 +481,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit happy path", () => {
 describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
   it("refuses a wording identical to the newest: nothing is written", async () => {
     await seed(dbUrl, async (db) => {
-      await db.insert(testDefinitions).values({
+      await db.insert(DbSchema.testDefinitions).values({
         name: "wide-same",
         description: "d",
         instruction: "i\nover two lines",
@@ -518,7 +501,7 @@ describe.skipIf(dbUrl === "")("dashboard/definitions edit unhappy path", () => {
   it("refuses an empty field: nothing is written", async () => {
     await seed(dbUrl, async (db) => {
       await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values({ name: "wide-empty", description: "d", instruction: "i", proof: "p" });
     });
     const empty = await postForm(
@@ -629,7 +612,9 @@ const registered = async (
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    return await drizzle(client).select({ url: servers.url, type: servers.type }).from(servers);
+    return await drizzle(client)
+      .select({ url: DbSchema.servers.url, type: DbSchema.servers.type })
+      .from(DbSchema.servers);
   } finally {
     await client.end();
   }
@@ -680,8 +665,8 @@ describe.skipIf(dbUrl === "")("dashboard/servers page unhappy path", () => {
 type QueuedJob = {
   // null for a result nobody has ticketed yet.
   readonly ticket: string | null;
-  readonly action: (typeof automationJobs.$inferInsert)["action"];
-  readonly status: (typeof automationJobs.$inferInsert)["status"];
+  readonly action: (typeof DbSchema.automationJobs.$inferInsert)["action"];
+  readonly status: (typeof DbSchema.automationJobs.$inferInsert)["status"];
   readonly reason?: string;
   readonly queuedSecondsAgo: number;
   readonly startedSecondsAgo?: number;
@@ -699,13 +684,13 @@ const seedQueue = async (
   name: string,
   jobs: ReadonlyArray<QueuedJob>,
 ): Promise<void> => {
-  await db.delete(automationJobs);
+  await db.delete(DbSchema.automationJobs);
   const [definition] = await db
-    .insert(testDefinitions)
+    .insert(DbSchema.testDefinitions)
     .values({ name, description: "d", instruction: "i", proof: "p" })
-    .returning({ id: testDefinitions.id });
+    .returning({ id: DbSchema.testDefinitions.id });
   const runs = await db
-    .insert(testRuns)
+    .insert(DbSchema.testRuns)
     .values(
       jobs.map((_, index) => ({
         name: `${name} ${String(index)}`,
@@ -713,9 +698,9 @@ const seedQueue = async (
         serverUrl: "http://127.0.0.1:42069",
       })),
     )
-    .returning({ id: testRuns.id });
+    .returning({ id: DbSchema.testRuns.id });
   const results = await db
-    .insert(testResults)
+    .insert(DbSchema.testResults)
     .values(
       jobs.map((job, index) => ({
         runId: runs[index].id,
@@ -723,8 +708,8 @@ const seedQueue = async (
         linearId: job.ticket,
       })),
     )
-    .returning({ id: testResults.id });
-  await db.insert(automationJobs).values(
+    .returning({ id: DbSchema.testResults.id });
+  await db.insert(DbSchema.automationJobs).values(
     jobs.map((job, index) => ({
       resultId: results[index].id,
       action: job.action,
@@ -879,13 +864,13 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
   it("lists the three newest suites, newest first, each with how many passed and failed and completed once every result has run", async () => {
     const inserted = await seed(dbUrl, async (db) => {
       const definitions = await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values([
           { name: "suite-latest-a", description: "d", instruction: "i", proof: "p" },
           { name: "suite-latest-b", description: "d", instruction: "i", proof: "p" },
           { name: "suite-latest-c", description: "d", instruction: "i", proof: "p" },
         ])
-        .returning({ id: testDefinitions.id });
+        .returning({ id: DbSchema.testDefinitions.id });
       const [first, second, third] = definitions;
       if (first === undefined || second === undefined || third === undefined) {
         throw new Error("suite-latest definitions were not inserted");
@@ -900,7 +885,7 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
       // Started ahead of every run the other tests left, so these four are the newest and the
       // first of them is the one the three leave out.
       const runs = await db
-        .insert(testRuns)
+        .insert(DbSchema.testRuns)
         .values([
           run("suite-latest-oldest", 60, "pending"),
           // The run row still says running. The results have all closed, so it is completed.
@@ -908,7 +893,7 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
           run("suite-latest-open", 180, "pending"),
           run("suite-latest-stopped", 240, "pending"),
         ])
-        .returning({ id: testRuns.id, name: testRuns.name });
+        .returning({ id: DbSchema.testRuns.id, name: DbSchema.testRuns.name });
       const runId = (name: string): string => {
         const found = runs.find((row) => row.name === name);
         if (found === undefined) {
@@ -916,7 +901,7 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
         }
         return found.id;
       };
-      await db.insert(testResults).values([
+      await db.insert(DbSchema.testResults).values([
         { runId: runId("suite-latest-oldest"), definitionId: first.id, status: "passed" },
         { runId: runId("suite-latest-done"), definitionId: first.id, status: "passed" },
         { runId: runId("suite-latest-done"), definitionId: second.id, status: "passed" },
@@ -952,9 +937,13 @@ for (const suite of queue.suites) {
       ]);
     } finally {
       await seed(dbUrl, async (db) => {
-        await db.delete(testResults).where(inArray(testResults.runId, inserted.runIds));
-        await db.delete(testRuns).where(inArray(testRuns.id, inserted.runIds));
-        await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+        await db
+          .delete(DbSchema.testResults)
+          .where(inArray(DbSchema.testResults.runId, inserted.runIds));
+        await db.delete(DbSchema.testRuns).where(inArray(DbSchema.testRuns.id, inserted.runIds));
+        await db
+          .delete(DbSchema.testDefinitions)
+          .where(inArray(DbSchema.testDefinitions.id, inserted.definitionIds));
       });
     }
   });
@@ -992,28 +981,28 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
   it("aborts the results still open and their jobs, and leaves a result that already passed", async () => {
     const inserted = await seed(dbUrl, async (db) => {
       const [definition] = await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values({ name: "suite-close", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
+        .returning({ id: DbSchema.testDefinitions.id });
       const [run] = await db
-        .insert(testRuns)
+        .insert(DbSchema.testRuns)
         .values({
           name: "suite-close",
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
           status: "pending",
         })
-        .returning({ id: testRuns.id });
+        .returning({ id: DbSchema.testRuns.id });
       const [second] = await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values({ name: "suite-close-b", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
+        .returning({ id: DbSchema.testDefinitions.id });
       const [third] = await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values({ name: "suite-close-c", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
+        .returning({ id: DbSchema.testDefinitions.id });
       const results = await db
-        .insert(testResults)
+        .insert(DbSchema.testResults)
         .values([
           {
             runId: run.id,
@@ -1029,7 +1018,7 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
           },
           { runId: run.id, definitionId: third.id, status: "passed", linearId: "CLS-OK" },
         ])
-        .returning({ id: testResults.id, status: testResults.status });
+        .returning({ id: DbSchema.testResults.id, status: DbSchema.testResults.status });
       const runningResult = results.find((row) => row.status === "running");
       const pendingResult = results.find((row) => row.status === "pending");
       const passedResult = results.find((row) => row.status === "passed");
@@ -1040,7 +1029,7 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       ) {
         throw new Error("suite-close results were not inserted");
       }
-      await db.insert(automationJobs).values([
+      await db.insert(DbSchema.automationJobs).values([
         { resultId: runningResult.id, action: "drive", status: "running" },
         { resultId: pendingResult.id, action: "drive", status: "pending" },
         { resultId: passedResult.id, action: "diagnose", status: "pending" },
@@ -1055,25 +1044,28 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
     try {
       expect(await postAbortSuite(dbUrl, inserted.runId)).toBe(200);
       const stored = await seed(dbUrl, async (db) => {
-        const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
+        const [run] = await db
+          .select()
+          .from(DbSchema.testRuns)
+          .where(eq(DbSchema.testRuns.id, inserted.runId));
         const results = await db
           .select({
-            id: testResults.id,
-            status: testResults.status,
-            reason: testResults.reason,
-            finishedAt: testResults.finishedAt,
+            id: DbSchema.testResults.id,
+            status: DbSchema.testResults.status,
+            reason: DbSchema.testResults.reason,
+            finishedAt: DbSchema.testResults.finishedAt,
           })
-          .from(testResults)
-          .where(eq(testResults.runId, inserted.runId));
+          .from(DbSchema.testResults)
+          .where(eq(DbSchema.testResults.runId, inserted.runId));
         const jobs = await db
           .select({
-            resultId: automationJobs.resultId,
-            status: automationJobs.status,
-            reason: automationJobs.reason,
-            finishedAt: automationJobs.finishedAt,
+            resultId: DbSchema.automationJobs.resultId,
+            status: DbSchema.automationJobs.status,
+            reason: DbSchema.automationJobs.reason,
+            finishedAt: DbSchema.automationJobs.finishedAt,
           })
-          .from(automationJobs)
-          .where(inArray(automationJobs.resultId, inserted.resultIds));
+          .from(DbSchema.automationJobs)
+          .where(inArray(DbSchema.automationJobs.resultId, inserted.resultIds));
         return { run, results, jobs };
       });
       expect(stored.run?.status).toBe("aborted");
@@ -1104,10 +1096,14 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       }
     } finally {
       await seed(dbUrl, async (db) => {
-        await db.delete(automationJobs).where(inArray(automationJobs.resultId, inserted.resultIds));
-        await db.delete(testResults).where(eq(testResults.runId, inserted.runId));
-        await db.delete(testRuns).where(eq(testRuns.id, inserted.runId));
-        await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+        await db
+          .delete(DbSchema.automationJobs)
+          .where(inArray(DbSchema.automationJobs.resultId, inserted.resultIds));
+        await db.delete(DbSchema.testResults).where(eq(DbSchema.testResults.runId, inserted.runId));
+        await db.delete(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, inserted.runId));
+        await db
+          .delete(DbSchema.testDefinitions)
+          .where(inArray(DbSchema.testDefinitions.id, inserted.definitionIds));
       });
     }
   });
@@ -1115,32 +1111,35 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
   it("leaves a suite whose results have all closed", async () => {
     const inserted = await seed(dbUrl, async (db) => {
       const [definition] = await db
-        .insert(testDefinitions)
+        .insert(DbSchema.testDefinitions)
         .values({ name: "suite-close-done", description: "d", instruction: "i", proof: "p" })
-        .returning({ id: testDefinitions.id });
+        .returning({ id: DbSchema.testDefinitions.id });
       const [run] = await db
-        .insert(testRuns)
+        .insert(DbSchema.testRuns)
         .values({
           name: "suite-close-done",
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
           status: "pending",
         })
-        .returning({ id: testRuns.id });
+        .returning({ id: DbSchema.testRuns.id });
       const [result] = await db
-        .insert(testResults)
+        .insert(DbSchema.testResults)
         .values({ runId: run.id, definitionId: definition.id, status: "passed" })
-        .returning({ id: testResults.id });
+        .returning({ id: DbSchema.testResults.id });
       return { runId: run.id, definitionId: definition.id, resultId: result.id };
     });
     try {
       expect(await postAbortSuite(dbUrl, inserted.runId)).toBe(200);
       const stored = await seed(dbUrl, async (db) => {
-        const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
+        const [run] = await db
+          .select()
+          .from(DbSchema.testRuns)
+          .where(eq(DbSchema.testRuns.id, inserted.runId));
         const [result] = await db
-          .select({ status: testResults.status })
-          .from(testResults)
-          .where(eq(testResults.id, inserted.resultId));
+          .select({ status: DbSchema.testResults.status })
+          .from(DbSchema.testResults)
+          .where(eq(DbSchema.testResults.id, inserted.resultId));
         return { run, result };
       });
       expect(stored.run?.status).toBe("pending");
@@ -1148,9 +1147,11 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
       expect(stored.result?.status).toBe("passed");
     } finally {
       await seed(dbUrl, async (db) => {
-        await db.delete(testResults).where(eq(testResults.runId, inserted.runId));
-        await db.delete(testRuns).where(eq(testRuns.id, inserted.runId));
-        await db.delete(testDefinitions).where(eq(testDefinitions.id, inserted.definitionId));
+        await db.delete(DbSchema.testResults).where(eq(DbSchema.testResults.runId, inserted.runId));
+        await db.delete(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, inserted.runId));
+        await db
+          .delete(DbSchema.testDefinitions)
+          .where(eq(DbSchema.testDefinitions.id, inserted.definitionId));
       });
     }
   });
@@ -1305,13 +1306,18 @@ const jobByTicket = async (
   try {
     const [row] = await drizzle(client)
       .select({
-        status: automationJobs.status,
-        reason: automationJobs.reason,
-        finishedAt: automationJobs.finishedAt,
+        status: DbSchema.automationJobs.status,
+        reason: DbSchema.automationJobs.reason,
+        finishedAt: DbSchema.automationJobs.finishedAt,
       })
-      .from(automationJobs)
-      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
-      .where(and(eq(testResults.linearId, ticket), eq(automationJobs.action, action)));
+      .from(DbSchema.automationJobs)
+      .innerJoin(
+        DbSchema.testResults,
+        eq(DbSchema.testResults.id, DbSchema.automationJobs.resultId),
+      )
+      .where(
+        and(eq(DbSchema.testResults.linearId, ticket), eq(DbSchema.automationJobs.action, action)),
+      );
     if (row === undefined) {
       throw new Error(`no ${action} job for ${ticket}`);
     }
@@ -1325,20 +1331,20 @@ const jobByTicket = async (
 // ticket is in between the driver moving it to Needs Review and the drive closing. seedQueue gives
 // every job its own result, so this pair is seeded onto one.
 const seedSiblings = async (db: NodePgDatabase, name: string, ticket: string): Promise<void> => {
-  await db.delete(automationJobs);
+  await db.delete(DbSchema.automationJobs);
   const [definition] = await db
-    .insert(testDefinitions)
+    .insert(DbSchema.testDefinitions)
     .values({ name, description: "d", instruction: "i", proof: "p" })
-    .returning({ id: testDefinitions.id });
+    .returning({ id: DbSchema.testDefinitions.id });
   const [run] = await db
-    .insert(testRuns)
+    .insert(DbSchema.testRuns)
     .values({ name, iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" })
-    .returning({ id: testRuns.id });
+    .returning({ id: DbSchema.testRuns.id });
   const [result] = await db
-    .insert(testResults)
+    .insert(DbSchema.testResults)
     .values({ runId: run.id, definitionId: definition.id, linearId: ticket })
-    .returning({ id: testResults.id });
-  await db.insert(automationJobs).values([
+    .returning({ id: DbSchema.testResults.id });
+  await db.insert(DbSchema.automationJobs).values([
     {
       resultId: result.id,
       action: "drive",
@@ -2165,31 +2171,31 @@ const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<
   const sessionId = randomUUID();
   const agentId = `PRUNE-${tag}`;
   const url = `http://prune-${tag}:42069`;
-  await db.insert(sessions).values({
+  await db.insert(DbSchema.sessions).values({
     id: sessionId,
     config: { iso: "x" },
     status: "succeeded",
     startedAt: at,
     endedAt: at,
   });
-  await db.insert(agentRuns).values({ agentId, sessionId, startedAt: at, endedAt: at });
+  await db.insert(DbSchema.agentRuns).values({ agentId, sessionId, startedAt: at, endedAt: at });
   const [, last] = await db
-    .insert(actions)
+    .insert(DbSchema.actions)
     .values([
       { sessionId, agentId, request: { name: "click" }, state: "completed", createdAt: at },
       { sessionId, agentId, request: { name: "screenshot" }, state: "completed", createdAt: at },
     ])
-    .returning({ id: actions.id });
-  await db.insert(images).values({ actionId: last.id, data: Buffer.from("png") });
-  await db.insert(debugLogs).values({
+    .returning({ id: DbSchema.actions.id });
+  await db.insert(DbSchema.images).values({ actionId: last.id, data: Buffer.from("png") });
+  await db.insert(DbSchema.debugLogs).values({
     sessionId,
     sources: { serial: "", proxy: "", qemu: "", actions: "" },
     createdAt: at,
   });
   await db
-    .insert(postRunErrorTypes)
+    .insert(DbSchema.postRunErrorTypes)
     .values({ key: `prune-${tag}`, description: "d", createdAt: at });
-  await db.insert(postRunDiagnosis).values({
+  await db.insert(DbSchema.postRunDiagnosis).values({
     sessionId,
     verdict: "failed",
     errorType: `prune-${tag}`,
@@ -2197,13 +2203,13 @@ const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<
     model: "m",
     createdAt: at,
   });
-  await db.insert(sessionServers).values({ sessionId, serverUrl: url, createdAt: at });
+  await db.insert(DbSchema.sessionServers).values({ sessionId, serverUrl: url, createdAt: at });
   const [definition] = await db
-    .insert(testDefinitions)
+    .insert(DbSchema.testDefinitions)
     .values({ name: `prune-${tag}`, description: "d", instruction: "i", proof: "p", createdAt: at })
-    .returning({ id: testDefinitions.id });
+    .returning({ id: DbSchema.testDefinitions.id });
   const [run] = await db
-    .insert(testRuns)
+    .insert(DbSchema.testRuns)
     .values({
       name: `prune ${tag}`,
       iso: "https://example.com/omarchy.iso",
@@ -2212,9 +2218,9 @@ const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<
       startedAt: at,
       endedAt: at,
     })
-    .returning({ id: testRuns.id });
+    .returning({ id: DbSchema.testRuns.id });
   const [result] = await db
-    .insert(testResults)
+    .insert(DbSchema.testResults)
     .values({
       runId: run.id,
       definitionId: definition.id,
@@ -2225,8 +2231,8 @@ const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<
       createdAt: at,
       finishedAt: at,
     })
-    .returning({ id: testResults.id });
-  await db.insert(automationJobs).values({
+    .returning({ id: DbSchema.testResults.id });
+  await db.insert(DbSchema.automationJobs).values({
     resultId: result.id,
     action: "drive",
     status: "succeeded",
@@ -2234,8 +2240,10 @@ const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<
     startedAt: at,
     finishedAt: at,
   });
-  await db.insert(logs).values({ location: sessionId, agentId, text: "line", createdAt: at });
-  await db.insert(processStats).values({
+  await db
+    .insert(DbSchema.logs)
+    .values({ location: sessionId, agentId, text: "line", createdAt: at });
+  await db.insert(DbSchema.processStats).values({
     name: `prune-${tag}`,
     type: "qemu",
     jobs: 0,
@@ -2243,8 +2251,8 @@ const seedAged = async (db: NodePgDatabase, tag: string, days: number): Promise<
     cpuPercent: 0,
     reportedAt: at,
   });
-  await db.insert(agentServers).values({ agentId, serverUrl: url, createdAt: at });
-  await db.insert(servers).values({ url, createdAt: at });
+  await db.insert(DbSchema.agentServers).values({ agentId, serverUrl: url, createdAt: at });
+  await db.insert(DbSchema.servers).values({ url, createdAt: at });
   return { tag, sessionId, agentId, imageActionId: last.id, runId: run.id, resultId: result.id };
 };
 
@@ -2269,28 +2277,46 @@ type AgedRows = {
 
 // What is left of one seedAged, table by table.
 const remaining = async (db: NodePgDatabase, aged: Aged): Promise<AgedRows> => ({
-  sessions: await db.$count(sessions, eq(sessions.id, aged.sessionId)),
-  agentRuns: await db.$count(agentRuns, eq(agentRuns.agentId, aged.agentId)),
-  actions: await db.$count(actions, eq(actions.sessionId, aged.sessionId)),
-  images: await db.$count(images, eq(images.actionId, aged.imageActionId)),
-  debugLogs: await db.$count(debugLogs, eq(debugLogs.sessionId, aged.sessionId)),
+  sessions: await db.$count(DbSchema.sessions, eq(DbSchema.sessions.id, aged.sessionId)),
+  agentRuns: await db.$count(DbSchema.agentRuns, eq(DbSchema.agentRuns.agentId, aged.agentId)),
+  actions: await db.$count(DbSchema.actions, eq(DbSchema.actions.sessionId, aged.sessionId)),
+  images: await db.$count(DbSchema.images, eq(DbSchema.images.actionId, aged.imageActionId)),
+  debugLogs: await db.$count(DbSchema.debugLogs, eq(DbSchema.debugLogs.sessionId, aged.sessionId)),
   postRunDiagnosis: await db.$count(
-    postRunDiagnosis,
-    eq(postRunDiagnosis.sessionId, aged.sessionId),
+    DbSchema.postRunDiagnosis,
+    eq(DbSchema.postRunDiagnosis.sessionId, aged.sessionId),
   ),
-  sessionServers: await db.$count(sessionServers, eq(sessionServers.sessionId, aged.sessionId)),
-  testRuns: await db.$count(testRuns, eq(testRuns.id, aged.runId)),
-  testResults: await db.$count(testResults, eq(testResults.runId, aged.runId)),
-  automationJobs: await db.$count(automationJobs, eq(automationJobs.resultId, aged.resultId)),
-  logs: await db.$count(logs, eq(logs.agentId, aged.agentId)),
-  processStats: await db.$count(processStats, eq(processStats.name, `prune-${aged.tag}`)),
-  agentServers: await db.$count(agentServers, eq(agentServers.agentId, aged.agentId)),
-  testDefinitions: await db.$count(testDefinitions, eq(testDefinitions.name, `prune-${aged.tag}`)),
+  sessionServers: await db.$count(
+    DbSchema.sessionServers,
+    eq(DbSchema.sessionServers.sessionId, aged.sessionId),
+  ),
+  testRuns: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.id, aged.runId)),
+  testResults: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.runId, aged.runId)),
+  automationJobs: await db.$count(
+    DbSchema.automationJobs,
+    eq(DbSchema.automationJobs.resultId, aged.resultId),
+  ),
+  logs: await db.$count(DbSchema.logs, eq(DbSchema.logs.agentId, aged.agentId)),
+  processStats: await db.$count(
+    DbSchema.processStats,
+    eq(DbSchema.processStats.name, `prune-${aged.tag}`),
+  ),
+  agentServers: await db.$count(
+    DbSchema.agentServers,
+    eq(DbSchema.agentServers.agentId, aged.agentId),
+  ),
+  testDefinitions: await db.$count(
+    DbSchema.testDefinitions,
+    eq(DbSchema.testDefinitions.name, `prune-${aged.tag}`),
+  ),
   postRunErrorTypes: await db.$count(
-    postRunErrorTypes,
-    eq(postRunErrorTypes.key, `prune-${aged.tag}`),
+    DbSchema.postRunErrorTypes,
+    eq(DbSchema.postRunErrorTypes.key, `prune-${aged.tag}`),
   ),
-  servers: await db.$count(servers, eq(servers.url, `http://prune-${aged.tag}:42069`)),
+  servers: await db.$count(
+    DbSchema.servers,
+    eq(DbSchema.servers.url, `http://prune-${aged.tag}:42069`),
+  ),
 });
 
 const SEEDED: AgedRows = {
@@ -2339,27 +2365,27 @@ const seedLinked = async (
   sessionDays: number,
 ): Promise<{ readonly sessionId: string; readonly runId: string; readonly resultId: string }> => {
   const sessionId = randomUUID();
-  await db.insert(sessions).values({
+  await db.insert(DbSchema.sessions).values({
     id: sessionId,
     config: { iso: "x" },
     status: "succeeded",
     startedAt: daysAgo(sessionDays),
   });
   const [definition] = await db
-    .insert(testDefinitions)
+    .insert(DbSchema.testDefinitions)
     .values({ name: `prune-${tag}`, description: "d", instruction: "i", proof: "p" })
-    .returning({ id: testDefinitions.id });
+    .returning({ id: DbSchema.testDefinitions.id });
   const [run] = await db
-    .insert(testRuns)
+    .insert(DbSchema.testRuns)
     .values({
       name: `prune ${tag}`,
       iso: "https://example.com/omarchy.iso",
       serverUrl: "http://127.0.0.1:42069",
       startedAt: daysAgo(runDays),
     })
-    .returning({ id: testRuns.id });
+    .returning({ id: DbSchema.testRuns.id });
   const [result] = await db
-    .insert(testResults)
+    .insert(DbSchema.testResults)
     .values({
       runId: run.id,
       definitionId: definition.id,
@@ -2368,9 +2394,9 @@ const seedLinked = async (
       model: "m",
       linearId: `PRUNE-${tag}`,
     })
-    .returning({ id: testResults.id });
+    .returning({ id: DbSchema.testResults.id });
   await db
-    .insert(automationJobs)
+    .insert(DbSchema.automationJobs)
     .values({ resultId: result.id, action: "drive", status: "succeeded" });
   return { sessionId, runId: run.id, resultId: result.id };
 };
@@ -2423,16 +2449,19 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
       sessions: 0,
     });
     const left = await seed(dbUrl, async (db) => ({
-      testRuns: await db.$count(testRuns, eq(testRuns.id, linked.runId)),
-      testResults: await db.$count(testResults, eq(testResults.id, linked.resultId)),
-      sessions: await db.$count(sessions, eq(sessions.id, linked.sessionId)),
+      testRuns: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.id, linked.runId)),
+      testResults: await db.$count(
+        DbSchema.testResults,
+        eq(DbSchema.testResults.id, linked.resultId),
+      ),
+      sessions: await db.$count(DbSchema.sessions, eq(DbSchema.sessions.id, linked.sessionId)),
     }));
     expect(left).toEqual({ testRuns: 0, testResults: 0, sessions: 1 });
   });
 
   it("runs as the Worker's scheduled handler: the old rows go and the cron resolves", async () => {
     await seed(dbUrl, async (db) => {
-      await db.insert(logs).values([
+      await db.insert(DbSchema.logs).values([
         { location: "server", agentId: "PRUNE-cron", text: "old", createdAt: daysAgo(8) },
         { location: "server", agentId: "PRUNE-cron", text: "kept", createdAt: daysAgo(6) },
       ]);
@@ -2448,7 +2477,10 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
       ),
     ).resolves.toBeUndefined();
     const texts = await seed(dbUrl, (db) =>
-      db.select({ text: logs.text }).from(logs).where(eq(logs.agentId, "PRUNE-cron")),
+      db
+        .select({ text: DbSchema.logs.text })
+        .from(DbSchema.logs)
+        .where(eq(DbSchema.logs.agentId, "PRUNE-cron")),
     );
     expect(texts).toEqual([{ text: "kept" }]);
   });
@@ -2460,7 +2492,7 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows unhappy path", () =
     // is refused by the foreign key. The whole sweep rolls back, the session's actions included.
     const held = await seed(dbUrl, async (db) => {
       const linked = await seedLinked(db, "held", 1, 8);
-      await db.insert(actions).values({
+      await db.insert(DbSchema.actions).values({
         sessionId: linked.sessionId,
         request: { name: "click" },
         createdAt: daysAgo(8),
@@ -2476,15 +2508,17 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows unhappy path", () =
     expect(refused.stderr).toMatch(/Failed query: delete from "sessions"/);
     expect(refused.stderr).toMatch(/violates foreign key constraint/);
     const untouched = await seed(dbUrl, async (db) => ({
-      actions: await db.$count(actions, eq(actions.sessionId, held.sessionId)),
-      sessions: await db.$count(sessions, eq(sessions.id, held.sessionId)),
+      actions: await db.$count(DbSchema.actions, eq(DbSchema.actions.sessionId, held.sessionId)),
+      sessions: await db.$count(DbSchema.sessions, eq(DbSchema.sessions.id, held.sessionId)),
     }));
     expect(untouched).toEqual({ actions: 1, sessions: 1 });
 
     await seed(dbUrl, async (db) => {
-      await db.delete(automationJobs).where(eq(automationJobs.resultId, held.resultId));
-      await db.delete(testResults).where(eq(testResults.id, held.resultId));
-      await db.delete(testRuns).where(eq(testRuns.id, held.runId));
+      await db
+        .delete(DbSchema.automationJobs)
+        .where(eq(DbSchema.automationJobs.resultId, held.resultId));
+      await db.delete(DbSchema.testResults).where(eq(DbSchema.testResults.id, held.resultId));
+      await db.delete(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, held.runId));
     });
     const swept = await runQuery(SWEEP, dbUrl);
     expect(swept.hung, "process did not exit: the pg client was not ended").toBe(false);
@@ -2492,8 +2526,8 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows unhappy path", () =
     expect(swept.code).toBe(0);
     expect(JSON.parse(swept.stdout)).toMatchObject({ sessions: 1, actions: 1 });
     const gone = await seed(dbUrl, async (db) => ({
-      actions: await db.$count(actions, eq(actions.sessionId, held.sessionId)),
-      sessions: await db.$count(sessions, eq(sessions.id, held.sessionId)),
+      actions: await db.$count(DbSchema.actions, eq(DbSchema.actions.sessionId, held.sessionId)),
+      sessions: await db.$count(DbSchema.sessions, eq(DbSchema.sessions.id, held.sessionId)),
     }));
     expect(gone).toEqual({ actions: 0, sessions: 0 });
   });

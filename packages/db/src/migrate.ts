@@ -5,9 +5,12 @@ import * as Env from "@oligarchy/env/run";
 import * as Render from "@oligarchy/log/render";
 import * as Client from "./client.ts";
 
+// The generated migrations live beside this package's sources, wherever the process was started.
+const MIGRATIONS = decodeURIComponent(new URL("../drizzle", import.meta.url).pathname);
+
 export const migrateDatabase = Effect.gen(function* () {
   const database = yield* Client.Database;
-  yield* database.run("migrate", (db) => migrate(db, { migrationsFolder: "drizzle" }));
+  yield* database.run("migrate", (db) => migrate(db, { migrationsFolder: MIGRATIONS }));
   yield* Console.log("database migrations applied");
 });
 

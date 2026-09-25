@@ -13,26 +13,9 @@ import {
 } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
-import {
-  actions,
-  agentRuns,
-  agentServers,
-  automationJobs,
-  debugLogs,
-  images,
-  logs,
-  postRunDiagnosis,
-  processStats,
-  servers,
-  sessionServers,
-  sessions,
-  testBasePrompts,
-  testDefinitions,
-  testResults,
-  testRuns,
-} from "../db/schema.ts";
+import * as DbSchema from "@oligarchy/db/schema";
 
-export type Session = typeof sessions.$inferSelect & {
+export type Session = typeof DbSchema.sessions.$inferSelect & {
   imageId: string | null;
   queriedAt: Date;
   // The definition the session's result ran, and which wording of it: null together when the
@@ -42,13 +25,13 @@ export type Session = typeof sessions.$inferSelect & {
   model: string | null;
 };
 
-export type TestDefinition = typeof testDefinitions.$inferSelect;
-export type TestBasePrompt = typeof testBasePrompts.$inferSelect;
+export type TestDefinition = typeof DbSchema.testDefinitions.$inferSelect;
+export type TestBasePrompt = typeof DbSchema.testBasePrompts.$inferSelect;
 
 // One server of the fleet with what it last said of itself, and the database's clock at the
 // read, so the page measures a heartbeat's age against the clock that stamped it.
 export type Server = Pick<
-  typeof servers.$inferSelect,
+  typeof DbSchema.servers.$inferSelect,
   "url" | "name" | "stats" | "generation" | "heartbeatAt"
 > & {
   readonly queriedAt: Date;
@@ -61,8 +44,8 @@ export type Server = Pick<
 export type AutomationJob = {
   readonly ticket: string | null;
   readonly test: string;
-  readonly action: (typeof automationJobs.$inferSelect)["action"];
-  readonly status: (typeof automationJobs.$inferSelect)["status"];
+  readonly action: (typeof DbSchema.automationJobs.$inferSelect)["action"];
+  readonly status: (typeof DbSchema.automationJobs.$inferSelect)["status"];
   readonly reason: string | null;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
@@ -120,7 +103,7 @@ const countOf = (
 // the page measures the report's age against the clock that stamped it.
 export type ProcessStat = {
   readonly name: string;
-  readonly type: (typeof processStats.$inferSelect)["type"];
+  readonly type: (typeof DbSchema.processStats.$inferSelect)["type"];
   readonly jobs: number;
   readonly memoryBytes: number;
   readonly cpuPercent: number;
@@ -164,7 +147,7 @@ export type DefinitionStat = {
 export type TestResultOutcome = {
   readonly definitionId: number;
   readonly model: string | null;
-  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly status: (typeof DbSchema.testResults.$inferSelect)["status"];
   readonly runId: string;
   readonly iso: string;
   readonly startedAt: Date;
@@ -250,7 +233,7 @@ export function definitionHistories(
   rows: ReadonlyArray<{
     readonly name: string;
     readonly id: string;
-    readonly status: (typeof testResults.$inferSelect)["status"];
+    readonly status: (typeof DbSchema.testResults.$inferSelect)["status"];
     readonly at: number;
     readonly reason: string | null;
     readonly model: string | null;
@@ -477,37 +460,37 @@ export function listSessions(connectionString: string): Promise<Session[]> {
   return withDatabase(connectionString, (db) => {
     const recentSessions = db
       .select({
-        id: sessions.id,
-        config: sessions.config,
-        status: sessions.status,
-        reason: sessions.reason,
-        startedAt: sessions.startedAt,
-        endedAt: sessions.endedAt,
+        id: DbSchema.sessions.id,
+        config: DbSchema.sessions.config,
+        status: DbSchema.sessions.status,
+        reason: DbSchema.sessions.reason,
+        startedAt: DbSchema.sessions.startedAt,
+        endedAt: DbSchema.sessions.endedAt,
       })
-      .from(sessions)
-      .orderBy(desc(sessions.startedAt))
+      .from(DbSchema.sessions)
+      .orderBy(desc(DbSchema.sessions.startedAt))
       .limit(50)
       .as("recent_sessions");
     const latestImage = db
-      .select({ id: images.id })
-      .from(images)
-      .innerJoin(actions, eq(actions.id, images.actionId))
-      .where(eq(actions.sessionId, recentSessions.id))
-      .orderBy(desc(actions.id))
+      .select({ id: DbSchema.images.id })
+      .from(DbSchema.images)
+      .innerJoin(DbSchema.actions, eq(DbSchema.actions.id, DbSchema.images.actionId))
+      .where(eq(DbSchema.actions.sessionId, recentSessions.id))
+      .orderBy(desc(DbSchema.actions.id))
       .limit(1)
       .as("latest_image");
 
     // A wording's version is its place among its name's rows by id.
     const wordings = db
       .select({
-        id: testDefinitions.id,
-        name: testDefinitions.name,
+        id: DbSchema.testDefinitions.id,
+        name: DbSchema.testDefinitions.name,
         version:
-          sql<number>`row_number() over (partition by ${testDefinitions.name} order by ${testDefinitions.id})`
+          sql<number>`row_number() over (partition by ${DbSchema.testDefinitions.name} order by ${DbSchema.testDefinitions.id})`
             .mapWith(Number)
             .as("version"),
       })
-      .from(testDefinitions)
+      .from(DbSchema.testDefinitions)
       .as("wordings");
 
     // The database timestamp shown by the UI also keeps status reads out of Hyperdrive's query cache.
@@ -523,11 +506,11 @@ export function listSessions(connectionString: string): Promise<Session[]> {
         queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(recentSessions.startedAt),
         definitionName: wordings.name,
         definitionVersion: wordings.version,
-        model: testResults.model,
+        model: DbSchema.testResults.model,
       })
       .from(recentSessions)
-      .leftJoin(testResults, eq(testResults.sessionId, recentSessions.id))
-      .leftJoin(wordings, eq(wordings.id, testResults.definitionId))
+      .leftJoin(DbSchema.testResults, eq(DbSchema.testResults.sessionId, recentSessions.id))
+      .leftJoin(wordings, eq(wordings.id, DbSchema.testResults.definitionId))
       .leftJoinLateral(latestImage, sql`true`)
       .orderBy(desc(recentSessions.startedAt));
   });
@@ -537,11 +520,11 @@ export function getImage(connectionString: string, id: string): Promise<Buffer |
   return withDatabase(connectionString, async (db) => {
     const [row] = await db
       .select({
-        data: images.data,
+        data: DbSchema.images.data,
         queriedAt: sql`CURRENT_TIMESTAMP`,
       })
-      .from(images)
-      .where(eq(images.id, id));
+      .from(DbSchema.images)
+      .where(eq(DbSchema.images.id, id));
     return row?.data;
   });
 }
@@ -560,30 +543,33 @@ export function listDefinitionHistories(
   return withDatabase(connectionString, async (db) => {
     const rows = await db
       .select({
-        name: testDefinitions.name,
-        id: testResults.id,
-        status: testResults.status,
-        reason: testResults.reason,
-        model: testResults.model,
-        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
-          testResults.createdAt,
+        name: DbSchema.testDefinitions.name,
+        id: DbSchema.testResults.id,
+        status: DbSchema.testResults.status,
+        reason: DbSchema.testResults.reason,
+        model: DbSchema.testResults.model,
+        at: sql<Date>`coalesce(${DbSchema.testResults.finishedAt}, ${DbSchema.testResults.createdAt})`.mapWith(
+          DbSchema.testResults.createdAt,
         ),
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.testResults.createdAt),
       })
-      .from(testResults)
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
+      .from(DbSchema.testResults)
+      .innerJoin(
+        DbSchema.testDefinitions,
+        eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+      )
       .where(
         names === undefined
-          ? inArray(testResults.status, ["passed", "failed", "running"])
+          ? inArray(DbSchema.testResults.status, ["passed", "failed", "running"])
           : and(
-              inArray(testResults.status, ["passed", "failed", "running"]),
-              inArray(testDefinitions.name, [...names]),
+              inArray(DbSchema.testResults.status, ["passed", "failed", "running"]),
+              inArray(DbSchema.testDefinitions.name, [...names]),
             ),
       )
       .orderBy(
-        testDefinitions.name,
-        sql`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`,
-        testResults.createdAt,
+        DbSchema.testDefinitions.name,
+        sql`coalesce(${DbSchema.testResults.finishedAt}, ${DbSchema.testResults.createdAt})`,
+        DbSchema.testResults.createdAt,
       );
     return definitionHistories(
       rows.map((row) => ({
@@ -602,7 +588,7 @@ export function listDefinitionHistories(
 // rows by id, the same order the definitions page numbers. Screenshots and logs are empty together
 // when the result never opened a session. The clock keeps the page out of Hyperdrive's cache.
 export type TestLogLine = {
-  readonly level: (typeof logs.$inferSelect)["level"];
+  readonly level: (typeof DbSchema.logs.$inferSelect)["level"];
   readonly text: string;
   readonly at: Date;
 };
@@ -614,7 +600,7 @@ export type TestDump = {
   readonly description: string;
   readonly instruction: string;
   readonly proof: string;
-  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly status: (typeof DbSchema.testResults.$inferSelect)["status"];
   readonly reason: string | null;
   readonly model: string | null;
   readonly ticket: string | null;
@@ -628,32 +614,40 @@ export function readTestDump(connectionString: string, id: string): Promise<Test
   return withDatabase(connectionString, async (db) => {
     const [row] = await db
       .select({
-        id: testResults.id,
-        definitionId: testDefinitions.id,
-        name: testDefinitions.name,
-        description: testDefinitions.description,
-        instruction: testDefinitions.instruction,
-        proof: testDefinitions.proof,
-        status: testResults.status,
-        reason: testResults.reason,
-        model: testResults.model,
-        ticket: testResults.linearId,
-        sessionId: testResults.sessionId,
-        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
-          testResults.createdAt,
+        id: DbSchema.testResults.id,
+        definitionId: DbSchema.testDefinitions.id,
+        name: DbSchema.testDefinitions.name,
+        description: DbSchema.testDefinitions.description,
+        instruction: DbSchema.testDefinitions.instruction,
+        proof: DbSchema.testDefinitions.proof,
+        status: DbSchema.testResults.status,
+        reason: DbSchema.testResults.reason,
+        model: DbSchema.testResults.model,
+        ticket: DbSchema.testResults.linearId,
+        sessionId: DbSchema.testResults.sessionId,
+        at: sql<Date>`coalesce(${DbSchema.testResults.finishedAt}, ${DbSchema.testResults.createdAt})`.mapWith(
+          DbSchema.testResults.createdAt,
         ),
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.testResults.createdAt),
       })
-      .from(testResults)
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
-      .where(eq(testResults.id, id));
+      .from(DbSchema.testResults)
+      .innerJoin(
+        DbSchema.testDefinitions,
+        eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+      )
+      .where(eq(DbSchema.testResults.id, id));
     if (row === undefined) {
       return undefined;
     }
     const [versionRow] = await db
       .select({ version: count().mapWith(Number) })
-      .from(testDefinitions)
-      .where(and(eq(testDefinitions.name, row.name), lte(testDefinitions.id, row.definitionId)));
+      .from(DbSchema.testDefinitions)
+      .where(
+        and(
+          eq(DbSchema.testDefinitions.name, row.name),
+          lte(DbSchema.testDefinitions.id, row.definitionId),
+        ),
+      );
     const version = versionRow?.version ?? 1;
     if (row.sessionId === null) {
       return {
@@ -675,20 +669,20 @@ export function readTestDump(connectionString: string, id: string): Promise<Test
     }
     const sessionId = row.sessionId;
     const shots = await db
-      .select({ id: images.id })
-      .from(images)
-      .innerJoin(actions, eq(actions.id, images.actionId))
-      .where(eq(actions.sessionId, sessionId))
-      .orderBy(actions.id);
+      .select({ id: DbSchema.images.id })
+      .from(DbSchema.images)
+      .innerJoin(DbSchema.actions, eq(DbSchema.actions.id, DbSchema.images.actionId))
+      .where(eq(DbSchema.actions.sessionId, sessionId))
+      .orderBy(DbSchema.actions.id);
     const logRows = await db
       .select({
-        level: logs.level,
-        text: logs.text,
-        at: logs.createdAt,
+        level: DbSchema.logs.level,
+        text: DbSchema.logs.text,
+        at: DbSchema.logs.createdAt,
       })
-      .from(logs)
-      .where(eq(logs.location, sessionId))
-      .orderBy(logs.id);
+      .from(DbSchema.logs)
+      .where(eq(DbSchema.logs.location, sessionId))
+      .orderBy(DbSchema.logs.id);
     return {
       id: row.id,
       name: row.name,
@@ -713,9 +707,9 @@ export function readTestDump(connectionString: string, id: string): Promise<Test
 export function listTestDefinitions(connectionString: string): Promise<TestDefinition[]> {
   return withDatabase(connectionString, (db) =>
     db
-      .select({ ...getTableColumns(testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
-      .from(testDefinitions)
-      .orderBy(testDefinitions.name, testDefinitions.id),
+      .select({ ...getTableColumns(DbSchema.testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
+      .from(DbSchema.testDefinitions)
+      .orderBy(DbSchema.testDefinitions.name, DbSchema.testDefinitions.id),
   );
 }
 
@@ -735,10 +729,10 @@ export function reviseTestDefinition(
 ): Promise<"unknown" | "unchanged" | "revised"> {
   return withDatabase(connectionString, async (db) => {
     const [newest] = await db
-      .select({ ...getTableColumns(testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
-      .from(testDefinitions)
-      .where(eq(testDefinitions.name, wording.name))
-      .orderBy(desc(testDefinitions.id))
+      .select({ ...getTableColumns(DbSchema.testDefinitions), queriedAt: sql`CURRENT_TIMESTAMP` })
+      .from(DbSchema.testDefinitions)
+      .where(eq(DbSchema.testDefinitions.name, wording.name))
+      .orderBy(desc(DbSchema.testDefinitions.id))
       .limit(1);
     if (newest === undefined) {
       return "unknown";
@@ -750,7 +744,7 @@ export function reviseTestDefinition(
     ) {
       return "unchanged";
     }
-    await db.insert(testDefinitions).values(wording);
+    await db.insert(DbSchema.testDefinitions).values(wording);
     return "revised";
   });
 }
@@ -759,26 +753,26 @@ export function listTestResultOutcomes(connectionString: string): Promise<TestRe
   return withDatabase(connectionString, (db) =>
     db
       .select({
-        definitionId: testResults.definitionId,
-        model: testResults.model,
-        status: testResults.status,
-        runId: testResults.runId,
-        iso: testRuns.iso,
-        startedAt: testRuns.startedAt,
-        createdAt: testResults.createdAt,
-        finishedAt: testResults.finishedAt,
-        sessionStartedAt: sessions.startedAt,
-        sessionEndedAt: sessions.endedAt,
+        definitionId: DbSchema.testResults.definitionId,
+        model: DbSchema.testResults.model,
+        status: DbSchema.testResults.status,
+        runId: DbSchema.testResults.runId,
+        iso: DbSchema.testRuns.iso,
+        startedAt: DbSchema.testRuns.startedAt,
+        createdAt: DbSchema.testResults.createdAt,
+        finishedAt: DbSchema.testResults.finishedAt,
+        sessionStartedAt: DbSchema.sessions.startedAt,
+        sessionEndedAt: DbSchema.sessions.endedAt,
       })
-      .from(testResults)
-      .innerJoin(testRuns, eq(testRuns.id, testResults.runId))
-      .leftJoin(sessions, eq(sessions.id, testResults.sessionId)),
+      .from(DbSchema.testResults)
+      .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.testResults.runId))
+      .leftJoin(DbSchema.sessions, eq(DbSchema.sessions.id, DbSchema.testResults.sessionId)),
   );
 }
 
 export function listTestBasePrompts(connectionString: string): Promise<TestBasePrompt[]> {
   return withDatabase(connectionString, (db) =>
-    db.select().from(testBasePrompts).orderBy(testBasePrompts.name),
+    db.select().from(DbSchema.testBasePrompts).orderBy(DbSchema.testBasePrompts.name),
   );
 }
 
@@ -789,16 +783,16 @@ export function listServers(connectionString: string): Promise<Server[]> {
   return withDatabase(connectionString, (db) =>
     db
       .select({
-        url: servers.url,
-        name: servers.name,
-        stats: servers.stats,
-        generation: servers.generation,
-        heartbeatAt: servers.heartbeatAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
+        url: DbSchema.servers.url,
+        name: DbSchema.servers.name,
+        stats: DbSchema.servers.stats,
+        generation: DbSchema.servers.generation,
+        heartbeatAt: DbSchema.servers.heartbeatAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.servers.createdAt),
       })
-      .from(servers)
-      .where(eq(servers.type, "qemu"))
-      .orderBy(servers.createdAt, servers.url),
+      .from(DbSchema.servers)
+      .where(eq(DbSchema.servers.type, "qemu"))
+      .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
   );
 }
 
@@ -832,33 +826,39 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
     const jobs = () =>
       db
         .select({
-          ticket: testResults.linearId,
-          test: testDefinitions.name,
-          action: automationJobs.action,
-          status: automationJobs.status,
-          reason: automationJobs.reason,
-          createdAt: automationJobs.createdAt,
-          startedAt: automationJobs.startedAt,
-          finishedAt: automationJobs.finishedAt,
-          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+          ticket: DbSchema.testResults.linearId,
+          test: DbSchema.testDefinitions.name,
+          action: DbSchema.automationJobs.action,
+          status: DbSchema.automationJobs.status,
+          reason: DbSchema.automationJobs.reason,
+          createdAt: DbSchema.automationJobs.createdAt,
+          startedAt: DbSchema.automationJobs.startedAt,
+          finishedAt: DbSchema.automationJobs.finishedAt,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
         })
-        .from(automationJobs)
-        .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
-        .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId));
-    const queueRank = sql`case ${automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
+        .from(DbSchema.automationJobs)
+        .innerJoin(
+          DbSchema.testResults,
+          eq(DbSchema.testResults.id, DbSchema.automationJobs.resultId),
+        )
+        .innerJoin(
+          DbSchema.testDefinitions,
+          eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+        );
+    const queueRank = sql`case ${DbSchema.automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
     // One client, one query at a time: pg warns, and soon refuses, a second query
     // started while the first is still running.
     const running = await jobs()
-      .where(eq(automationJobs.status, "running"))
-      .orderBy(queueRank, automationJobs.createdAt)
+      .where(eq(DbSchema.automationJobs.status, "running"))
+      .orderBy(queueRank, DbSchema.automationJobs.createdAt)
       .limit(QUEUE_LIMIT);
     const pending = await jobs()
-      .where(eq(automationJobs.status, "pending"))
-      .orderBy(queueRank, automationJobs.createdAt)
+      .where(eq(DbSchema.automationJobs.status, "pending"))
+      .orderBy(queueRank, DbSchema.automationJobs.createdAt)
       .limit(QUEUE_LIMIT);
     const completed = await jobs()
       .where(
-        inArray(automationJobs.status, [
+        inArray(DbSchema.automationJobs.status, [
           "succeeded",
           "failed",
           "aborted",
@@ -867,45 +867,49 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
           "errored",
         ]),
       )
-      .orderBy(desc(automationJobs.finishedAt))
+      .orderBy(desc(DbSchema.automationJobs.finishedAt))
       .limit(QUEUE_LIMIT);
     const jobCounts = await db
       .select({
-        status: automationJobs.status,
+        status: DbSchema.automationJobs.status,
         total: count().mapWith(Number),
       })
-      .from(automationJobs)
-      .where(inArray(automationJobs.status, ["running", "pending"]))
-      .groupBy(automationJobs.status);
+      .from(DbSchema.automationJobs)
+      .where(inArray(DbSchema.automationJobs.status, ["running", "pending"]))
+      .groupBy(DbSchema.automationJobs.status);
     // The runs started last, one row each, newest first. A result still pending or running
     // keeps the suite open even when every job for it has already stopped.
     const suiteRows = await db
       .select({
-        id: testRuns.id,
-        name: testRuns.name,
-        startedAt: testRuns.startedAt,
-        pending: sql<number>`count(*) filter (where ${testResults.status} = 'pending')`.mapWith(
-          Number,
-        ),
-        running: sql<number>`count(*) filter (where ${testResults.status} = 'running')`.mapWith(
-          Number,
-        ),
-        passed: sql<number>`count(*) filter (where ${testResults.status} = 'passed')`.mapWith(
-          Number,
-        ),
-        failed: sql<number>`count(*) filter (where ${testResults.status} = 'failed')`.mapWith(
-          Number,
-        ),
-        stopped:
-          sql<number>`count(*) filter (where ${testResults.status} in ('aborted', 'timed_out'))`.mapWith(
+        id: DbSchema.testRuns.id,
+        name: DbSchema.testRuns.name,
+        startedAt: DbSchema.testRuns.startedAt,
+        pending:
+          sql<number>`count(*) filter (where ${DbSchema.testResults.status} = 'pending')`.mapWith(
             Number,
           ),
-        queriedAt: sql<Date>`(select CURRENT_TIMESTAMP)`.mapWith(testRuns.startedAt),
+        running:
+          sql<number>`count(*) filter (where ${DbSchema.testResults.status} = 'running')`.mapWith(
+            Number,
+          ),
+        passed:
+          sql<number>`count(*) filter (where ${DbSchema.testResults.status} = 'passed')`.mapWith(
+            Number,
+          ),
+        failed:
+          sql<number>`count(*) filter (where ${DbSchema.testResults.status} = 'failed')`.mapWith(
+            Number,
+          ),
+        stopped:
+          sql<number>`count(*) filter (where ${DbSchema.testResults.status} in ('aborted', 'timed_out'))`.mapWith(
+            Number,
+          ),
+        queriedAt: sql<Date>`(select CURRENT_TIMESTAMP)`.mapWith(DbSchema.testRuns.startedAt),
       })
-      .from(testRuns)
-      .innerJoin(testResults, eq(testResults.runId, testRuns.id))
-      .groupBy(testRuns.id, testRuns.name, testRuns.startedAt)
-      .orderBy(desc(testRuns.startedAt), desc(testRuns.id))
+      .from(DbSchema.testRuns)
+      .innerJoin(DbSchema.testResults, eq(DbSchema.testResults.runId, DbSchema.testRuns.id))
+      .groupBy(DbSchema.testRuns.id, DbSchema.testRuns.name, DbSchema.testRuns.startedAt)
+      .orderBy(desc(DbSchema.testRuns.startedAt), desc(DbSchema.testRuns.id))
       .limit(SUITE_LIMIT);
     return {
       running,
@@ -948,7 +952,7 @@ export type DefinitionRun = {
 export type DefinitionRunSource = {
   readonly id: string;
   readonly definitionId: number;
-  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly status: (typeof DbSchema.testResults.$inferSelect)["status"];
   readonly at: number;
   readonly durationMs: number | null;
   readonly errorType: string | null;
@@ -1038,27 +1042,36 @@ export function listDefinitionRuns(
   return withDatabase(connectionString, async (db) => {
     const rows = await db
       .select({
-        id: testResults.id,
-        definitionId: testResults.definitionId,
-        status: testResults.status,
-        reason: testResults.reason,
-        createdAt: testResults.createdAt,
-        finishedAt: testResults.finishedAt,
-        sessionStartedAt: sessions.startedAt,
-        sessionEndedAt: sessions.endedAt,
-        errorType: postRunDiagnosis.errorType,
-        summary: postRunDiagnosis.summary,
-        at: sql<Date>`coalesce(${testResults.finishedAt}, ${testResults.createdAt})`.mapWith(
-          testResults.createdAt,
+        id: DbSchema.testResults.id,
+        definitionId: DbSchema.testResults.definitionId,
+        status: DbSchema.testResults.status,
+        reason: DbSchema.testResults.reason,
+        createdAt: DbSchema.testResults.createdAt,
+        finishedAt: DbSchema.testResults.finishedAt,
+        sessionStartedAt: DbSchema.sessions.startedAt,
+        sessionEndedAt: DbSchema.sessions.endedAt,
+        errorType: DbSchema.postRunDiagnosis.errorType,
+        summary: DbSchema.postRunDiagnosis.summary,
+        at: sql<Date>`coalesce(${DbSchema.testResults.finishedAt}, ${DbSchema.testResults.createdAt})`.mapWith(
+          DbSchema.testResults.createdAt,
         ),
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.testResults.createdAt),
       })
-      .from(testResults)
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
-      .leftJoin(sessions, eq(sessions.id, testResults.sessionId))
-      .leftJoin(postRunDiagnosis, eq(postRunDiagnosis.sessionId, testResults.sessionId))
+      .from(DbSchema.testResults)
+      .innerJoin(
+        DbSchema.testDefinitions,
+        eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+      )
+      .leftJoin(DbSchema.sessions, eq(DbSchema.sessions.id, DbSchema.testResults.sessionId))
+      .leftJoin(
+        DbSchema.postRunDiagnosis,
+        eq(DbSchema.postRunDiagnosis.sessionId, DbSchema.testResults.sessionId),
+      )
       .where(
-        and(eq(testDefinitions.name, name), inArray(testResults.status, ["passed", "failed"])),
+        and(
+          eq(DbSchema.testDefinitions.name, name),
+          inArray(DbSchema.testResults.status, ["passed", "failed"]),
+        ),
       );
     const sources = rows.map((row) => ({
       id: row.id,
@@ -1090,23 +1103,29 @@ export function listRunningAutomationJobs(connectionString: string): Promise<Aut
   return withDatabase(connectionString, (db) =>
     db
       .select({
-        ticket: testResults.linearId,
-        test: testDefinitions.name,
-        action: automationJobs.action,
-        status: automationJobs.status,
-        reason: automationJobs.reason,
-        createdAt: automationJobs.createdAt,
-        startedAt: automationJobs.startedAt,
-        finishedAt: automationJobs.finishedAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+        ticket: DbSchema.testResults.linearId,
+        test: DbSchema.testDefinitions.name,
+        action: DbSchema.automationJobs.action,
+        status: DbSchema.automationJobs.status,
+        reason: DbSchema.automationJobs.reason,
+        createdAt: DbSchema.automationJobs.createdAt,
+        startedAt: DbSchema.automationJobs.startedAt,
+        finishedAt: DbSchema.automationJobs.finishedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
       })
-      .from(automationJobs)
-      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
-      .where(eq(automationJobs.status, "running"))
+      .from(DbSchema.automationJobs)
+      .innerJoin(
+        DbSchema.testResults,
+        eq(DbSchema.testResults.id, DbSchema.automationJobs.resultId),
+      )
+      .innerJoin(
+        DbSchema.testDefinitions,
+        eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+      )
+      .where(eq(DbSchema.automationJobs.status, "running"))
       .orderBy(
-        sql`case ${automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`,
-        automationJobs.createdAt,
+        sql`case ${DbSchema.automationJobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`,
+        DbSchema.automationJobs.createdAt,
       ),
   );
 }
@@ -1245,18 +1264,21 @@ export function readSessionFollow(
   ticket: string,
 ): Promise<SessionFollow | undefined> {
   return withDatabase(connectionString, async (db) => {
-    const clock = sql<Date>`CURRENT_TIMESTAMP`.mapWith(testResults.createdAt);
+    const clock = sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.testResults.createdAt);
     const [result] = await db
       .select({
-        sessionId: testResults.sessionId,
-        instruction: testDefinitions.instruction,
-        status: sessions.status,
+        sessionId: DbSchema.testResults.sessionId,
+        instruction: DbSchema.testDefinitions.instruction,
+        status: DbSchema.sessions.status,
         queriedAt: clock,
       })
-      .from(testResults)
-      .innerJoin(testDefinitions, eq(testDefinitions.id, testResults.definitionId))
-      .leftJoin(sessions, eq(sessions.id, testResults.sessionId))
-      .where(eq(testResults.linearId, ticket))
+      .from(DbSchema.testResults)
+      .innerJoin(
+        DbSchema.testDefinitions,
+        eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
+      )
+      .leftJoin(DbSchema.sessions, eq(DbSchema.sessions.id, DbSchema.testResults.sessionId))
+      .where(eq(DbSchema.testResults.linearId, ticket))
       .limit(1);
     if (result === undefined) {
       return undefined;
@@ -1266,15 +1288,18 @@ export function readSessionFollow(
     if (result.sessionId === null) {
       const [job] = await db
         .select({
-          id: automationJobs.id,
-          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+          id: DbSchema.automationJobs.id,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
         })
-        .from(automationJobs)
-        .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+        .from(DbSchema.automationJobs)
+        .innerJoin(
+          DbSchema.testResults,
+          eq(DbSchema.testResults.id, DbSchema.automationJobs.resultId),
+        )
         .where(
           and(
-            eq(testResults.linearId, ticket),
-            inArray(automationJobs.status, ["pending", "running"]),
+            eq(DbSchema.testResults.linearId, ticket),
+            inArray(DbSchema.automationJobs.status, ["pending", "running"]),
           ),
         )
         .limit(1);
@@ -1293,39 +1318,39 @@ export function readSessionFollow(
 
     const logRows = await db
       .select({
-        text: logs.text,
-        at: logs.createdAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(logs.createdAt),
+        text: DbSchema.logs.text,
+        at: DbSchema.logs.createdAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.logs.createdAt),
       })
-      .from(logs)
+      .from(DbSchema.logs)
       .where(
         and(
-          eq(logs.location, result.sessionId),
-          or(like(logs.text, "intent start; %"), eq(logs.text, "intent end")),
+          eq(DbSchema.logs.location, result.sessionId),
+          or(like(DbSchema.logs.text, "intent start; %"), eq(DbSchema.logs.text, "intent end")),
         ),
       )
-      .orderBy(desc(logs.id))
+      .orderBy(desc(DbSchema.logs.id))
       .limit(FOLLOW_LIMIT);
     const actionRows = await db
       .select({
-        request: actions.request,
-        state: actions.state,
-        at: actions.createdAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(actions.createdAt),
+        request: DbSchema.actions.request,
+        state: DbSchema.actions.state,
+        at: DbSchema.actions.createdAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.actions.createdAt),
       })
-      .from(actions)
-      .where(eq(actions.sessionId, result.sessionId))
-      .orderBy(desc(actions.id))
+      .from(DbSchema.actions)
+      .where(eq(DbSchema.actions.sessionId, result.sessionId))
+      .orderBy(desc(DbSchema.actions.id))
       .limit(FOLLOW_LIMIT);
     const [image] = await db
       .select({
-        id: images.id,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(actions.createdAt),
+        id: DbSchema.images.id,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.actions.createdAt),
       })
-      .from(images)
-      .innerJoin(actions, eq(actions.id, images.actionId))
-      .where(eq(actions.sessionId, result.sessionId))
-      .orderBy(desc(actions.id))
+      .from(DbSchema.images)
+      .innerJoin(DbSchema.actions, eq(DbSchema.actions.id, DbSchema.images.actionId))
+      .where(eq(DbSchema.actions.sessionId, result.sessionId))
+      .orderBy(desc(DbSchema.actions.id))
       .limit(1);
 
     return {
@@ -1358,34 +1383,34 @@ export function readSessionFollow(
 export function abortAutomationJob(
   connectionString: string,
   ticket: string,
-  action: (typeof automationJobs.$inferSelect)["action"],
+  action: (typeof DbSchema.automationJobs.$inferSelect)["action"],
   from: "pending" | "running",
 ): Promise<boolean> {
   return withDatabase(connectionString, async (db) => {
     const rows = await db
-      .update(automationJobs)
+      .update(DbSchema.automationJobs)
       .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
       .where(
         and(
-          eq(automationJobs.action, action),
-          eq(automationJobs.status, from),
+          eq(DbSchema.automationJobs.action, action),
+          eq(DbSchema.automationJobs.status, from),
           inArray(
-            automationJobs.resultId,
+            DbSchema.automationJobs.resultId,
             db
-              .select({ id: testResults.id })
-              .from(testResults)
-              .where(eq(testResults.linearId, ticket)),
+              .select({ id: DbSchema.testResults.id })
+              .from(DbSchema.testResults)
+              .where(eq(DbSchema.testResults.linearId, ticket)),
           ),
         ),
       )
-      .returning({ id: automationJobs.id });
+      .returning({ id: DbSchema.automationJobs.id });
     return rows.length > 0;
   });
 }
 
 export type OpenSuiteJob = {
   readonly ticket: string | null;
-  readonly action: (typeof automationJobs.$inferSelect)["action"];
+  readonly action: (typeof DbSchema.automationJobs.$inferSelect)["action"];
 };
 
 // Pending jobs of results this suite has not aborted. Aborting them before the
@@ -1395,20 +1420,20 @@ export type OpenSuiteJob = {
 export function abortPendingSuiteJobs(connectionString: string, runId: string): Promise<void> {
   return withDatabase(connectionString, async (db) => {
     await db
-      .update(automationJobs)
+      .update(DbSchema.automationJobs)
       .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
       .where(
         and(
-          eq(automationJobs.status, "pending"),
+          eq(DbSchema.automationJobs.status, "pending"),
           inArray(
-            automationJobs.resultId,
+            DbSchema.automationJobs.resultId,
             db
-              .select({ id: testResults.id })
-              .from(testResults)
+              .select({ id: DbSchema.testResults.id })
+              .from(DbSchema.testResults)
               .where(
                 and(
-                  eq(testResults.runId, runId),
-                  inArray(testResults.status, ["pending", "running"]),
+                  eq(DbSchema.testResults.runId, runId),
+                  inArray(DbSchema.testResults.status, ["pending", "running"]),
                 ),
               ),
           ),
@@ -1427,17 +1452,20 @@ export function listOpenSuiteJobs(
   return withDatabase(connectionString, (db) =>
     db
       .select({
-        ticket: testResults.linearId,
-        action: automationJobs.action,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(automationJobs.createdAt),
+        ticket: DbSchema.testResults.linearId,
+        action: DbSchema.automationJobs.action,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.automationJobs.createdAt),
       })
-      .from(automationJobs)
-      .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
+      .from(DbSchema.automationJobs)
+      .innerJoin(
+        DbSchema.testResults,
+        eq(DbSchema.testResults.id, DbSchema.automationJobs.resultId),
+      )
       .where(
         and(
-          eq(testResults.runId, runId),
-          inArray(testResults.status, ["pending", "running"]),
-          eq(automationJobs.status, "running"),
+          eq(DbSchema.testResults.runId, runId),
+          inArray(DbSchema.testResults.status, ["pending", "running"]),
+          eq(DbSchema.automationJobs.status, "running"),
         ),
       ),
   );
@@ -1456,31 +1484,34 @@ export function abortTestSuite(connectionString: string, runId: string): Promise
   return withDatabase(connectionString, (db) =>
     db.transaction(async (tx) => {
       const results = await tx
-        .update(testResults)
+        .update(DbSchema.testResults)
         .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
         .where(
-          and(eq(testResults.runId, runId), inArray(testResults.status, ["pending", "running"])),
+          and(
+            eq(DbSchema.testResults.runId, runId),
+            inArray(DbSchema.testResults.status, ["pending", "running"]),
+          ),
         )
-        .returning({ id: testResults.id, ticket: testResults.linearId });
+        .returning({ id: DbSchema.testResults.id, ticket: DbSchema.testResults.linearId });
       if (results.length === 0) {
         return { aborted: false, tickets: [] };
       }
       await tx
-        .update(automationJobs)
+        .update(DbSchema.automationJobs)
         .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
         .where(
           and(
             inArray(
-              automationJobs.resultId,
+              DbSchema.automationJobs.resultId,
               results.map((result) => result.id),
             ),
-            inArray(automationJobs.status, ["pending", "running"]),
+            inArray(DbSchema.automationJobs.status, ["pending", "running"]),
           ),
         );
       await tx
-        .update(testRuns)
+        .update(DbSchema.testRuns)
         .set({ status: "aborted", reason: "aborted", endedAt: sql`now()` })
-        .where(eq(testRuns.id, runId));
+        .where(eq(DbSchema.testRuns.id, runId));
       return {
         aborted: true,
         tickets: results.flatMap((result) => (result.ticket === null ? [] : [result.ticket])),
@@ -1519,17 +1550,21 @@ export function groupProcessSeries(rows: ReadonlyArray<ProcessStat>): ProcessSer
 export function listProcessStats(connectionString: string): Promise<ProcessStat[]> {
   return withDatabase(connectionString, (db) =>
     db
-      .selectDistinctOn([processStats.type, processStats.name], {
-        name: processStats.name,
-        type: processStats.type,
-        jobs: processStats.jobs,
-        memoryBytes: processStats.memoryBytes,
-        cpuPercent: processStats.cpuPercent,
-        reportedAt: processStats.reportedAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
+      .selectDistinctOn([DbSchema.processStats.type, DbSchema.processStats.name], {
+        name: DbSchema.processStats.name,
+        type: DbSchema.processStats.type,
+        jobs: DbSchema.processStats.jobs,
+        memoryBytes: DbSchema.processStats.memoryBytes,
+        cpuPercent: DbSchema.processStats.cpuPercent,
+        reportedAt: DbSchema.processStats.reportedAt,
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.processStats.reportedAt),
       })
-      .from(processStats)
-      .orderBy(processStats.type, processStats.name, desc(processStats.reportedAt)),
+      .from(DbSchema.processStats)
+      .orderBy(
+        DbSchema.processStats.type,
+        DbSchema.processStats.name,
+        desc(DbSchema.processStats.reportedAt),
+      ),
   );
 }
 
@@ -1541,18 +1576,18 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
   return withDatabase(connectionString, async (db) => {
     const ranked = db
       .select({
-        name: processStats.name,
-        type: processStats.type,
-        jobs: processStats.jobs,
-        memoryBytes: processStats.memoryBytes,
-        cpuPercent: processStats.cpuPercent,
-        reportedAt: processStats.reportedAt,
-        rank: sql<number>`row_number() over (partition by ${processStats.type}, ${processStats.name} order by ${processStats.reportedAt} desc)`
+        name: DbSchema.processStats.name,
+        type: DbSchema.processStats.type,
+        jobs: DbSchema.processStats.jobs,
+        memoryBytes: DbSchema.processStats.memoryBytes,
+        cpuPercent: DbSchema.processStats.cpuPercent,
+        reportedAt: DbSchema.processStats.reportedAt,
+        rank: sql<number>`row_number() over (partition by ${DbSchema.processStats.type}, ${DbSchema.processStats.name} order by ${DbSchema.processStats.reportedAt} desc)`
           .mapWith(Number)
           .as("rn"),
       })
-      .from(processStats)
-      .where(sql`${processStats.reportedAt} > now() - interval '30 minutes'`)
+      .from(DbSchema.processStats)
+      .where(sql`${DbSchema.processStats.reportedAt} > now() - interval '30 minutes'`)
       .as("process_series");
     const rows = await db
       .select({
@@ -1562,7 +1597,7 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
         memoryBytes: ranked.memoryBytes,
         cpuPercent: ranked.cpuPercent,
         reportedAt: ranked.reportedAt,
-        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(processStats.reportedAt),
+        queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.processStats.reportedAt),
       })
       .from(ranked)
       .where(sql`${ranked.rank} <= ${PROCESS_SERIES_LIMIT}`)
@@ -1576,7 +1611,7 @@ export function listProcessSeries(connectionString: string): Promise<ProcessSeri
 // word on what it is.
 export function addServer(connectionString: string, url: string): Promise<void> {
   return withDatabase(connectionString, async (db) => {
-    await db.insert(servers).values({ url, type: "qemu" }).onConflictDoNothing();
+    await db.insert(DbSchema.servers).values({ url, type: "qemu" }).onConflictDoNothing();
   });
 }
 
@@ -1584,9 +1619,9 @@ export function addServer(connectionString: string, url: string): Promise<void> 
 export function removeServer(connectionString: string, url: string): Promise<boolean> {
   return withDatabase(connectionString, async (db) => {
     const rows = await db
-      .delete(servers)
-      .where(eq(servers.url, url))
-      .returning({ url: servers.url });
+      .delete(DbSchema.servers)
+      .where(eq(DbSchema.servers.url, url))
+      .returning({ url: DbSchema.servers.url });
     return rows.length > 0;
   });
 }
@@ -1627,50 +1662,70 @@ export function deleteOldRows(connectionString: string): Promise<DeletedRows> {
     db.transaction(async (tx) => {
       const cutoff = sql`now() - make_interval(days => ${RETENTION_DAYS})`;
       const oldRuns = tx
-        .select({ id: testRuns.id })
-        .from(testRuns)
-        .where(lt(testRuns.startedAt, cutoff));
+        .select({ id: DbSchema.testRuns.id })
+        .from(DbSchema.testRuns)
+        .where(lt(DbSchema.testRuns.startedAt, cutoff));
       const oldResults = tx
-        .select({ id: testResults.id })
-        .from(testResults)
-        .where(inArray(testResults.runId, oldRuns));
+        .select({ id: DbSchema.testResults.id })
+        .from(DbSchema.testResults)
+        .where(inArray(DbSchema.testResults.runId, oldRuns));
       const oldSessions = tx
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(lt(sessions.startedAt, cutoff));
+        .select({ id: DbSchema.sessions.id })
+        .from(DbSchema.sessions)
+        .where(lt(DbSchema.sessions.startedAt, cutoff));
       const oldActions = tx
-        .select({ id: actions.id })
-        .from(actions)
-        .where(inArray(actions.sessionId, oldSessions));
+        .select({ id: DbSchema.actions.id })
+        .from(DbSchema.actions)
+        .where(inArray(DbSchema.actions.sessionId, oldSessions));
       return {
         automationJobs: rowCount(
-          await tx.delete(automationJobs).where(inArray(automationJobs.resultId, oldResults)),
+          await tx
+            .delete(DbSchema.automationJobs)
+            .where(inArray(DbSchema.automationJobs.resultId, oldResults)),
         ),
         testResults: rowCount(
-          await tx.delete(testResults).where(inArray(testResults.runId, oldRuns)),
+          await tx.delete(DbSchema.testResults).where(inArray(DbSchema.testResults.runId, oldRuns)),
         ),
-        testRuns: rowCount(await tx.delete(testRuns).where(lt(testRuns.startedAt, cutoff))),
-        images: rowCount(await tx.delete(images).where(inArray(images.actionId, oldActions))),
-        actions: rowCount(await tx.delete(actions).where(inArray(actions.sessionId, oldSessions))),
+        testRuns: rowCount(
+          await tx.delete(DbSchema.testRuns).where(lt(DbSchema.testRuns.startedAt, cutoff)),
+        ),
+        images: rowCount(
+          await tx.delete(DbSchema.images).where(inArray(DbSchema.images.actionId, oldActions)),
+        ),
+        actions: rowCount(
+          await tx.delete(DbSchema.actions).where(inArray(DbSchema.actions.sessionId, oldSessions)),
+        ),
         agentRuns: rowCount(
-          await tx.delete(agentRuns).where(inArray(agentRuns.sessionId, oldSessions)),
+          await tx
+            .delete(DbSchema.agentRuns)
+            .where(inArray(DbSchema.agentRuns.sessionId, oldSessions)),
         ),
         debugLogs: rowCount(
-          await tx.delete(debugLogs).where(inArray(debugLogs.sessionId, oldSessions)),
+          await tx
+            .delete(DbSchema.debugLogs)
+            .where(inArray(DbSchema.debugLogs.sessionId, oldSessions)),
         ),
         postRunDiagnosis: rowCount(
-          await tx.delete(postRunDiagnosis).where(inArray(postRunDiagnosis.sessionId, oldSessions)),
+          await tx
+            .delete(DbSchema.postRunDiagnosis)
+            .where(inArray(DbSchema.postRunDiagnosis.sessionId, oldSessions)),
         ),
         sessionServers: rowCount(
-          await tx.delete(sessionServers).where(inArray(sessionServers.sessionId, oldSessions)),
+          await tx
+            .delete(DbSchema.sessionServers)
+            .where(inArray(DbSchema.sessionServers.sessionId, oldSessions)),
         ),
-        sessions: rowCount(await tx.delete(sessions).where(lt(sessions.startedAt, cutoff))),
-        logs: rowCount(await tx.delete(logs).where(lt(logs.createdAt, cutoff))),
+        sessions: rowCount(
+          await tx.delete(DbSchema.sessions).where(lt(DbSchema.sessions.startedAt, cutoff)),
+        ),
+        logs: rowCount(await tx.delete(DbSchema.logs).where(lt(DbSchema.logs.createdAt, cutoff))),
         processStats: rowCount(
-          await tx.delete(processStats).where(lt(processStats.reportedAt, cutoff)),
+          await tx
+            .delete(DbSchema.processStats)
+            .where(lt(DbSchema.processStats.reportedAt, cutoff)),
         ),
         agentServers: rowCount(
-          await tx.delete(agentServers).where(lt(agentServers.createdAt, cutoff)),
+          await tx.delete(DbSchema.agentServers).where(lt(DbSchema.agentServers.createdAt, cutoff)),
         ),
       };
     }),

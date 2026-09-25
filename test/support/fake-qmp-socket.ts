@@ -1,4 +1,5 @@
 import { Cause, Effect, Layer, Queue, Schema, Scope, Stream } from "effect";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import type * as Client from "../../src/qmp/client.ts";
 import * as Socket from "../../src/qmp/socket.ts";
@@ -127,8 +128,9 @@ export type Recording = {
 // A Recorder that keeps every command opened and every outcome closed; `onClose` scripts the
 // close's own result (a refused finishAction, say).
 export const recorder = (
-  onClose: (outcome: Domain.QmpExchangeOutcome) => Effect.Effect<void, Errors.DatabaseError> = () =>
-    Effect.void,
+  onClose: (
+    outcome: Domain.QmpExchangeOutcome,
+  ) => Effect.Effect<void, DbErrors.DatabaseError> = () => Effect.void,
 ): Recording => {
   const commands: Array<Domain.QmpCommand> = [];
   const outcomes: Array<Domain.QmpExchangeOutcome> = [];

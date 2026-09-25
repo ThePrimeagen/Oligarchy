@@ -2,12 +2,12 @@ import { Deferred, Effect, Layer } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Client from "../db/client.ts";
-import * as Errors from "../shared/errors.ts";
 
 // One above the qemu server's, so both run on one host in development.
 const DEFAULT_PORT = 42070;
@@ -19,7 +19,7 @@ export type QemuReverseProxyServer<RServe> = {
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
-type StartupError = Errors.DatabaseError | HttpServerError.ServeError;
+type StartupError = DbErrors.DatabaseError | HttpServerError.ServeError;
 
 // A ServeError says nothing itself; the bind or accept error it wraps does.
 const detail = (error: StartupError): string =>
@@ -42,7 +42,7 @@ export const makeQemuReverseProxyCommand = <RServe>(server: QemuReverseProxyServ
           // The routes are rows: fail at startup, not on the first request, without the database.
           yield* database.ping.pipe(
             Effect.mapError((error) =>
-              Errors.DatabaseError.make({
+              DbErrors.DatabaseError.make({
                 operation: "ping",
                 message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
                 cause: error,

@@ -2,7 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as Config from "@oligarchy/env/config";
-import * as Migrate from "../../src/db/migrate.ts";
+import * as Migrate from "../src/migrate.ts";
 
 const APP_URL = "postgres://user:pw@127.0.0.1:1/oligarchy";
 

@@ -11,13 +11,13 @@ import {
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
 import * as Handlers from "../../src/qemu-reverse-proxy/handlers.ts";
 import * as Router from "../../src/qemu-reverse-proxy/router.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
@@ -667,7 +667,7 @@ describe("registration refusals", () => {
 
   it.effect("a failed insert is 500 internal error logged with the driver's reason", () =>
     Effect.gen(function* () {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "addServer",
         message: "Failed query: insert into servers",
         cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -1426,7 +1426,7 @@ describe("placement", () => {
   it.effect(
     "a reserve the server accepts whose route cannot be saved relinquishes that server and stops",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "routeAgent",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -1473,7 +1473,7 @@ describe("placement", () => {
   );
 
   it.effect("a relinquish that fails after a route write failure is reported", () => {
-    const failure = Errors.DatabaseError.make({
+    const failure = DbErrors.DatabaseError.make({
       operation: "routeAgent",
       message: "connection reset",
       cause: new Error("connection reset"),
@@ -1520,7 +1520,7 @@ describe("placement", () => {
   it.effect(
     "a route write that commits and then fails is a reservation and is not relinquished",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "routeAgent",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -1564,7 +1564,7 @@ describe("placement", () => {
   it.effect(
     "a relinquish that never answers is reported after ten seconds and does not hang",
     () => {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "routeAgent",
         message: "connection reset",
         cause: new Error("connection reset"),
@@ -1977,7 +1977,7 @@ describe("placement", () => {
     "POST /relinquish whose session route cannot be read is 500 internal error attributed to that session (unhappy)",
     () =>
       Effect.gen(function* () {
-        const failure = Errors.DatabaseError.make({
+        const failure = DbErrors.DatabaseError.make({
           operation: "serverForSession",
           message: "Failed query: select from session_servers",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -2166,7 +2166,7 @@ describe("placement", () => {
     "a route that cannot be recorded is 500 internal error attributed to the new session",
     () =>
       Effect.gen(function* () {
-        const failure = Errors.DatabaseError.make({
+        const failure = DbErrors.DatabaseError.make({
           operation: "routeSession",
           message: "Failed query: insert into session_servers",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -2761,7 +2761,7 @@ describe("forwarding refusals", () => {
 
   it.effect("a route lookup that fails is 500 internal error with the driver's reason", () =>
     Effect.gen(function* () {
-      const failure = Errors.DatabaseError.make({
+      const failure = DbErrors.DatabaseError.make({
         operation: "serverForSession",
         message: "Failed query: select from session_servers",
         cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),

@@ -8,9 +8,9 @@ import {
   responseJson,
   SuiteRequestError,
 } from "../../src/dashboard/suite.ts";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Prompts from "../../src/ctrl/prompts.ts";
-import * as Errors from "../../src/shared/errors.ts";
 
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REQUIRED = "iso, version and serverUrl are required";
@@ -181,9 +181,9 @@ describe("create test-suite-run runner", () => {
     await expect(refused).rejects.toThrow("test: no test definitions found");
 
     const database = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
-      throw Errors.DatabaseError.make({ operation: "query", message: "database request failed" });
+      throw DbErrors.DatabaseError.make({ operation: "query", message: "database request failed" });
     });
-    await expect(database).rejects.toBeInstanceOf(Errors.DatabaseError);
+    await expect(database).rejects.toBeInstanceOf(DbErrors.DatabaseError);
 
     const other = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
       throw SharedErrors.CommandError.make({ message: "mint: no live qemu server" });

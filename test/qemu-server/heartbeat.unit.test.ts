@@ -2,9 +2,9 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
-import * as SetupRequests from "../../src/db/setup-requests.ts";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Heartbeat from "../../src/qemu-server/heartbeat.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as ProcessUsage from "../../src/shared/process-usage.ts";
 import * as FakeSessions from "../support/fake-sessions.ts";
 import * as FakeLog from "../support/log.ts";
@@ -32,7 +32,7 @@ const fakeUsage = (sample = SAMPLE) =>
     ProcessUsage.ProcessUsage.of({ collect: Effect.succeed(sample) }),
   );
 
-const refused = Errors.DatabaseError.make({
+const refused = DbErrors.DatabaseError.make({
   operation: "heartbeat",
   message: "Failed query: insert into servers",
   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -253,7 +253,7 @@ describe("heartbeat unhappy path", () => {
     "a refused delete is one error line with the driver's reason, and the scope still closes",
     () =>
       Effect.gen(function* () {
-        const refusedDelete = Errors.DatabaseError.make({
+        const refusedDelete = DbErrors.DatabaseError.make({
           operation: "removeServer",
           message: "Failed query: delete from servers",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -282,7 +282,7 @@ describe("heartbeat unhappy path", () => {
     "a refused process write is its own error line, and the servers heartbeat still writes",
     () =>
       Effect.gen(function* () {
-        const refusedProcess = Errors.DatabaseError.make({
+        const refusedProcess = DbErrors.DatabaseError.make({
           operation: "reportProcess",
           message: "Failed query: insert into process_stats",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -341,7 +341,7 @@ describe("heartbeat unhappy path", () => {
 
   it.effect("a refused setup clear is one error line and the heartbeat still writes", () =>
     Effect.gen(function* () {
-      const boom = Errors.DatabaseError.make({
+      const boom = DbErrors.DatabaseError.make({
         operation: "removeServerSetups",
         message: "Failed query: delete from setup_requests",
         cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),

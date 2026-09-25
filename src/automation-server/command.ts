@@ -2,14 +2,14 @@ import { Deferred, Effect, Layer } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Client from "../db/client.ts";
-import * as Errors from "../shared/errors.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
@@ -24,7 +24,7 @@ export type AutomationServer<RServe> = {
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
-type StartupError = Errors.DatabaseError | SharedErrors.CommandError | HttpServerError.ServeError;
+type StartupError = DbErrors.DatabaseError | SharedErrors.CommandError | HttpServerError.ServeError;
 
 // A ServeError says nothing itself; the bind or accept error it wraps does.
 const detail = (error: StartupError): string =>
@@ -49,7 +49,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
           // Queue rows live in Postgres: fail at startup, not on the first webhook.
           yield* database.ping.pipe(
             Effect.mapError((error) =>
-              Errors.DatabaseError.make({
+              DbErrors.DatabaseError.make({
                 operation: "ping",
                 message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
                 cause: error,

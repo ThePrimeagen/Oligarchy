@@ -1,11 +1,11 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import { Effect, Layer } from "effect";
+import * as Client from "@oligarchy/db/client";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
 import * as Api from "@oligarchy/routes/api";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Client from "../db/client.ts";
-import * as Tests from "../db/tests.ts";
 import * as DriverCommand from "./command.ts";
 import * as Loop from "./loop.ts";
 

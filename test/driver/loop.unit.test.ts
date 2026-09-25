@@ -15,14 +15,14 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as DbSchema from "@oligarchy/db/schema";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as DbSchema from "../../src/db/schema.ts";
-import * as Tests from "../../src/db/tests.ts";
 import * as DriverLog from "../../src/driver/log.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as Stores from "../support/stores.ts";
@@ -445,7 +445,7 @@ describe("driver loop", () => {
           overrides: {
             findResultByLinearId: () =>
               Effect.fail(
-                Errors.DatabaseError.make({
+                DbErrors.DatabaseError.make({
                   operation: "findResultByLinearId",
                   message: "Failed query: select",
                   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),

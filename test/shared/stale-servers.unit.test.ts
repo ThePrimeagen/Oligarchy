@@ -2,9 +2,9 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
+import type * as Servers from "@oligarchy/db/servers";
 import * as Log from "@oligarchy/log/log";
-import type * as Servers from "../../src/db/servers.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as StaleServers from "../../src/shared/stale-servers.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
@@ -22,7 +22,7 @@ const forgotten = (url: string) => ({
   cause: undefined,
 });
 
-const refused = Errors.DatabaseError.make({
+const refused = DbErrors.DatabaseError.make({
   operation: "removeStaleServers",
   message: "Failed query: delete from servers",
   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),

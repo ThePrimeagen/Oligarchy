@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Client from "../../src/qmp/client.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -117,7 +118,7 @@ describe("handshake", () => {
     Effect.gen(function* () {
       const fake = yield* FakeSocket.fakeQmpSocket({ respond: FakeSocket.acceptAll });
       const log = FakeLog.fakeLog();
-      const refused = Errors.DatabaseError.make({
+      const refused = DbErrors.DatabaseError.make({
         operation: "startAction",
         message: "Failed query: insert into actions",
       });
@@ -269,7 +270,7 @@ describe("execute", () => {
       const { fake, log, client } = yield* connect();
       const recording = recorder(() =>
         Effect.fail(
-          Errors.DatabaseError.make({
+          DbErrors.DatabaseError.make({
             operation: "finishAction",
             message: "Failed query: update actions",
           }),
@@ -295,7 +296,7 @@ describe("execute", () => {
   it.effect("surfaces a failing close of a completed exchange as itself", () =>
     Effect.gen(function* () {
       const { fake, log, client } = yield* connect();
-      const refused = Errors.DatabaseError.make({
+      const refused = DbErrors.DatabaseError.make({
         operation: "finishAction",
         message: "Failed query: update actions",
       });

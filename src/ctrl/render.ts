@@ -1,6 +1,6 @@
 import { Array as Arr } from "effect";
+import type * as DbSchema from "@oligarchy/db/schema";
 import type * as Domain from "@oligarchy/shared/domain";
-import type * as DbSchema from "../db/schema.ts";
 
 export type SessionRow = {
   readonly id: string;

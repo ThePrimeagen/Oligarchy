@@ -1,7 +1,7 @@
 import { Option } from "effect";
-import type * as Automation from "../../src/db/automation.ts";
-import type * as ProcessStats from "../../src/db/process-stats.ts";
-import type * as Servers from "../../src/db/servers.ts";
+import type * as Automation from "@oligarchy/db/automation";
+import type * as ProcessStats from "@oligarchy/db/process-stats";
+import type * as Servers from "@oligarchy/db/servers";
 import * as View from "../../src/viz/view.ts";
 import type * as Stores from "./stores.ts";
 

@@ -1,14 +1,15 @@
 import { Cause, Effect, Option, Result, Schedule, Schema, Scope } from "effect";
+import * as Automation from "@oligarchy/db/automation";
+import * as Diagnosis from "@oligarchy/db/diagnosis";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Servers from "@oligarchy/db/servers";
+import * as Sessions from "@oligarchy/db/sessions";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
+import * as Tests from "@oligarchy/db/tests";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Linear from "../ctrl/linear.ts";
-import * as Automation from "../db/automation.ts";
-import * as Diagnosis from "../db/diagnosis.ts";
-import * as Servers from "../db/servers.ts";
-import * as Sessions from "../db/sessions.ts";
-import * as SetupRequests from "../db/setup-requests.ts";
-import * as Tests from "../db/tests.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
@@ -17,7 +18,7 @@ import * as Ready from "./ready.ts";
 
 const DISPATCH_INTERVAL = "5 seconds";
 
-const isDatabaseError = Schema.is(Errors.DatabaseError);
+const isDatabaseError = Schema.is(DbErrors.DatabaseError);
 
 const detail = (error: unknown): string =>
   isDatabaseError(error)
