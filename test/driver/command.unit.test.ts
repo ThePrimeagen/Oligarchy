@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect } from "vitest";
+import { afterAll, describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Redacted, Terminal } from "effect";
 import { TestConsole } from "effect/testing";
@@ -18,19 +20,18 @@ import * as Stdio from "../support/stdio.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-const without = (...names: ReadonlyArray<string>): NodeJS.ProcessEnv => {
-  const env = { ...process.env };
-  for (const name of names) {
-    delete env[name];
-  }
-  return env;
-};
+const MAIN = join(ROOT, "src/driver/main.ts");
+
+// The config provider reads .env from the working directory, so the process runs in an empty one.
+const EMPTY_CWD = mkdtempSync(join(tmpdir(), "driver-command-"));
+afterAll(() => rmSync(EMPTY_CWD, { recursive: true, force: true }));
 
 // The process, not Command.runWith: main.ts is what builds the layers, and --help must not.
-const driverProcess = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv) =>
-  spawnSync("bun", ["--no-env-file", "src/driver/main.ts", ...args], {
-    cwd: ROOT,
-    env,
+// Nothing from the caller's environment reaches it: only what a test names, plus what bun needs.
+const driverProcess = (args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}) =>
+  spawnSync("bun", ["--no-env-file", MAIN, ...args], {
+    cwd: EMPTY_CWD,
+    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     encoding: "utf8",
   });
 
@@ -216,7 +217,7 @@ describe("driver command", () => {
 
   it.effect("the driver process --help does not read DATABASE_URL", () =>
     Effect.sync(() => {
-      const ran = driverProcess(["--help"], without("DATABASE_URL", "OPENROUTER_API_KEY"));
+      const ran = driverProcess(["--help"]);
       expect(ran.status, ran.stderr).toBe(0);
       expect(ran.stdout).toContain("--agent-id");
       expect(`${ran.stdout}\n${ran.stderr}`).not.toContain("DATABASE_URL");
@@ -227,7 +228,7 @@ describe("driver command", () => {
     "a missing token is reported before DATABASE_URL when the process actually runs (unhappy)",
     () =>
       Effect.sync(() => {
-        const ran = driverProcess(FLAGS, without("DATABASE_URL", "OPENROUTER_API_KEY"));
+        const ran = driverProcess(FLAGS);
         expect(ran.status, ran.stderr).not.toBe(0);
         expect(ran.stderr).toContain("OPENROUTER_API_KEY is not set");
         expect(ran.stderr).not.toContain("DATABASE_URL");
@@ -236,9 +237,7 @@ describe("driver command", () => {
 
   it.effect("a run with a token and no database reports DATABASE_URL (unhappy)", () =>
     Effect.sync(() => {
-      const env = without("DATABASE_URL");
-      env.OPENROUTER_API_KEY = "present";
-      const ran = driverProcess(FLAGS, env);
+      const ran = driverProcess(FLAGS, { OPENROUTER_API_KEY: "present" });
       expect(ran.status, ran.stderr).not.toBe(0);
       expect(ran.stderr).toContain("DATABASE_URL is not set");
     }),
@@ -246,10 +245,10 @@ describe("driver command", () => {
 
   it.effect("a database url that is not a url is a command error (unhappy)", () =>
     Effect.sync(() => {
-      const env = without("DATABASE_URL");
-      env.DATABASE_URL = "not-a-url";
-      env.OPENROUTER_API_KEY = "present";
-      const ran = driverProcess(FLAGS, env);
+      const ran = driverProcess(FLAGS, {
+        DATABASE_URL: "not-a-url",
+        OPENROUTER_API_KEY: "present",
+      });
       expect(ran.status, ran.stderr).not.toBe(0);
       expect(ran.stderr).toContain("db: database url is not a valid url");
       expect(ran.stderr).toContain("CommandError");
