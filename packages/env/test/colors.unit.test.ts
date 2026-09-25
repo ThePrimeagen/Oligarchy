@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import * as Colors from "../../src/observability/colors.ts";
+import * as Colors from "../src/colors.ts";
 
 describe("wantsColor", () => {
   it("is false without a TTY and without FORCE_COLOR", () => {

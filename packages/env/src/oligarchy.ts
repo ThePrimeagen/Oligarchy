@@ -3,11 +3,15 @@ import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 
-// The harness's configuration, the checked-in file beside the package. The
-// OpenRouter token stays in the environment: a token key in this file is
-// refused. There is no default. A missing or malformed file fails startup,
-// and a bad field is named in the failure.
-export const PATH = decodeURIComponent(new URL("../../oligarchy.json", import.meta.url).pathname);
+// The settings file is checked in at the workspace root, three directories up from these
+// sources, beside client.md and prompts/. One URL for all of them, because the driver bundle
+// defines import.meta.url once for the whole bundle and resolves every sibling from here.
+export const ROOT = new URL("../../../", import.meta.url);
+
+// The harness's configuration. The OpenRouter token stays in the environment: a token key in
+// this file is refused. There is no default. A missing or malformed file fails startup, and a
+// bad field is named in the failure.
+export const PATH = decodeURIComponent(new URL("oligarchy.json", ROOT).pathname);
 
 // A request that never receives a first byte, or a next chunk, must fail
 // before the run ceiling kills the whole job. Zero and Infinity do neither.

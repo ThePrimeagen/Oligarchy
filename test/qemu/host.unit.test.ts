@@ -1,10 +1,10 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import * as Config from "@oligarchy/env/config";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Args from "../../src/qemu/args.ts";
 import * as Host from "../../src/qemu/host.ts";
-import * as Support from "../support/config.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
@@ -39,7 +39,11 @@ const check = (display: Domain.QemuDisplay, fixture: Fixture = {}) =>
     const fs = FakeFs.recordingFs(fixture.entries ?? ALL_ENTRIES);
     const missing = yield* Host.missingHostRequirements(display).pipe(
       Effect.provide(
-        Layer.mergeAll(spawner.layer, fs.layer, Support.withEnv(fixture.env ?? { DISPLAY: ":0" })),
+        Layer.mergeAll(
+          spawner.layer,
+          fs.layer,
+          Config.fromValues(fixture.env ?? { DISPLAY: ":0" }),
+        ),
       ),
     );
     return { missing, spawner, fs };
@@ -168,7 +172,7 @@ describe("missingHostRequirements unhappy path", () => {
       );
       const fs = FakeFs.recordingFs(ALL_ENTRIES);
       const missing = yield* Host.missingHostRequirements("dbus").pipe(
-        Effect.provide(Layer.mergeAll(spawner.layer, fs.layer, Support.withEnv({}))),
+        Effect.provide(Layer.mergeAll(spawner.layer, fs.layer, Config.fromValues({}))),
       );
       expect(missing).toEqual(["qemu-system-x86_64 was built without display backend dbus"]);
     }),

@@ -13,6 +13,8 @@ import {
   Scope,
   Stdio,
 } from "effect";
+import * as Config from "@oligarchy/env/config";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Log from "@oligarchy/log/log";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -22,10 +24,8 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as AutomationClient from "../../src/automation-server/client.ts";
-import * as Config from "../../src/config.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
-import * as HarnessConfig from "../../src/harness/config.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
@@ -3658,9 +3658,9 @@ type SixJobClient = {
 
 // Every OpenCode it starts runs until the test ends it, unless the script says otherwise.
 const clientConfig = FileSystem.layerNoop({
-  exists: (path) => Effect.succeed(path === HarnessConfig.PATH),
+  exists: (path) => Effect.succeed(path === Oligarchy.PATH),
   readFileString: (path) =>
-    path === HarnessConfig.PATH
+    path === Oligarchy.PATH
       ? Effect.succeed(
           JSON.stringify({
             models: { drive: MODEL, diagnose: MODEL, mint: MODEL },

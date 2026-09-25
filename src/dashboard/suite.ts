@@ -1,8 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Cause, Console, Effect, Exit, FileSystem, Layer, ManagedRuntime } from "effect";
-import * as ConfigProvider from "effect/ConfigProvider";
 import * as Command from "effect/unstable/cli/Command";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import clientMd from "../../client.md";
 import ctrlLinearMd from "../../ctrl-linear.md";
@@ -137,11 +137,11 @@ const runCtrlCommand: SuiteRunner = async (connectionString, token, team, args) 
     Layer.mergeAll(
       Layer.merge(NodeServices.layer, bundledPrompts),
       FetchHttpClient.layer,
-      ConfigProvider.layer(
-        ConfigProvider.fromEnv({
-          env: { DATABASE_URL: connectionString, LINEAR_API_TOKEN: token, LINEAR_TEAM: team },
-        }),
-      ),
+      Config.fromValues({
+        DATABASE_URL: connectionString,
+        LINEAR_API_TOKEN: token,
+        LINEAR_TEAM: team,
+      }),
       Layer.succeed(Console.Console, recording),
     ),
   );

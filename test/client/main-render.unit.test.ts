@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Cause, Effect } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliError } from "effect/unstable/cli";
+import * as EnvErrors from "@oligarchy/env/errors";
 import * as Render from "@oligarchy/log/render";
 import * as Errors from "../../src/shared/errors.ts";
 
@@ -67,7 +68,7 @@ describe("the client's render boundary", () => {
   it.effect("prints a missing variable with `OLIGARCHY_TOKEN is not set` first", () =>
     Effect.gen(function* () {
       yield* Render.reportFailure(
-        Cause.fail(Errors.MissingVariable.make({ name: "OLIGARCHY_TOKEN" })),
+        Cause.fail(EnvErrors.MissingVariable.make({ name: "OLIGARCHY_TOKEN" })),
       );
       const [headline] = ((yield* stderr)[0] ?? "").split("\n");
       expect(headline).toBe("OLIGARCHY_TOKEN is not set");

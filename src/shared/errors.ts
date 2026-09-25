@@ -4,14 +4,6 @@ import * as Domain from "@oligarchy/shared/domain";
 // Each error here is waiting for the package that raises it (monorepo-plan.md's error table)
 // and moves out in the phase that creates it. The domain errors are @oligarchy/shared/errors.
 
-export class MissingVariable extends Schema.TaggedError<MissingVariable>(
-  "@oligarchy/shared/errors/MissingVariable",
-)("MissingVariable", { name: Schema.String }) {
-  override get message(): string {
-    return `${this.name} is not set`;
-  }
-}
-
 // The harness loop appended a message the history cannot hold. The caller built
 // the turn; the model did not.
 export class HistoryError extends Schema.TaggedError<HistoryError>(

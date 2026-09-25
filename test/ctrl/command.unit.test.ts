@@ -4,6 +4,7 @@ import { NodeFileSystem, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
+import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
@@ -11,7 +12,6 @@ import * as CtrlCommand from "../../src/ctrl/command.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as Config from "../support/config.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -150,7 +150,7 @@ const harness = (
       Effect.provide(
         Layer.mergeAll(
           services,
-          Config.withEnv(env),
+          Config.fromValues(env),
           options.proxy?.layer ?? FakeHttp.die,
           options.reporter?.layer ?? Layer.empty,
         ),

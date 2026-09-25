@@ -7,13 +7,13 @@
 # that separated them, so a torn refresh runs the sources' truth at the latest one call later. The
 # outputs carry the time the build started, so a source edited while it ran still counts as newer.
 # Bytecode is CommonJS, so `import.meta` is not a value: ConfigProvider.fromEnv only touches
-# `import.meta?.env`, and oligarchy.json and client.md are read with
-# `new URL("../../…", import.meta.url)` from src/harness. One url in that directory keeps both
-# relatives beside the package. Stack traces name the bundle; `bun run driver` runs the sources
-# for one that names them.
+# `import.meta?.env`, and the settings loader in @oligarchy/env reads `import.meta.url` once to
+# find the workspace root; oligarchy.json, client.md and the prompts resolve from that root. One
+# url, the loader's, keeps them all beside the package. Stack traces name the bundle; `bun run
+# driver` runs the sources for one that names them.
 root=$(CDPATH= cd "$(dirname "$0")" && pwd)
 cache="$root/node_modules/.cache/oligarchy/driver"
-meta=$(printf 'import.meta={"url":"file://%s/src/harness/config.ts"}' "$root")
+meta=$(printf 'import.meta={"url":"file://%s/packages/env/src/oligarchy.ts"}' "$root")
 if [ ! -f "$cache/main.js" ] || [ ! -f "$cache/main.js.jsc" ] ||
   [ -n "$(find "$root/src" "$root/packages" "$root/bun.lock" "$root/driver" \( -newer "$cache/main.js" -o -newer "$cache/main.js.jsc" \) -print)" ]; then
   tmp="$cache.$$"

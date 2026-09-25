@@ -12,12 +12,12 @@ import {
   Semaphore,
 } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import type * as Domain from "@oligarchy/shared/domain";
-import * as Cli from "../cli.ts";
-import * as HarnessConfig from "../harness/config.ts";
+import * as Child from "./child.ts";
 import * as Driver from "./driver.ts";
 import * as OpenCode from "./opencode.ts";
 
@@ -255,7 +255,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
           const args = diagnose
-            ? yield* HarnessConfig.load.pipe(
+            ? yield* Oligarchy.load.pipe(
                 Effect.mapError((error) =>
                   ApiErrors.RunFailed.make({ message: error.message, cause: error }),
                 ),
@@ -268,7 +268,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
                 agentId: ticket,
                 action: action === "mint" ? "mint" : "drive",
               });
-          const handle = yield* Cli.spawn(bin, args, env);
+          const handle = yield* Child.spawn(bin, args, env);
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)
               ? ([false, map] as const)
@@ -282,7 +282,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               map.get(ticket) === handle ? mapWithout(map, ticket) : map,
             ).pipe(Effect.andThen(Ref.update(aborts, (map) => mapWithout(map, ticket)))),
           );
-          const exit = yield* Effect.exit(Cli.awaitExit(bin, handle));
+          const exit = yield* Effect.exit(Child.awaitExit(bin, handle));
           const stopping = (yield* Ref.get(aborts)).get(ticket);
           if (stopping !== undefined && (yield* Deferred.await(stopping))) {
             return yield* ApiErrors.RunAborted.make({ agentId: ticket });
@@ -340,7 +340,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         Effect.andThen(
           handle.kill({
             killSignal: "SIGTERM",
-            forceKillAfter: Cli.FORCE_KILL_AFTER,
+            forceKillAfter: Child.FORCE_KILL_AFTER,
           }),
         ),
         Effect.as(true),

@@ -14,15 +14,16 @@ import {
 } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Config from "@oligarchy/env/config";
+import * as EnvErrors from "@oligarchy/env/errors";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Steps from "@oligarchy/shared/steps";
 import * as Actions from "../client/actions.ts";
 import type * as ProxyClient from "../client/proxy-client.ts";
-import * as Config from "../config.ts";
 import * as Tests from "../db/tests.ts";
-import * as HarnessConfig from "../harness/config.ts";
 import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
 import * as Pointer from "../harness/pointer.ts";
@@ -38,9 +39,9 @@ export type Input = {
   readonly prompt: string;
   readonly agentId: string;
   readonly debugLog: string;
-  readonly config: HarnessConfig.AppConfig;
+  readonly config: Oligarchy.AppConfig;
   readonly token: Redacted.Redacted;
-  readonly reasoning: HarnessConfig.Effort;
+  readonly reasoning: Oligarchy.Effort;
 };
 
 export type Stopped = {
@@ -318,7 +319,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
 
         const held = { agentId: input.agentId, serverUrl, sessionId };
         const failure = Effect.match({
-          onFailure: (error: Errors.MissingVariable | ProxyClient.Failure) =>
+          onFailure: (error: EnvErrors.MissingVariable | ProxyClient.Failure) =>
             Render.headline(error),
           onSuccess: () => undefined,
         });

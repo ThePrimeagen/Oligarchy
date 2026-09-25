@@ -9,10 +9,29 @@ import {
   Redacted,
   Stdio,
 } from "effect";
-import * as Errors from "./shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 export const DEFAULT_SERVER_URL = "http://127.0.0.1:42069";
 export const DEFAULT_LINEAR_API_URL = "https://api.linear.app/graphql";
+
+// Every variable the fleet reads, in one place. The names are a type, so an environment built
+// in code (`fromValues`, `override`) cannot name one that does not exist.
+export const VARIABLES = [
+  "OLIGARCHY_TOKEN",
+  "OPENROUTER_API_KEY",
+  "DATABASE_URL",
+  "DATABASE_MIGRATION_URL",
+  "AUTOMATION_SERVER_URL",
+  "LINEAR_API_TOKEN",
+  "LINEAR_TEAM",
+  "LINEAR_API_URL",
+  "LINEAR_WEBHOOK_SECRET",
+  "SERVER_URL",
+  "OLIGARCHY_DATA_DIR",
+  "SESSION_ID",
+] as const;
+export type Variable = (typeof VARIABLES)[number];
+export type Values = { readonly [Name in Variable]?: string };
 
 const ENV_FILE = "--env-file";
 
@@ -60,25 +79,46 @@ const envFileArg = (args: ReadonlyArray<string>): Effect.Effect<Option.Option<st
 // the environment is never replaced by a file. The file is read from the process arguments
 // here, before the CLI parses, because a flag that falls back to config has to see it. An
 // unreadable `.env`, or an `--env-file` that was named and cannot be read, is a defect.
-export const providerLayer: Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =
+const chain: Effect.Effect<
+  ConfigProvider.ConfigProvider,
+  never,
+  FileSystem.FileSystem | Stdio.Stdio
+> = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const args = yield* (yield* Stdio.Stdio).args;
+  let provider = ConfigProvider.fromEnv();
+  const extra = yield* envFileArg(args);
+  if (Option.isSome(extra)) {
+    const file = yield* ConfigProvider.fromDotEnv({ path: extra.value }).pipe(Effect.orDie);
+    provider = ConfigProvider.orElse(provider, file);
+  }
+  const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
+  if (!hasDotEnv) {
+    return provider;
+  }
+  // A `.env` that exists but cannot be read is a broken working directory, not a missing variable.
+  const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
+  return ConfigProvider.orElse(provider, dotEnv);
+});
+
+// What a process runs under.
+export const live: Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =
+  ConfigProvider.layer(chain);
+
+// An explicit record and nothing else: a unit test's environment, or the dashboard's, which has
+// no process to read. An empty string counts as absent, as `fromEnv` treats it.
+export const fromValues = (values: Values): Layer.Layer<never> =>
+  ConfigProvider.layer(ConfigProvider.fromEnv({ env: values }));
+
+// The record ahead of the live chain: one variable points somewhere else (a local Postgres) and
+// every other still comes from the process, the env file and `.env`.
+export const override = (
+  values: Values,
+): Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =>
   ConfigProvider.layer(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const args = yield* (yield* Stdio.Stdio).args;
-      let provider = ConfigProvider.fromEnv();
-      const extra = yield* envFileArg(args);
-      if (Option.isSome(extra)) {
-        const file = yield* ConfigProvider.fromDotEnv({ path: extra.value }).pipe(Effect.orDie);
-        provider = ConfigProvider.orElse(provider, file);
-      }
-      const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
-      if (!hasDotEnv) {
-        return provider;
-      }
-      // A `.env` that exists but cannot be read is a broken working directory, not a missing variable.
-      const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
-      return ConfigProvider.orElse(provider, dotEnv);
-    }),
+    Effect.map(chain, (rest) =>
+      ConfigProvider.orElse(ConfigProvider.fromEnv({ env: values }), rest),
+    ),
   );
 
 const missing = (name: string) => () => Errors.MissingVariable.make({ name });
@@ -125,9 +165,12 @@ export const dataDir: EffectConfig.Config<string> = EffectConfig.string("OLIGARC
 // once.
 export const sessionId: EffectConfig.Config<string> = EffectConfig.string("SESSION_ID");
 
-export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/config/ProxyConfig", {
-  // Sequential on purpose: OLIGARCHY_TOKEN is reported before DATABASE_URL.
-  make: Effect.all({ token: oligarchyToken, databaseUrl }),
-}) {
+export class ProxyConfig extends Context.Service<ProxyConfig>()(
+  "@oligarchy/env/config/ProxyConfig",
+  {
+    // Sequential on purpose: OLIGARCHY_TOKEN is reported before DATABASE_URL.
+    make: Effect.all({ token: oligarchyToken, databaseUrl }),
+  },
+) {
   static readonly layer = Layer.effect(this)(this.make);
 }

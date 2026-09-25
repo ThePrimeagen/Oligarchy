@@ -1,8 +1,8 @@
 import { Effect, Layer, type Redacted, Terminal } from "effect";
 import * as Command from "effect/unstable/cli/Command";
+import * as Config from "@oligarchy/env/config";
+import * as EnvFile from "@oligarchy/env/env-file";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Config from "../config.ts";
-import * as EnvFile from "../env-file.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";

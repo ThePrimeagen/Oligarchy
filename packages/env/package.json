@@ -1,0 +1,29 @@
+{
+  "name": "@oligarchy/env",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./colors": "./src/colors.ts",
+    "./config": "./src/config.ts",
+    "./env-file": "./src/env-file.ts",
+    "./errors": "./src/errors.ts",
+    "./oligarchy": "./src/oligarchy.ts",
+    "./run": "./src/run.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

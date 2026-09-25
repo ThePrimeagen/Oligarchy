@@ -3,13 +3,6 @@ import { Schema } from "effect";
 import * as Errors from "../../src/shared/errors.ts";
 
 describe("staged errors, each waiting for its package", () => {
-  it("MissingVariable renders <NAME> is not set", () => {
-    expect(Errors.MissingVariable.make({ name: "OLIGARCHY_TOKEN" }).message).toBe(
-      "OLIGARCHY_TOKEN is not set",
-    );
-    expect(String(Errors.MissingVariable.make({ name: "X" }))).toContain("X is not set");
-  });
-
   it("QmpTimeout names the command", () => {
     expect(Errors.QmpTimeout.make({ command: "send-key" }).message).toBe(
       "qemu: send-key timed out",

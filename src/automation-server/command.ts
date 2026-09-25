@@ -2,13 +2,13 @@ import { Deferred, Effect, Layer } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as EnvFile from "@oligarchy/env/env-file";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Client from "../db/client.ts";
-import * as EnvFile from "../env-file.ts";
-import * as HarnessConfig from "../harness/config.ts";
 import * as Errors from "../shared/errors.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.
@@ -19,7 +19,7 @@ const DEFAULT_PORT = 54321;
 export type AutomationServer<RServe> = {
   readonly serve: (
     port: number,
-    models: HarnessConfig.AppConfig["models"],
+    models: Oligarchy.AppConfig["models"],
   ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
@@ -45,7 +45,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
         const database = yield* Client.Database;
         const startup = Effect.gen(function* () {
           // The file is the model. A missing one fails here, before the database and before listen.
-          const config = yield* HarnessConfig.load;
+          const config = yield* Oligarchy.load;
           // Queue rows live in Postgres: fail at startup, not on the first webhook.
           yield* database.ping.pipe(
             Effect.mapError((error) =>

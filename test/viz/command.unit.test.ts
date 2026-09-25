@@ -5,9 +5,9 @@ import { Cause, Effect, Exit, Fiber, Layer } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import * as VizCommand from "../../src/viz/command.ts";
-import * as Config from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import { fakeRenderer, rows } from "../support/fake-renderer.ts";
 import { fakeTerminal } from "../support/fake-terminal.ts";
@@ -73,7 +73,7 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
               screen.layer,
               stdio.layer,
               FakeHttp.respondWith(() => new Response(null, { status: 404 })),
-              Config.withEnv(env),
+              Config.fromValues(env),
             ),
           ),
         ),

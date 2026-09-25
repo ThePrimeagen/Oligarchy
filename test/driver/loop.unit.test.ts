@@ -15,14 +15,14 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
+import * as Config from "@oligarchy/env/config";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as DriverLog from "../../src/driver/log.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as HarnessConfig from "../../src/harness/config.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as Support from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as Stores from "../support/stores.ts";
@@ -56,7 +56,7 @@ const config = (overrides?: {
   readonly chunk?: string;
   readonly defaultRetry?: string;
 }) =>
-  HarnessConfig.parse(
+  Oligarchy.parse(
     JSON.stringify({
       models: { drive: MODEL, diagnose: MODEL, mint: MODEL },
       reasoning: { drive: "minimal", diagnose: "minimal", mint: "minimal" },
@@ -363,7 +363,7 @@ const storeFor = (
 };
 
 const run = (
-  app: Effect.Effect<HarnessConfig.AppConfig, SharedErrors.CommandError>,
+  app: Effect.Effect<Oligarchy.AppConfig, SharedErrors.CommandError>,
   http: Layer.Layer<HttpClient.HttpClient>,
   script: Script,
   log: Array<string>,
@@ -376,7 +376,7 @@ const run = (
     readonly mode?: StoreMode;
     readonly overrides?: Partial<typeof Tests.TestStore.Service>;
     readonly printed?: Array<string>;
-    readonly reasoning?: HarnessConfig.Effort;
+    readonly reasoning?: Oligarchy.Effort;
   },
 ) =>
   Effect.gen(function* () {
@@ -406,7 +406,7 @@ const run = (
           http,
           spawner.layer,
           NodePath.layer,
-          Support.withEnv(options?.env ?? { OLIGARCHY_TOKEN: TOKEN }),
+          Config.fromValues(options?.env ?? { OLIGARCHY_TOKEN: TOKEN }),
           store.layer,
         ),
       ),
@@ -1094,7 +1094,7 @@ describe("driver loop", () => {
             recorder.layer,
             spawner.layer,
             NodePath.layer,
-            Support.withEnv({ OLIGARCHY_TOKEN: TOKEN }),
+            Config.fromValues({ OLIGARCHY_TOKEN: TOKEN }),
             store.layer,
           ),
         ),
@@ -1370,7 +1370,7 @@ describe("driver loop", () => {
             recorder.layer,
             spawner.layer,
             NodePath.layer,
-            Support.withEnv({ OLIGARCHY_TOKEN: TOKEN }),
+            Config.fromValues({ OLIGARCHY_TOKEN: TOKEN }),
             store.layer,
           ),
         ),

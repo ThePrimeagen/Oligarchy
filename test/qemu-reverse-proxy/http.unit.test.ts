@@ -11,9 +11,9 @@ import {
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
-import * as Config from "../../src/config.ts";
 import * as Handlers from "../../src/qemu-reverse-proxy/handlers.ts";
 import * as Router from "../../src/qemu-reverse-proxy/router.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";

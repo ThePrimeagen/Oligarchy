@@ -4,8 +4,8 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { Effect, Layer } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as Config from "@oligarchy/env/config";
 import * as Actions from "../../src/client/actions.ts";
-import * as Support from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
@@ -18,7 +18,7 @@ const run = (args: ReadonlyArray<string>, http: Layer.Layer<HttpClient.HttpClien
     Effect.provide(
       Layer.mergeAll(
         http,
-        Support.withEnv({ OLIGARCHY_TOKEN: TOKEN }),
+        Config.fromValues({ OLIGARCHY_TOKEN: TOKEN }),
         NodeFileSystem.layer,
         NodePath.layer,
         Stdio.capture().layer,

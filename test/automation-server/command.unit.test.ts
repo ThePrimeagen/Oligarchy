@@ -12,8 +12,8 @@ import {
   Stdio,
   Terminal,
 } from "effect";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Api from "@oligarchy/routes/api";
-import * as HarnessConfig from "../../src/harness/config.ts";
 import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
@@ -39,9 +39,9 @@ const APP = JSON.stringify({
 
 const configFs = (text: string | undefined) =>
   FileSystem.layerNoop({
-    exists: (path) => Effect.succeed(path === HarnessConfig.PATH && text !== undefined),
+    exists: (path) => Effect.succeed(path === Oligarchy.PATH && text !== undefined),
     readFileString: (path) => {
-      if (path !== HarnessConfig.PATH || text === undefined) {
+      if (path !== Oligarchy.PATH || text === undefined) {
         return Effect.die(`unexpected read ${path}`);
       }
       return Effect.succeed(text);
@@ -189,12 +189,12 @@ describe("automation server command flags", () => {
       );
       expect(error._tag).toBe("CommandError");
       if (error._tag === "CommandError") {
-        expect(error.message).toContain(HarnessConfig.PATH);
+        expect(error.message).toContain(Oligarchy.PATH);
         expect(error.message).toContain("missing");
       }
       expect(fake.served).toEqual([]);
       expect(log.lines.map((line) => line.level)).toEqual(["fatal"]);
-      expect(log.lines[0]?.text).toContain(HarnessConfig.PATH);
+      expect(log.lines[0]?.text).toContain(Oligarchy.PATH);
     }),
   );
 });

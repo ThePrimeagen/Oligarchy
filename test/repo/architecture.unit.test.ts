@@ -48,6 +48,7 @@ const packageGraph: PackageGraph = new Map(
 const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
   "@oligarchy/log": 1,
+  "@oligarchy/env": 2,
   "@oligarchy/routes": 5,
 };
 
@@ -153,7 +154,9 @@ const BOUNDARY_FILES = new Set([
   "src/shared/process-usage.ts",
   "src/observability/instrument.ts",
   // Whether stdout takes colour: the tty's depth and FORCE_COLOR, decided once for the process.
-  "src/observability/colors.ts",
+  "packages/env/src/colors.ts",
+  // The entry runner: the one NodeRuntime.runMain, the stdout and stderr error listeners.
+  "packages/env/src/run.ts",
   "src/db/client.ts",
 ]);
 
@@ -257,6 +260,29 @@ describe("Effect.run placement", () => {
         );
         const allowed = RUN_ALLOWED.get(path) ?? [];
         return calls.filter((call) => !allowed.includes(call)).map((call) => `Effect.${call}`);
+      }),
+    ).toEqual([]);
+  });
+
+  // Every entry runs through the one runner, `bun run db:migrate`'s included; the session REPL
+  // answers its own signals, so it is the one process with a runtime of its own.
+  it("NodeRuntime.runMain lives in env's runner, Runtime.makeRunMain in the session entry, and Env.run in the entries", () => {
+    expect(
+      violations((path, source) => {
+        const code = stripStringsAndComments(source);
+        return [
+          ...(path !== "packages/env/src/run.ts" && /\bNodeRuntime\.runMain\b/.test(code)
+            ? ["NodeRuntime.runMain"]
+            : []),
+          ...(path !== "src/session/main.ts" && /\bRuntime\.makeRunMain\b/.test(code)
+            ? ["Runtime.makeRunMain"]
+            : []),
+          ...(!/^src\/[^/]+\/main\.ts$/.test(path) &&
+          path !== "src/db/migrate.ts" &&
+          /\bEnv\.run\(/.test(code)
+            ? ["Env.run"]
+            : []),
+        ];
       }),
     ).toEqual([]);
   });

@@ -1,8 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Effect, Exit, FileSystem, Inspectable, Layer, Redacted, Stdio } from "effect";
-import * as Config from "../../src/config.ts";
-import * as Support from "../support/config.ts";
+import * as Config from "../src/config.ts";
 
 const SENTINEL = "s3cr3t-sentinel-value";
 
@@ -11,7 +10,7 @@ describe("required", () => {
     Effect.gen(function* () {
       const value = yield* Config.required("OLIGARCHY_TOKEN");
       expect(value).toBe("t0ken");
-    }).pipe(Effect.provide(Support.withEnv({ OLIGARCHY_TOKEN: "t0ken" }))),
+    }).pipe(Effect.provide(Config.fromValues({ OLIGARCHY_TOKEN: "t0ken" }))),
   );
 
   it.effect("fails MissingVariable rendered <NAME> is not set when missing", () =>
@@ -19,14 +18,14 @@ describe("required", () => {
       const error = yield* Effect.flip(Config.required("OLIGARCHY_TOKEN"));
       expect(error._tag).toBe("MissingVariable");
       expect(error.message).toBe("OLIGARCHY_TOKEN is not set");
-    }).pipe(Effect.provide(Support.withEnv({}))),
+    }).pipe(Effect.provide(Config.fromValues({}))),
   );
 
   it.effect("treats an empty value as missing", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.required("OLIGARCHY_TOKEN"));
       expect(error).toMatchObject({ _tag: "MissingVariable", name: "OLIGARCHY_TOKEN" });
-    }).pipe(Effect.provide(Support.withEnv({ OLIGARCHY_TOKEN: "" }))),
+    }).pipe(Effect.provide(Config.fromValues({ OLIGARCHY_TOKEN: "" }))),
   );
 });
 
@@ -39,14 +38,14 @@ describe("requiredRedacted", () => {
       expect(JSON.stringify(token)).not.toContain(SENTINEL);
       expect(Cause.pretty(Cause.fail(token))).not.toContain(SENTINEL);
       expect(Cause.pretty(Cause.die(token))).not.toContain(SENTINEL);
-    }).pipe(Effect.provide(Support.withEnv({ OLIGARCHY_TOKEN: SENTINEL }))),
+    }).pipe(Effect.provide(Config.fromValues({ OLIGARCHY_TOKEN: SENTINEL }))),
   );
 
   it.effect("treats an empty value as missing", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.requiredRedacted("DATABASE_URL"));
       expect(error.message).toBe("DATABASE_URL is not set");
-    }).pipe(Effect.provide(Support.withEnv({ DATABASE_URL: "" }))),
+    }).pipe(Effect.provide(Config.fromValues({ DATABASE_URL: "" }))),
   );
 
   it.effect("the named accessors read their variables", () =>
@@ -62,7 +61,7 @@ describe("requiredRedacted", () => {
       expect(yield* Config.sessionId).toBe("e");
     }).pipe(
       Effect.provide(
-        Support.withEnv({
+        Config.fromValues({
           OLIGARCHY_TOKEN: "a",
           OPENROUTER_API_KEY: "i",
           DATABASE_URL: "b",
@@ -82,7 +81,7 @@ describe("requiredRedacted", () => {
       const error = yield* Effect.flip(Config.serverUrl);
       expect(error._tag).toBe("ConfigError");
       expect(Config.DEFAULT_SERVER_URL).toBe("http://127.0.0.1:42069");
-    }).pipe(Effect.provide(Support.withEnv({ SERVER_URL: "" }))),
+    }).pipe(Effect.provide(Config.fromValues({ SERVER_URL: "" }))),
   );
 
   // A flag fallback, like SERVER_URL: an empty SESSION_ID is unset, so the flag's own rule applies.
@@ -90,7 +89,7 @@ describe("requiredRedacted", () => {
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.sessionId);
       expect(error._tag).toBe("ConfigError");
-    }).pipe(Effect.provide(Support.withEnv({ SESSION_ID: "" }))),
+    }).pipe(Effect.provide(Config.fromValues({ SESSION_ID: "" }))),
   );
 });
 
@@ -125,7 +124,7 @@ const dotEnvFileSystem = (contents: string) =>
     Stdio.layerTest({}),
   );
 
-describe("providerLayer", () => {
+describe("live", () => {
   it.effect("fills missing variables from .env in the working directory", () =>
     withProcessEnv(
       { OLIGARCHY_TEST_SET: "from-env" },
@@ -134,7 +133,7 @@ describe("providerLayer", () => {
         expect(yield* Config.required("OLIGARCHY_TEST_FILL")).toBe("from-dotenv");
       }).pipe(
         Effect.provide(
-          Config.providerLayer.pipe(
+          Config.live.pipe(
             Layer.provide(
               dotEnvFileSystem("OLIGARCHY_TEST_SET=from-dotenv\nOLIGARCHY_TEST_FILL=from-dotenv\n"),
             ),
@@ -153,7 +152,7 @@ describe("providerLayer", () => {
         expect(error.message).toBe("OLIGARCHY_TEST_FILL is not set");
       }).pipe(
         Effect.provide(
-          Config.providerLayer.pipe(
+          Config.live.pipe(
             Layer.provide(Layer.mergeAll(FileSystem.layerNoop({}), Stdio.layerTest({}))),
           ),
         ),
@@ -166,9 +165,7 @@ describe("providerLayer", () => {
       const error = yield* Effect.flip(Config.required("OLIGARCHY_TEST_NOWHERE"));
       expect(error.message).toBe("OLIGARCHY_TEST_NOWHERE is not set");
     }).pipe(
-      Effect.provide(
-        Config.providerLayer.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_TEST_OTHER=1\n"))),
-      ),
+      Effect.provide(Config.live.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_TEST_OTHER=1\n")))),
     ),
   );
 });
@@ -185,13 +182,13 @@ const envFiles = (files: Record<string, string>) =>
   });
 
 const provideProvider = (args: ReadonlyArray<string>, files: Record<string, string>) =>
-  Config.providerLayer.pipe(
+  Config.live.pipe(
     Layer.provide(Layer.mergeAll(envFiles(files), Stdio.layerTest({ args: Effect.succeed(args) }))),
   );
 
 const readFill = Config.required("OLIGARCHY_TEST_FILL");
 
-describe("providerLayer --env-file", () => {
+describe("live --env-file", () => {
   const dot =
     "OLIGARCHY_TEST_SET=from-dotenv\nOLIGARCHY_TEST_FILE=from-dotenv\nOLIGARCHY_TEST_DOT=from-dotenv\n";
   const extra =
@@ -279,7 +276,7 @@ describe("providerLayer --env-file", () => {
       const exit = yield* Effect.exit(
         readFill.pipe(
           Effect.provide(
-            Config.providerLayer.pipe(
+            Config.live.pipe(
               Layer.provide(
                 Layer.mergeAll(
                   FileSystem.layerNoop({}),
@@ -302,7 +299,7 @@ describe("linearTeam", () => {
   it.effect("returns the team name when set", () =>
     Effect.gen(function* () {
       expect(yield* Config.linearTeam).toBe("Local Board");
-    }).pipe(Effect.provide(Support.withEnv({ LINEAR_TEAM: "Local Board" }))),
+    }).pipe(Effect.provide(Config.fromValues({ LINEAR_TEAM: "Local Board" }))),
   );
 
   it.effect("fails MissingVariable rendered LINEAR_TEAM is not set when missing", () =>
@@ -313,14 +310,14 @@ describe("linearTeam", () => {
         name: "LINEAR_TEAM",
         message: "LINEAR_TEAM is not set",
       });
-    }).pipe(Effect.provide(Support.withEnv({}))),
+    }).pipe(Effect.provide(Config.fromValues({}))),
   );
 
   it.effect("treats an empty value as missing", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.linearTeam);
       expect(error).toMatchObject({ _tag: "MissingVariable", name: "LINEAR_TEAM" });
-    }).pipe(Effect.provide(Support.withEnv({ LINEAR_TEAM: "" }))),
+    }).pipe(Effect.provide(Config.fromValues({ LINEAR_TEAM: "" }))),
   );
 
   // The token is the credential; the team is which board that credential files on.
@@ -328,14 +325,14 @@ describe("linearTeam", () => {
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.linearAccess);
       expect(error.message).toBe("LINEAR_API_TOKEN is not set");
-    }).pipe(Effect.provide(Support.withEnv({}))),
+    }).pipe(Effect.provide(Config.fromValues({}))),
   );
 
   it.effect("reports LINEAR_TEAM when the token is set and the team is not", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.linearAccess);
       expect(error.message).toBe("LINEAR_TEAM is not set");
-    }).pipe(Effect.provide(Support.withEnv({ LINEAR_API_TOKEN: "lin" }))),
+    }).pipe(Effect.provide(Config.fromValues({ LINEAR_API_TOKEN: "lin" }))),
   );
 
   it.effect("holds the token and the team name", () =>
@@ -344,7 +341,7 @@ describe("linearTeam", () => {
       expect(Redacted.value(access.token)).toBe("lin");
       expect(access.team).toBe("Local Board");
     }).pipe(
-      Effect.provide(Support.withEnv({ LINEAR_API_TOKEN: "lin", LINEAR_TEAM: "Local Board" })),
+      Effect.provide(Config.fromValues({ LINEAR_API_TOKEN: "lin", LINEAR_TEAM: "Local Board" })),
     ),
   );
 });
@@ -358,7 +355,7 @@ describe("ProxyConfig", () => {
     }).pipe(
       Effect.provide(
         Config.ProxyConfig.layer.pipe(
-          Layer.provide(Support.withEnv({ OLIGARCHY_TOKEN: "t", DATABASE_URL: "postgres://x" })),
+          Layer.provide(Config.fromValues({ OLIGARCHY_TOKEN: "t", DATABASE_URL: "postgres://x" })),
         ),
       ),
     ),
@@ -368,13 +365,13 @@ describe("ProxyConfig", () => {
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.ProxyConfig.make);
       expect(error.message).toBe("OLIGARCHY_TOKEN is not set");
-    }).pipe(Effect.provide(Support.withEnv({}))),
+    }).pipe(Effect.provide(Config.fromValues({}))),
   );
 
   it.effect("reports DATABASE_URL when only the token is set", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Config.ProxyConfig.make);
       expect(error.message).toBe("DATABASE_URL is not set");
-    }).pipe(Effect.provide(Support.withEnv({ OLIGARCHY_TOKEN: "t" }))),
+    }).pipe(Effect.provide(Config.fromValues({ OLIGARCHY_TOKEN: "t" }))),
   );
 });

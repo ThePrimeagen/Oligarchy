@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import * as Flag from "effect/unstable/cli/Flag";
+import * as Config from "@oligarchy/env/config";
 import * as Domain from "@oligarchy/shared/domain";
-import * as Config from "../config.ts";
 
 export const DEFAULT_ISO = "omarchy.iso";
 export const DEFAULT_ENCODING = "oligarchy";

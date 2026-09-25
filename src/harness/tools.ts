@@ -1,13 +1,15 @@
 import { readFileSync } from "node:fs";
 import { Cause, Exit, Result, Schema } from "effect";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Render from "@oligarchy/log/render";
 import * as Errors from "../shared/errors.ts";
 
 // The model drives the guest through ./client. client.md is that tool's
 // definition, read here so a new command is not copied into this module.
 // Intent, and marking a result started or completed, are the harness's. The
-// model is not given ./ctrl.
-export const clientGuide = readFileSync(new URL("../../client.md", import.meta.url), "utf8");
+// model is not given ./ctrl. Resolved from the settings file's root, the one
+// URL the driver bundle defines.
+export const clientGuide = readFileSync(new URL("client.md", Oligarchy.ROOT), "utf8");
 
 export type CommandLine = {
   readonly bin: "./client";

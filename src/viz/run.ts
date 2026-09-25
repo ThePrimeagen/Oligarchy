@@ -26,12 +26,13 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { createSignal } from "solid-js";
+import * as Config from "@oligarchy/env/config";
+import * as EnvErrors from "@oligarchy/env/errors";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
 import * as Automation from "../db/automation.ts";
 import * as Logs from "../db/logs.ts";
@@ -171,7 +172,7 @@ type Abort =
 const abortJob = (
   ticket: string,
   action: Automation.AutomationAction,
-): Effect.Effect<Abort, Errors.MissingVariable, HttpClient.HttpClient> =>
+): Effect.Effect<Abort, EnvErrors.MissingVariable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     // The url is read first, so it is the one reported first.
     const serverUrl = yield* Config.automationServerUrl;

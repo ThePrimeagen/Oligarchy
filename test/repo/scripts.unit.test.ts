@@ -243,7 +243,10 @@ describe("root executables", () => {
       expect(wrapper, name).not.toMatch(NOT_BUN);
     }
     const driver = read("driver");
-    expect(driver).toContain("/src/harness/config.ts");
+    // One import.meta.url for the whole bytecode bundle: the settings loader's, from which the
+    // repo root and every checked-in file beside it resolve.
+    expect(driver).toContain("/packages/env/src/oligarchy.ts");
+    expect(driver).not.toContain("/src/harness/config.ts");
     expect(driver).toContain("--define");
   });
 });

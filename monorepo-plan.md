@@ -3,8 +3,9 @@
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
-(`@oligarchy/shared`) and phase 3 (`@oligarchy/log`). The rest of this file is the plan for the
-remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it lands.
+(`@oligarchy/shared`), phase 3 (`@oligarchy/log`) and phase 4 (`@oligarchy/env`). The rest of
+this file is the plan for the remaining phases and the reasoning behind each choice; a phase's
+checklist is ticked as it lands.
 
 Revised 2026-09-25 after review. What changed from the first version, and why:
 
@@ -248,31 +249,31 @@ Write each phase's tests before any of that phase's code, and see them fail.
 
 **Phase 4: `@oligarchy/env`**
 
-- [ ] TEST (move) `test/config/config.unit.test.ts` to `packages/env/test/config.unit.test.ts`,
+- [x] TEST (move) `test/config/config.unit.test.ts` to `packages/env/test/config.unit.test.ts`,
       with the same assertions: the provider order, `--env-file` last one wins, `--` stops the
       scan, `<NAME> is not set`, and `ProxyConfig`.
-- [ ] TEST (new) `packages/env/test/environments.unit.test.ts`: `Env.fromValues({ DATABASE_URL:
+- [x] TEST (new) `packages/env/test/environments.unit.test.ts`: `Env.fromValues({ DATABASE_URL:
       url })` answers that variable and nothing else, so `Config.linearTeam` under it is
       `MissingVariable("LINEAR_TEAM")`; `Env.override({ DATABASE_URL: url })` over a live chain
       answers the override for that name and the chain for every other; an empty string in
       either counts as absent, as `fromEnv` treats it. Unhappy: a misspelt name is a compile
       error (`@ts-expect-error` on `fromValues({ DATABSE_URL: url })`), and the override of an
       unset name still reports the chain's `MissingVariable`.
-- [ ] TEST (alter) every test using `test/support/config.ts`'s `withEnv` (12 files): uses
+- [x] TEST (alter) every test using `test/support/config.ts`'s `withEnv` (12 files): uses
       `Env.fromValues`. The helper is deleted.
-- [ ] TEST (new) `packages/env/test/run.unit.test.ts`: `Env.program(command, { version })`
+- [x] TEST (new) `packages/env/test/run.unit.test.ts`: `Env.program(command, { version })`
       returns the effect the entry runs: a successful command's exit is 0; a failing command's
       exit prints one headline and the cause, with no stack; a `CliError` prints nothing more;
       `--version` prints the version passed in; the Wizard is not offered; `Log.Colors` is
       provided from stdout, on for a TTY with 16 colours and off for a pipe. `Env.run` is the one
       `NodeRuntime.runMain` call and is not unit tested.
-- [ ] TEST (move) the `wantsColor` describe from the render test to
+- [x] TEST (move) the `wantsColor` describe from the render test to
       `packages/env/test/colors.unit.test.ts`.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the driver wrapper defines `import.meta.url`
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the driver wrapper defines `import.meta.url`
       as the `oligarchy.json` loader's new path.
-- [ ] TEST (move) `test/cli.unit.test.ts` to `test/automation-client/child.unit.test.ts`,
+- [x] TEST (move) `test/cli.unit.test.ts` to `test/automation-client/child.unit.test.ts`,
       following `src/cli.ts` to `src/automation-client/child.ts`.
-- [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the `Effect.run` placement rule allows
+- [x] TEST (alter) `test/repo/architecture.unit.test.ts`: the `Effect.run` placement rule allows
       `Env.run` in env and the eight `main.ts` files that call it; `src/session/main.ts` keeps its
       own named exemption.
 
@@ -596,21 +597,43 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 4: `@oligarchy/env`**
 
-- [ ] Create `packages/env` with `config.ts` (the one list, plus `Env.live`, `Env.fromValues`
+- [x] Create `packages/env` with `config.ts` (the one list, plus `Env.live`, `Env.fromValues`
       and `Env.override`), `env-file.ts`, `oligarchy.ts` (from `src/harness/config.ts`),
       `colors.ts` (from `src/observability/colors.ts`) and `run.ts`:
       `Env.program(command, { version })`, the effect, and `Env.run(program, { teardown })`, the
       one `NodeRuntime.runMain` call.
-- [ ] The dashboard's `suite.ts` builds its provider with `Env.fromValues` instead of a
+- [x] The dashboard's `suite.ts` builds its provider with `Env.fromValues` instead of a
       hand-written `ConfigProvider.fromEnv`; the in-process integration tests that set
       `process.env.DATABASE_URL` for their own runtime use `Env.override` (the ones that spawn a
       process keep setting the child's environment, which is the only way to reach a child).
-- [ ] Switch eight entries to `Env.run` (`ctrl`, `driver`, `client`, `viz` and the four
+- [x] Switch eight entries to `Env.run` (`ctrl`, `driver`, `client`, `viz` and the four
       servers). `src/session/main.ts` uses `Env.program` and keeps its own runtime and signal
       handling.
-- [ ] Update the driver wrapper's `--define` for the loader's new path.
-- [ ] Move `src/cli.ts` to `src/automation-client/child.ts`.
-- [ ] `development.md`: the Config section's paths and the runner.
+- [x] Update the driver wrapper's `--define` for the loader's new path.
+- [x] Move `src/cli.ts` to `src/automation-client/child.ts`.
+- [x] `development.md`: the Config section's paths and the runner.
+
+Decided while working the phase:
+
+- `@oligarchy/env/config` keeps its consumers' alias, `Config` (thirty files import it so), and
+  the environments are `Config.live`, `Config.fromValues` and `Config.override`; the runner
+  module `@oligarchy/env/run` is `Env` (`Env.program`, `Env.run`); `oligarchy.ts` is `Oligarchy`
+  (was `HarnessConfig`); `MissingVariable` is `@oligarchy/env/errors`, imported as `EnvErrors`.
+- `Env.program` takes the process's `layer` and builds it over the environment itself, because
+  a layer failure (a missing variable) must be printed and the process layer needs the config
+  chain beneath it; the entries pass `layer: MainLive` and nothing more. `Env.run` provides
+  `NodeServices.layer`, so `Env.program` is platform-free and its tests run on `Stdio.layerTest`
+  and `FileSystem.layerNoop`.
+- The four servers pass `failuresLogged: true`: their commands log every failure as a fatal line
+  before failing, so only a defect is printed, as their entries did before. A CLI prints every
+  failure.
+- `import.meta.url` is read once, in `oligarchy.ts`, which exports `ROOT`; `harness/tools.ts`
+  and `driver/prompt.ts` resolve `client.md` and the prompts against it, so the driver bundle's
+  one `--define` still serves all three files.
+- `db/migrate.ts` is not a `Command`; it runs a bare effect through `Env.run` now (phase 5 moves
+  it into db), so `NodeRuntime.runMain` appears in the runner alone.
+- `@effect/platform-node` joins the catalog; the `strict-effect-provide` override covers the
+  runner, the entry point the rule exempts.
 
 **Phase 5: `@oligarchy/db`**
 
