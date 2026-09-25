@@ -60,6 +60,12 @@ Then two independent reviews of that revision (2026-09-25), which changed:
   still writes the line, then `db: log insert failed: <detail>`, then reports the failure to
   Sentry. So the sink is offered the line with its row, and the stdout layer's sink writes at
   once.
+- **`viz` is the sixth app.** Every import it has today already maps to a package (`db`, `env`,
+  `log`, `shared`, `http`) except one four-line predicate from `session/image.ts`, which it keeps
+  its own copy of. Nothing imports viz once `steps.ts` is in shared. With viz and the dashboard
+  both apps, the root has no `.tsx` left: the root tsconfig drops its JSX settings, the root
+  vitest config drops both JSX plugins, and the pragma rule in the architecture test is deleted
+  rather than kept for an empty set.
 
 How to work a phase:
 
@@ -73,8 +79,8 @@ How to work a phase:
 ## Target in one picture
 
 ```
-top     integration-testing (system tests, dev only)   scripts: ctrl, dig, driver, session, viz, client (root package)
-6       automation-server  automation-client  qemu-reverse-proxy  qemu-server  dashboard
+top     integration-testing (system tests, dev only)   scripts: ctrl, dig, driver, session, client (root package)
+6       automation-server  automation-client  qemu-reverse-proxy  qemu-server  dashboard  viz
 5       http            contract, API errors, middleware, serve, proxy client
 5       fleet           host and process stats, member announce loop, stale-server sweep
 4       observability   Sentry, instrument, dsn, the row-writing Log layer
@@ -87,7 +93,7 @@ top     integration-testing (system tests, dev only)   scripts: ctrl, dig, drive
 
 A package depends only on packages in a lower layer. Two packages on the same layer never depend
 on each other. Nothing depends on an app, with one dev-only exception (open decision 4). The
-scripts (`client`, `ctrl`, `dig`, `driver`, `session`, `viz`) stay in the root package as one-off
+scripts (`client`, `ctrl`, `dig`, `driver`, `session`) stay in the root package as one-off
 consumers on top. `client` will be removed later, outside this plan.
 
 Declared dependencies, which is what the architecture test reads:
@@ -121,8 +127,8 @@ Declared dependencies, which is what the architecture test reads:
   package's own holds list; a rule that a listed module fails is a wrong rule or a wrong list.
   `shared` has the strictest one, because a package called "shared" is the one that becomes
   "everything goes here".
-- **Five apps.** `automation-server`, `automation-client`, `qemu-reverse-proxy`, `qemu-server`
-  and `dashboard`. Everything else is a script.
+- **Six apps.** `automation-server`, `automation-client`, `qemu-reverse-proxy`, `qemu-server`,
+  `dashboard` and `viz`. Everything else is a script.
 - **Prefer returning values; log where the decision is made.** The `Log` service is available
   from layer 1, so any package may take it. The default is still to return a typed error and let
   the caller decide. A module logs itself when the line is the decision, as the host sampler does
@@ -339,7 +345,7 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (alter) `test/integration/client.integration.test.ts`: the bundle rebuilds when an
       http-package source is newer.
 
-**Phase 10: the five apps**
+**Phase 10: the six apps**
 
 - [ ] TEST (move) qemu-server's unit tests (`test/qemu-server/`, `test/qemu/`, `test/qmp/`) to
       `apps/qemu-server/test/`.
@@ -363,11 +369,20 @@ container and stay in the root's integration project until phase 11.
       `apps/dashboard`; `check:types` reaches every app's tsconfig.
 - [ ] TEST (new) `test/repo/architecture.unit.test.ts`: an app imports packages only, never
       another app and never the root's `src/`. Unhappy: an app-to-app import is named.
+- [ ] TEST (move) `test/viz/*.unit.test.ts` (eleven files, `screen.unit.test.tsx` included) to
+      `apps/viz/test/`, with `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts` and `fake-tty.ts`
+      as the app's own helpers. The session tests in the root keep what they use of those four
+      under `test/support/`.
+- [ ] TEST (new) `apps/viz/test/terminal.unit.test.ts`: `speaksKitty` is true for a tmux client
+      termtype naming ghostty or kitty in any case, false for anything else and for an empty
+      string.
 - [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the boundary-file list, the `main.ts`
       pattern and the `Effect.run` rules cover `apps/*/src/main.ts` and the dashboard's entry.
-- [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: every `.tsx` in the root package opens
-      with the `@opentui/solid` pragma; the dashboard's `.tsx` files are the app's, under its own
-      tsconfig. Unhappy: a root `.tsx` without the pragma is named.
+- [ ] TEST (delete) the `.tsx` pragma case in `test/repo/architecture.unit.test.ts`: with viz and
+      the dashboard both apps, the root has no `.tsx`; each app's tsconfig names its own JSX
+      runtime and the rule has nothing left to check.
+- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the `viz` script and wrapper run
+      `apps/viz/src/main.ts` with exactly its preload.
 - [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the fleet starters start the apps from
       their new entries, and a second signal still kills both children.
 
@@ -508,16 +523,24 @@ container and stay in the root's integration project until phase 11.
       `onError: (cause) => MutableRef.set(shutdown.reason, ...)`.
 - [ ] Run `wrangler deploy --dry-run` as a build check (not a test).
 
-**Phase 10: the five apps**
+**Phase 10: the six apps**
 
 - [ ] Add `apps/*` to the root workspaces.
 - [ ] Move each server into `apps/<name>/`: qemu-server takes `src/qemu/` and `src/qmp/`,
       automation-client takes `child.ts`, automation-server keeps `client.ts`.
 - [ ] Move the dashboard into `apps/dashboard/` with `wrangler.jsonc`, the `dev` script, the text
       module rules (paths to `client.md`, `ctrl-linear.md` and `prompts/*.html` become
-      `../../../`), its own tsconfig with `jsxImportSource: hono/jsx`, and `query.ts` as its read
-      model. Drop `jsxImportSource` from the root tsconfig. `SuiteRequestError` becomes a
+      `../../../`), its own tsconfig with `jsxImportSource: hono/jsx`, the `textModules` vitest
+      plugin, and `query.ts` as its read model. `SuiteRequestError` becomes a
       `Schema.TaggedError`.
+- [ ] Move viz into `apps/viz/` with `preload.ts`, its own tsconfig with
+      `jsxImportSource: @opentui/solid`, the `opentuiSolid` babel plugin in its `vitest.config.ts`
+      (applied to every `.tsx` there, no pragma sniff), and `@opentui/core`, `@opentui/solid`,
+      `solid-js`, `@babel/core`, `@babel/preset-typescript`, `babel-preset-solid` and
+      `@types/babel__core` in its `package.json`. Add `terminal.ts` with `speaksKitty`, viz's own
+      copy of the four-line predicate in `session/image.ts`; `image.ts` stays with `session`.
+- [ ] Drop `jsx` and `jsxImportSource` from the root tsconfig, and both JSX plugins from the root
+      `vitest.config.ts`. Remove the moved dependencies from the root `package.json`.
 - [ ] Give the dashboard an `exports` entry for its Worker entry, if open decision 4 is accepted.
 - [ ] Delete the root `src/shared/errors.ts` once the last app error has moved.
 - [ ] Update the wrappers, package scripts and fleet starters.
@@ -607,6 +630,7 @@ was checked against the modules' imports as they are today.
 | `env` ↔ `shared` | env imports shared | a flag schema in shared | flags live in the apps; shared holds the vocabulary a flag decodes to |
 | app ↔ app | none | `ctrl/linear.ts`, `qemu-server/middleware.ts`, `client/proxy-client.ts`, `ctrl/command.ts` (all imported across apps today) | each is in linear, http or linear (`openRun`) before phase 10 |
 | `dashboard` ↔ root | none | the dashboard importing `ctrl` or `viz` (it does today) | `steps` is in shared, `openRun` in linear; the dashboard imports packages only |
+| `viz` ↔ root | none | `viz/main.ts` importing `session/image.ts` for `speaksKitty` (it does today); `driver/loop.ts` importing `viz/steps.ts` (it does today) | viz keeps its own four-line `speaksKitty`; `steps` is in shared |
 
 ### Considered and not chosen
 
@@ -863,8 +887,9 @@ Read from the four `main.ts` files. Three lifecycles stack:
 
 - **Process** (nine entries; `session` keeps its own runtime): stdout/stderr error listeners,
   build the graph and print a failure before a `Log` exists, `Command.run`, defects to
-  `reportFailure`, `runMain` with a teardown. This is `Env.run`. Only the six scripts install CLI
-  config without the Wizard today; the runner does it for all nine.
+  `reportFailure`, `runMain` with a teardown. This is `Env.run`. Only the six non-server entries
+  (`ctrl`, `dig`, `driver`, `client`, `viz`, `session`) install CLI config without the Wizard
+  today; the runner does it for all nine.
 - **Server** (the four servers, and `dig` as a root script): `createServer`, the first-error
   `Deferred`, listen with the logger and listen log off, `TracerDisabledWhen`, then in the same
   scope log "listening" and start background work. This is http's `serve`. qemu-server also
@@ -971,7 +996,7 @@ How we speak HTTP: one way to serve, one way to call the proxy, one set of API e
 - **Admission rule.** The contract, serving it, calling the proxy, guarding a route. Refused: a
   store, a loop, a client with one consumer. A request timeout is HTTP and is not a "clock".
 
-### The five apps (layer 6, phase 10)
+### The six apps (layer 6, phase 10)
 
 Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` and
 `vitest.config.ts`. The root workspaces gain `apps/*`.
@@ -994,23 +1019,36 @@ Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` a
   (the client, `openRun`) and shared (`steps`). What it imported from the root today is gone:
   `ctrl/command.ts` (was run in-process as a CLI) into linear's `openRun`, `viz/steps.ts` into
   shared, and its hand-rolled Linear client into linear. `SuiteRequestError` becomes a
-  `Schema.TaggedError`. Its `.tsx` files use `hono/jsx` under the app's own tsconfig, so the root
-  tsconfig drops `jsxImportSource` and the "every `.tsx` outside the dashboard carries the
-  `@opentui/solid` pragma" rule loses its exception.
+  `Schema.TaggedError`. Its `.tsx` files use `hono/jsx` under the app's own tsconfig.
+- **viz** is the OpenTUI terminal: `main.ts`, `command.ts`, `run.ts` (the `Renderer` service),
+  `view.ts`, `screen.tsx`, `follow.ts`, `trail.ts`, `read.ts`, `settings.ts`, `text.ts`,
+  `placeholder.ts`, `preload.ts` (the Solid JSX plugin for Bun), and `terminal.ts`
+  (`speaksKitty`, its own copy of the four lines it took from `session/image.ts`; the rest of
+  `image.ts`, the kitty placement and PNG decoding, is the session REPL's and stays there). It
+  imports db (the stores it reads), env (`Config`, `EnvFile`), log (`Render`, `Palette`,
+  `ExternalFailure`), shared (`Domain`, `Errors`) and http (`Api.VERSION`, the proxy client).
+  Its identifiers are already `@oligarchy/viz/...`. Its `.tsx` uses `@opentui/solid` under the
+  app's own tsconfig, and its `vitest.config.ts` carries the Solid babel transform that the
+  root's carries today. Nothing imports viz once `steps.ts` is in shared (phase 2);
+  `dashboard/follow.tsx` and `driver/loop.ts` were its only dependents.
 
-The wrappers (`./qemu-server` and the others), the package scripts and the fleet starters point
-at `apps/<name>/src/main.ts`.
+With viz and the dashboard both apps, the root package has no `.tsx`: the root tsconfig drops its
+JSX settings, the root `vitest.config.ts` drops both JSX plugins, and the pragma rule in the
+architecture test is deleted.
+
+The wrappers (`./qemu-server`, `./viz` and the others), the package scripts and the fleet
+starters point at `apps/<name>/src/main.ts`.
 
 ### What stays in the root package
 
 - **The scripts:** `client` (to be removed), `ctrl`, `dig`, `driver` (with `src/harness/`, except
-  the settings loader that moves to env), `session` and `viz`.
+  the settings loader that moves to env) and `session` (with `image.ts`).
 - **`test/repo/`,** the repo-wide checks, which read files and import no packages.
 
-The scripts use packages the way the apps do. The root keeps its own tangle (`driver` imports
-`client` and `viz`, `viz` imports `session`, `ctrl` imports `client`), which is out of scope
-here: this plan is the fleet's libraries and apps. The scripts are a second plan; the harness's
-home (open decision 6) is decided there.
+The scripts use packages the way the apps do. The root keeps what is left of its tangle (`driver`
+imports `client`, `ctrl` imports `client`; both go when `client` is removed), which is out of
+scope here: this plan is the fleet's libraries and apps. The scripts are a second plan; the
+harness's home (open decision 6) is decided there.
 
 ## Testing
 
@@ -1071,7 +1109,7 @@ Counted on 2026-09-25 (unit test files using each):
 | `stdio.ts` | process arguments | 5 | Stays with the scripts' command tests in the root. |
 | `fake-qemu.ts`, `fake-minted.ts`, `fake-qmp-socket.ts`, `fake-sessions.ts` | QEMU pieces | 2–4 each | qemu-server's own `test/`. |
 | `fake-linear.ts` | Linear | 5 | automation-server, the proxy's setup, ctrl and the dashboard: inline, or an app-local helper. |
-| `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts`, `fake-tty.ts` | the viz terminal | 1–5 each | Stay with the viz script in the root. |
+| `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts`, `fake-tty.ts` | the viz terminal | 1–5 each | viz's own `apps/viz/test/`. The session tests (root) keep what they use of them; `viz.integration.test.ts` takes `stripAnsi` into integration-testing. |
 | `fake-children.ts` | session children | 2 | Stays with the session script in the root. |
 | `postgres.ts`, `stub-proxy.ts` | integration only | 10, 3 | `@oligarchy/integration-testing`. |
 
