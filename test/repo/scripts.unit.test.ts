@@ -8,6 +8,7 @@ const root = join(import.meta.dirname, "../..");
 const read = (file: string): string => readFileSync(join(root, file), "utf8");
 
 const PackageJson = Schema.Struct({
+  bin: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   scripts: Schema.Record(Schema.String, Schema.String),
 });
 
@@ -35,7 +36,6 @@ const PROCESSES: Readonly<Record<string, ReadonlyArray<string>>> = {
   driver: [],
   session: [],
   viz: [SOLID_JSX],
-  dig: [],
   ctrl: [INSTRUMENT],
   "qemu-server": [INSTRUMENT],
   "qemu-reverse-proxy": [INSTRUMENT],
@@ -43,11 +43,58 @@ const PROCESSES: Readonly<Record<string, ReadonlyArray<string>>> = {
   "automation-client": [INSTRUMENT],
 };
 const count = (text: string, needle: string): number => text.split(needle).length - 1;
+
+// A process is a `bin` entry, a script ending in `src/<name>/main.ts`, or a root sh wrapper
+// naming one. Each must be in PROCESSES, or it runs with preloads nobody checked.
+const ENTRY = /src\/([a-z-]+)\/main\.ts/g;
+const unregistered = (input: {
+  readonly bin: Readonly<Record<string, string>>;
+  readonly scripts: Readonly<Record<string, string>>;
+  readonly wrappers: Readonly<Record<string, string>>;
+}): ReadonlyArray<string> => {
+  const names = new Set<string>();
+  for (const name of Object.keys(input.bin)) {
+    names.add(name);
+  }
+  for (const text of [...Object.values(input.scripts), ...Object.values(input.wrappers)]) {
+    for (const match of text.matchAll(ENTRY)) {
+      const name = match[1];
+      if (name !== undefined) {
+        names.add(name);
+      }
+    }
+  }
+  return [...names].filter((name) => !(name in PROCESSES)).sort();
+};
+
+const rootWrappers = (): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && !entry.name.includes("."))
+      .map((entry) => [entry.name, read(entry.name)] as const)
+      .filter(([, text]) => text.startsWith("#!/bin/sh\n")),
+  );
 // Bun runs the sources as they are: no Node, no npm, none of Node's loader flags.
 const NOT_BUN = /\bnode\b|\bnpm\b|\bnpx\b|--experimental-strip-types|--import\b/;
 
 describe("package.json scripts", () => {
-  const { scripts } = decodePackageJson(read("package.json"));
+  const { bin = {}, scripts } = decodePackageJson(read("package.json"));
+
+  it("registers every process in PROCESSES: each bin, entry script and root wrapper (happy)", () => {
+    expect(unregistered({ bin, scripts, wrappers: rootWrappers() })).toEqual([]);
+  });
+
+  it("names a bin, an entry script or a wrapper that PROCESSES does not know (unhappy)", () => {
+    expect(
+      unregistered({
+        bin: { ...bin, lobby: "src/lobby/main.ts" },
+        scripts: { ...scripts, room: "bun --no-env-file src/room/main.ts" },
+        wrappers: {
+          arena: '#!/bin/sh\nexec bun --no-env-file "$(dirname "$0")/src/arena/main.ts" "$@"\n',
+        },
+      }),
+    ).toEqual(["arena", "lobby", "room"]);
+  });
 
   it("exposes the check and test scripts by their full names", () => {
     for (const name of [

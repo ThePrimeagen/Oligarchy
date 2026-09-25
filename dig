@@ -1,2 +1,0 @@
-#!/bin/sh
-exec bun --no-env-file "$(dirname "$0")/src/dig/main.ts" "$@"

@@ -135,6 +135,45 @@ logic in files that change independently:
   `reserve`, `run` and `abort`; one `run(label, effect)` as `src/client/proxy-client.ts` has is
   what `development.md` prescribes for a client.
 
+## 10. Job transitions and searches are spread over four processes, and nothing finds what drifted
+
+A job is a test result and its Linear ticket; they are supposed to move together. Today the code
+that moves them is in four processes, each with its own copy of the rule, and none of them looks
+for the cases where the two halves have come apart. `monorepo-plan.md` makes a `jobs` package the
+one owner of every transition and every search (phase 8); this item is what that package should
+grow into once it exists, and what it prevents.
+
+- **Where the transitions are today.** Create: `src/ctrl/command.ts` (`openRun`) and
+  `src/qemu-reverse-proxy/setup.ts` (the mint ticket). Close, fail, error: `src/automation-server/worker.ts`
+  (`closeJob`, `reportErrored`, `reportDiagnosis`, `moveTicket`), each with its own "retry twice,
+  then a line" policy. Ready: `src/automation-server/ready.ts`, with a different policy again.
+  Which board column means which action: three copies, `src/automation-server/backlog.ts`,
+  `enqueue.ts` and `webhook.ts`. Abort: split between the dashboard, which moves the ticket to
+  Aborted with its own hand-rolled Linear client (`src/dashboard/linear.ts`), and
+  automation-server's `POST /abort`, which closes the row. Two processes, two clients, one job.
+- **Where the searches are today.** `worker.ts` (`diagnosable`, `isOpen`, `nextPending` with a
+  skip list, `listRunning` at startup), `backlog.ts` (`findResultByLinearId`, `jobStatus`,
+  `hasPending`), `handlers.ts` (the abort lookup), `src/dashboard/query.ts` (its own read model
+  over the same tables). Each decides for itself what "a job with a pending drive" means.
+- **What drifts, and nobody looks.** `moveTicket` gives a ticket three attempts and then one log
+  line: the row is closed, the ticket stays in the wrong column for good, and no later pass
+  notices. A ticket a person drags on the board is invisible to the row until the next webhook
+  or poll happens to cover that column. An action row is `running` for a server that died until
+  the *next* automation server starts and runs `closeInherited`; if none starts, it is running
+  forever. A ticket in *Automation Needed* whose action row was aborted stays there. None of these
+  is a bug in one file; each is the absence of a search.
+- **The fix, in two steps.** First, the `jobs` package as planned: `open`, `openMint`, `close`,
+  `fail`, `ready`, `release`, `actionFor`, `enqueue`, `abort`, `find` (`byTicket`, `nextPending`,
+  `running`, `inherited`, `status`, `hasPending`, `isDiagnosable`) and `reclaim`, with one retry
+  policy and one `detail` helper, so every process moves a job the same way and the apps stop
+  querying stores for jobs. Second, on top of that, `Jobs.reconcile()`: a search for row-and-ticket
+  pairs whose states disagree (a closed row under a working-column ticket, an Errored ticket over
+  a pending row, a `running` action for a server no longer in `servers`, a working-column ticket
+  with no open action), and one transition per case that settles it the same way `close` and
+  `fail` do. The automation server schedules it, the way it schedules the board watch; `ctrl`
+  gets a `jobs reconcile --dry-run` that lists what would move. Not for the split itself; it is
+  the first thing to build once `jobs` exists, because it is the point of having one place.
+
 ## Checked and sound
 
 Recorded so the next reviewer does not redo them.
