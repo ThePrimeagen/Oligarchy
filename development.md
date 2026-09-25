@@ -895,9 +895,10 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
   primary key or a unique index, so a second write is a `DatabaseError` by design, never a
   pre-check. An update omits an absent key rather than writing `null` (drizzle writes `null` but
   skips an absent key), so an earlier command's value stays. A `pgEnum` and its `Schema.Literals`
-  twin in `domain.ts` (or `contract.ts`, when a body carries it) are maintained by hand together; a vocabulary that grows at runtime is a
-  lookup table, not an enum (an enum value is a code change and a migration and can never be
-  removed; a row is an insert). A lookup that may find nothing answers an `Option`.
+  twin in `packages/shared/src/domain.ts` are maintained by hand together; a vocabulary that
+  grows at runtime is a lookup table, not an enum (an enum value is a code change and a
+  migration and can never be removed; a row is an insert). A lookup that may find nothing
+  answers an `Option`.
 
 `Client.runInTransaction` in `src/db/client.ts`: one re-entry, the body's cause re-raised as
 itself.
