@@ -6,10 +6,10 @@ import * as CliConfig from "effect/unstable/cli/CliConfig";
 import * as CliOutput from "effect/unstable/cli/CliOutput";
 import * as Command from "effect/unstable/cli/Command";
 import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
+import * as Api from "@oligarchy/routes/api";
 import * as Config from "../config.ts";
 import * as Render from "../observability/render.ts";
 import * as Sentry from "../observability/sentry.ts";
-import * as Api from "../shared/api.ts";
 import * as CtrlCommand from "./command.ts";
 
 // Sentry sits beneath everything a command builds: the Log a database action builds captures the

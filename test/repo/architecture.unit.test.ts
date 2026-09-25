@@ -1,18 +1,78 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { Schema } from "effect";
 
 const root = join(import.meta.dirname, "../..");
 
-// The viz's Solid components are `.tsx`; the same rules bind them.
-const sources = (): ReadonlyArray<string> =>
-  readdirSync(join(root, "src"), { recursive: true, withFileTypes: true })
+const read = (path: string): string => readFileSync(join(root, path), "utf8");
+
+const filesUnder = (dir: string): ReadonlyArray<string> =>
+  readdirSync(join(root, dir), { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
     .map((entry) => relative(root, join(entry.parentPath, entry.name)))
-    .filter((path) => !path.startsWith("src/dashboard/"))
     .sort();
 
-const read = (path: string): string => readFileSync(join(root, path), "utf8");
+const PackageJson = Schema.Struct({
+  name: Schema.String,
+  exports: Schema.Record(Schema.String, Schema.String),
+});
+const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
+
+// Each workspace package with the specifiers its exports answer: `./api` is `@oligarchy/routes/api`.
+const workspacePackages = readdirSync(join(root, "packages"), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map(({ name: dir }) => {
+    const { name, exports } = decodePackageJson(read(`packages/${dir}/package.json`));
+    return {
+      dir: `packages/${dir}`,
+      modules: Object.keys(exports).map((key) => `${name}${key.slice(1)}`),
+    };
+  });
+
+// The viz's Solid components are `.tsx`; the same rules bind them, and every workspace package's.
+const sources = (): ReadonlyArray<string> =>
+  ["src", ...workspacePackages.map((pkg) => `${pkg.dir}/src`)]
+    .flatMap(filesUnder)
+    .filter((path) => !path.startsWith("src/dashboard/"));
+
+const ROUTES_SOURCES = "packages/routes/src/";
+
+const importSpecifiers = (source: string): ReadonlyArray<string> =>
+  [...source.matchAll(/^import\s(?:[^;]*?\sfrom\s+)?"([^"]+)";?$/gm)].map((m) => m[1] ?? "");
+
+// The routes package is the HTTP contract alone: Effect's schemas and its own modules, nothing of
+// the processes that serve it, no platform and no Node.
+const routesImportProblems = (path: string, source: string): ReadonlyArray<string> =>
+  importSpecifiers(source).filter((specifier) =>
+    specifier.startsWith(".")
+      ? !join(dirname(path), specifier).startsWith(ROUTES_SOURCES)
+      : !/^effect(?:\/|$)/.test(specifier),
+  );
+
+// The main package imports a workspace package the way it imports its own modules, as a
+// namespace, and only by a specifier the package exports: a relative path into packages/ would
+// skip the exports map and the dependency the package.json declares.
+const exportedModules = new Set(workspacePackages.flatMap((pkg) => pkg.modules));
+const workspaceImportProblems = (path: string, source: string): ReadonlyArray<string> =>
+  [...source.matchAll(/^import\s+(?:type\s+)?([^;]*?)\s+from\s+"([^"]+)";?$/gm)].flatMap((m) => {
+    const clause = m[1] ?? "";
+    const specifier = m[2] ?? "";
+    if (specifier.startsWith(".")) {
+      return join(dirname(path), specifier).startsWith("packages/")
+        ? [`"${specifier}" reaches into packages/`]
+        : [];
+    }
+    if (!specifier.startsWith("@oligarchy/")) {
+      return [];
+    }
+    if (!exportedModules.has(specifier)) {
+      return [`"${specifier}" is not an exported module`];
+    }
+    return /^\*\s+as\s+[A-Za-z_$][\w$]*$/.test(clause)
+      ? []
+      : [`import ${clause} from "${specifier}"`];
+  });
 
 // V2-PLAN §1: the only files allowed to import `node:*`, read `process.*`, or use
 // `setTimeout`/`new Promise`/`async`.
@@ -59,10 +119,15 @@ const stripStringsAndComments = (source: string): string =>
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
-const violations = (
+const violationsIn = (
+  files: ReadonlyArray<string>,
   predicate: (path: string, source: string) => ReadonlyArray<string>,
 ): ReadonlyArray<string> =>
-  sources().flatMap((path) => predicate(path, read(path)).map((detail) => `${path}: ${detail}`));
+  files.flatMap((path) => predicate(path, read(path)).map((detail) => `${path}: ${detail}`));
+
+const violations = (
+  predicate: (path: string, source: string) => ReadonlyArray<string>,
+): ReadonlyArray<string> => violationsIn(sources(), predicate);
 
 describe("boundary files", () => {
   it("only named boundary files import node:* modules", () => {
@@ -176,10 +241,10 @@ describe("CLI flags", () => {
 });
 
 describe("HttpApi ownership", () => {
-  it("endpoints, groups and the api are declared only in src/shared/api.ts", () => {
+  it("endpoints, groups and the api are declared only in packages/routes/src/api.ts", () => {
     expect(
       violations((path, source) =>
-        path === "src/shared/api.ts"
+        path === `${ROUTES_SOURCES}api.ts`
           ? []
           : [
               ...stripStringsAndComments(source).matchAll(
@@ -188,6 +253,68 @@ describe("HttpApi ownership", () => {
             ].map((m) => m[0]),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("workspace packages", () => {
+  it("the routes package imports only effect and its own modules (happy)", () => {
+    expect(filesUnder(ROUTES_SOURCES).length).toBeGreaterThan(0);
+    expect(violationsIn(filesUnder(ROUTES_SOURCES), routesImportProblems)).toEqual([]);
+  });
+
+  it("names a routes import of the main package, a platform, Node or a driver (unhappy)", () => {
+    const path = `${ROUTES_SOURCES}contract.ts`;
+    expect(
+      routesImportProblems(
+        path,
+        [
+          'import { Schema } from "effect";',
+          'import * as HttpApi from "effect/unstable/httpapi/HttpApi";',
+          'import * as Errors from "./errors.ts";',
+          'import * as Log from "../../../src/observability/log.ts";',
+          'import * as NodeServices from "@effect/platform-node/NodeServices";',
+          'import { readFileSync } from "node:fs";',
+          'import pg from "pg";',
+          'import "./side-effect.ts";',
+          'import "../test/setup.ts";',
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "../../../src/observability/log.ts",
+      "@effect/platform-node/NodeServices",
+      "node:fs",
+      "pg",
+      "../test/setup.ts",
+    ]);
+  });
+
+  it("the main package imports a workspace package as a namespace of an exported module (happy)", () => {
+    expect(exportedModules.size).toBeGreaterThan(0);
+    expect(
+      violationsIn([...filesUnder("src"), ...filesUnder("test")], workspaceImportProblems),
+    ).toEqual([]);
+  });
+
+  it("names a relative path into packages/, a named import and an unexported module (unhappy)", () => {
+    expect(
+      workspaceImportProblems(
+        "src/client/actions.ts",
+        [
+          'import * as Api from "@oligarchy/routes/api";',
+          'import type * as Contract from "@oligarchy/routes/contract";',
+          'import * as Log from "../observability/log.ts";',
+          'import * as Errors from "../../packages/routes/src/errors.ts";',
+          'import { QemuServerApi } from "@oligarchy/routes/api";',
+          'import * as Routes from "@oligarchy/routes";',
+          'import * as Source from "@oligarchy/routes/src/api.ts";',
+        ].join("\n"),
+      ),
+    ).toEqual([
+      '"../../packages/routes/src/errors.ts" reaches into packages/',
+      'import { QemuServerApi } from "@oligarchy/routes/api"',
+      '"@oligarchy/routes" is not an exported module',
+      '"@oligarchy/routes/src/api.ts" is not an exported module',
+    ]);
   });
 });
 

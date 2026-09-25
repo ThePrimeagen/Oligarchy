@@ -1,0 +1,4 @@
+# Each workspace package resolves only what its own package.json declares: an import of a
+# dependency the package never named fails instead of borrowing the root's copy.
+[install]
+linker = "isolated"

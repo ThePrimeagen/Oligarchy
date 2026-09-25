@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
@@ -12,11 +12,19 @@ const PackageJson = Schema.Struct({
 });
 
 const TsConfig = Schema.Struct({
-  compilerOptions: Schema.Struct({ erasableSyntaxOnly: Schema.Boolean }),
+  extends: Schema.optionalKey(Schema.String),
+  compilerOptions: Schema.optionalKey(
+    Schema.Struct({ erasableSyntaxOnly: Schema.optionalKey(Schema.Boolean) }),
+  ),
 });
+type TsConfig = typeof TsConfig.Type;
 
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 const decodeTsConfig = Schema.decodeUnknownSync(Schema.fromJsonString(TsConfig));
+
+const WORKSPACES = readdirSync(join(root, "packages"), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => `packages/${entry.name}`);
 
 // Every process and what its wrapper and script preload before the entry loads: Sentry on the
 // instrumented ones, and on viz the Solid JSX transform its OpenTUI components are written for.
@@ -83,6 +91,12 @@ describe("package.json scripts", () => {
     expect(scripts["test:integration"]).toMatch(/^bun --bun vitest run /);
   });
 
+  // check:fast is what CI runs: a package whose types and tests it never ran would go stale.
+  it("check:types and test:unit run the root's own lane, then every workspace package's", () => {
+    expect(scripts["check:types"]).toMatch(/ && bun run --workspaces check:types$/);
+    expect(scripts["test:unit"]).toMatch(/ && bun run --workspaces test:unit$/);
+  });
+
   it("names no other runtime, package manager or Node flag anywhere", () => {
     for (const [name, script] of Object.entries(scripts)) {
       expect(script, name).not.toMatch(NOT_BUN);
@@ -112,14 +126,6 @@ describe("package.json scripts", () => {
     expect(scripts["test:db:migrate"] ?? "").not.toContain(".prod-env");
     expect(scripts["prod:db:migrate"] ?? "").not.toContain("drizzle-kit");
     expect(scripts["test:db:migrate"] ?? "").not.toContain("drizzle-kit");
-  });
-
-  // Top-level wrangler config is production. A `dev` without --env local would bind the
-  // production Hyperdrive and write the shared test work into live rows.
-  it("runs the dashboard against the local wrangler environment", () => {
-    expect(scripts.dev).toContain("wrangler dev");
-    expect(scripts.dev).toContain("--remote");
-    expect(scripts.dev).toContain("--env local");
   });
 });
 
@@ -152,6 +158,8 @@ describe("root executables", () => {
       const wrapper = read(name);
       expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
       expect(wrapper, name).toContain("bun build --target=bun --bytecode ");
+      // The bundle holds the workspace packages the entry imports, so their sources count too.
+      expect(wrapper, name).toContain(`find "$root/src" "$root/packages" `);
       expect(wrapper, name).toContain(`"$root/src/${name}/main.ts"`);
       expect(wrapper, name).toContain(`node_modules/.cache/oligarchy/${name}`);
       expect(wrapper, name).toContain('exec bun --no-env-file "$cache/main.js" "$@"');
@@ -231,10 +239,67 @@ describe("fleet starters", () => {
   });
 });
 
-describe("tsconfig.json", () => {
-  const { compilerOptions } = decodeTsConfig(read("tsconfig.json"));
+// A workspace package owns its lanes, and check:fast reaches them through `bun run --workspaces`,
+// so each names both, and runs vitest on bun as the root does.
+const laneProblems = (scripts: Readonly<Record<string, string>>): ReadonlyArray<string> => [
+  ...["check:types", "test:unit"].filter((name) => scripts[name] === undefined),
+  ...(scripts["test:unit"] === undefined || /^bun --bun vitest run\b/.test(scripts["test:unit"])
+    ? []
+    : ["test:unit does not run vitest on bun"]),
+  ...Object.entries(scripts)
+    .filter(([, script]) => NOT_BUN.test(script))
+    .map(([name]) => `${name} names another runtime`),
+];
 
+describe("workspace packages", () => {
+  it("each has its own check:types and test:unit lanes on bun (happy)", () => {
+    expect(WORKSPACES.length).toBeGreaterThan(0);
+    for (const dir of WORKSPACES) {
+      expect(laneProblems(decodePackageJson(read(`${dir}/package.json`)).scripts), dir).toEqual([]);
+    }
+  });
+
+  it("names a missing lane, vitest off bun and a script on node (unhappy)", () => {
+    expect(laneProblems({})).toEqual(["check:types", "test:unit"]);
+    expect(laneProblems({ "check:types": "npx tsc --noEmit", "test:unit": "vitest run" })).toEqual([
+      "test:unit does not run vitest on bun",
+      "check:types names another runtime",
+    ]);
+  });
+});
+
+// Every package compiles under the one base, so none can write syntax Bun's stripper cannot erase.
+const baseProblems = (file: string, config: TsConfig): ReadonlyArray<string> => [
+  ...(config.extends !== undefined && join(dirname(file), config.extends) === "tsconfig.base.json"
+    ? []
+    : [`${file} does not extend tsconfig.base.json`]),
+  ...(config.compilerOptions?.erasableSyntaxOnly === false
+    ? [`${file} turns off erasableSyntaxOnly`]
+    : []),
+];
+
+describe("tsconfig", () => {
   it("keeps the sources to syntax a type stripper can erase", () => {
-    expect(compilerOptions.erasableSyntaxOnly).toBe(true);
+    expect(decodeTsConfig(read("tsconfig.base.json")).compilerOptions?.erasableSyntaxOnly).toBe(
+      true,
+    );
+  });
+
+  it("the root and every workspace package extend the base (happy)", () => {
+    for (const file of ["tsconfig.json", ...WORKSPACES.map((dir) => `${dir}/tsconfig.json`)]) {
+      expect(baseProblems(file, decodeTsConfig(read(file)))).toEqual([]);
+    }
+  });
+
+  it("names a tsconfig that extends nothing or turns erasable syntax off (unhappy)", () => {
+    expect(baseProblems("packages/x/tsconfig.json", {})).toEqual([
+      "packages/x/tsconfig.json does not extend tsconfig.base.json",
+    ]);
+    expect(
+      baseProblems("packages/x/tsconfig.json", {
+        extends: "../../tsconfig.base.json",
+        compilerOptions: { erasableSyntaxOnly: false },
+      }),
+    ).toEqual(["packages/x/tsconfig.json turns off erasableSyntaxOnly"]);
   });
 });

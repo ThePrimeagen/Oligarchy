@@ -1,4 +1,5 @@
 import { Duration, Effect, FileSystem, Schema } from "effect";
+import * as Contract from "@oligarchy/routes/contract";
 import * as Render from "../observability/render.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
@@ -54,7 +55,7 @@ const Harness = Schema.Struct({
 export class AppConfig extends Schema.Class<AppConfig>("@oligarchy/harness/config/AppConfig")({
   models: Models,
   reasoning: Reasoning,
-  openRouterBaseUrl: Domain.ServerUrl,
+  openRouterBaseUrl: Contract.ServerUrl,
   timeouts: Timeouts,
   runCeiling: PositiveDuration,
   stepLimit: StepLimit,

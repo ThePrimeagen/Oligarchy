@@ -1,6 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Option, Semaphore } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as Errors from "../shared/errors.ts";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Iso from "./iso.ts";
 import * as Process from "./process.ts";
 
@@ -22,7 +22,7 @@ export type MintedService = {
     iso: string,
     from: MintedDisk,
     who: Iso.Who,
-  ) => Effect.Effect<void, Errors.SaveFailed>;
+  ) => Effect.Effect<void, ApiErrors.SaveFailed>;
 };
 
 const make: Effect.Effect<
@@ -82,7 +82,7 @@ const make: Effect.Effect<
       )
       .pipe(
         Effect.mapError((error) =>
-          Errors.SaveFailed.make({
+          ApiErrors.SaveFailed.make({
             message: Process.detail(error),
             cause: error,
             sessionId: who.sessionId,

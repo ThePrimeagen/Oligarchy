@@ -2,12 +2,12 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as Cli from "../../src/cli.ts";
 import * as HarnessConfig from "../../src/harness/config.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
@@ -456,7 +456,7 @@ describe("Sessions.shutdown", () => {
       Effect.gen(function* () {
         const hold = yield* Deferred.make<void>();
         const asked = yield* Deferred.make<void>();
-        const failure = Errors.Internal.make({
+        const failure = ApiErrors.Internal.make({
           cause: new Error("relinquish refused"),
           agentId: TICKET,
         });
@@ -530,7 +530,7 @@ describe("Sessions.abort unhappy path", () => {
     "a relinquish that fails after aborting a reservation is logged and the slot is free",
     () => {
       const log = FakeLog.fakeLog();
-      const failure = Errors.Internal.make({
+      const failure = ApiErrors.Internal.make({
         cause: new Error("relinquish refused"),
         agentId: TICKET,
       });
@@ -797,7 +797,7 @@ describe("QEMU-first reserve", () => {
   it.effect("a QEMU 409 takes no local slot and is SetupNeeded (unhappy)", () => {
     const reserveQemu: Sessions.ReserveQemu = () =>
       Effect.fail(
-        Errors.SetupNeeded.make({
+        ApiErrors.SetupNeeded.make({
           message: "setup needed: http://host max-jobs is 4",
           agentId: TICKET,
         }),
@@ -833,7 +833,7 @@ describe("QEMU-first reserve", () => {
     const reserveQemu: Sessions.ReserveQemu = (agent) =>
       Effect.gen(function* () {
         qemu.push(agent);
-        return yield* Errors.AtCapacity.make({ message: "qemu full", agentId: agent });
+        return yield* ApiErrors.AtCapacity.make({ message: "qemu full", agentId: agent });
       });
     const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
     return Effect.gen(function* () {
@@ -900,7 +900,7 @@ describe("QEMU-first reserve", () => {
     const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
       Effect.gen(function* () {
         givenBack.push(agent);
-        return yield* Errors.Internal.make({
+        return yield* ApiErrors.Internal.make({
           cause: new Error("qemu unreachable"),
           agentId: agent,
         });
@@ -926,7 +926,7 @@ describe("QEMU-first reserve", () => {
     const reserveQemu: Sessions.ReserveQemu = (agent) =>
       Effect.gen(function* () {
         qemu.push(agent);
-        return yield* Errors.Internal.make({
+        return yield* ApiErrors.Internal.make({
           cause: new Error("qemu unreachable"),
           agentId: agent,
         });
@@ -1220,7 +1220,7 @@ describe("reservation expiry", () => {
     "a relinquish that fails at expiry is one error line and the slot is freed all the same",
     () => {
       const relinquishQemu: Sessions.RelinquishQemu = (agent) =>
-        Errors.Internal.make({ cause: new Error("proxy unreachable"), agentId: agent });
+        ApiErrors.Internal.make({ cause: new Error("proxy unreachable"), agentId: agent });
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
       const log = FakeLog.fakeLog();
       return Effect.gen(function* () {

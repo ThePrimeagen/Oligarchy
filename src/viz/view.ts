@@ -866,15 +866,17 @@ export type Screen = {
     readonly place: Option.Option<string>;
   };
   readonly footer: { readonly left: Text.Row; readonly right: string };
-  // The selected ticket's last image, between the log tail and the graph, as tall as both.
-  // Absent when there is none.
-  readonly image: Option.Option<{
-    readonly png: Uint8Array;
-    readonly top: number;
-    readonly left: number;
-    readonly columns: number;
-    readonly height: number;
-  }>;
+  // Absent when the selected ticket has no image.
+  readonly image: Option.Option<ScreenImage>;
+};
+
+// The selected ticket's last image, between the log tail and the graph, as tall as both.
+export type ScreenImage = {
+  readonly png: Uint8Array;
+  readonly top: number;
+  readonly left: number;
+  readonly columns: number;
+  readonly height: number;
 };
 
 const card = (

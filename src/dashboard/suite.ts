@@ -3,11 +3,11 @@ import { Cause, Console, Effect, Exit, FileSystem, Layer, ManagedRuntime } from 
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Command from "effect/unstable/cli/Command";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as Api from "@oligarchy/routes/api";
 import clientMd from "../../client.md";
 import ctrlLinearMd from "../../ctrl-linear.md";
 import linearIssue from "../../prompts/linear-issue.html";
 import * as CtrlCommand from "../ctrl/command.ts";
-import * as Api from "../shared/api.ts";
 
 // POST /create-test-suite-run runs `./ctrl test run testsuite`. The worker has no checkout, so
 // the files that command reads — the ticket template and the two guides it embeds — are these

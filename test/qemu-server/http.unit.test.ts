@@ -21,13 +21,14 @@ import {
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Config from "../../src/config.ts";
 import * as Log from "../../src/observability/log.ts";
 import * as Render from "../../src/observability/render.ts";
 import * as Handlers from "../../src/qemu-server/handlers.ts";
 import * as RealSessions from "../../src/qemu-server/sessions.ts";
-import * as Api from "../../src/shared/api.ts";
-import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeMinted from "../support/fake-minted.ts";
@@ -924,7 +925,7 @@ describe("Sessions failures", () => {
 
   it.effect("a Conflict from follow is 409 with its message", () =>
     Effect.gen(function* () {
-      const conflict = Errors.Conflict.make({
+      const conflict = ApiErrors.Conflict.make({
         message: `session "${SESSION_ID}" is not running on this qemu server`,
         sessionId: SESSION_ID,
       });
@@ -974,7 +975,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           mouse: (live) =>
             Effect.fail(
-              Errors.BadRequest.make({
+              ApiErrors.BadRequest.make({
                 message: "mouse: x and y must be in 0..1",
                 sessionId: live.id,
                 agentId: live.agent,
@@ -982,7 +983,7 @@ describe("Sessions failures", () => {
             ),
           intentEnd: (live) =>
             Effect.fail(
-              Errors.BadRequest.make({
+              ApiErrors.BadRequest.make({
                 message: "no active intent",
                 sessionId: live.id,
                 agentId: live.agent,
@@ -1037,7 +1038,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           image: (live) =>
             Effect.fail(
-              Errors.ExchangeFailed.make({
+              ApiErrors.ExchangeFailed.make({
                 message: timeout.message,
                 cause: timeout,
                 sessionId: live.id,
@@ -1093,7 +1094,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           save: (live) =>
             Effect.fail(
-              Errors.SaveFailed.make({
+              ApiErrors.SaveFailed.make({
                 message: convert.message,
                 cause: convert,
                 sessionId: live.id,
@@ -1133,7 +1134,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           save: (live) =>
             Effect.fail(
-              Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent }),
+              ApiErrors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent }),
             ),
         }),
       });
@@ -1193,7 +1194,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           start: (body) =>
             Effect.fail(
-              Errors.StartFailed.make({
+              ApiErrors.StartFailed.make({
                 message: "qemu: disk not found: /tmp/nope.qcow2",
                 sessionId: STARTED_ID,
                 agentId: body.agent,
@@ -1237,7 +1238,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           reserve: (agent) =>
             Effect.fail(
-              Errors.BadRequest.make({
+              ApiErrors.BadRequest.make({
                 message: "already reserved",
                 agentId: agent,
               }),
@@ -1289,7 +1290,7 @@ describe("Sessions failures", () => {
           sessions: FakeSessions.fakeSessions({
             reserve: (agent) =>
               Effect.fail(
-                Errors.AtCapacity.make({
+                ApiErrors.AtCapacity.make({
                   message: "at capacity: max-jobs is 2",
                   agentId: agent,
                 }),
@@ -1345,7 +1346,7 @@ describe("Sessions failures", () => {
           sessions: FakeSessions.fakeSessions({
             relinquish: (agent) =>
               Effect.fail(
-                Errors.BadRequest.make({
+                ApiErrors.BadRequest.make({
                   message: "no reservation",
                   agentId: agent,
                 }),
@@ -1396,7 +1397,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           start: (body) =>
             Effect.fail(
-              Errors.BadRequest.make({
+              ApiErrors.BadRequest.make({
                 message: "no reservation",
                 agentId: body.agent,
               }),
@@ -1454,7 +1455,7 @@ describe("Sessions failures", () => {
           sessions: FakeSessions.fakeSessions({
             stop: (live) =>
               Effect.fail(
-                Errors.Internal.make({
+                ApiErrors.Internal.make({
                   message: "internal error",
                   cause: failure,
                   sessionId: live.id,
@@ -1500,7 +1501,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           serial: (live) =>
             Effect.fail(
-              Errors.Internal.make({
+              ApiErrors.Internal.make({
                 message: "internal error",
                 cause: failure,
                 sessionId: live.id,
@@ -1525,7 +1526,7 @@ describe("Sessions failures", () => {
         sessions: FakeSessions.fakeSessions({
           stop: (live) =>
             Effect.fail(
-              Errors.Internal.make({
+              ApiErrors.Internal.make({
                 message: "internal error",
                 cause: Errors.DatabaseError.make({
                   operation: "endSession",
@@ -1587,14 +1588,14 @@ describe("defects", () => {
             stats: Effect.die(defect),
             reserve: (agent) =>
               Effect.fail(
-                Errors.BadRequest.make({
+                ApiErrors.BadRequest.make({
                   message: "already reserved",
                   agentId: agent,
                 }),
               ),
             serial: (live) =>
               Effect.fail(
-                Errors.Internal.make({
+                ApiErrors.Internal.make({
                   message: "internal error",
                   cause: failure,
                   sessionId: live.id,
@@ -1649,7 +1650,10 @@ describe("defects", () => {
           reserve: (agent) =>
             agent === AGENT_ID
               ? Effect.fail(
-                  Errors.AtCapacity.make({ message: "at capacity: max-jobs is 2", agentId: agent }),
+                  ApiErrors.AtCapacity.make({
+                    message: "at capacity: max-jobs is 2",
+                    agentId: agent,
+                  }),
                 )
               : Effect.die(defect),
         }),

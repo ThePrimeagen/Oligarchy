@@ -1,9 +1,9 @@
 import { Effect, Layer } from "effect";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
 import * as QemuServerHandlers from "../qemu-server/handlers.ts";
 import * as Middleware from "../qemu-server/middleware.ts";
-import * as Api from "../shared/api.ts";
-import * as Contract from "../shared/contract.ts";
 import * as Router from "./router.ts";
 
 const ok = Contract.Ok.make({});

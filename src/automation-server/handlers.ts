@@ -1,6 +1,9 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
@@ -8,8 +11,6 @@ import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as QemuServerHandlers from "../qemu-server/handlers.ts";
 import * as Middleware from "../qemu-server/middleware.ts";
-import * as Api from "../shared/api.ts";
-import * as Contract from "../shared/contract.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
@@ -39,11 +40,11 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
       const log = yield* Log.Log;
       const bytes = new Uint8Array(
         yield* request.arrayBuffer.pipe(
-          Effect.mapError((cause) => Errors.Internal.make({ cause })),
+          Effect.mapError((cause) => ApiErrors.Internal.make({ cause })),
         ),
       );
       if (!Signature.matches(Redacted.value(secret), request.headers["linear-signature"], bytes)) {
-        return yield* Errors.Unauthorized.make({});
+        return yield* ApiErrors.Unauthorized.make({});
       }
       const parsed = Option.map(Webhook.issue(bytes), Webhook.work);
       if (Option.isNone(parsed)) {
@@ -63,7 +64,9 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         return ok;
       }
       const placed = yield* Enqueue.enqueueTicket(event.ticket, job.value).pipe(
-        Effect.mapError((error) => Errors.Internal.make({ cause: error, agentId: event.ticket })),
+        Effect.mapError((error) =>
+          ApiErrors.Internal.make({ cause: error, agentId: event.ticket }),
+        ),
       );
       if (placed.result === "missing") {
         yield* log.info(`linear webhook ignored; no result for ${event.state}`, {
@@ -111,7 +114,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
         const automation = yield* Automation.AutomationStore;
         const servers = yield* Servers.ServerStore;
         const log = yield* Log.Log;
-        const nothingToAbort = Errors.BadRequest.make({
+        const nothingToAbort = ApiErrors.BadRequest.make({
           message: `ticket "${payload.ticket}" has no ${payload.action} to abort`,
           agentId: payload.ticket,
         });
@@ -119,7 +122,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           .findResultByLinearId(payload.ticket)
           .pipe(
             Effect.mapError((error) =>
-              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
             ),
           );
         if (Option.isNone(result)) {
@@ -129,7 +132,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           .abortPending(result.value.id, payload.action)
           .pipe(
             Effect.mapError((error) =>
-              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
             ),
           );
         if (closedPending) {
@@ -146,7 +149,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           .findRunning(result.value.id)
           .pipe(
             Effect.mapError((error) =>
-              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
             ),
           );
         if (Option.isNone(job)) {
@@ -155,7 +158,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
         // One job of a ticket runs at a time; the one running may not be the one named, when
         // the diagnose named closed since and the drive is still on.
         if (job.value.action !== payload.action) {
-          return yield* Errors.BadRequest.make({
+          return yield* ApiErrors.BadRequest.make({
             message: `ticket "${payload.ticket}" is running a ${job.value.action}, not a ${payload.action}`,
             agentId: payload.ticket,
           });
@@ -167,11 +170,11 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           .findServer(job.value.serverId)
           .pipe(
             Effect.mapError((error) =>
-              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
             ),
           );
         if (Option.isNone(server)) {
-          return yield* Errors.RunFailed.make({
+          return yield* ApiErrors.RunFailed.make({
             message: `unknown server "${job.value.serverId}"`,
           });
         }
@@ -187,7 +190,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
             error.status === 404
               ? Effect.succeed(Option.some(error))
               : Effect.fail(
-                  Errors.RunFailed.make(
+                  ApiErrors.RunFailed.make(
                     Object.assign(
                       { message: error.message },
                       error.cause === undefined ? undefined : { cause: error.cause },
@@ -200,7 +203,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           .finish(job.value.id, "aborted", "aborted")
           .pipe(
             Effect.mapError((error) =>
-              Errors.Internal.make({ cause: error, agentId: payload.ticket }),
+              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
             ),
           );
         // The row closed some other way while its client was asked: the job finished, and a

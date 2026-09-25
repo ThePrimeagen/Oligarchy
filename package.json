@@ -9,6 +9,17 @@
     "session": "src/session/main.ts",
     "viz": "src/viz/main.ts"
   },
+  "workspaces": {
+    "packages": [
+      "packages/*"
+    ],
+    "catalog": {
+      "@types/node": "^26.4.0",
+      "effect": "4.0.0-rc.112",
+      "typescript": "7.0.2",
+      "vitest": "^4.1.11"
+    }
+  },
   "type": "module",
   "scripts": {
     "client": "bun --no-env-file src/client/main.ts",
@@ -25,8 +36,8 @@
     "check:lint": "oxlint --deny-warnings .",
     "check:format": "oxfmt --check .",
     "format": "oxfmt .",
-    "check:types": "tsc --noEmit -p tsconfig.json",
-    "test:unit": "bun --bun vitest run --project unit",
+    "check:types": "tsc --noEmit -p tsconfig.json && bun run --workspaces check:types",
+    "test:unit": "bun --bun vitest run --project unit && bun run --workspaces test:unit",
     "test:integration": "bun --bun vitest run --project integration --maxWorkers 1",
     "check:fast": "bun run check:lint && bun run check:format && bun run check:types && bun run test:unit",
     "db:generate": "drizzle-kit generate",
@@ -37,13 +48,14 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
+    "@oligarchy/routes": "workspace:*",
     "@opentui/core": "0.5.11",
     "@opentui/solid": "0.5.11",
     "@sentry/bun": "10.73.0",
     "@sentry/cloudflare": "10.73.0",
     "@sentry/effect": "10.73.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-rc.112",
+    "effect": "catalog:",
     "hono": "^4.13.5",
     "pg": "^8.23.0",
     "solid-js": "1.9.12"
@@ -55,15 +67,15 @@
     "@effect/vitest": "4.0.0-rc.112",
     "@testcontainers/postgresql": "^11.14.0",
     "@types/babel__core": "7.20.5",
-    "@types/node": "^26.4.0",
+    "@types/node": "catalog:",
     "@types/pg": "^8.23.1",
     "babel-preset-solid": "1.9.12",
     "drizzle-kit": "^0.31.10",
     "oxfmt": "0.66.0",
     "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2001",
-    "typescript": "7.0.2",
-    "vitest": "^4.1.11",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "^4.127.1"
   },
   "overrides": {

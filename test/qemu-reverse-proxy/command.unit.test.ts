@@ -17,9 +17,9 @@ import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Api from "@oligarchy/routes/api";
 import * as Client from "../../src/db/client.ts";
 import * as QemuReverseProxyCommand from "../../src/qemu-reverse-proxy/command.ts";
-import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 

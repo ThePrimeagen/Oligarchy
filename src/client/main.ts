@@ -6,9 +6,9 @@ import * as CliConfig from "effect/unstable/cli/CliConfig";
 import * as CliOutput from "effect/unstable/cli/CliOutput";
 import * as Command from "effect/unstable/cli/Command";
 import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
+import * as Api from "@oligarchy/routes/api";
 import * as Config from "../config.ts";
 import * as Render from "../observability/render.ts";
-import * as Api from "../shared/api.ts";
 import * as ClientCommand from "./command.ts";
 
 const MainLive = Layer.mergeAll(

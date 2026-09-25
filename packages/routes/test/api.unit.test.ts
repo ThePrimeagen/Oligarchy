@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HttpApi, HttpApiClient, type HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
-import * as Api from "../../src/shared/api.ts";
+import * as Api from "../src/api.ts";
 
 type Route = {
   readonly group: string;

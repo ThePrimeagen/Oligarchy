@@ -84,26 +84,6 @@ describe("brands", () => {
     }
   });
 
-  it("accepts an http or https url with a host as a ServerUrl and refuses anything else", () => {
-    const is = Schema.is(Domain.ServerUrl);
-    expect(is("http://10.0.0.5:42069")).toBe(true);
-    expect(is("https://qemu.example.com")).toBe(true);
-    expect(is("https://qemu.example.com/")).toBe(true);
-    expect(is("")).toBe(false);
-    expect(is("qemu.example.com:42069")).toBe(false);
-    expect(is("ftp://qemu.example.com")).toBe(false);
-    expect(is("http://")).toBe(false);
-    expect(is("not a url")).toBe(false);
-  });
-
-  it("names the url rule in the ServerUrl decode failure", () => {
-    const exit = Schema.decodeUnknownExit(Domain.ServerUrl)("qemu.example.com:42069");
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(String(Cause.squash(exit.cause))).toMatch(/url must be an http or https url/);
-    }
-  });
-
   it("accepts a non-empty ServerName and refuses an empty one", () => {
     const is = Schema.is(Domain.ServerName);
     expect(is("garage")).toBe(true);
@@ -274,15 +254,7 @@ describe("encodeQmpCommand", () => {
   });
 });
 
-describe("SessionMode", () => {
-  it("is fresh or resume and nothing else", () => {
-    const is = Schema.is(Domain.SessionMode);
-    expect(is("fresh")).toBe(true);
-    expect(is("resume")).toBe(true);
-    expect(is("mint")).toBe(false);
-    expect(is("")).toBe(false);
-  });
-
+describe("SessionConfig", () => {
   it("a session config carries the mode when it was resumed and nothing when it was fresh", () => {
     const decode = Schema.decodeUnknownSync(Domain.SessionConfig);
     expect(decode({ iso: "omarchy.iso" })).toEqual({ iso: "omarchy.iso" });

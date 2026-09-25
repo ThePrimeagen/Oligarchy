@@ -12,6 +12,7 @@ import {
   Stdio,
   Terminal,
 } from "effect";
+import * as Api from "@oligarchy/routes/api";
 import * as HarnessConfig from "../../src/harness/config.ts";
 import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
@@ -19,7 +20,6 @@ import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as AutomationServerCommand from "../../src/automation-server/command.ts";
 import * as Client from "../../src/db/client.ts";
-import * as Api from "../../src/shared/api.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 

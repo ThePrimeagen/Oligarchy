@@ -5,7 +5,7 @@ import { Cause, Effect, Exit, Fiber, Layer } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import * as Api from "../../src/shared/api.ts";
+import * as Api from "@oligarchy/routes/api";
 import * as VizCommand from "../../src/viz/command.ts";
 import * as Config from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";

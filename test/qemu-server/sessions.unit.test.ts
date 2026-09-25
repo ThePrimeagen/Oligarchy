@@ -18,10 +18,11 @@ import {
   Tracer,
 } from "effect";
 import { TestClock } from "effect/testing";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
 import type * as Qemu from "../../src/qemu/qemu.ts";
 import * as Log from "../../src/observability/log.ts";
-import * as Contract from "../../src/shared/contract.ts";
 import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
@@ -2271,7 +2272,7 @@ describe("save", () => {
         minted: {
           save: ({ who }) =>
             Effect.fail(
-              Errors.SaveFailed.make({
+              ApiErrors.SaveFailed.make({
                 message: "qemu-img convert exited 1",
                 sessionId: who.sessionId,
                 agentId: who.agentId,
