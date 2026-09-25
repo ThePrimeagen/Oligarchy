@@ -18,7 +18,8 @@ Revised 2026-09-25 after review. What changed from the first version, and why:
 - **`shared` stays small** and takes only what is domain vocabulary: ids, vocabularies, errors,
   and `steps.ts`.
 - **`linear` moves up** a layer and takes `openRun`, the workflow that turns test definitions into
-  a run and its tickets. `ctrl` and the dashboard call the same function.
+  a run and its tickets. `ctrl` and the dashboard call the same function. (Superseded below:
+  `openRun` is `jobs`' `open`, and `linear` stays on layer 3.)
 - **The dashboard is the fifth app.** It stops importing `ctrl` and `viz`.
 - **`integration-testing` holds system tests only** (the Postgres container, spawned processes)
   and is created last. A test that needs only the real OS lives in its owner's own lane.
@@ -54,7 +55,7 @@ Then two independent reviews of that revision (2026-09-25), which changed:
   resolved and restated open decisions.
 - **`openRun` is specified**: lifted out of `makeCtrlCommand`'s closure with its helpers, returns
   the value instead of printing, and the dashboard still builds its own runtime around it.
-- **`@oligarchy/routes` has a slot** in the layer list between phase 2 and its phase 9 rename.
+- **`@oligarchy/routes` has a slot** in the layer list between phase 2 and its phase 10 rename.
 - **The row, then the line.** Today `emit` writes stdout first and queues the row after. The
   sink now owns both destinations in order: insert the row, then write the line. A refused row
   still writes the line, then `db: log insert failed: <detail>`, then reports the failure to
@@ -81,6 +82,16 @@ Then two independent reviews of that revision (2026-09-25), which changed:
   `Env.override({ DATABASE_URL: url })`, the same record layered ahead of the live chain so one
   variable points at a local Postgres and everything else still comes from the process. A name
   not in the list does not compile.
+- **`jobs` is a package; `linear` is primitives.** A job is a test result and its Linear ticket,
+  which move together; an action (a row in `automation_jobs`) is a drive, mint or diagnose on
+  one. Everything that writes a job's row *and* moves its ticket lives in `jobs`: `open`,
+  `close`, `fail`, `abort`, `ready`/`release`, the board rules (which column means which
+  action), the retry policies, and the ticket templates. Today those are spread over
+  `ctrl/command.ts`, `automation-server/worker.ts`, `ready.ts`, `backlog.ts`, `enqueue.ts`,
+  `webhook.ts`, the proxy's `setup.ts` and the dashboard (which aborts the ticket with its own
+  client and the row through automation-server's `/abort`). `linear` shrinks to the API client,
+  its state constants and `LinearError`, never touches a store, and drops back to layer 3. The
+  old open decision 1 (`linear` on layer 4 for `openRun`) is closed by this.
 - **Three open decisions closed.** `drizzle/` and `drizzle.config.ts` move into `packages/db`
   (the generated migrations and drizzle-kit's pointer were the only database things not already
   there). A behaviour-imitating fake lives with the one package or app that uses it, and moves to
@@ -105,8 +116,9 @@ top     integration-testing (system tests)  testing (shared fakes)  — both dev
 5       http            contract, API errors, middleware, serve, proxy client
 5       fleet           host and process stats, member announce loop, stale-server sweep
 4       observability   Sentry, instrument, dsn, the row-writing Log layer
-4       linear          Linear API client, ticket templates, openRun
+4       jobs            a job is a result and its ticket: open, close, fail, abort, ready, board rules, templates
 3       db              Postgres client, stores, schema, migrations
+3       linear          the Linear API client, its state vocabulary, LinearError
 2       env             variables, env files, the settings file, --env-file, entry runner, colour detection
 1       log             the Log service and stdout layer, failure mechanics and text, log-line text, palette
 0       shared          domain ids, vocabularies, domain errors, steps
@@ -125,13 +137,14 @@ Declared dependencies, which is what the architecture test reads:
 | `log` | `effect`, `shared` |
 | `env` | `effect`, `@effect/platform-node`, `log`, `shared` |
 | `db` | `effect`, `drizzle-orm`, `pg`, `env`, `log`, `shared` |
-| `linear` | `effect`, `db`, `env`, `log`, `shared` |
+| `linear` | `effect`, `env`, `log`, `shared` |
+| `jobs` | `effect`, `db`, `linear`, `env`, `log`, `shared` |
 | `observability` | `effect`, `@sentry/bun`, `@sentry/effect`, `db`, `log`, `shared` |
 | `fleet` | `effect`, `db`, `log`, `shared` (dev: `@effect/platform-node` for its integration lane) |
 | `http` | `effect`, `@effect/platform-node`, `env`, `log`, `shared` |
-| `routes` (phases 2 to 8, then renamed to `http`) | `effect`, `shared`; it sits in `http`'s slot of the layer list |
+| `routes` (phases 2 to 9, then renamed to `http`) | `effect`, `shared`; it sits in `http`'s slot of the layer list |
 | an app | any package; never another app, never the root's `src/` |
-| `testing` | the packages whose services it fakes (`db`, `log`, `linear`, `http`, `fleet` as fakes arrive); dev only; a `devDependency` of the packages and apps that use it |
+| `testing` | the packages whose services it fakes (`db`, `linear` first; `log`, `http`, `fleet` as fakes arrive); dev only; a `devDependency` of the packages and apps that use it |
 | `integration-testing` | any package; the dashboard's Worker entry; dev only |
 
 For `testing` and `integration-testing` the edge check reads `devDependencies` too: a package may
@@ -277,7 +290,7 @@ No test covers the `oligarchy.json` loader or the file's contents (standing deci
       `@oligarchy/db`.
 
 `test/integration/db.integration.test.ts` and `test-database.integration.test.ts` need the
-container and stay in the root's integration project until phase 11.
+container and stay in the root's integration project until phase 12.
 
 **Phase 6: `@oligarchy/observability`**
 
@@ -294,25 +307,68 @@ container and stay in the root's integration project until phase 11.
 
 **Phase 7: `@oligarchy/linear`**
 
-- [ ] TEST (move) `test/ctrl/linear.unit.test.ts` and `test/ctrl/prompts.unit.test.ts` to
-      `packages/linear/test/`.
+- [ ] TEST (move) `test/ctrl/linear.unit.test.ts` to `packages/linear/test/client.unit.test.ts`.
+- [ ] TEST (move) the cases of `test/dashboard/dashboard.unit.test.ts` that exercise the
+      dashboard's own Linear client to `packages/linear/test/client.unit.test.ts` as
+      `moveToAborted`. Happy: the ticket moves to Aborted. Unhappy: an unknown ticket and an API
+      refusal are each a `LinearError`.
+- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no file in linear imports a store or
+      `@oligarchy/db`. Unhappy: a `TestStore` import inside linear is named.
+
+**Phase 8: `@oligarchy/jobs`**
+
+- [ ] TEST (move) `fakeTestStore` and `fakeAutomationStore` from `test/support/stores.ts` and
+      `test/support/fake-linear.ts` to `packages/testing/src/`, with their own cases: jobs' tests
+      and the apps' are the two consumers. This creates `@oligarchy/testing`.
+- [ ] TEST (move) `test/ctrl/prompts.unit.test.ts` to `packages/jobs/test/templates.unit.test.ts`.
 - [ ] TEST (move) the `test run` and `testsuite` cases of `test/ctrl/command.unit.test.ts` that
-      exercise `openRun` to `packages/linear/test/run.unit.test.ts`. Happy: `testsuite` opens one
-      run per definition but mint, each in its newest wording, with one ticket each, and returns
-      the run and its tickets; `--name` opens one; nothing is printed. Unhappy: a ticket that
-      fails rolls the run back and fails with the cause; an unknown name is refused. The ctrl
-      command test keeps one case per command proving it calls `openRun` with its flags and
-      prints what came back as JSON.
-- [ ] TEST (move) the abort cases of `test/dashboard/dashboard.unit.test.ts` that exercise the
-      dashboard's own Linear client to `packages/linear/test/client.unit.test.ts` as `abort`.
-      Happy: the ticket moves to Aborted. Unhappy: an unknown ticket and an API refusal are each
-      a `LinearError`. The dashboard test keeps one case proving `POST /abort` calls it.
+      exercise `openRun` to `packages/jobs/test/open.unit.test.ts`. Happy: `Jobs.open` for the
+      suite creates one run, one result per definition but mint in its newest wording, one
+      ticket each, sets each result's Linear id, and returns the run and its tickets; for one
+      name it creates one; nothing is printed. Unhappy: a ticket that fails rolls the run back
+      (`failRun`) and fails with the cause; an unknown name is refused. The ctrl command test
+      keeps one case per command proving it calls `Jobs.open` with its flags and prints what came
+      back as JSON.
+- [ ] TEST (new) `packages/jobs/test/open.unit.test.ts`: `Jobs.openMint` (from the proxy's
+      `setup.ts`) creates the mint result and its ticket from the mint template. Unhappy: a
+      second mint for the same setup is refused by the store and files no ticket.
+- [ ] TEST (move) the `closeJob`, `reportErrored`, `moveTicket` and `reportDiagnosis` cases of
+      `test/automation-server/worker.unit.test.ts` to `packages/jobs/test/close.unit.test.ts`.
+      Happy: `Jobs.close(action, outcome)` finishes the row, then moves the ticket to Succeeded,
+      Failed or Needs Review by the outcome, and answers true when this call closed it;
+      `Jobs.fail(action, reason)` errors the result (not for a diagnose), then moves the ticket
+      to Errored with `<action> errored; <reason>`. Unhappy: a row write that fails three times is
+      one line and the ticket still moves; a ticket that will not move after three attempts is
+      one line and the row stays closed; a second `close` of a closed row answers false and moves
+      nothing (a board that will not move does not reopen a job); an action without a ticket
+      writes the row and moves nothing.
+- [ ] TEST (move) `test/automation-server/ready.unit.test.ts` to `packages/jobs/test/ready.unit.test.ts`:
+      `Jobs.ready` marks the ticket once inside the webhook deadline and logs a miss;
+      `Jobs.release` clears it with two immediate retries and never reopens the closed row.
+- [ ] TEST (move) the column-to-action cases of `test/automation-server/backlog.unit.test.ts`,
+      `enqueue.unit.test.ts` and `webhook.unit.test.ts` to `packages/jobs/test/board.unit.test.ts`.
+      Happy: Automation Needed is a drive, unless the result is the mint definition, then a mint;
+      Needs Review is a diagnose; `Jobs.enqueue(ticket)` inserts the pending action for the
+      ticket's result. Unhappy: a ticket without a result is not a job; a second insert for the
+      same (result, action) is named by the status the unique index kept; any other column is
+      no action. The automation-server tests keep one case each that the watch loop and the
+      webhook handler call these.
+- [ ] TEST (new) `packages/jobs/test/abort.unit.test.ts`: `Jobs.abort(ticket, action)` aborts the
+      pending action row and moves the ticket to Aborted, in that order. Unhappy: no pending
+      action is a typed refusal and the ticket does not move; a ticket that will not move is one
+      line and the row stays aborted.
+- [ ] TEST (alter) `test/automation-server/handlers.unit.test.ts` and
+      `test/dashboard/dashboard.unit.test.ts`: `POST /abort` on automation-server calls
+      `Jobs.abort`; the dashboard's `POST /abort` forwards to automation-server and no longer
+      moves the ticket itself.
 - [ ] TEST (alter) `test/dashboard/suite.unit.test.ts`: `createTestSuiteRun` builds its runtime
       (database and `TestStore`, `Linear`, `Log.layerStdout`, the bundled templates as the file
-      system, `FetchHttpClient`), calls `openRun`, and answers with what it returned. It no longer
-      runs `ctrl` or scrapes a console.
+      system, `FetchHttpClient`), calls `Jobs.open`, and answers with what it returned. It no
+      longer runs `ctrl` or scrapes a console.
+- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no file in jobs imports `http`, a
+      platform, or an app. Unhappy: an `AutomationClient` import inside jobs is named.
 
-**Phase 8: `@oligarchy/fleet`**
+**Phase 9: `@oligarchy/fleet`**
 
 - [ ] TEST (move) `test/qemu/stats.unit.test.ts` to `packages/fleet/test/host.unit.test.ts`,
       scripting its readings in the file, with `Log.layerStdout` or an inline recording `Log`.
@@ -331,9 +387,9 @@ container and stay in the root's integration project until phase 11.
       lane, on the platform's child-process layer.
 - [ ] TEST (move) `fakeServerStore` and `fakeProcessStatsStore` from `test/support/stores.ts`
       to `packages/testing/src/stores.ts`: fleet's member and sweep tests and the apps' heartbeat
-      tests all need them, which is the two-consumer trigger. Their own cases (a url registers
-      once; a second route is the primary key's `DatabaseError`; the heartbeat upsert registers)
-      move to `packages/testing/test/stores.unit.test.ts`.
+      tests all need them. Their own cases (a url registers once; a second route is the primary
+      key's `DatabaseError`; the heartbeat upsert registers) move to
+      `packages/testing/test/stores.unit.test.ts`.
 - [ ] TEST (new) `packages/fleet/test/member.unit.test.ts`, on `TestClock` with
       `Testing.fakeServerStore` and `Testing.fakeProcessStatsStore`. Happy: the first tick writes
       the servers row with the member's type, name and
@@ -366,7 +422,7 @@ container and stay in the root's integration project until phase 11.
       `bun run --workspaces --if-present test:integration`. Unhappy: a package integration lane
       off Bun, and a fan-out without `--if-present`, are each named.
 
-**Phase 9: `@oligarchy/http`**
+**Phase 10: `@oligarchy/http`**
 
 - [ ] TEST (alter) every test importing `@oligarchy/routes/*` imports `@oligarchy/http/*`,
       keeping the `Api`, `Contract` and `ApiErrors` aliases.
@@ -385,7 +441,7 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (alter) `test/integration/client.integration.test.ts`: the bundle rebuilds when an
       http-package source is newer.
 
-**Phase 10: the seven apps**
+**Phase 11: the seven apps**
 
 - [ ] TEST (move) qemu-server's unit tests (`test/qemu-server/`, `test/qemu/`, `test/qmp/`) to
       `apps/qemu-server/test/`.
@@ -434,7 +490,7 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the fleet starters start the apps from
       their new entries, and a second signal still kills both children.
 
-**Phase 11: finish integration testing**
+**Phase 12: finish integration testing**
 
 - [ ] TEST (move) the remaining integration tests (every one that copies the Postgres template or
       spawns a built process) into `packages/integration-testing/test/`.
@@ -538,19 +594,44 @@ container and stay in the root's integration project until phase 11.
 
 **Phase 7: `@oligarchy/linear`**
 
-- [ ] Create `packages/linear` from `src/ctrl/linear.ts` (with `abort` folded in from
-      `src/dashboard/linear.ts`) and `src/ctrl/prompts.ts`, with `LinearError` and `PromptError`,
-      plus `run.ts` holding `openRun` lifted out of `makeCtrlCommand`'s closure together with
-      `selectDefinitions`, `noDefinitions`, `withReason`, `trapped` and `MINT_DEFINITION`. It
-      requires `TestStore`, `Linear`, `Log` and `FileSystem`, returns the run and its tickets,
-      and prints nothing; `ctrl` prints the JSON.
-- [ ] `ctrl test run` and `testsuite` call `Linear.openRun`. The dashboard's `suite.ts` builds its
-      `ManagedRuntime` (database and `TestStore`, `Linear`, `Log.layerStdout`, the bundled
-      templates as the file system, `FetchHttpClient`) and calls it, dropping the in-process
-      `ctrl` run and the recording console. `POST /abort` calls the client. Delete
-      `src/dashboard/linear.ts`.
+- [ ] Create `packages/linear` from `src/ctrl/linear.ts`: the `Linear` service (service key
+      `@oligarchy/linear/Linear`), the state and label constants, `LinearTicket`,
+      `LinearBacklogTicket`, `LinearError`, and `moveToAborted` with `ABORTED_STATE` folded in
+      from `src/dashboard/linear.ts`. Delete `src/dashboard/linear.ts`; the dashboard's abort
+      goes through automation-server in phase 8.
+- [ ] Re-point the proxy's, automation-server's and ctrl's `Linear` imports.
 
-**Phase 8: `@oligarchy/fleet`**
+**Phase 8: `@oligarchy/jobs`**
+
+- [ ] Create `packages/jobs` with:
+  - `templates.ts` (from `src/ctrl/prompts.ts`, with `PromptError`): the test and mint ticket
+    bodies, filled from `prompts/*.html`.
+  - `open.ts`: `open` lifted out of `makeCtrlCommand`'s closure (`openRun`) together with
+    `selectDefinitions`, `noDefinitions`, `withReason`, `trapped` and `MINT_DEFINITION`, and
+    `openMint` from the proxy's `setup.ts`. Both require `TestStore`, `Linear`, `Log` and
+    `FileSystem`, return what they made, and print nothing.
+  - `close.ts`: `close`, `fail` and the diagnosis verdict, from `worker.ts`'s `closeJob`,
+    `reportErrored`, `reportDiagnosis` and `moveTicket`, with the one retry policy (three
+    attempts on the row, three on the ticket, one line each) and the one `detail` helper.
+  - `ready.ts`: `ready` and `release`, from `automation-server/ready.ts`.
+  - `board.ts`: `actionFor(column, result)` and `enqueue(ticket)`, the one copy of the rule in
+    `backlog.ts`, `enqueue.ts` and `webhook.ts`.
+  - `abort.ts`: `abort`, from automation-server's `/abort` handler plus `moveToAborted`.
+- [ ] Create `packages/testing` (`@oligarchy/testing`, `private`, dev only) with
+      `fakeTestStore`, `fakeAutomationStore` and `fakeLinear`; it depends on `db` and `linear`.
+      It grows one fake at a time, each when a second consumer appears.
+- [ ] `ctrl test run` and `testsuite` call `Jobs.open` and print the JSON. The proxy's `setup.ts`
+      calls `Jobs.openMint`. automation-server's worker calls `Jobs.close` and `Jobs.fail`, its
+      webhook and board watch call `Jobs.ready`, `Jobs.release`, `Jobs.actionFor` and
+      `Jobs.enqueue`, and its `/abort` handler calls `Jobs.abort`. The dashboard's `suite.ts`
+      builds its `ManagedRuntime` (database and `TestStore`, `Linear`, `Log.layerStdout`, the
+      bundled templates as the file system, `FetchHttpClient`) and calls `Jobs.open`, dropping
+      the in-process `ctrl` run and the recording console; its `POST /abort` only forwards to
+      automation-server.
+- [ ] Delete `automation-server/ready.ts` and `enqueue.ts`; `worker.ts`, `backlog.ts` and
+      `webhook.ts` keep the dispatch, the poll loop and the HTTP decoding.
+
+**Phase 9: `@oligarchy/fleet`**
 
 - [ ] Create `packages/fleet` with `host.ts` (from `src/qemu/stats.ts`), `process.ts` (from
       `src/shared/process-usage.ts`), `member.ts` (the template, from the two `heartbeat.ts`)
@@ -564,17 +645,14 @@ container and stay in the root's integration project until phase 11.
 - [ ] qemu-server and automation-client each define their `Member` and call `Fleet.announce`;
       the proxy and automation-server call `Fleet.forget`. Delete both `heartbeat.ts` files and
       `stale-servers.ts`. The apps build `Contract.Stats` from the values plus the machine count.
-- [ ] Create `packages/testing` (`@oligarchy/testing`, `private`, dev only) with `stores.ts`
-      holding the two store fakes fleet and the apps share. It depends on `db`; fleet and the
-      root's tests dev-depend on it. It grows one fake at a time, each when a second consumer
-      appears (candidates: `fakeAutomationStore`, `fakeLinear`, the HTTP client fake, the process
-      spawner).
+- [ ] Add `fakeServerStore` and `fakeProcessStatsStore` to `@oligarchy/testing`; fleet
+      dev-depends on it.
 - [ ] Add fleet's `test:integration` lane and the `--workspaces --if-present` fan-out.
 - [ ] Add `@effect/vitest` to the catalog.
 - [ ] Update the architecture boundary-file list for the new paths.
 - [ ] `development.md`: the unit-test rule, per-package integration lanes and the fleet template.
 
-**Phase 9: `@oligarchy/http`**
+**Phase 10: `@oligarchy/http`**
 
 - [ ] Rename `packages/routes` to `packages/http` (`@oligarchy/http`).
 - [ ] Move in the middleware, `NotFoundRoute` and the proxy client. Add `serve` with its
@@ -583,7 +661,7 @@ container and stay in the root's integration project until phase 11.
       `onError: (cause) => MutableRef.set(shutdown.reason, ...)`.
 - [ ] Run `wrangler deploy --dry-run` as a build check (not a test).
 
-**Phase 10: the seven apps**
+**Phase 11: the seven apps**
 
 - [ ] Add `apps/*` to the root workspaces.
 - [ ] Move each server into `apps/<name>/`: qemu-server takes `src/qemu/` and `src/qmp/`,
@@ -609,7 +687,7 @@ container and stay in the root's integration project until phase 11.
 - [ ] Delete the root `src/shared/errors.ts` once the last app error has moved.
 - [ ] Update the wrappers, package scripts and fleet starters.
 
-**Phase 11: finish integration testing**
+**Phase 12: finish integration testing**
 
 - [ ] Create `packages/integration-testing` with the container global setup, the template copy
       (`postgres.ts`), the loopback stubs (`stub-proxy.ts`) and the one-worker lane.
@@ -624,7 +702,7 @@ container and stay in the root's integration project until phase 11.
 - `bun install --frozen-lockfile`.
 - When a phase touches something the scripts bundle: `./client --help` and `./driver --help`.
 - When a phase touches something the dashboard bundles (shared, log, db, observability, linear,
-  http): `wrangler deploy --dry-run` as a build check, from `apps/dashboard` once phase 10 lands.
+  jobs, http): `wrangler deploy --dry-run` as a build check, from `apps/dashboard` once phase 11 lands.
 
 ## Enforcing one-way dependencies
 
@@ -687,15 +765,17 @@ was checked against the modules' imports as they are today.
 | `log` ↔ `observability` | observability imports log | Sentry reporting inside log | log reports through Effect's `ErrorReporter.CurrentErrorReporters`; Sentry installs a reporter, log never names Sentry |
 | `db` ↔ `observability` | observability imports db (rows) | `db/client.ts` importing `Render` from observability (it does today) | failure text is in log; `db/client.ts` keeps `Effect.logError`, because a pool error routed through the row-writing log would try to insert through the failing pool |
 | `db` ↔ platform | — | `migrate.ts` importing `NodeRuntime` and `NodeServices` (it does today) | `migrate.ts` is an `Env.run` entry; db declares no platform module |
-| `db` ↔ `linear` | linear imports db (`openRun` reads `TestStore`) | a store that files a ticket | db stores never call out; a workflow that spans both lives in linear |
+| `db` ↔ `linear` | none | a store that files a ticket, or a Linear primitive that reads a result | db stores never call out; linear knows ticket identifiers, not results; the workflow that spans both is jobs, above both |
+| `jobs` ↔ `linear` | jobs imports linear | a board rule or a retry policy in linear | linear is API calls and names; the rule about what a column means for a job is jobs' |
+| `jobs` ↔ automation-server | the app imports jobs | dispatching to a client from jobs | jobs never imports http; `dispatch` and `place` stay in the app and call `Jobs.close`/`fail` |
 | `fleet` ↔ `http` | none | `stats.ts` importing `@oligarchy/routes/contract` (it does today) | fleet returns `{ memory, cpu }`; the apps build `Contract.Stats`; the import goes in the same change as the move |
 | `http` ↔ automation-server | none | moving `automation-server/client.ts` to http while `AutomationClientError` and `OligarchyToken` stay in the app | the client stays in the app; it has one consumer |
 | `env` ↔ `http` | http imports env (`ProxyConfig`) | `Api.VERSION` in the runner | the version is passed to `Env.program` |
 | `env` ↔ `shared` | env imports shared | a flag schema in shared | flags live in the apps; shared holds the vocabulary a flag decodes to |
-| app ↔ app | none | `ctrl/linear.ts` and `ctrl/prompts.ts` (proxy, automation-server), `qemu-server/middleware.ts` and `handlers.ts` (three apps), `client/proxy-client.ts` (three), `ctrl/command.ts` (dashboard); all imported across apps today | each is in linear or http before phase 10, `openRun` in linear |
+| app ↔ app | none | `ctrl/linear.ts` and `ctrl/prompts.ts` (proxy, automation-server), `qemu-server/middleware.ts` and `handlers.ts` (three apps), `client/proxy-client.ts` (three), `ctrl/command.ts` (dashboard); all imported across apps today | each is in linear, jobs or http before phase 11 |
 | `ctrl` ↔ root | none | `ctrl/command.ts` importing `client/proxy-client.ts` (it does today) | the proxy client is in http |
 | `testing` ↔ a package | testing imports the package (its service tag) | that package dev-depending on `testing` for a fake of its own service | the edge check reads `devDependencies` for `testing`; a package's fakes of its own services stay in its `test/` |
-| `dashboard` ↔ root | none | the dashboard importing `ctrl` or `viz` (it does today) | `steps` is in shared, `openRun` in linear; the dashboard imports packages only |
+| `dashboard` ↔ root | none | the dashboard importing `ctrl` or `viz` (it does today) | `steps` is in shared, `open` in jobs; the dashboard imports packages only |
 | `viz` ↔ root | none | `viz/main.ts` importing `session/image.ts` for `speaksKitty` (it does today); `driver/loop.ts` importing `viz/steps.ts` (it does today) | viz keeps its own four-line `speaksKitty`; `steps` is in shared |
 
 ### Considered and not chosen
@@ -739,7 +819,8 @@ Each other error moves with the package that raises it:
 | `LogLine` (identifier `@oligarchy/observability/log/LogLine`, unchanged) | log |
 | `MissingVariable` | env |
 | `DatabaseError` | db |
-| `LinearError`, `PromptError` | linear |
+| `LinearError` | linear |
+| `PromptError` | jobs (with the templates) |
 | `PsFailed` (new) | fleet |
 | `ProxyRefusal`, `ProxyUnreachable` | http |
 | `QmpError`, `QmpTimeout`, `QmpClosed`, `QmpProtocolError`, `QemuStartError`, `HostRequirementsMissing`, `IsoError`, `KeysError` | qemu-server |
@@ -750,7 +831,7 @@ Each other error moves with the package that raises it:
 | `PngDecodeError` | session (root) |
 
 Until its package exists, an error stays in the root's `src/shared/errors.ts`, which shrinks each
-phase and is deleted in phase 10. No code raises `ChildExit`; only its own test names it, so it is
+phase and is deleted in phase 11. No code raises `ChildExit`; only its own test names it, so it is
 a candidate for deletion.
 
 ### `@oligarchy/log` (layer 1, phase 3)
@@ -840,7 +921,7 @@ them.
   `../../../oligarchy.json`, and the driver wrapper's `--define` for `import.meta.url` must point
   at the new file. It is read during a job as well as at startup; that is the app's business, not
   the loader's. The alternative home, a `harness` package, is the scripts plan's call (open
-  decision 2).
+  decision 1).
 - **The entry runner.** `Env.program(command, { version })` is the effect: install the config
   lookup, set up CLI output and CLI config without the Wizard, provide `Log.Colors` from
   `wantsColor(process.stdout, process.env)`, `Command.run` with the version, `reportFailure` on
@@ -890,31 +971,73 @@ anything a command does while running, anything that writes.
 - **Admission rule.** A store reads and writes rows and returns them. Refused: a loop, a clock, a
   call to another system, a log line.
 
-### `@oligarchy/linear` (layer 4, phase 7)
+### `@oligarchy/linear` (layer 3, phase 7)
 
-The Linear API client, the ticket templates, and filing a run's tickets.
+The Linear API and nothing else: the primitives `jobs` is built from.
 
-- **Holds** `client.ts` (`src/ctrl/linear.ts`, plus `abort` folded in from the dashboard's
-  hand-rolled `src/dashboard/linear.ts`), `prompts.ts` (the ticket templates for test and mint
-  tickets, read from `prompts/*.html`; the proxy's setup renders the mint one), and `run.ts`:
-  `openRun`, lifted from `src/ctrl/command.ts` together with `selectDefinitions`,
-  `noDefinitions`, `withReason`, `trapped` and `MINT_DEFINITION`. `openRun` reads the definitions
-  from `TestStore`, creates the run and its experiment tests, files one ticket each from the
-  templates, sets the run's Linear id, and fails the run on a ticket failure. It requires
-  `TestStore`, `Linear`, `Log` and `FileSystem`, returns the run and its tickets, and prints
-  nothing.
-- **Used by** automation-server, qemu-reverse-proxy, ctrl and the dashboard. `ctrl test run`
-  prints what `openRun` returns as JSON; `POST /create-test-suite-run` answers with it. The
-  dashboard still builds its own `ManagedRuntime` (database and `TestStore`, `Linear`,
-  `Log.layerStdout`, the bundled templates as its file system, `FetchHttpClient`); what changes is
-  that it calls a function instead of a CLI with a scraped console.
-- **Depends on** db (`TestStore`), env (`DEFAULT_LINEAR_API_URL`, `linearAccess`), log and
-  shared. It is on layer 4 because of `openRun`; the client alone would sit on layer 3.
-- **Admission rule.** The client, the templates, and `openRun`. A workflow enters only when
-  filing a ticket is its purpose and the rows it writes are the run that ticket is about. Refused:
-  a workflow whose purpose is a row or a session that happens to mention a ticket; those belong
-  to the app that owns them (`automation-server/prompts.ts`, the drive and diagnose prompt
-  filler, is such a case and stays in its app). Open decision 1 says when to revisit.
+- **Holds** `client.ts` (`src/ctrl/linear.ts`): the `Linear` service (`teamId`, `labelIds`,
+  `assigneeId`, `stateIds`, `createIssue`, `describeIssue`, `moveIssue`, `markReady`,
+  `clearReady`, the `moveTo*` family, `listBacklog`, `listAutomationNeeded`, `listNeedsReview`),
+  plus `moveToAborted` folded in from the dashboard's hand-rolled `src/dashboard/linear.ts`; the
+  board vocabulary (`BACKLOG_STATE`, `AUTOMATION_NEEDED_STATE`, `NEEDS_REVIEW_STATE`,
+  `IN_PROGRESS_STATE`, `ERRORED_STATE`, `FAILED_STATE`, `SUCCEEDED_STATE`, `ABORTED_STATE`,
+  `READY_LABEL`, `AGENT_TEST_LABEL`); `LinearTicket`, `LinearBacklogTicket`; `LinearError`.
+- **Used by** jobs (every write), automation-server (the board reads its watch polls), ctrl
+  (`describeIssue`) and the dashboard through jobs.
+- **Depends on** env (`DEFAULT_LINEAR_API_URL`, `linearAccess`), log and shared. Never db: a
+  Linear primitive knows a ticket identifier, not a result.
+- **Admission rule.** A call to the Linear API, or a name the board uses. Refused: a store, a
+  template, a rule about what a column means for a job, a retry policy. Those are jobs'.
+
+### `@oligarchy/jobs` (layer 4, phase 8)
+
+A job is a test result and its Linear ticket, which move together. An action is a row in
+`automation_jobs`: a drive, a mint or a diagnose on one job, and an action moves the job's
+ticket. Everything that writes a job's row *and* moves its ticket lives here, so no process can
+do one without the other.
+
+- **Vocabulary, without renaming tables.** `test_results.linear_id` is the one column that ties
+  a row to a ticket (unique: one job per ticket). `automation_jobs` rows are actions. `test_runs`
+  group the jobs one `open` made. The package speaks of jobs and actions; the stores keep their
+  names.
+- **Holds:**
+  - `open.ts`: `open` (from `ctrl/command.ts`'s `openRun`: the run, one result per definition in
+    its newest wording, one ticket each from the template, `setLinearId`, `failRun` if a ticket
+    fails) and `openMint` (from the proxy's `setup.ts`). Both return what they made and print
+    nothing; `ctrl` prints.
+  - `close.ts`: `close(action, outcome)` finishes the row, then moves the ticket to Succeeded,
+    Failed or Needs Review, and answers whether this call closed it; `fail(action, reason)`
+    errors the result (not for a diagnose), then moves the ticket to Errored with
+    `<action> errored; <reason>`; the diagnosis verdict (passed is Succeeded, failed is Failed).
+    From `worker.ts`'s `closeJob`, `reportErrored`, `reportDiagnosis`, `moveTicket`.
+  - `ready.ts`: `ready` (one attempt inside Linear's five-second webhook deadline, a miss is a
+    line) and `release` (two immediate retries; a closed row is never reopened). From
+    `automation-server/ready.ts`.
+  - `board.ts`: `actionFor(column, result)`: Automation Needed is a drive, unless the result is
+    the mint definition, then a mint; Needs Review is a diagnose; anything else is no action.
+    `enqueue(ticket)`: look the result up by ticket, insert the pending action, name a duplicate
+    by the status the unique index kept. Today's three copies (`backlog.ts`, `enqueue.ts`,
+    `webhook.ts`) become one.
+  - `abort.ts`: `abort(ticket, action)`: abort the pending row, then move the ticket to Aborted.
+    Today the dashboard moves the ticket with its own client and closes the row through
+    automation-server's `/abort`: two processes, two clients, one job.
+  - `templates.ts` (from `ctrl/prompts.ts`, with `PromptError`): the test and mint ticket
+    bodies, filled from `prompts/*.html`. A job's ticket text is the job's.
+  - **One policy.** Three attempts on a row write, three on a ticket move, one log line per
+    failure, and a row that is closed stays closed whatever the board answers. Written once,
+    with the one `detail` helper that unwraps a `DatabaseError` (a copy of which sits in
+    `worker.ts`, `backlog.ts` and the two heartbeats today).
+- **Used by** ctrl (`open`), qemu-reverse-proxy (`openMint`), automation-server (`close`,
+  `fail`, `ready`, `release`, `actionFor`, `enqueue`, `abort`) and the dashboard (`open`; its
+  abort forwards to automation-server).
+- **Depends on** db (`TestStore`, `AutomationStore`), linear, env, log and shared. Not on http:
+  a job never talks to an automation client.
+- **Admission rule.** An operation on a job's row and its ticket together, the rule that keeps
+  them consistent, or the text of its ticket. Refused: dispatching an action to a client (HTTP,
+  slots, the `/run` wait — automation-server's `dispatch` and `place`), the poll loop and the
+  webhook handler (the schedule is the app's; the rule it applies is jobs'), and the drive and
+  diagnose agent prompts (`automation-server/prompts.ts` is what the agent reads, not what the
+  ticket says).
 
 ### `@oligarchy/observability` (layer 4, phase 6)
 
@@ -932,7 +1055,7 @@ Where lines and failures go once written.
 - **Admission rule.** A destination for lines, failures and spans. Refused: text formatting
   (log), and anything a package would need in order to log.
 
-### `@oligarchy/fleet` (layer 5, phase 8)
+### `@oligarchy/fleet` (layer 5, phase 9)
 
 How a server measures itself, announces itself, and how the fleet forgets a dead member. About
 600 lines, four app consumers.
@@ -1049,7 +1172,7 @@ clear is once-until-success, which is `onJoin`), the tick interval (one constant
 the failure policy (one line, keep going, which is the template's point). Session drain and exit
 codes are process lifecycle and stay in each app's `main.ts`.
 
-### `@oligarchy/http` (layer 5, phase 9)
+### `@oligarchy/http` (layer 5, phase 10)
 
 How we speak HTTP: one way to serve, one way to call the proxy, one set of API errors.
 
@@ -1084,7 +1207,7 @@ How we speak HTTP: one way to serve, one way to call the proxy, one set of API e
 - **Admission rule.** The contract, serving it, calling the proxy, guarding a route. Refused: a
   store, a loop, a client with one consumer. A request timeout is HTTP and is not a "clock".
 
-### The seven apps (layer 6, phase 10)
+### The seven apps (layer 6, phase 11)
 
 Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` and
 `vitest.config.ts`. The root workspaces gain `apps/*`.
@@ -1096,17 +1219,21 @@ Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` a
 - **automation-server** keeps `client.ts`, `OligarchyToken`, `AutomationClientError` and
   `JobNotFound`.
 - **automation-server** and **qemu-reverse-proxy** take their own directories. Their imports of
-  other apps (`ctrl/linear.ts`, `qemu-server/middleware.ts`, `qemu-server/handlers.ts`,
-  `client/proxy-client.ts`, `shared/stale-servers.ts`) are gone by then, into linear, http and
-  fleet.
+  other apps (`ctrl/linear.ts`, `ctrl/prompts.ts`, `qemu-server/middleware.ts`,
+  `qemu-server/handlers.ts`, `client/proxy-client.ts`, `shared/stale-servers.ts`) are gone by
+  then, into linear, jobs, http and fleet. automation-server keeps `dispatch` and `place` (the
+  client protocol) and calls `Jobs.close`, `Jobs.fail`, `Jobs.ready`, `Jobs.release`,
+  `Jobs.actionFor`, `Jobs.enqueue` and `Jobs.abort`; the proxy's setup calls `Jobs.openMint`.
 - **dashboard** is the Cloudflare Worker: `dashboard.tsx`, the pages, `query.ts` (its read model
   over the schema on a Hyperdrive client per request; dashboard-specific processing, so it stays
-  in the app), `clicker.ts`, `htmx.ts`, `suite.ts` (builds its runtime and calls
-  `Linear.openRun`), `ticket.ts`, `wrangler.jsonc`, the text-module rules and the `dev` script.
-  It imports db (`schema`), observability (`dsn`), http (`api`, `contract`, `errors`), linear
-  (the client, `openRun`) and shared (`steps`). What it imported from the root today is gone:
-  `ctrl/command.ts` (was run in-process as a CLI) into linear's `openRun`, `viz/steps.ts` into
-  shared, and its hand-rolled Linear client into linear. `SuiteRequestError` becomes a
+  in the app), `clicker.ts`, `htmx.ts`, `suite.ts` (builds its runtime and calls `Jobs.open`),
+  `ticket.ts`, `wrangler.jsonc`, the text-module rules and the `dev` script. It imports db
+  (`schema`, `TestStore` for `open`), observability (`dsn`), http (`api`, `contract`, `errors`),
+  jobs (`open`), linear (the layer `open` needs) and shared (`steps`). What it imported from the
+  root today is gone: `ctrl/command.ts` (was run in-process as a CLI) into jobs' `open`,
+  `viz/steps.ts` into shared, and its hand-rolled Linear client into linear's `moveToAborted`,
+  which its `POST /abort` no longer calls: it forwards to automation-server, whose handler runs
+  `Jobs.abort` for the row and the ticket together. `SuiteRequestError` becomes a
   `Schema.TaggedError`. Its `.tsx` files use `hono/jsx` under the app's own tsconfig.
 - **viz** is the OpenTUI terminal: `main.ts`, `command.ts`, `run.ts` (the `Renderer` service),
   `view.ts`, `screen.tsx`, `follow.ts`, `trail.ts`, `read.ts`, `settings.ts`, `text.ts`,
@@ -1123,11 +1250,11 @@ Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` a
   command tree: tests, runs, results, servers, automation, diagnosis, mint) and `render.ts`
   (its JSON and text output). It imports db (every store), env (`Config`, `EnvFile`), log
   (`Log`, `Render`), observability (`SentryLive`, `LogLive`), shared, http (`Api.VERSION`, the
-  proxy client) and linear (the client, `prompts`, `openRun`). `linear.ts` and `prompts.ts` are
-  linear's by phase 7, which is also when its three dependents stop importing it: the dashboard
-  ran its command tree in-process, and the proxy and automation-server took `Linear` from it.
-  It is the one non-server app that builds the row-writing log (in `command.ts`) and preloads
-  Sentry.
+  proxy client), linear (`describeIssue`) and jobs (`open`, `templates`). `linear.ts` is
+  linear's by phase 7 and `prompts.ts` and `openRun` are jobs' by phase 8, which is when its
+  three dependents stop importing it: the dashboard ran its command tree in-process, and the
+  proxy and automation-server took `Linear` from it. It is the one non-server app that builds
+  the row-writing log (in `command.ts`) and preloads Sentry.
 
 With viz and the dashboard both apps, the root package has no `.tsx`: the root tsconfig drops its
 JSX settings, the root `vitest.config.ts` drops both JSX plugins, and the pragma rule in the
@@ -1145,7 +1272,7 @@ fleet starters point at `apps/<name>/src/main.ts`.
 The scripts use packages the way the apps do. The root keeps one edge of its old tangle (`driver`
 imports `client/actions.ts`; it goes when `client` is removed), which is out of scope here: this
 plan is the fleet's libraries and apps. The scripts are a second plan; the harness's home (open
-decision 2) is decided there.
+decision 1) is decided there.
 
 ## Testing
 
@@ -1162,7 +1289,7 @@ decision 2) is decided there.
   with everything that makes them complicated: the Postgres container and its migrated template,
   the per-file template copy (`postgres.ts`), the loopback stubs, testcontainers, the one-worker
   lane. Every test that copies the template or spawns a built process is a system test. It sits
-  above everything it tests, is dev only, and nothing depends on it. It is created in phase 11,
+  above everything it tests, is dev only, and nothing depends on it. It is created in phase 12,
   when the first such test can move; the first version of this plan created it in phase 2 to hold
   one `ps` test that belongs in fleet.
 - **Shared fakes live in `@oligarchy/testing`** (`packages/testing`), dev only. A fake enters it
@@ -1170,8 +1297,9 @@ decision 2) is decided there.
   code, and is tested as code). Until then it is the one consumer's, in that consumer's `test/`.
   `testing` depends on the packages whose services it fakes and is a `devDependency` of its
   consumers; the edge check reads those `devDependencies`, so a package can never dev-depend on
-  a `testing` that depends on it. It is created in phase 8, when `fakeServerStore` gets its
-  second consumer.
+  a `testing` that depends on it. It is created in phase 8, when jobs' tests become the second
+  consumer of `fakeTestStore`, `fakeAutomationStore` and `fakeLinear`; fleet adds
+  `fakeServerStore` and `fakeProcessStatsStore` in phase 9.
 - **A system test drives a built process; it does not import the app's source.**
   `automation-client.integration.test.ts` imports `Driver.args` today to spell the child's
   arguments; it spells them itself. The one exception is the dashboard, which has no process to
@@ -1198,7 +1326,7 @@ decision 2) is decided there.
 - A fake of one of our services is `Layer.succeed(Tag)(Tag.of({ ... }))` inline, with only the
   methods the test uses, and every unused member `Effect.die("Unexpected <Service>.<method>")`.
 - `development.md` currently says fakes live under `test/support/`, one file per seam. That rule
-  is rewritten in phase 8, when the first package's tests with fakes move.
+  is rewritten in phase 9, when the first package's tests with fakes move.
 
 ### The shared helpers today, and where each goes
 
@@ -1207,16 +1335,16 @@ Counted on 2026-09-25 (unit test files using each):
 | Helper | Fakes | Users | Where it goes |
 |---|---|---|---|
 | `log.ts` | Log | 22 | `Log.layerStdout` from `@oligarchy/log` where a test asserts no lines; an inline recording `Log` where it asserts lines. |
-| `stores.ts` (1,055 lines) | every database store | 16 | Recording fakes (`fakeLogStore`, `fakeDebugLogStore`) go inline. Behaviour-imitating fakes go to `@oligarchy/testing` as each gets a second consumer: `fakeServerStore` and `fakeProcessStatsStore` in phase 8, `fakeAutomationStore` and `fakeSessionStore` in phase 10. One with a single consumer stays in that consumer's `test/`. |
-| `fake-http.ts` | the HTTP client | 16 | Decided in phase 9: inline `Layer.succeed(HttpClient.HttpClient)` where short; the scripted-response helper goes to `testing` if two packages keep it. |
-| `fake-spawner.ts` (235 lines) | child processes | 12 | Fleet narrows its seam. qemu-server and automation-client share the process choreography, so it goes to `testing` in phase 10. |
+| `stores.ts` (1,055 lines) | every database store | 16 | Recording fakes (`fakeLogStore`, `fakeDebugLogStore`) go inline. Behaviour-imitating fakes go to `@oligarchy/testing` as each gets a second consumer: `fakeTestStore` and `fakeAutomationStore` in phase 8 (jobs), `fakeServerStore` and `fakeProcessStatsStore` in phase 9 (fleet), `fakeSessionStore` in phase 11 (the apps). One with a single consumer stays in that consumer's `test/`. |
+| `fake-http.ts` | the HTTP client | 16 | Decided in phase 10: inline `Layer.succeed(HttpClient.HttpClient)` where short; the scripted-response helper goes to `testing` if two packages keep it. |
+| `fake-spawner.ts` (235 lines) | child processes | 12 | Fleet narrows its seam. qemu-server and automation-client share the process choreography, so it goes to `testing` in phase 11. |
 | `config.ts` (5 lines) | configuration | 12 | Replaced by `Env.fromValues` from `@oligarchy/env`, typed over the one list; deleted in phase 4. |
 | `fake-fs.ts` | the file system | 10 | Effect's `FileSystem.layerNoop`, inline. |
 | `reporter.ts` | Sentry's error reporter | 6 | Log's and observability's tests and the four servers' HTTP tests: inline, or an app-local helper. |
 | `tracer.ts` | a recording tracer | 1 | qemu-server's own `test/` (its sessions test). |
 | `stdio.ts` | process arguments | 5 | viz's command test takes its own copy into `apps/viz/test/`; the driver, client and session command tests in the root keep root's. |
 | `fake-qemu.ts`, `fake-minted.ts`, `fake-qmp-socket.ts`, `fake-sessions.ts` | QEMU pieces | 2–4 each | qemu-server's own `test/`. |
-| `fake-linear.ts` | Linear | 5 | Four apps use it (automation-server, the proxy's setup, ctrl, the dashboard): `testing`, in phase 10. |
+| `fake-linear.ts` | Linear | 5 | jobs' tests and four apps use it: `testing`, in phase 8. |
 | `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts`, `fake-tty.ts` | the viz terminal | 1–5 each | viz's own `apps/viz/test/`. The session tests (root) keep what they use of them; `viz.integration.test.ts` takes `stripAnsi` into integration-testing. |
 | `fake-children.ts` | session children | 2 | Stays with the session script in the root. |
 | `postgres.ts`, `stub-proxy.ts` | integration only | 10, 3 | `@oligarchy/integration-testing`. |
@@ -1234,17 +1362,15 @@ Counted on 2026-09-25 (unit test files using each):
 Each has a recommendation. None blocks phases 1 to 3. Decisions already taken in a design above
 are not repeated here.
 
-1. **`linear` on layer 4 for `openRun`.** Recommended: yes; the alternative is a `runs` package
-   of one function, which is the too-small pattern. If a second workflow that writes rows asks to
-   enter linear, that is the signal to make the `runs` package instead.
-2. **The settings loader's home.** Recommended for this plan: env, as configuration with three
+1. **The settings loader's home.** Recommended for this plan: env, as configuration with three
    consumers in three places. If the scripts plan makes `src/harness/` a package, the loader goes
    with it and env keeps only the variables the harness reads.
 
 Closed on 2026-09-25: variables stay one list in `env`, which also produces environments
 (`fromValues`, `override`); the migrations move into `packages/db`; a behaviour-imitating fake is
 its one consumer's until a second needs it, then `@oligarchy/testing`'s; the dashboard exports
-its Worker entry. Each is written into its design above.
+its Worker entry; `openRun` and every other row-and-ticket operation is `jobs`', and `linear` is
+primitives on layer 3. Each is written into its design above.
 
 ## Phase 0 (done)
 
