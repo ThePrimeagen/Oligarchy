@@ -96,13 +96,13 @@ stderr under `disableErrorReporting`. It also prints an empty line on interrupt,
 `isDuplicateJob` is `String(error.cause).includes("duplicate key")`. `development.md` asks for
 structured classification; pg exposes the unique-violation code as `code === "23505"`, which does
 not depend on the driver's wording. Decode it with a `Schema.Struct({ code: Schema.Literal("23505") })`
-probe on the cause (the same shape `src/external-failure.ts` uses) and update
+probe on the cause (the same shape `packages/log/src/external-failure.ts` uses) and update
 `test/support/stores.ts`, whose fake builds the error with the message alone.
 
 ## 8. Convention drifts, one line each
 
-- `Record<string, unknown>` (forbidden by `development.md`) in `src/observability/log.ts`
-  (`annotations`), `src/observability/sentry.ts` (`tag`) and `src/ctrl/linear.ts` (`variables`).
+- `Record<string, unknown>` (forbidden by `development.md`) in `src/observability/sentry.ts`
+  (`tag`) and `src/ctrl/linear.ts` (`variables`).
 - `src/shared/process-usage.ts` wraps `collect` in `Effect.withSpan`; every other service method is
   `Effect.fn("Service.method")`.
 - `src/db/logs.ts` `listLogs` orders by `created_at, id`; `development.md` says `id`, not
@@ -111,7 +111,7 @@ probe on the cause (the same shape `src/external-failure.ts` uses) and update
   reads and streams are interruptible and only handlers that drive a resource are not. `serial` is
   a file read.
 - `src/db/schema.ts` `SessionConfig` has no `readonly` fields, and the `logs` table comment omits
-  the `automation-client` location bucket `src/observability/log.ts` added.
+  the `automation-client` location bucket `packages/log/src/log.ts` added.
 - `MAX_CLICKS = 100` in `src/qemu-server/sessions.ts` is repeated as the literal `100` in
   `src/client/flags.ts` (`clicks`), so the flag and the server can drift.
 - `packages/routes/src/api.ts` `unregister` declares `Errors.NotFoundWire` on the endpoint while its group's
@@ -126,7 +126,7 @@ logic in files that change independently:
   `src/qemu-server/heartbeat.ts`, `src/automation-client/heartbeat.ts`, `src/shared/stale-servers.ts`
   and `src/automation-server/worker.ts`; `describeThrowable(causeOf(e), errorDetail(e))` in
   `src/cli.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/run.ts`. Both belong in
-  `src/external-failure.ts` beside `causeOf`.
+  `packages/log/src/external-failure.ts` beside `causeOf`.
 - `src/qemu-server/heartbeat.ts` and `src/automation-client/heartbeat.ts` differ only in the
   `type`, the location and how `jobs`/`stats` are read; one `announce` taking those would keep a fix
   in one from missing the other.
@@ -184,7 +184,7 @@ Recorded so the next reviewer does not redo them.
   reserved for joins of interrupted children.
 - `Effect.timeoutOrElse` inside the uninterruptible `save` handler: `raceAllFirst` forks its
   children interruptible whatever the parent, so the two-minute power-off bound fires.
-- The Sentry reporter's `error.name === Errors.LogLine.identifier`: `Schema.TaggedError` sets
+- The Sentry reporter's `error.name === LogErrors.LogLine.identifier`: `Schema.TaggedError` sets
   `name` to the identifier.
 - `Command.provide` applied before `Command.withSubcommands` wraps the parent's handler only, so
   `ctrl test run` builds one pool.

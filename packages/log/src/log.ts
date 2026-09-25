@@ -70,7 +70,7 @@ export type SinkFactory<R> = (
   report: (cause: Cause.Cause<unknown>) => Effect.Effect<void>,
 ) => Effect.Effect<Sink, never, Scope.Scope | R>;
 
-const annotations = (text: string, attribution: Attribution): Record<string, unknown> =>
+const annotations = (text: string, attribution: Attribution) =>
   Object.assign(
     {},
     attribution.location === undefined ? undefined : { location: attribution.location },

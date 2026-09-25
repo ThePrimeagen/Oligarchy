@@ -167,8 +167,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
   package that raises it exists: `src/shared/errors.ts` holds those (`MissingVariable`,
-  `DatabaseError`, `LogLine`, the app errors) and shrinks as each package is created,
-  re-exporting nothing.
+  `DatabaseError`, the app errors) and shrinks as each package is created, re-exporting
+  nothing.
 - `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
