@@ -145,7 +145,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `src/cli.ts`, `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
-  schemas, the follow stream), `errors.ts` (the domain errors every process raises,
+  schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
   `CommandError` today) and `steps.ts` (how a test instruction reads as steps and where a
   message sits in them), and imports nothing but `effect` and its own files. A module enters
   shared only if it imports nothing but `effect` and shared, has consumers in at least two
@@ -304,10 +304,10 @@ const MainLive = Layer.mergeAll(
 
 - Model every expected failure as
   `class X extends Schema.TaggedError<X>("@oligarchy/shared/errors/X")("X", fields, annotations?)`
-  in `packages/shared/src/errors.ts` when every process raises it, in the package that raises it
-  otherwise (in `src/shared/errors.ts` until that package exists), or, when an HTTP API declares
-  it (an `ApiError`), in `packages/routes/src/errors.ts` beside its wire codec; never
-  `Data.TaggedError`, never a bare `Error` in an error channel.
+  in `packages/shared/src/errors.ts` when more than one package or app raises it, in the one
+  that raises it otherwise (in `src/shared/errors.ts` until that package exists), or, when an
+  HTTP API declares it (an `ApiError`), in `packages/routes/src/errors.ts` beside its wire
+  codec; never `Data.TaggedError`, never a bare `Error` in an error channel.
 - The class name equals the `_tag`; no `Error` suffix unless the concept is the error (`QmpError`,
   `DatabaseError`, `MissingVariable`). Never name a class `Error`.
 - Construct with `.make`; raise with `return yield* X.make({...})` (instances are yieldable).

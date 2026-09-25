@@ -553,7 +553,7 @@ container and stay in the root's integration project until phase 12.
 - [x] **Staged errors.** `src/shared/errors.ts` stays in the root, re-exporting nothing, holding
       only the errors whose package does not exist yet (`MissingVariable`, `DatabaseError`,
       `LogLine`, the app errors). Each phase moves its errors out; the file is deleted in phase
-      10 when the last app takes its own. Every import of a moved error is re-pointed in the
+      11 when the last app takes its own. Every import of a moved error is re-pointed in the
       phase that moves it.
 - [x] Re-point every import of `src/shared/domain.ts` and `src/viz/steps.ts` (`viz/view.ts`,
       `viz/follow.ts`, `driver/loop.ts`, `dashboard/follow.tsx`). Decided while working the

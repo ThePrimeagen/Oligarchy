@@ -19,6 +19,16 @@ describe("bodies carrying shared vocabularies", () => {
     );
   });
 
+  it("a drag body refuses an end point that is present but not two numbers", () => {
+    const decodeDrag = Schema.decodeUnknownSync(Contract.MouseDragBody);
+    const drag = { id: SESSION_ID, from: { x: 0.1, y: 0.2 }, button: "left", agent: AGENT_ID };
+    expect(decodeDrag({ ...drag, to: { x: 0.9, y: 0.8 } })).toMatchObject({
+      to: { x: 0.9, y: 0.8 },
+    });
+    expect(() => decodeDrag({ ...drag, to: { x: "far", y: 0.8 } })).toThrow();
+    expect(() => decodeDrag({ ...drag, to: { x: 0.9 } })).toThrow();
+  });
+
   it("a start body refuses a mode other than fresh or resume", () => {
     const decodeStart = Schema.decodeUnknownSync(Contract.StartBody);
     const start = { iso: "/isos/omarchy.iso", agent: AGENT_ID };
