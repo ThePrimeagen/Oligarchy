@@ -44,7 +44,9 @@ const packageGraph: PackageGraph = new Map(
 // one way and nothing below knows what sits above it. Every package must appear here.
 const LAYERS: ReadonlyArray<ReadonlyArray<string>> = [["@oligarchy/routes"]];
 
-// Every dependency loop in the graph, each written out once as the path that closes it.
+// The loops one depth-first walk finds, each written out as the path that closes it. A package
+// already walked through is not walked again, so two loops sharing a package may name only the
+// first; an empty result still means the graph has no loop at all.
 const packageCycles = (graph: PackageGraph): ReadonlyArray<string> => {
   const cycles: Array<string> = [];
   const done = new Set<string>();

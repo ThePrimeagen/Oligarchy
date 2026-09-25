@@ -60,13 +60,13 @@ Write each phase's tests before any of that phase's code, and see them fail.
 
 **Phase 1: cycle checks**
 
-- [ ] TEST (new) `test/repo/scripts.unit.test.ts`: `.oxlintrc.json` turns `import/no-cycle` on
+- [x] TEST (new) `test/repo/scripts.unit.test.ts`: `.oxlintrc.json` turns `import/no-cycle` on
       as an error. Happy: the checked-in config. Unhappy: a config without the rule, or with it
       off, is named.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: the workspace package graph has no
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: the workspace package graph has no
       cycle. Happy: the real graph. Unhappy: a made-up graph `a -> b -> a` is named with its
       loop.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: every package depends only on packages
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: every package depends only on packages
       in a lower layer of the declared layer list. Happy: the real graph. Unhappy: a made-up
       upward edge, a same-layer edge and a package missing from the list are each named.
 - [x] TEST (alter) `test/repo/scripts.unit.test.ts`: `dig` is no longer a process. Its tests
