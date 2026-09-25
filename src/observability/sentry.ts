@@ -13,8 +13,8 @@ import {
   Schema,
   Tracer,
 } from "effect";
+import * as LogErrors from "@oligarchy/log/errors";
 import type * as Domain from "@oligarchy/shared/domain";
-import * as Errors from "../shared/errors.ts";
 
 // ---------------------------------------------------------------------------
 // Reporter: error and fatal lines, defects and 5xx failures
@@ -50,7 +50,9 @@ export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
     // A log line brings the level and the text (`extra.log`); the exception Sentry groups on is
     // the cause it carries, as it always was. A line without a cause is the exception itself.
     const exception =
-      error.name === Errors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
+      error.name === LogErrors.LogLine.identifier && error.cause !== undefined
+        ? error.cause
+        : error;
     Sentry.captureException(exception, {
       level: toSentryLevel(severity),
       tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),

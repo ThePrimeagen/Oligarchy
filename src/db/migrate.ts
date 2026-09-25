@@ -2,8 +2,8 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Console, Effect, Layer } from "effect";
+import * as Render from "@oligarchy/log/render";
 import * as Config from "../config.ts";
-import * as Render from "../observability/render.ts";
 import * as Client from "./client.ts";
 
 export const migrateDatabase = Effect.gen(function* () {

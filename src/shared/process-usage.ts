@@ -1,7 +1,7 @@
 import { Clock, Context, Effect, FileSystem, Layer, Option, Ref, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as ExternalFailure from "../external-failure.ts";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Errors from "./errors.ts";
 
 // USER_HZ on Linux: /proc/self/stat counts in these ticks, and macOS's microseconds are read as

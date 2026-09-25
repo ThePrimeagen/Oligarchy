@@ -62,9 +62,10 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today two: `@oligarchy/shared`, the
-  vocabulary every process speaks, and `@oligarchy/routes`, the HTTP contract (HttpApi server,
-  below). A workspace package is source-first: its `exports` map each
+  dashboard, the tests); `packages/*` are its libraries, today three: `@oligarchy/shared`, the
+  vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
+  the service a line is written through (Log, below), and `@oligarchy/routes`, the HTTP contract
+  (HttpApi server, below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `typescript`, `vitest`,
@@ -81,8 +82,8 @@ exist.
   package depends only on packages on a strictly lower layer, never on one of its own layer:
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
-  picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0 and
-  `@oligarchy/routes` at 5, holding `http`'s slot). A package missing from the list, an upward
+  picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
+  `@oligarchy/log` at 1 and `@oligarchy/routes` at 5, holding `http`'s slot). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
@@ -142,7 +143,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`,
   `test/` and `packages/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
-  `src/cli.ts`, `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
+  `src/cli.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
   schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
@@ -152,7 +153,16 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   packages or apps, and is a schema, an id, an error class, or a pure function that reads a
   domain value (`steps.ts` is the one such function); a service, anything that reads the OS or
   `process.*`, anything that names a store, anything that turns a failure into text, and
-  anything with one consumer stays out. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  anything with one consumer stays out. `packages/log/src/` holds `log.ts` (the `Log` service,
+  its attribution and `Colors` references, `LogRow`, the `Sink` a line goes to), `render.ts` (how
+  a failure reads: `errorDetail`, `headline`, `renderFailure`, `reportFailure`; how a line reads:
+  `Line`, `logPieces`, `renderLogLine`, `paint` and the Rosé Pine constants), `palette.ts`,
+  `external-failure.ts` (`messageOf`, `causeOf`) and `errors.ts` (`LogLine`), and imports
+  nothing but `effect`, `@oligarchy/shared` and its own files. Its admission rule: reading a
+  failure, the text of a line or a failure, and the service that writes a line to the console;
+  refused are any destination but the console (a store, a file, Sentry) and any reading of the
+  terminal or the environment, so the package has no boundary file and every package above it
+  may take `Log`. `packages/routes/src/` holds `api.ts`, `contract.ts` and
   `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
@@ -186,9 +196,14 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `import * as Api from "@oligarchy/routes/api"`, `import * as Contract from
   "@oligarchy/routes/contract"`, `import * as ApiErrors from "@oligarchy/routes/errors"`,
   `import * as Domain from "@oligarchy/shared/domain"`, `import * as SharedErrors from
-  "@oligarchy/shared/errors"`, `import * as Steps from "@oligarchy/shared/steps"`. The two
-  errors modules are `ApiErrors` and `SharedErrors` everywhere so neither shadows the main
-  package's staged `Errors`; when that file is gone, `SharedErrors` becomes `Errors`.
+  "@oligarchy/shared/errors"`, `import * as Steps from "@oligarchy/shared/steps"`, `import * as
+  Log from "@oligarchy/log/log"`, `import * as Render from "@oligarchy/log/render"`, `import *
+  as Palette from "@oligarchy/log/palette"`, `import * as ExternalFailure from
+  "@oligarchy/log/external-failure"`, `import * as LogErrors from "@oligarchy/log/errors"`. The
+  three errors modules are `ApiErrors`, `SharedErrors` and `LogErrors` everywhere so none
+  shadows the main package's staged `Errors`; when that file is gone, `SharedErrors` becomes
+  `Errors`. The root's `src/observability/log.ts` is the row-writing `Log` layer, imported as
+  `RowLog` by the five graphs that build it.
 - Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
   every other Effect module as a namespace by its module path
   (`import * as Command from "effect/unstable/cli/Command"`,
@@ -334,7 +349,7 @@ const MainLive = Layer.mergeAll(
 - Translate infrastructure failures once, at the module boundary, with one helper per module
   (`Database.run`/`Client.attempt`, the HTTP client's `run(label, effect)`, `Process.detail`);
   classify an `HttpClientError` by its `response` status and `error.reason`, never by message;
-  convert `unknown` thrown values with the probes in `src/external-failure.ts` (`messageOf`,
+  convert `unknown` thrown values with the probes in `@oligarchy/log/external-failure` (`messageOf`,
   `describeThrowable`, `causeOf`; there is no `ExternalFailure` class), `causeOf` unwrapping a
   wrapper where the line should name the driver's or Node's message; wrap Promise SDKs with
   `Effect.tryPromise({ try, catch })` and a typed `catch`.
@@ -389,7 +404,7 @@ export const BadRequestWire = wireError(
 );
 ```
 
-The boundary renderer in `src/observability/render.ts`, `renderFailure(cause)`, is `""` for an
+The boundary renderer in `packages/log/src/render.ts`, `renderFailure(cause)`, is `""` for an
 interrupt-only cause, otherwise `headline(Cause.squash(cause))` (the message, then `: <cause
 message>` when the error carries one) and `Cause.pretty(cause)`, printed once at the process
 boundary.
@@ -497,7 +512,8 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   with a comment saying so), after parsing but before any work, so the first name reported is
   always the same one.
 - Configuration is either a hardcoded constant or a required value, never a silent optional; CLI
-  knobs (`isTTY`, `FORCE_COLOR`, `TERM`, `execPath`) are read in `main.ts` and `render.ts` only.
+  knobs (`isTTY`, `FORCE_COLOR`, `TERM`, `execPath`) are read in `main.ts` and
+  `src/observability/colors.ts` only.
 - The harness's non-secret configuration is the checked-in `oligarchy.json`, read from beside
   the package by `src/harness/config.ts`. `load` fails when the file is missing or malformed,
   and the message names the field. The OpenRouter token stays an environment variable, and a
@@ -920,7 +936,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 
 ## Log
 
-- Application code logs through the `Log` service (`src/observability/log.ts`): `info`, `warning`,
+- Application code logs through the `Log` service (`@oligarchy/log/log`): `info`, `warning`,
   `error`, `fatal`, `flush`. Messages are fixed sentences; every
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
@@ -928,25 +944,35 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   session), or `Locations.automation` (the automation server; its `agentId` is also
   `Locations.automation`). `ProcessAttribution` is the fallback the HTTP boundary uses when an
   error carries no session; the qemu server leaves the default (`server`), the automation server overrides it.
-- Each line is written twice: to stdout through `Console.log` when the method runs, and as a
-  `logs` row `Queue.offerUnsafe`d to a `Queue.unbounded` drained by one `forkScoped` fiber that
-  inserts in call order. The queue is unbounded by policy: a log call never blocks or drops a row
-  because the database is slow; a long outage costs memory, accepted. A failed insert writes
-  `db: log insert failed: <cause message>` to stdout, reports it to Sentry as a defect, and never
-  fails the caller. `id`, not `created_at`, orders rows.
-- stdout is the convenience copy; the rows and Sentry are the record. A process's `main.ts`
+- The service renders each line (`Render.Line`: level, text, attribution, palette colour), builds
+  its `LogRow` (`text`, `level`, `location`, `agentId`) and offers both to one `Sink`; it writes
+  nothing itself. A sink is a factory, `Log.layer((write, report) => Effect<Sink, never, Scope |
+  R>)`, built once with the `write` that puts a rendered line on stdout and the `report` that
+  reaches the reporters captured at build, so a sink can name its own failure without depending
+  on the `Log` it is part of. `Log.layerStdout`'s sink writes each line as it is offered and has
+  nothing to flush. The row-writing sink, `src/observability/log.ts` (`RowLog.layer`, over
+  `LogStore`), `Queue.offerUnsafe`s each line with its row to a `Queue.unbounded` drained by one
+  `forkScoped` fiber that inserts the row, then writes the line, so lines land in call order and
+  each stdout line trails its insert. The queue is unbounded by policy: a log call never blocks
+  or drops a row because the database is slow; a long outage costs memory, accepted. A refused
+  row still writes its line, then `db: log insert failed: <cause message>`, reports the failure
+  to Sentry as a defect, and never fails the caller or the rows behind it. `id`, not
+  `created_at`, orders rows.
+- The row is the record and stdout its convenience copy, so the copy follows the record; the
+  rows and Sentry are what is kept. A process's `main.ts`
   attaches a no-op `error` listener to `process.stdout` and `process.stderr`, so a write refused by
   a full filesystem (`ENOSPC`) drops that line instead of raising an uncaught exception per line.
 - The stdout line is `[LEVEL] [<agent>] <location>: <text>`: the level in capitals (`INFO`,
   `WARN`, `ERROR`, `FATAL`), `global` for a line with no agent, the location only when there is
   one. `Render.logPieces` is the one description of that line as coloured runs; stdout paints
   them and `./viz`'s log pane draws them, so both read alike. An agent's colour comes from
-  `src/observability/palette.ts`: its first line takes the next Rosé Pine colour in turn that no
+  `packages/log/src/palette.ts`: its first line takes the next Rosé Pine colour in turn that no
   active agent holds, and it keeps it; once an hour the palette drops agents with no line in the
   last hour, so the map stays bounded. Each process holds one palette, and the viz holds its own
-  fed by the rows it pulls. Colour is the `Log.Colors` `Context.Reference`,
-  defaulting to `Render.stdoutColors` (a TTY or `FORCE_COLOR`, and `hasColors(16)`); tests
-  override it. The row is the original text, level and attribution; prefix and colour are stdout
+  fed by the rows it pulls. Colour is the `Log.Colors` `Context.Reference`, off by default: the
+  package reads no terminal, so each graph that builds a `Log` provides
+  `Layer.succeed(Log.Colors)(Colors.stdoutColors)` from `src/observability/colors.ts` (a TTY or
+  `FORCE_COLOR`, and `hasColors(16)`, decided once for the process); tests provide `true`. The row is the original text, level and attribution; prefix and colour are stdout
   only.
 - Levels are the `log_level` enum in ascending severity and mean severity of the operation, not of
   the state recorded: `info` is the normal story, a verdict included; `warning` is degraded but
@@ -954,20 +980,20 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   boundary, a defect with its stack); `fatal` is the process going down, written right before the
   exit.
 - `error` and `fatal` report to the `ErrorReporter`s captured when the layer was built, unless
-  `skipSentry` is set: always as `Cause.fail(Errors.LogLine.make({ text, level, cause? }))`, so the
+  `skipSentry` is set: always as `Cause.fail(LogErrors.LogLine.make({ text, level, cause? }))`, so the
   line's own `[ErrorReporter.severity]` carries the level. The reporter hands Sentry the `cause`
   when the line has one (what Sentry groups on) and the `LogLine` itself otherwise, at the line's
   level either way: `log.fatal("…", { cause })` arrives as `fatal`, never `error`. 4xx request
   refusals set `skipSentry`: they are the client's mistake.
-- `flush` resolves when every offered row has been inserted or its failure reported; the layer
-  finalizer runs `flush` before the drain fiber is interrupted, and `Log.layer` (over `LogStore`)
-  sits above `Database` so the flush completes before the pool closes. `Log.layer` reads
-  `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive` is provided beneath it,
-  never only to callers. `Log.layerStdout` persists nothing: it is for tests. The automation
-  server persists through `Log.layer` once it has a database; its lines use
+- `flush` waits for the sink's flush: for the row sink, until every offered row has been inserted
+  or its failure reported; the sink's finalizer runs `flush` before the drain fiber is
+  interrupted, and `RowLog.layer` sits above `Database` so the flush completes before the pool
+  closes. `Log.layer` reads `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive`
+  is provided beneath it, never only to callers. `Log.layerStdout` persists nothing: it is for
+  tests. The automation server persists through `RowLog.layer` once it has a database; its lines use
   `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
-- `Log` installs no Effect `Logger`; `emit` formats, writes and offers synchronously. `console.*`
+- `Log` installs no Effect `Logger`; `emit` renders, builds the row and offers both at once. `console.*`
   appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
   fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
 
@@ -1021,7 +1047,7 @@ export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
     // A log line brings the level and the text (`extra.log`); the exception Sentry groups on is
     // the cause it carries, as it always was. A line without a cause is the exception itself.
     const exception =
-      error.name === Errors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
+      error.name === LogErrors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
     Sentry.captureException(exception, {
       level: toSentryLevel(severity),
       tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
@@ -1175,8 +1201,9 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Encode repository invariants oxlint cannot express as source-scanning tests in `test/repo/`: the
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
-  with `.ts`, the shared package importing only `effect` and itself and reading no `process.*`,
-  the routes package importing only `effect`, shared and itself, the main package reaching a
+  with `.ts`, the shared package importing only `effect` and itself, the log and routes packages
+  only `effect`, shared and themselves, none of the three reading `process.*`, the main package
+  reaching a
   workspace package only by an exported subpath, every package in the layer list and depending
   only on strictly lower layers, every package's lanes, deep-path Effect imports, no `as` but
   `as const`, `@oligarchy/` identifiers, no `Data.TaggedError`, `class Error` or re-export, the
@@ -1248,8 +1275,9 @@ change ships (Tests, above).
   `class-self-mismatch`, `non-object-effect-service-type`, `schema-opaque-instance-member`,
   `overridden-schema-constructor`, `schema-literal-non-finite`, `outdated-api`,
   `promise-in-effect-success`, `strict-effect-provide`, the last off only for `src/**/main.ts`,
-  `src/observability/instrument.ts`, `test/**` and `vitest.global-setup.ts`);
-  `typescript/no-floating-promises` off for `test/**` and the global setup. No `warn` tier.
+  `src/observability/instrument.ts`, `test/**`, `packages/*/test/**` and
+  `vitest.global-setup.ts`); `typescript/no-floating-promises` off for `test/**`,
+  `packages/*/test/**` and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
   final newline; `drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
   `wrangler.jsonc` ignored. `.editorconfig` matches.

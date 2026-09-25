@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { NodePath } from "@effect/platform-node";
 import { Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import * as Log from "@oligarchy/log/log";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Args from "../../src/qemu/args.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
@@ -11,7 +12,6 @@ import * as Errors from "../../src/shared/errors.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeSocket from "../support/fake-qmp-socket.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
-import * as FakeLog from "../support/log.ts";
 
 const ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 const ISO = "/isos/omarchy.iso";
@@ -66,14 +66,13 @@ const fixture = (options: Fixture = {}) =>
           }),
       },
     });
-    const log = FakeLog.fakeLog();
     const layer = Layer.effect(Qemu.Qemu)(Qemu.Qemu.make).pipe(
       Layer.provide(
-        Layer.mergeAll(fs.layer, NodePath.layer, spawner.layer, log.layer, listen.layer),
+        Layer.mergeAll(fs.layer, NodePath.layer, spawner.layer, Log.Log.layerStdout, listen.layer),
       ),
     );
     const qemu = yield* Effect.provide(Qemu.Qemu, layer);
-    return { events, socket, listen, spawner, fs, log, qemu };
+    return { events, socket, listen, spawner, fs, qemu };
   });
 
 const startInput = (record: Client.Recorder) =>

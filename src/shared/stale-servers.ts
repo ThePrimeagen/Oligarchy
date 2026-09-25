@@ -1,8 +1,8 @@
 import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Servers from "../db/servers.ts";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 import * as Errors from "./errors.ts";
 
 // As often as a server writes its row, so a row is gone within one heartbeat of its tenth

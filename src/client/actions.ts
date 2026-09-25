@@ -15,12 +15,12 @@ import {
 import * as CliError from "effect/unstable/cli/CliError";
 import * as Flag from "effect/unstable/cli/Flag";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Contract from "@oligarchy/routes/contract";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
-import * as ExternalFailure from "../external-failure.ts";
 import * as Flags from "./flags.ts";
 import * as ProxyClient from "./proxy-client.ts";
 

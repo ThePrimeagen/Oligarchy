@@ -13,6 +13,7 @@ import {
   Scope,
   Stdio,
 } from "effect";
+import * as Log from "@oligarchy/log/log";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import { TestClock } from "effect/testing";
@@ -26,7 +27,6 @@ import * as Automation from "../../src/db/automation.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
 import * as HarnessConfig from "../../src/harness/config.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
-import * as Log from "../../src/observability/log.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";

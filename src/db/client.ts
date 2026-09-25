@@ -2,8 +2,8 @@ import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Cause, Context, Effect, Exit, Layer, Redacted, Scope } from "effect";
 import { Pool } from "pg";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Render from "../observability/render.ts";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Render from "@oligarchy/log/render";
 import * as Errors from "../shared/errors.ts";
 import * as DbSchema from "./schema.ts";
 

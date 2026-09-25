@@ -1,8 +1,8 @@
 import { Cause, Console, Effect, Exit, Option, Sink, Stdio, Stream } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
+import * as Render from "@oligarchy/log/render";
 import * as Actions from "../client/actions.ts";
 import * as Tools from "../harness/tools.ts";
-import * as Render from "../observability/render.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

@@ -4,6 +4,7 @@ import { it } from "@effect/vitest";
 import { Cause, Effect, ErrorReporter, Exit, Layer, Schema } from "effect";
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as LogErrors from "@oligarchy/log/errors";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Sentry from "../../src/observability/sentry.ts";
 import * as Errors from "../../src/shared/errors.ts";
@@ -342,11 +343,13 @@ describe("reporter", () => {
       const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
       yield* ErrorReporter.report(
         Cause.fail(
-          Errors.LogLine.make({ text: "proxy: database unreachable", level: "fatal", cause }),
+          LogErrors.LogLine.make({ text: "proxy: database unreachable", level: "fatal", cause }),
         ),
       ).pipe(Effect.annotateLogs({ log: "proxy: database unreachable" }));
       yield* ErrorReporter.report(
-        Cause.fail(Errors.LogLine.make({ text: "timeout cleanup failed: boom", level: "error" })),
+        Cause.fail(
+          LogErrors.LogLine.make({ text: "timeout cleanup failed: boom", level: "error" }),
+        ),
       );
       const events = yield* captured.events;
       expect(events).toHaveLength(2);

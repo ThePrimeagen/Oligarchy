@@ -21,13 +21,13 @@ import {
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Config from "../../src/config.ts";
-import * as Log from "../../src/observability/log.ts";
-import * as Render from "../../src/observability/render.ts";
 import * as Handlers from "../../src/qemu-server/handlers.ts";
 import * as RealSessions from "../../src/qemu-server/sessions.ts";
 import * as Errors from "../../src/shared/errors.ts";

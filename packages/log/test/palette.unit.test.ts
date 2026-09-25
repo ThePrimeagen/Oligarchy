@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Option } from "effect";
-import * as Palette from "../../src/observability/palette.ts";
-import * as Render from "../../src/observability/render.ts";
+import * as Palette from "../src/palette.ts";
+import * as Render from "../src/render.ts";
 
 const MINUTE = 60_000;
 

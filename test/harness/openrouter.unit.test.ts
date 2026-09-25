@@ -3,10 +3,10 @@ import { it } from "@effect/vitest";
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import * as Render from "@oligarchy/log/render";
 import * as OpenRouter from "../../src/harness/openrouter.ts";
 import type * as History from "../../src/harness/history.ts";
 import type * as Tools from "../../src/harness/tools.ts";
-import * as Render from "../../src/observability/render.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 
 // Synthetic OpenRouter chat-completion frames. The shapes follow the public streaming

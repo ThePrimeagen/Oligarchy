@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import * as Log from "../../src/observability/log.ts";
+import * as Log from "@oligarchy/log/log";
 
 export type Line = {
   readonly level: "info" | "warning" | "error" | "fatal";
@@ -31,14 +31,18 @@ export const fakeLog = (): FakeLog => {
           cause: report?.cause,
         });
       });
-  const service: Log.LogService = {
-    info: record("info"),
-    warning: record("warning"),
-    error: record("error"),
-    fatal: record("fatal"),
-    flush: Effect.void,
+  return {
+    lines,
+    layer: Layer.succeed(Log.Log)(
+      Log.Log.of({
+        info: record("info"),
+        warning: record("warning"),
+        error: record("error"),
+        fatal: record("fatal"),
+        flush: Effect.void,
+      }),
+    ),
   };
-  return { lines, layer: Layer.succeed(Log.Log)(service) };
 };
 
 export const texts = (log: FakeLog): ReadonlyArray<string> => log.lines.map((line) => line.text);

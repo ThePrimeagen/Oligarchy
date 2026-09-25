@@ -1,10 +1,10 @@
 import { Cause, Context, Effect, Exit, FileSystem, Layer, Option, Ref, type Scope } from "effect";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Linear from "../ctrl/linear.ts";
 import * as Prompts from "../ctrl/prompts.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 
 // The install ./ctrl mint already uses. One definition, one ticket pinned to the server.
 const MINT_DEFINITION = "mint";

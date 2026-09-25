@@ -14,6 +14,8 @@ import {
 } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Steps from "@oligarchy/shared/steps";
 import * as Actions from "../client/actions.ts";
@@ -25,8 +27,6 @@ import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
 import * as Pointer from "../harness/pointer.ts";
 import * as Tools from "../harness/tools.ts";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Client from "./client.ts";
 import * as Log from "./log.ts";

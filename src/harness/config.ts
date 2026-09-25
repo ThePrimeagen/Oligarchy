@@ -1,7 +1,7 @@
 import { Duration, Effect, FileSystem, Schema } from "effect";
+import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Render from "../observability/render.ts";
 
 // The harness's configuration, the checked-in file beside the package. The
 // OpenRouter token stays in the environment: a token key in this file is

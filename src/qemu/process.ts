@@ -2,8 +2,8 @@ import { Deferred, Effect, Fiber, Ref, Stream } from "effect";
 import type { PlatformError } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Render from "../observability/render.ts";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Render from "@oligarchy/log/render";
 import * as Errors from "../shared/errors.ts";
 import * as Args from "./args.ts";
 

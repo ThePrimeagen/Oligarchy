@@ -12,8 +12,8 @@ import {
   Stream,
 } from "effect";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
-import * as Render from "../observability/render.ts";
 import * as Children from "./children.ts";
 import * as Grammar from "./grammar.ts";
 import * as Image from "./image.ts";

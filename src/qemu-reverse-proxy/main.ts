@@ -8,17 +8,19 @@ import * as Command from "effect/unstable/cli/Command";
 import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Api from "@oligarchy/routes/api";
 import * as Linear from "../ctrl/linear.ts";
 import * as Config from "../config.ts";
+import * as Colors from "../observability/colors.ts";
 import * as Client from "../db/client.ts";
 import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
+import * as RowLog from "../observability/log.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as StaleServers from "../shared/stale-servers.ts";
 import * as QemuReverseProxyCommand from "./command.ts";
@@ -94,9 +96,10 @@ const MainLive = Layer.mergeAll(
   SetupRequests.SetupRequestStore.layer,
   Tests.TestStore.layer,
   LinearLive,
-  Log.Log.layer,
+  RowLog.layer,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
+  Layer.provideMerge(Layer.succeed(Log.Colors)(Colors.stdoutColors)),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),
   Layer.provideMerge(Sentry.SentryLive),

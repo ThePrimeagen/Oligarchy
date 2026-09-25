@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Cause } from "effect";
-import * as Render from "../../src/observability/render.ts";
-import * as Errors from "../../src/shared/errors.ts";
+import * as Errors from "../src/errors.ts";
+import * as Render from "../src/render.ts";
 
 const AGENT_ID = "OLI-61";
 const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
@@ -14,7 +14,9 @@ describe("errorDetail", () => {
 
   it("reads a message-shaped object and a tagged error's getter", () => {
     expect(Render.errorDetail({ message: "boom" })).toBe("boom");
-    expect(Render.errorDetail(Errors.MissingVariable.make({ name: "X" }))).toBe("X is not set");
+    expect(Render.errorDetail(Errors.LogLine.make({ text: "X is not set", level: "error" }))).toBe(
+      "X is not set",
+    );
   });
 
   it("stringifies anything else", () => {
@@ -27,9 +29,9 @@ describe("errorDetail", () => {
 describe("headline", () => {
   it("is the message alone without a cause", () => {
     expect(Render.headline(new Error("x"))).toBe("x");
-    expect(Render.headline(Errors.MissingVariable.make({ name: "OLIGARCHY_TOKEN" }))).toBe(
-      "OLIGARCHY_TOKEN is not set",
-    );
+    expect(
+      Render.headline(Errors.LogLine.make({ text: "OLIGARCHY_TOKEN is not set", level: "fatal" })),
+    ).toBe("OLIGARCHY_TOKEN is not set");
   });
 
   it("appends the cause's message", () => {
@@ -41,9 +43,9 @@ describe("headline", () => {
     );
     expect(
       Render.headline(
-        Errors.DatabaseError.make({
-          operation: "ping",
-          message: "Failed query: select 1",
+        Errors.LogLine.make({
+          text: "Failed query: select 1",
+          level: "error",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
         }),
       ),
@@ -135,34 +137,5 @@ describe("paint and AGENT_COLORS", () => {
     expect(Render.AGENT_COLORS[0]).toBe(LOVE);
     expect(Render.AGENT_COLORS).toHaveLength(10);
     expect(new Set(Render.AGENT_COLORS).size).toBe(10);
-  });
-});
-
-describe("wantsColor", () => {
-  it("is false without a TTY and without FORCE_COLOR", () => {
-    expect(Render.wantsColor({ isTTY: false, hasColors: () => true }, {})).toBe(false);
-    expect(Render.wantsColor({}, {})).toBe(false);
-  });
-
-  it("is true with FORCE_COLOR=1 when 16 colours are supported", () => {
-    expect(
-      Render.wantsColor({ isTTY: false, hasColors: (n) => n <= 16 }, { FORCE_COLOR: "1" }),
-    ).toBe(true);
-  });
-
-  it("is true on a TTY that supports 16 colours", () => {
-    expect(Render.wantsColor({ isTTY: true, hasColors: (n) => n <= 16 }, {})).toBe(true);
-  });
-
-  it("is false when the stream cannot render 16 colours", () => {
-    expect(Render.wantsColor({ isTTY: true, hasColors: () => false }, { FORCE_COLOR: "1" })).toBe(
-      false,
-    );
-  });
-
-  // A piped stdout is a plain stream with no hasColors of its own, on Bun as on Node.
-  it("falls back to the runtime's colour depth when the stream has no hasColors", () => {
-    expect(Render.wantsColor({ isTTY: false }, { FORCE_COLOR: "1" })).toBe(true);
-    expect(Render.wantsColor({ isTTY: false }, { FORCE_COLOR: "0" })).toBe(false);
   });
 });

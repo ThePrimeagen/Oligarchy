@@ -1,6 +1,6 @@
 import { Context, Effect, FileSystem, Schema } from "effect";
+import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Render from "../observability/render.ts";
 
 // What the screen asks for lives here, not in the environment: a missing file is the
 // default, a present file that does not parse is a refusal. `tickets` is how many

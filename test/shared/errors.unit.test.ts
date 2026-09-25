@@ -1,24 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ErrorReporter, Schema } from "effect";
+import { Schema } from "effect";
 import * as Errors from "../../src/shared/errors.ts";
-
-describe("Sentry policy", () => {
-  it("a LogLine reads as its text and carries the line's level as its severity", () => {
-    const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
-    const fatal = Errors.LogLine.make({
-      text: "proxy: database unreachable",
-      level: "fatal",
-      cause,
-    });
-    expect(fatal.message).toBe("proxy: database unreachable");
-    expect(fatal.cause).toBe(cause);
-    expect(ErrorReporter.getSeverity(fatal)).toBe("Fatal");
-    expect(ErrorReporter.isIgnored(fatal)).toBe(false);
-    const error = Errors.LogLine.make({ text: "timeout cleanup failed: boom", level: "error" });
-    expect(ErrorReporter.getSeverity(error)).toBe("Error");
-    expect(error.cause).toBeUndefined();
-  });
-});
 
 describe("staged errors, each waiting for its package", () => {
   it("MissingVariable renders <NAME> is not set", () => {
@@ -94,7 +76,6 @@ describe("staged errors, each waiting for its package", () => {
     expect(Errors.ProxyUnreachable.make({ message: "x", cause: 1 })._tag).toBe("ProxyUnreachable");
     expect(Errors.LinearError.make({ operation: "team", message: "x" })._tag).toBe("LinearError");
     expect(Errors.PngDecodeError.make({ message: "x" })._tag).toBe("PngDecodeError");
-    expect(Errors.LogLine.make({ text: "x", level: "error" })._tag).toBe("LogLine");
     expect(Errors.CliFailed.make({ command: "tool", message: "x" })._tag).toBe("CliFailed");
   });
 });

@@ -15,10 +15,10 @@ import {
 } from "effect";
 import * as Headers from "effect/unstable/http/Headers";
 import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Qemu from "./qemu.ts";
 
