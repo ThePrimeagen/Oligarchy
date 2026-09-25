@@ -14,7 +14,7 @@ type Fixture = {
   readonly binaries?: ReadonlyArray<string>;
   readonly entries?: FakeFs.Entries;
   readonly help?: string;
-  readonly env?: Record<string, string>;
+  readonly env?: Config.Values;
 };
 
 const ALL_ENTRIES: FakeFs.Entries = {

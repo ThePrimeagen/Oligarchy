@@ -61,7 +61,7 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
         );
       },
     });
-    const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+    const run = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
       Effect.exit(
         Command.runWith(command, { version: Api.VERSION })(args).pipe(
           Effect.provide(

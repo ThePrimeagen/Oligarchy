@@ -369,7 +369,7 @@ const run = (
   log: Array<string>,
   options?: {
     readonly write?: Effect.Effect<void, PlatformError.PlatformError>;
-    readonly env?: Record<string, string>;
+    readonly env?: Config.Values;
     readonly prompt?: string;
     readonly agentId?: string;
     readonly seed?: Partial<Seed>;

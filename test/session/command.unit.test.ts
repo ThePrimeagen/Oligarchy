@@ -46,7 +46,7 @@ const harness = () => {
       return actions.layer;
     },
   });
-  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const run = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
     Effect.gen(function* () {
       const tty = FakeTty.fakeTty();
       const host = State.Host.of({

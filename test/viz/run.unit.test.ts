@@ -92,7 +92,7 @@ type Extra = {
   readonly tests?: Stores.FakeTestStore;
   readonly logs?: Stores.FakeLogStore;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
-  readonly env?: Record<string, string>;
+  readonly env?: Config.Values;
 };
 
 const live = (

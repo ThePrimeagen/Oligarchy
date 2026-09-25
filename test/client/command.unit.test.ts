@@ -36,7 +36,7 @@ const SpawnerStub = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
 );
 
 type Options = {
-  readonly env?: Record<string, string>;
+  readonly env?: Config.Values;
   readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
   readonly stdio?: Stdio.Captured;

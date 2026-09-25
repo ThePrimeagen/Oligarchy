@@ -109,7 +109,7 @@ const run = (
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
-  env: Record<string, string> = {},
+  env: Config.Values = {},
 ) =>
   Command.runWith(QemuServerCommand.makeQemuServerCommand(server), { version: Api.VERSION })(
     args,

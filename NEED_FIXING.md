@@ -83,13 +83,9 @@ passes. The other one-shot names `0012_adorable_deathbird.sql`, `0013_odd_slipst
 
 ## 6. `src/db/migrate.ts` prints nothing for a layer failure
 
-Every other entry applies `Render.reportFailure` outside `Effect.provide(MainLive)` so a layer
-failure (an unreadable `.env`, a defect from `Config.live`) prints its cause. Here
-`Layer.build(MainLive)` is unwrapped and `Console.error(Render.renderFailure(cause))` sits inside
-the provided program, so `npm run db:migrate` with an unreadable `.env` exits 1 with nothing on
-stderr under `disableErrorReporting`. It also prints an empty line on interrupt, where
-`Render.reportFailure` prints nothing. Use `Render.reportFailure` around the build as
-`src/qemu-server/main.ts` does.
+Fixed in the monorepo's phase 4: the entry runs through `Env.run`, with `Render.reportFailure`
+outside `Layer.build(Config.live)`, so an unreadable `.env` prints its cause and an interrupt
+prints nothing.
 
 ## 7. Classification by message in `src/automation-server/handlers.ts`
 

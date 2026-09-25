@@ -29,6 +29,7 @@ export const VARIABLES = [
   "SERVER_URL",
   "OLIGARCHY_DATA_DIR",
   "SESSION_ID",
+  "DISPLAY",
 ] as const;
 export type Variable = (typeof VARIABLES)[number];
 export type Values = { readonly [Name in Variable]?: string };
@@ -164,6 +165,10 @@ export const dataDir: EffectConfig.Config<string> = EffectConfig.string("OLIGARC
 // rule applies, so a shell can `SESSION_ID=$(./ctrl session --search ...) && export SESSION_ID`
 // once.
 export const sessionId: EffectConfig.Config<string> = EffectConfig.string("SESSION_ID");
+
+// The X display qemu-server's gtk check looks for; read through the provider so the check sees
+// the same environment as the rest of the process. Absent and empty both count as unset.
+export const display: EffectConfig.Config<string> = EffectConfig.string("DISPLAY");
 
 export class ProxyConfig extends Context.Service<ProxyConfig>()(
   "@oligarchy/env/config/ProxyConfig",

@@ -96,7 +96,7 @@ const run = (
   args: ReadonlyArray<string>,
   seen: Seen,
   options?: {
-    readonly env?: Record<string, string>;
+    readonly env?: Config.Values;
     readonly contents?: string | undefined;
     readonly outcome?: Effect.Effect<Loop.Stopped, Loop.Failure>;
   },

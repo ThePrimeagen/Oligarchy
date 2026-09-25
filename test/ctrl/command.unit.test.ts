@@ -145,7 +145,7 @@ const harness = (
   // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
   const services =
     options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
-  const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
+  const program = (args: ReadonlyArray<string>, env: Config.Values) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(
         Layer.mergeAll(
@@ -156,10 +156,10 @@ const harness = (
         ),
       ),
     );
-  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const run = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
     Effect.exit(program(args, env));
   // The failure itself, for a command refused after parsing.
-  const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const fail = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
     Effect.flip(program(args, env));
   return { stores, log, linear, touched, teams, program, run, fail };
 };
