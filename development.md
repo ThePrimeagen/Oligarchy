@@ -19,8 +19,9 @@ exist.
   `./automation-client` and `./ctrl` add `--preload ./src/observability/instrument.ts`), and the
   session REPL spawns its children the same way. The exceptions are `./client` and `./driver`. A
   driving agent calls `./client` many times per task, so it runs `bun build --target=bun --bytecode`
-  of its entry from `node_modules/.cache/oligarchy/client/`, rebuilt when a source, `bun.lock` or
-  the wrapper is newer than either cached file or one is missing, and when the build fails prints
+  of its entry from `node_modules/.cache/oligarchy/client/`, rebuilt when a source (under `src/` or
+  `packages/`), `bun.lock` or the wrapper is newer than either cached file or one is missing, and
+  when the build fails prints
   its output and one line saying so on stderr, then runs the sources
   (`test/integration/client.integration.test.ts` pins all three). `./driver` is that same wrapper
   for `src/driver/main.ts`, cached under `node_modules/.cache/oligarchy/driver/`. A stack trace from
@@ -60,6 +61,20 @@ exist.
   `check`, `test` or `lint` script; `test/repo/scripts.unit.test.ts` keeps it that way, and pins
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
+- The repo is a Bun workspace. The root `package.json` is the main package (every process, the
+  dashboard, the tests); `packages/*` are its libraries, today one: `@oligarchy/routes`, the HTTP
+  contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
+  `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
+  it as `"workspace:*"`. A version two packages share (`effect`, `typescript`, `vitest`,
+  `@types/node`) is named once in the root's `workspaces.catalog` and each package says
+  `"catalog:"`. Why: two `effect`s would make two sets of Schema types that do not assign to each
+  other. `bunfig.toml` sets `linker = "isolated"`: a package sees only what its own `package.json`
+  declares, so an import it never named fails instead of borrowing the root's copy. Every
+  `tsconfig.json` extends `tsconfig.base.json`; the root adds only hono's JSX. `check:types` and
+  `test:unit` run the root's lane, then `bun run --workspaces <lane>`, which runs that script in
+  every package and fails when one does; every package has both scripts, on Bun. Lint and format
+  run once, at the root, over the whole tree.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
   wins, and an empty value counts as unset. `--env-file <path>` on any process is a second file,
   read after the process environment and before `.env`.
@@ -110,10 +125,15 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   server; `./start-automation-server-client <max-jobs>` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
   other), the tooling files,
-  `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`
-  and `test/`.
+  `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`,
+  `test/` and `packages/`.
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/cli.ts`, `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
+- `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
+  `src/` and `test/`. `packages/routes/src/` holds `api.ts`, `contract.ts` and `errors.ts` and
+  imports nothing but `effect` and its own files, so the contract can be read, and depended on,
+  without the processes that serve it. What only one side knows (QEMU, the database, the harness,
+  the domain errors) stays in `src/`.
 - `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
@@ -136,6 +156,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - Import relative modules as namespaces with the `.ts` extension
   (`import * as Sessions from "./sessions.ts"`, `import type * as Domain from "./domain.ts"`);
   side-effect and asset imports are exempt. No barrels, no re-exports, no `export ... from`.
+- Import a workspace package the same way, as a namespace of one exported subpath, never by a
+  relative path into `packages/` and never from an index (there is none):
+  `import * as Api from "@oligarchy/routes/api"`, `import * as Contract from
+  "@oligarchy/routes/contract"`, `import * as ApiErrors from "@oligarchy/routes/errors"`. The
+  errors module is `ApiErrors` everywhere so it never shadows the main package's `Errors`.
 - Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
   every other Effect module as a namespace by its module path
   (`import * as Command from "effect/unstable/cli/Command"`,
@@ -148,14 +173,17 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - Identifiers are `@oligarchy/<dir>/<file>/<Name>` for schemas, errors and `Context.Reference`s
   (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/qemu-server/sessions/Shutdown`) and
   `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/qemu-server/Sessions`).
+  An identifier is text a caller reads: a decode failure names it, an error's `name` is it, and
+  Sentry groups on it. So a schema that moves keeps its identifier, and the routes package's are
+  still `@oligarchy/shared/...`.
 - Only the boundary files may import `node:*`, read `process.*`, or use `setTimeout`,
   `setInterval`, `new Promise` or `async`: every `src/**/main.ts` and the files named in
   `BOUNDARY_FILES` in `test/repo/architecture.unit.test.ts`, each the one place a Node API (a
   socket, a stream, a pool's error event, the tty, a timer) is wrapped into Effect. A non-boundary
   file that needs exactly one `node:*` module for something Effect lacks (a streaming hash, an
   inflate) is listed in `NODE_IMPORT_EXCEPTIONS` there with that module. A Promise SDK needs no
-  exemption: it is wrapped in `Effect.tryPromise`. `src/dashboard/**` and `test/**` are not
-  scanned. To add a boundary file or an exception, add it to the list with a comment naming why,
+  exemption: it is wrapped in `Effect.tryPromise`. `packages/*/src` is scanned like `src/`;
+  `src/dashboard/**` and `test/**` are not. To add a boundary file or an exception, add it to the list with a comment naming why,
   in one change; nothing else grants it.
 
 ## Core rules
@@ -248,7 +276,9 @@ const MainLive = Layer.mergeAll(
 
 - Model every expected failure as
   `class X extends Schema.TaggedError<X>("@oligarchy/shared/errors/X")("X", fields, annotations?)`
-  in `src/shared/errors.ts`; never `Data.TaggedError`, never a bare `Error` in an error channel.
+  in `src/shared/errors.ts`, or, when an HTTP API declares it (an `ApiError`), in
+  `packages/routes/src/errors.ts` beside its wire codec; never `Data.TaggedError`, never a bare
+  `Error` in an error channel.
 - The class name equals the `_tag`; no `Error` suffix unless the concept is the error (`QmpError`,
   `DatabaseError`, `MissingVariable`). Never name a class `Error`.
 - Construct with `.make`; raise with `return yield* X.make({...})` (instances are yieldable).
@@ -258,8 +288,8 @@ const MainLive = Layer.mergeAll(
   one. The boundary renders `message[: cause message]`.
 - Put the HTTP status on the class once, as `{ httpApiStatus: N }`; the wire codec derives it
   (`wireError(schema, fromMessage)` ends in `HttpApiSchema.status(httpStatus(schema))`), so the
-  two cannot disagree. Handlers never build error responses. `Errors.httpStatus(schema)` reads the
-  annotation (500 when absent); `Errors.apiStatus(error)` looks the class up in a table that
+  two cannot disagree. Handlers never build error responses. `ApiErrors.httpStatus(schema)` reads
+  the annotation (500 when absent); `ApiErrors.apiStatus(error)` looks the class up in a table that
   `satisfies Record<ApiError["_tag"], Schema.Top>`, so a tag without an arm does not compile.
 - Mark every API error class, 4xx and 5xx alike, with `override readonly [ErrorReporter.ignore] =
   true` and nothing else: no `[ErrorReporter.attributes]` getter (the reporter never reads one on
@@ -283,7 +313,8 @@ const MainLive = Layer.mergeAll(
   non-2xx status carried as a field, the thrown value as `cause`, and a `retryable` flag when the
   SDK can say so.
 
-`BadRequest` in `src/shared/errors.ts`: status on the class, opted out of Sentry, nothing else.
+`BadRequest` in `packages/routes/src/errors.ts`: status on the class, opted out of Sentry,
+nothing else.
 
 ```ts
 export class BadRequest extends Schema.TaggedError<BadRequest>(
@@ -618,9 +649,10 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
 
 ## HttpApi server
 
-- The contract lives in three files: `src/shared/api.ts` (middleware tags, `HttpApiEndpoint`s,
-  the groups, the `HttpApi`s, `VERSION`), `contract.ts` (`Schema.Class` DTOs and shared query field
-  objects), `errors.ts` (errors and wire codecs). No handler code lives there; `HttpApiEndpoint`,
+- The contract lives in three files, the `@oligarchy/routes` package: `packages/routes/src/api.ts`
+  (middleware tags, `HttpApiEndpoint`s, the groups, the `HttpApi`s, `VERSION`), `contract.ts`
+  (`Schema.Class` DTOs, shared query field objects, and the closed vocabularies a body carries),
+  `errors.ts` (the API errors and their wire codecs). No handler code lives there; `HttpApiEndpoint`,
   `HttpApiGroup.make`, `HttpApi.make` appear only in `api.ts` (the architecture test checks it).
 - A second `HttpApi` that must be reachable by the client generated from the first (the qemu reverse
   proxy in front of the qemu server) is built from the first's `HttpApiEndpoint` values, never from
@@ -673,6 +705,7 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
 
 `BearerAuth`, declared in `api.ts` as `HttpApiMiddleware.Service<BearerAuth>()(id, { error:
 Errors.UnauthorizedWire, security: { bearer: HttpApiSecurity.bearer }, requiredForClient: true })`
+(`Errors` there is the package's own `./errors.ts`)
 and implemented as `BearerAuthLive` in `src/qemu-server/middleware.ts`: compare, then run the request.
 
 ```ts
@@ -685,7 +718,7 @@ export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConf
       bearer: (httpEffect, { credential }) =>
         Redacted.value(credential) === Redacted.value(config.token)
           ? httpEffect
-          : Effect.fail(Errors.Unauthorized.make({})),
+          : Effect.fail(ApiErrors.Unauthorized.make({})),
     });
   }),
 );
@@ -711,7 +744,7 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
           Effect.catchDefect((defect) =>
             failed(Cause.pretty(Cause.die(defect)), { cause: defect }).pipe(
               Effect.andThen(
-                Effect.fail(Errors.Internal.make({ message: "internal error", cause: defect })),
+                Effect.fail(ApiErrors.Internal.make({ message: "internal error", cause: defect })),
               ),
             ),
           ),
@@ -814,7 +847,7 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
   primary key or a unique index, so a second write is a `DatabaseError` by design, never a
   pre-check. An update omits an absent key rather than writing `null` (drizzle writes `null` but
   skips an absent key), so an earlier command's value stays. A `pgEnum` and its `Schema.Literals`
-  twin in `domain.ts` are maintained by hand together; a vocabulary that grows at runtime is a
+  twin in `domain.ts` (or `contract.ts`, when a body carries it) are maintained by hand together; a vocabulary that grows at runtime is a
   lookup table, not an enum (an enum value is a code change and a migration and can never be
   removed; a row is an insert). A lookup that may find nothing answers an `Option`.
 
@@ -1053,7 +1086,9 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Vitest only, two lanes: `test/**/*.unit.test.{ts,tsx}` (no I/O beyond local fakes;
   `bun run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
   executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
-  false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary.
+  false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary. A
+  workspace package's unit tests sit in `packages/<name>/test/` under its own `vitest.config.ts`
+  and import its sources relatively; `bun run test:unit` runs them after the root's.
 - Run every test before anything is pushed to master or merged into it: `bun run check:fast`,
   then the whole integration lane with Docker up, `OLIGARCHY_REQUIRE_DATABASE=1 bun run
   test:integration`, so a database test fails instead of skipping. Never only the tests that look
@@ -1104,7 +1139,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Encode repository invariants oxlint cannot express as source-scanning tests in `test/repo/`: the
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
-  with `.ts`, deep-path Effect imports, no `as` but `as const`, `@oligarchy/` identifiers, no
+  with `.ts`, the routes package importing only `effect` and itself, the main package reaching a
+  workspace package only by an exported subpath, every package's lanes, deep-path Effect imports, no `as` but `as const`, `@oligarchy/` identifiers, no
   `Data.TaggedError`, `class Error` or re-export, the script names (no `drizzle-kit push`), no
   `"warn"`, `erasableSyntaxOnly` and the language-service plugin.
 - Tests are behaviour across a boundary; do not test static constants, literal order, a table
@@ -1173,7 +1209,8 @@ change ships (Tests, above).
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
   final newline; `drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
   `wrangler.jsonc` ignored. `.editorconfig` matches.
-- tsconfig: `strict`, `exactOptionalPropertyTypes`, `noUnusedLocals`, `noFallthroughCasesInSwitch`,
+- tsconfig: `tsconfig.base.json`, which every `tsconfig.json` extends: `strict`,
+  `exactOptionalPropertyTypes`, `noUnusedLocals`, `noFallthroughCasesInSwitch`,
   `verbatimModuleSyntax`, `isolatedModules`, `allowImportingTsExtensions`, `erasableSyntaxOnly`,
   `nodenext` modules, `noEmit`, the `@effect/language-service` plugin with `diagnostics: false`.
 

@@ -114,7 +114,7 @@ probe on the cause (the same shape `src/external-failure.ts` uses) and update
   the `automation-client` location bucket `src/observability/log.ts` added.
 - `MAX_CLICKS = 100` in `src/qemu-server/sessions.ts` is repeated as the literal `100` in
   `src/client/flags.ts` (`clicks`), so the flag and the server can drift.
-- `src/shared/api.ts` `unregister` declares `Errors.NotFoundWire` on the endpoint while its group's
+- `packages/routes/src/api.ts` `unregister` declares `Errors.NotFoundWire` on the endpoint while its group's
   `RouteBoundary` already declares it; one of the two is redundant.
 
 ## 9. Duplication that will drift
