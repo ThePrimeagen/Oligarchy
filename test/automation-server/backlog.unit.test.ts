@@ -6,7 +6,7 @@ import type * as Automation from "@oligarchy/db/automation";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Linear from "@oligarchy/linear/client";
 import * as LinearErrors from "@oligarchy/linear/errors";
-import * as FakeLinear from "@oligarchy/testing/linear";
+import * as TestingLinear from "@oligarchy/testing/linear";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as Backlog from "../../src/automation-server/backlog.ts";
 import * as FakeLog from "../support/log.ts";
@@ -110,7 +110,7 @@ const start = (
           board.splice(index, 1);
         }
       });
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         listBacklog: Effect.sync(() => [...board]),
         moveIssue: moveIssue ?? recordMove,
@@ -130,7 +130,7 @@ const ready = (identifier: string) => ({ method: "markReady" as const, identifie
 const automationNeeded = (identifier: string): Move => ({
   issueId: `issue-${identifier}`,
   identifier,
-  stateId: FakeLinear.STATES.automationNeeded,
+  stateId: TestingLinear.STATES.automationNeeded,
 });
 
 // Every poll writes one tracking line per column that lists a ticket. `acted` is everything else:
@@ -259,7 +259,7 @@ describe("backlog watch happy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...backlog]),
             listNeedsReview: Effect.sync(() => [...review]),
@@ -298,7 +298,7 @@ describe("backlog watch happy path", () => {
         const review = [ticket(OTHER, SEEN)];
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...needed]),
             listNeedsReview: Effect.sync(() => [...review]),
@@ -387,7 +387,7 @@ describe("backlog watch happy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...board]),
             moveIssue: (issue, stateId) =>
@@ -545,7 +545,7 @@ describe("backlog watch unhappy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.suspend(() =>
               fail ? Effect.fail(refused) : Effect.succeed([ticket(TICKET, SEEN)]),
@@ -647,7 +647,7 @@ describe("backlog watch unhappy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const steps: Array<string> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...board]),
             markReady: () =>
@@ -763,7 +763,7 @@ describe("backlog watch unhappy path", () => {
         announceClient(servers);
         const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN), ticket(THIRD, SEEN)];
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...board]),
             moveIssue: (issue, stateId) =>
@@ -856,7 +856,7 @@ describe("backlog watch unhappy path", () => {
       let polls = 0;
       const stores = Stores.fakeStores();
       const log = FakeLog.fakeLog();
-      const linear = FakeLinear.fakeLinear({
+      const linear = TestingLinear.fakeLinear({
         overrides: {
           listBacklog: Effect.sync(() => {
             polls += 1;
@@ -888,7 +888,7 @@ const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =
     const stores = Stores.fakeStores();
     const log = FakeLog.fakeLog();
     const moved: Array<Move> = [];
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         [column]: Effect.sync(() => [...board]),
         moveIssue: (issue, stateId) =>
@@ -925,7 +925,7 @@ const startDeleting = (column: "listBacklog" | Column, board: Array<Linear.Linea
     const servers = Stores.fakeServerStore();
     const log = FakeLog.fakeLog();
     const moved: Array<Move> = [];
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         [column]: Effect.sync(() => [...board]),
         moveIssue: (issue, stateId) =>
@@ -1435,7 +1435,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const labeled: Array<string> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...board]),
             markReady: (identifier) =>
@@ -1506,7 +1506,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         });
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [ticket(TICKET, SEEN)]),
           },
@@ -1559,7 +1559,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const log = FakeLog.fakeLog();
         const automationBoard = [ticket(TICKET, SEEN)];
         const reviewBoard = [ticket(OTHER, SEEN)];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.suspend(() =>
               fail ? Effect.fail(refused) : Effect.succeed([...automationBoard]),
@@ -1637,7 +1637,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const log = FakeLog.fakeLog();
         announceClient(servers);
         const board = [ticket(TICKET, SEEN)];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...board]),
           },
@@ -1747,7 +1747,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         });
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listNeedsReview: Effect.sync(() => [ticket(TICKET, SEEN)]),
           },

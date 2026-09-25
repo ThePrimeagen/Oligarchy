@@ -5,7 +5,7 @@ import { TestClock } from "effect/testing";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as LinearErrors from "@oligarchy/linear/errors";
-import * as FakeLinear from "@oligarchy/testing/linear";
+import * as TestingLinear from "@oligarchy/testing/linear";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
 import * as FakeLog from "../support/log.ts";
@@ -118,7 +118,7 @@ const memory = () => {
 const provide = (
   store: ReturnType<typeof memory>,
   tests = TestingStores.fakeTestStore({ definitions: [MINT] }),
-  linear = FakeLinear.fakeLinear(),
+  linear = TestingLinear.fakeLinear(),
   log = FakeLog.fakeLog(),
 ) => Layer.mergeAll(store.layer, tests.layer, linear.layer, log.layer, NodeFileSystem.layer);
 
@@ -177,7 +177,7 @@ describe("decide", () => {
 
 const harness = (
   definitions: ReadonlyArray<typeof MINT> = [MINT],
-  linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear(),
+  linear: TestingLinear.FakeLinear = TestingLinear.fakeLinear(),
 ) => {
   const store = memory();
   const tests = TestingStores.fakeTestStore({ definitions });
@@ -202,11 +202,11 @@ describe("opening a setup", () => {
           {
             method: "createIssue",
             input: {
-              teamId: FakeLinear.TEAM_ID,
+              teamId: TestingLinear.TEAM_ID,
               title: `Omarchy mint: ${SERVER}`,
-              labelIds: [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")],
-              assigneeId: FakeLinear.USER_ID,
-              stateId: FakeLinear.STATES.backlog,
+              labelIds: [TestingLinear.labelId("agent test"), TestingLinear.labelId("mint")],
+              assigneeId: TestingLinear.USER_ID,
+              stateId: TestingLinear.STATES.backlog,
             },
           },
         ]);
@@ -277,17 +277,17 @@ describe("opening a setup", () => {
       const started = yield* Deferred.make<void>();
       const go = yield* Deferred.make<void>();
       let created = 0;
-      const linear = FakeLinear.fakeLinear({
+      const linear = TestingLinear.fakeLinear({
         overrides: {
           createIssue: () =>
             Effect.gen(function* () {
               created += 1;
               if (created === 1) {
-                return FakeLinear.ticketFor("OLI-42");
+                return TestingLinear.ticketFor("OLI-42");
               }
               yield* Deferred.succeed(started, undefined);
               yield* Deferred.await(go);
-              return FakeLinear.ticketFor("OLI-43");
+              return TestingLinear.ticketFor("OLI-43");
             }),
         },
       });
@@ -349,7 +349,7 @@ describe("opening a setup", () => {
   });
 
   it.effect("a failed Linear ticket unlocks, and the issue is not watched (unhappy)", () => {
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         createIssue: () =>
           Effect.fail(
@@ -380,12 +380,12 @@ describe("opening a setup", () => {
   it.effect(
     "a lock deleted while its ticket is made fails the run and names the ticket left in Backlog (unhappy)",
     () => {
-      const linear = FakeLinear.fakeLinear({
+      const linear = TestingLinear.fakeLinear({
         overrides: {
           createIssue: () =>
             Effect.sync(() => {
               h.store.rows.splice(0);
-              return FakeLinear.ticketFor("OLI-42");
+              return TestingLinear.ticketFor("OLI-42");
             }),
         },
       });
@@ -418,7 +418,7 @@ describe("opening a setup", () => {
     "a failed unlock after a failed Linear ticket leaves the row and does not mint again (unhappy)",
     () => {
       let created = 0;
-      const linear = FakeLinear.fakeLinear({
+      const linear = TestingLinear.fakeLinear({
         overrides: {
           createIssue: () =>
             Effect.gen(function* () {

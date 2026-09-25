@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Log from "@oligarchy/log/log";
-import * as FakeLinear from "@oligarchy/testing/linear";
+import * as TestingLinear from "@oligarchy/testing/linear";
 import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Handlers from "../../src/automation-server/handlers.ts";
 import * as FakeHttp from "../support/fake-http.ts";
@@ -30,14 +30,14 @@ const SecretLive = Layer.succeed(Handlers.LinearWebhookSecret)(
 type Fixture = {
   readonly stores: ReturnType<typeof Stores.fakeStores>;
   readonly log: FakeLog.FakeLog;
-  readonly linear: FakeLinear.FakeLinear;
+  readonly linear: TestingLinear.FakeLinear;
   readonly reporter: Reporter.Collector;
 };
 
 const fixture = (): Fixture => ({
   stores: Stores.fakeStores(),
   log: FakeLog.fakeLog(),
-  linear: FakeLinear.fakeLinear(),
+  linear: TestingLinear.fakeLinear(),
   reporter: Reporter.collect(),
 });
 

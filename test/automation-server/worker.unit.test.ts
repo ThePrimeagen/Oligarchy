@@ -20,7 +20,7 @@ import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
-import * as FakeLinear from "@oligarchy/testing/linear";
+import * as TestingLinear from "@oligarchy/testing/linear";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as Errors from "../../src/shared/errors.ts";
 import { TestClock } from "effect/testing";
@@ -175,10 +175,10 @@ const reserving =
   (request, url) =>
     url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : respond(request, url);
 
-const erroredMoves = (linear: FakeLinear.FakeLinear) =>
+const erroredMoves = (linear: TestingLinear.FakeLinear) =>
   linear.calls.filter((call) => call.method === "moveToErrored");
 
-const verdictMoves = (linear: FakeLinear.FakeLinear) =>
+const verdictMoves = (linear: TestingLinear.FakeLinear) =>
   linear.calls.filter(
     (call) => call.method === "moveToFailed" || call.method === "moveToSucceeded",
   );
@@ -190,12 +190,12 @@ type Harness = {
   readonly diagnosis: Stores.FakeDiagnosisStore;
   readonly tests: TestingStores.FakeTestStore;
   readonly log: FakeLog.FakeLog;
-  readonly linear: FakeLinear.FakeLinear;
+  readonly linear: TestingLinear.FakeLinear;
   readonly pins: Map<string, string>;
 };
 
 const harness = (
-  linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear(),
+  linear: TestingLinear.FakeLinear = TestingLinear.fakeLinear(),
   automation: TestingStores.FakeAutomationStore = TestingStores.fakeAutomationStore(),
 ): Harness => ({
   automation,
@@ -553,7 +553,7 @@ describe("dispatch happy path", () => {
       const moving = yield* Deferred.make<void>();
       const releaseMove = yield* Deferred.make<void>();
       const fixed = harness(
-        FakeLinear.fakeLinear({
+        TestingLinear.fakeLinear({
           overrides: {
             moveToInReview: (identifier) =>
               Effect.gen(function* () {
@@ -814,7 +814,7 @@ describe("dispatch happy path", () => {
         const releaseMove = yield* Deferred.make<void>();
         let moves = 0;
         const fixed = harness(
-          FakeLinear.fakeLinear({
+          TestingLinear.fakeLinear({
             overrides: {
               moveToInProgress: (identifier) =>
                 Effect.gen(function* () {
@@ -860,7 +860,7 @@ describe("dispatch happy path", () => {
     });
     let attempts = 0;
     const fixed = harness(
-      FakeLinear.fakeLinear({
+      TestingLinear.fakeLinear({
         overrides: {
           moveToInProgress: () =>
             Effect.gen(function* () {
@@ -1101,7 +1101,7 @@ describe("dispatch unhappy path", () => {
       });
       let attempts = 0;
       const fixed = harness(
-        FakeLinear.fakeLinear({
+        TestingLinear.fakeLinear({
           overrides: {
             moveToInProgress: () =>
               Effect.sync(() => {
@@ -1165,7 +1165,7 @@ describe("dispatch unhappy path", () => {
       });
       let attempts = 0;
       const fixed = harness(
-        FakeLinear.fakeLinear({
+        TestingLinear.fakeLinear({
           overrides: {
             moveToInReview: () =>
               Effect.sync(() => {
@@ -1891,7 +1891,7 @@ describe("dispatch unhappy path", () => {
     });
     held.automation = automation;
     return Effect.gen(function* () {
-      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       const clientId = seedLiveClient(fixed.servers);
@@ -1944,7 +1944,7 @@ describe("dispatch unhappy path", () => {
       });
       held.automation = automation;
       return Effect.gen(function* () {
-        const fixed = harness(FakeLinear.fakeLinear(), automation);
+        const fixed = harness(TestingLinear.fakeLinear(), automation);
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         const clientId = seedLiveClient(fixed.servers);
@@ -1971,7 +1971,7 @@ describe("dispatch unhappy path", () => {
       markRunning: () => Effect.fail(failure),
     });
     return Effect.gen(function* () {
-      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
@@ -2015,7 +2015,7 @@ describe("dispatch unhappy path", () => {
           }).pipe(Effect.andThen(Effect.fail(failure))),
       });
       return Effect.gen(function* () {
-        const fixed = harness(FakeLinear.fakeLinear(), automation);
+        const fixed = harness(TestingLinear.fakeLinear(), automation);
         seedPair(fixed);
         seedLiveClient(fixed.servers);
         const http = FakeHttp.recordRequests((request, url) => {
@@ -2105,7 +2105,7 @@ describe("dispatch unhappy path", () => {
     });
     held.automation = automation;
     return Effect.gen(function* () {
-      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedPair(fixed);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests((request, url) =>
@@ -2155,7 +2155,7 @@ describe("dispatch unhappy path", () => {
         }).pipe(Effect.andThen(Effect.fail(finishFailure))),
     });
     return Effect.gen(function* () {
-      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedPair(fixed);
       seedLiveClient(fixed.servers);
       const http = FakeHttp.recordRequests((request, url) =>
@@ -2288,7 +2288,7 @@ const eventually = (check: () => boolean, what: string) =>
     return yield* Effect.die(`never: ${what}`);
   });
 
-const moved = (linear: FakeLinear.FakeLinear) =>
+const moved = (linear: TestingLinear.FakeLinear) =>
   linear.calls.filter((call) => call.method === "moveToErrored");
 
 const RESTARTED = "automation server restarted";
@@ -2453,7 +2453,7 @@ describe("a running job left by the last automation server", () => {
       listRunning: () => Effect.fail(failure),
     });
     return Effect.gen(function* () {
-      const fixed = harness(FakeLinear.fakeLinear(), automation);
+      const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
@@ -2522,7 +2522,7 @@ describe("a running job left by the last automation server", () => {
       const answer = yield* Deferred.make<void>();
       const landed: Array<string> = [];
       const fixed = harness(
-        FakeLinear.fakeLinear({
+        TestingLinear.fakeLinear({
           overrides: {
             moveToErrored: (identifier) =>
               Deferred.succeed(moving, undefined).pipe(
@@ -2594,7 +2594,7 @@ describe("a shutdown with drives running", () => {
         const writing = yield* Deferred.make<void>();
         const written = yield* Deferred.make<void>();
         const fixed = harness(
-          FakeLinear.fakeLinear(),
+          TestingLinear.fakeLinear(),
           wrapped(TestingStores.fakeAutomationStore(), (store) => ({
             markRunning: (id, serverId) =>
               store.markRunning(id, serverId).pipe(
@@ -2625,7 +2625,7 @@ describe("a shutdown with drives running", () => {
       const writing = yield* Deferred.make<void>();
       const written = yield* Deferred.make<void>();
       const fixed = harness(
-        FakeLinear.fakeLinear(),
+        TestingLinear.fakeLinear(),
         wrapped(TestingStores.fakeAutomationStore(), (store) => ({
           finish: (id, status, reason) =>
             Deferred.succeed(writing, undefined).pipe(
@@ -3027,7 +3027,7 @@ describe("an automation client with six jobs across an automation server restart
     "the six drives left running are closed, six waiting drives take their place, and no more than six are ever running",
     () => {
       const counted = countingRunning();
-      const fixed = harness(FakeLinear.fakeLinear(), counted.automation);
+      const fixed = harness(TestingLinear.fakeLinear(), counted.automation);
       return Effect.gen(function* () {
         const client = yield* sixJobClient();
         const children = yield* leftBehind(client, LEFT);
@@ -3094,7 +3094,7 @@ describe("an automation client with six jobs across an automation server restart
     "an automation client that cannot stop its OpenCode keeps its six runs: the rows are errored and reported, and every waiting drive is turned away",
     () => {
       const counted = countingRunning();
-      const fixed = harness(FakeLinear.fakeLinear(), counted.automation);
+      const fixed = harness(TestingLinear.fakeLinear(), counted.automation);
       return Effect.gen(function* () {
         const client = yield* sixJobClient(() => ({ killError: "kill EPERM" }));
         yield* leftBehind(client, LEFT);

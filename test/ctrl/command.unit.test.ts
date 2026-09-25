@@ -11,7 +11,7 @@ import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
-import * as FakeLinear from "@oligarchy/testing/linear";
+import * as TestingLinear from "@oligarchy/testing/linear";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
@@ -113,7 +113,7 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 // `mint --unminted`, answered by `proxy` when a test gives one: any other request dies.
 const harness = (
   options: {
-    readonly linear?: FakeLinear.FakeLinear;
+    readonly linear?: TestingLinear.FakeLinear;
     readonly proxy?: FakeHttp.Recorder;
     // With a collector the command builds the real Log over stdout, as main.ts does, with the
     // collector installed at the root where main.ts installs Sentry's reporter.
@@ -122,7 +122,7 @@ const harness = (
 ) => {
   const stores = Stores.fakeStores();
   const log = FakeLog.fakeLog();
-  const linear = options.linear ?? FakeLinear.fakeLinear();
+  const linear = options.linear ?? TestingLinear.fakeLinear();
   const touched: Array<string> = [];
   const teams: Array<string> = [];
   const command = CtrlCommand.makeCtrlCommand({
@@ -541,7 +541,7 @@ describe("test run", () => {
         });
         expect(yield* lastJson).toEqual({
           id: run?.id,
-          tests: [{ id: results[0]?.id, linear: FakeLinear.ticketFor("OLI-42") }],
+          tests: [{ id: results[0]?.id, linear: TestingLinear.ticketFor("OLI-42") }],
         });
         expect(h.log.lines.map((line) => line.text)).toEqual([
           `test ${run?.id} created; 1 tests; OLI-42`,
@@ -618,7 +618,7 @@ describe("test run", () => {
         });
         const reporter = Reporter.collect();
         const h = harness({
-          linear: FakeLinear.fakeLinear({
+          linear: TestingLinear.fakeLinear({
             overrides: { describeIssue: () => Effect.fail(refused) },
           }),
           reporter,
@@ -786,8 +786,8 @@ describe("test run testsuite", () => {
       expect(yield* lastJson).toEqual({
         id: run?.id,
         tests: [
-          { id: results[0]?.id, linear: FakeLinear.ticketFor("OLI-42") },
-          { id: results[1]?.id, linear: FakeLinear.ticketFor("OLI-43") },
+          { id: results[0]?.id, linear: TestingLinear.ticketFor("OLI-42") },
+          { id: results[1]?.id, linear: TestingLinear.ticketFor("OLI-43") },
         ],
       });
       expect(h.log.lines.map((line) => line.text)).toEqual([
@@ -974,7 +974,7 @@ describe("mint", () => {
       const second = yield* descriptionOf(1, "OLI-43", QEMU_B);
       expect(first).toContain(`--server ${QEMU_A}`);
       expect(second).toContain(`--server ${QEMU_B}`);
-      const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")];
+      const labels = [TestingLinear.labelId("agent test"), TestingLinear.labelId("mint")];
       expect(h.linear.calls).toEqual([
         { method: "teamId" },
         { method: "labelIds", teamId: "team-id", version: "mint" },
@@ -987,14 +987,14 @@ describe("mint", () => {
             title: `Omarchy mint: ${QEMU_A}`,
             labelIds: labels,
             assigneeId: "user-id",
-            stateId: FakeLinear.STATES.backlog,
+            stateId: TestingLinear.STATES.backlog,
           },
         },
         {
           method: "describeIssue",
-          ticket: FakeLinear.ticketFor("OLI-42"),
+          ticket: TestingLinear.ticketFor("OLI-42"),
           description: first,
-          stateId: FakeLinear.STATES.automationNeeded,
+          stateId: TestingLinear.STATES.automationNeeded,
         },
         {
           method: "createIssue",
@@ -1003,14 +1003,14 @@ describe("mint", () => {
             title: `Omarchy mint: ${QEMU_B}`,
             labelIds: labels,
             assigneeId: "user-id",
-            stateId: FakeLinear.STATES.backlog,
+            stateId: TestingLinear.STATES.backlog,
           },
         },
         {
           method: "describeIssue",
-          ticket: FakeLinear.ticketFor("OLI-43"),
+          ticket: TestingLinear.ticketFor("OLI-43"),
           description: second,
-          stateId: FakeLinear.STATES.automationNeeded,
+          stateId: TestingLinear.STATES.automationNeeded,
         },
       ]);
       expect(yield* lastJson).toEqual([
@@ -1018,13 +1018,13 @@ describe("mint", () => {
           id: runs[0]?.id,
           result: results[0]?.id,
           server: QEMU_A,
-          linear: FakeLinear.ticketFor("OLI-42"),
+          linear: TestingLinear.ticketFor("OLI-42"),
         },
         {
           id: runs[1]?.id,
           result: results[1]?.id,
           server: QEMU_B,
-          linear: FakeLinear.ticketFor("OLI-43"),
+          linear: TestingLinear.ticketFor("OLI-43"),
         },
       ]);
       expect(h.log.lines.map((line) => line.text)).toEqual([
@@ -1074,14 +1074,14 @@ describe("mint", () => {
         });
         let issues = 0;
         const h = harness({
-          linear: FakeLinear.fakeLinear({
+          linear: TestingLinear.fakeLinear({
             overrides: {
               createIssue: () =>
                 Effect.suspend(() => {
                   issues += 1;
                   return issues === 2
                     ? Effect.fail(refused)
-                    : Effect.succeed(FakeLinear.ticketFor("OLI-42"));
+                    : Effect.succeed(TestingLinear.ticketFor("OLI-42"));
                 }),
             },
           }),
@@ -1118,7 +1118,7 @@ describe("mint", () => {
           message: "linear: request failed (401): unauthorized",
         });
         const h = harness({
-          linear: FakeLinear.fakeLinear({
+          linear: TestingLinear.fakeLinear({
             overrides: { describeIssue: () => Effect.fail(refused) },
           }),
         });
@@ -1223,9 +1223,9 @@ describe("mint", () => {
               input: {
                 teamId: "team-id",
                 title: `Omarchy mint: ${QEMU_B}`,
-                labelIds: [FakeLinear.labelId("agent test"), FakeLinear.labelId("mint")],
+                labelIds: [TestingLinear.labelId("agent test"), TestingLinear.labelId("mint")],
                 assigneeId: "user-id",
-                stateId: FakeLinear.STATES.backlog,
+                stateId: TestingLinear.STATES.backlog,
               },
             },
           ]);
@@ -1234,7 +1234,7 @@ describe("mint", () => {
               id: runs[0]?.id,
               result: h.stores.tests.results[0]?.id,
               server: QEMU_B,
-              linear: FakeLinear.ticketFor("OLI-42"),
+              linear: TestingLinear.ticketFor("OLI-42"),
             },
           ]);
           expect(h.log.lines.map((line) => line.text)).toEqual([
@@ -1368,7 +1368,7 @@ describe("test list", () => {
           updatedAt: "2026-09-22T13:02:00.000Z",
         },
       ];
-      const h = harness({ linear: FakeLinear.fakeLinear({ backlog }) });
+      const h = harness({ linear: TestingLinear.fakeLinear({ backlog }) });
       const exit = yield* h.run(["test", "list"], WITH_LINEAR);
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(yield* lastJson).toEqual(backlog);
@@ -1393,7 +1393,7 @@ describe("test list", () => {
         message: "linear: invalid response",
       });
       const h = harness({
-        linear: FakeLinear.fakeLinear({ overrides: { listBacklog: Effect.fail(refused) } }),
+        linear: TestingLinear.fakeLinear({ overrides: { listBacklog: Effect.fail(refused) } }),
       });
       const exit = yield* h.run(["test", "list"], WITH_LINEAR);
       expect(failure(exit)).toBe(refused);
