@@ -15,10 +15,10 @@ import {
 import * as CliError from "effect/unstable/cli/CliError";
 import * as Flag from "effect/unstable/cli/Flag";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Contract from "@oligarchy/routes/contract";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
-import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Flags from "./flags.ts";
@@ -100,7 +100,7 @@ export const start = Effect.fn("client.start")(function* (input: StartInput) {
 });
 
 export type ReserveInput = Shared & {
-  readonly server: Option.Option<Domain.ServerUrl>;
+  readonly server: Option.Option<Contract.ServerUrl>;
 };
 
 export const reserve = Effect.fn("client.reserve")(function* (input: ReserveInput) {
@@ -171,8 +171,8 @@ export const mouseMove = Effect.fn("client.mouse.move")(function* (input: PointI
 });
 
 export type ClickInput = PointInput & {
-  readonly button: Domain.ClickButton;
-  readonly modifier: ReadonlyArray<Domain.MouseModifier>;
+  readonly button: Contract.ClickButton;
+  readonly modifier: ReadonlyArray<Contract.MouseModifier>;
 };
 
 const clickBody = (input: ClickInput) =>
@@ -196,7 +196,7 @@ export const mouseDoubleClick = Effect.fn("client.mouse.doubleClick")(function* 
 });
 
 export type ScrollInput = PointInput & {
-  readonly direction: Domain.ScrollDirection;
+  readonly direction: Contract.ScrollDirection;
   readonly ticks: number;
 };
 
@@ -220,8 +220,8 @@ export type DragInput = Shared & {
   readonly fromY: number;
   readonly toX: number;
   readonly toY: number;
-  readonly button: Domain.ClickButton;
-  readonly modifier: ReadonlyArray<Domain.MouseModifier>;
+  readonly button: Contract.ClickButton;
+  readonly modifier: ReadonlyArray<Contract.MouseModifier>;
 };
 
 export const mouseDrag = Effect.fn("client.mouse.drag")(function* (input: DragInput) {
@@ -243,7 +243,7 @@ export const mouseDrag = Effect.fn("client.mouse.drag")(function* (input: DragIn
 });
 
 export type ButtonInput = PointInput & {
-  readonly button: Domain.ClickButton;
+  readonly button: Contract.ClickButton;
 };
 
 const buttonBody = (input: ButtonInput) =>
@@ -296,7 +296,7 @@ export const intentEnd = Effect.fn("client.intentEnd")(function* (input: IntentE
 
 export type StopInput = Shared & {
   readonly sessionId: string;
-  readonly status: Option.Option<Domain.StopStatus>;
+  readonly status: Option.Option<Contract.StopStatus>;
   readonly reason: Option.Option<string>;
 };
 

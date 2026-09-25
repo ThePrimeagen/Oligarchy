@@ -8,6 +8,8 @@ import type * as HttpClientResponse from "effect/unstable/http/HttpClientRespons
 import * as HttpMethod from "effect/unstable/http/HttpMethod";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Servers from "../db/servers.ts";
@@ -15,9 +17,7 @@ import * as Setup from "./setup.ts";
 import * as SessionStore from "../db/sessions.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
-import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
-import * as Errors from "../shared/errors.ts";
 
 // A server that has not answered its /stats in this long is skipped for the reserve that asked and
 // is null in GET /servers; the request that probed it does not wait longer.
@@ -42,14 +42,18 @@ const decodeMintedAnswer = Schema.decodeUnknownEffect(MintedAnswer);
 
 export type RouterService = {
   // Probes GET /stats on the url, then remembers it; a url already registered is probed again.
-  readonly register: (url: string) => Effect.Effect<void, Errors.ServerFailed | Errors.Internal>;
+  readonly register: (
+    url: string,
+  ) => Effect.Effect<void, ApiErrors.ServerFailed | ApiErrors.Internal>;
   // Forgets the url; sessions routed to it stay routed until they end.
-  readonly unregister: (url: string) => Effect.Effect<void, Errors.NotFound | Errors.Internal>;
+  readonly unregister: (
+    url: string,
+  ) => Effect.Effect<void, ApiErrors.NotFound | ApiErrors.Internal>;
   // Every registered server with its stats, null for one whose probe failed.
-  readonly servers: Effect.Effect<Contract.Servers, Errors.Internal>;
+  readonly servers: Effect.Effect<Contract.Servers, ApiErrors.Internal>;
   // Every registered server asked whether it holds the iso's minted disk; unreachable for one
   // that gave no answer of its own.
-  readonly minted: (iso: string) => Effect.Effect<Contract.MintedServers, Errors.Internal>;
+  readonly minted: (iso: string) => Effect.Effect<Contract.MintedServers, ApiErrors.Internal>;
   // Places a reserve on an answering server with a free slot and remembers the agent. A body
   // naming a server goes to that server and nowhere else. A resume lands on the least-busy
   // server that holds that iso's minted disk; when none can and one with a free slot does
@@ -59,12 +63,12 @@ export type RouterService = {
     body: Contract.ReserveAgentBody,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    | Errors.BadRequest
-    | Errors.NotFound
-    | Errors.NoServer
-    | Errors.SetupNeeded
-    | Errors.ServerFailed
-    | Errors.Internal
+    | ApiErrors.BadRequest
+    | ApiErrors.NotFound
+    | ApiErrors.NoServer
+    | ApiErrors.SetupNeeded
+    | ApiErrors.ServerFailed
+    | ApiErrors.Internal
   >;
   // Forwards relinquish to the server that reserved this agent and forgets the agent when
   // that server accepts it or already holds nothing for it. There is no placement here:
@@ -74,7 +78,7 @@ export type RouterService = {
     agent: string,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.BadRequest | Errors.ServerFailed | Errors.Internal
+    ApiErrors.BadRequest | ApiErrors.ServerFailed | ApiErrors.Internal
   >;
   // Forwards start to the server that reserved this agent. There is no placement here:
   // /reserve already chose.
@@ -83,7 +87,7 @@ export type RouterService = {
     agent: string,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.BadRequest | Errors.ServerFailed | Errors.Internal
+    ApiErrors.BadRequest | ApiErrors.ServerFailed | ApiErrors.Internal
   >;
   // Sends the request as it came to the server that started the session; the answer as it came.
   readonly forward: (
@@ -92,12 +96,12 @@ export type RouterService = {
     agent?: string,
   ) => Effect.Effect<
     HttpServerResponse.HttpServerResponse,
-    Errors.UnknownSession | Errors.ServerFailed | Errors.Internal
+    ApiErrors.UnknownSession | ApiErrors.ServerFailed | ApiErrors.Internal
   >;
 };
 
-const internal = (cause: unknown, sessionId?: string, agentId?: string): Errors.Internal =>
-  Errors.Internal.make(
+const internal = (cause: unknown, sessionId?: string, agentId?: string): ApiErrors.Internal =>
+  ApiErrors.Internal.make(
     Object.assign(
       { cause },
       sessionId === undefined ? undefined : { sessionId },
@@ -110,8 +114,8 @@ const serverFailed = (
   message: string,
   cause: unknown,
   who: Log.Attribution,
-): Errors.ServerFailed =>
-  Errors.ServerFailed.make(
+): ApiErrors.ServerFailed =>
+  ApiErrors.ServerFailed.make(
     Object.assign(
       { message, url },
       cause === undefined ? undefined : { cause },
@@ -147,7 +151,7 @@ const unreachable = (
   url: string,
   error: HttpClientError.HttpClientError,
   who: Log.Attribution,
-): Errors.ServerFailed => {
+): ApiErrors.ServerFailed => {
   const cause = error.reason.cause ?? error;
   return serverFailed(url, `server ${url} unreachable: ${Render.errorDetail(cause)}`, cause, who);
 };
@@ -173,7 +177,7 @@ const make = Effect.gen(function* () {
   const probe = (
     url: string,
     who: Log.Attribution,
-  ): Effect.Effect<Contract.Stats, Errors.ServerFailed> =>
+  ): Effect.Effect<Contract.Stats, ApiErrors.ServerFailed> =>
     Effect.gen(function* () {
       const response = yield* http
         .execute(
@@ -267,12 +271,12 @@ const make = Effect.gen(function* () {
       .removeServer(url)
       .pipe(Effect.mapError((cause) => internal(cause)));
     if (!removed) {
-      return yield* Errors.NotFound.make({});
+      return yield* ApiErrors.NotFound.make({});
     }
     return yield* log.info(`server removed; ${url}`, { location: Log.Locations.server });
   });
 
-  const servers: Effect.Effect<Contract.Servers, Errors.Internal> = Effect.gen(function* () {
+  const servers: Effect.Effect<Contract.Servers, ApiErrors.Internal> = Effect.gen(function* () {
     const urls = yield* store
       .listServers(SERVER_TYPE)
       .pipe(Effect.mapError((cause) => internal(cause)));
@@ -312,7 +316,7 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed((): Contract.MintedState => "unreachable"),
     );
 
-  const minted = (iso: string): Effect.Effect<Contract.MintedServers, Errors.Internal> =>
+  const minted = (iso: string): Effect.Effect<Contract.MintedServers, ApiErrors.Internal> =>
     Effect.gen(function* () {
       const urls = yield* store
         .listServers(SERVER_TYPE)
@@ -330,7 +334,10 @@ const make = Effect.gen(function* () {
     url: string,
     request: HttpServerRequest.HttpServerRequest,
     agent: string,
-  ): Effect.Effect<HttpServerResponse.HttpServerResponse, Errors.ServerFailed | Errors.Internal> =>
+  ): Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    ApiErrors.ServerFailed | ApiErrors.Internal
+  > =>
     Effect.gen(function* () {
       const who = { agentId: agent };
       const response = yield* send(url, request).pipe(
@@ -365,7 +372,7 @@ const make = Effect.gen(function* () {
       .serverForAgent(agent)
       .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
     if (Option.isNone(reserved)) {
-      return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+      return yield* ApiErrors.BadRequest.make({ message: "no reservation", agentId: agent });
     }
     return yield* commitStart(reserved.value, request, agent);
   });
@@ -420,7 +427,7 @@ const make = Effect.gen(function* () {
     agent: string,
   ): Effect.Effect<
     { readonly status: number; readonly text: string; readonly headers: Headers.Input },
-    Errors.ServerFailed | Errors.Internal
+    ApiErrors.ServerFailed | ApiErrors.Internal
   > =>
     Effect.gen(function* () {
       const who = { agentId: agent };
@@ -492,7 +499,7 @@ const make = Effect.gen(function* () {
           .serverForAgent(agent)
           .pipe(Effect.mapError((cause) => internal(cause, undefined, agent)));
         if (Option.isSome(existing)) {
-          return yield* Errors.BadRequest.make({ message: "already reserved", agentId: agent });
+          return yield* ApiErrors.BadRequest.make({ message: "already reserved", agentId: agent });
         }
         const urls = yield* store
           .listServers(SERVER_TYPE)
@@ -502,7 +509,10 @@ const make = Effect.gen(function* () {
         if (body.server !== undefined) {
           const pinned = body.server;
           if (!urls.includes(pinned)) {
-            return yield* Errors.NotFound.make({ message: `no server ${pinned}`, agentId: agent });
+            return yield* ApiErrors.NotFound.make({
+              message: `no server ${pinned}`,
+              agentId: agent,
+            });
           }
           yield* probe(pinned, { agentId: agent });
           const asked = yield* Effect.result(askToReserve(pinned, request, agent));
@@ -551,7 +561,10 @@ const make = Effect.gen(function* () {
           });
         }
         if (urls.length === 0) {
-          return yield* Errors.NoServer.make({ message: "no server registered", agentId: agent });
+          return yield* ApiErrors.NoServer.make({
+            message: "no server registered",
+            agentId: agent,
+          });
         }
         const probed = yield* Effect.forEach(
           urls,
@@ -630,7 +643,7 @@ const make = Effect.gen(function* () {
           for (const each of unminted) {
             yield* setups.open(body.resume, each.url, origin);
           }
-          return yield* Errors.SetupNeeded.make({
+          return yield* ApiErrors.SetupNeeded.make({
             message: `setup needed: ${setup.url} max-jobs is ${String(setup.maxJobs)}`,
             agentId: agent,
           });
@@ -641,7 +654,7 @@ const make = Effect.gen(function* () {
             headers: lastCapacity.headers,
           });
         }
-        return yield* Errors.NoServer.make({ message: "no server available", agentId: agent });
+        return yield* ApiErrors.NoServer.make({ message: "no server available", agentId: agent });
       }),
     );
   });
@@ -668,7 +681,7 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError((cause) => internal(cause, session.value, agent)));
     const held = Option.orElse(reserved, () => routed);
     if (Option.isNone(held)) {
-      return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+      return yield* ApiErrors.BadRequest.make({ message: "no reservation", agentId: agent });
     }
     const who: Log.Attribution = Option.isSome(session)
       ? { location: session.value, agentId: agent }
@@ -705,7 +718,7 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError((cause) => internal(cause, id, agent)))
       : Option.none<string>();
     if (Option.isNone(route)) {
-      return yield* Errors.unknownSession(id, agent);
+      return yield* ApiErrors.unknownSession(id, agent);
     }
     const who = agent === undefined ? { location: id } : { location: id, agentId: agent };
     const response = yield* send(route.value, request).pipe(

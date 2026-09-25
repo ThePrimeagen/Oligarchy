@@ -1,12 +1,76 @@
 import { Effect, Schema } from "effect";
-import * as Domain from "./domain.ts";
+
+// What a session boots: `fresh` is the iso on a blank disk, `resume` the machine's minted disk of
+// that iso with no iso attached. Absent on the wire and in a row means fresh.
+export const SessionMode = Schema.Literals(["fresh", "resume"]).annotate({
+  identifier: "@oligarchy/shared/domain/SessionMode",
+});
+export type SessionMode = typeof SessionMode.Type;
+
+export const StopStatus = Schema.Literals(["succeeded", "failed", "aborted", "completed"]).annotate(
+  {
+    identifier: "@oligarchy/shared/domain/StopStatus",
+  },
+);
+export type StopStatus = typeof StopStatus.Type;
+
+// The buttons a click, a drag, a hold or a release take; the wheel is a scroll, never a click.
+export const ClickButton = Schema.Literals(["left", "middle", "right"]).annotate({
+  identifier: "@oligarchy/shared/domain/ClickButton",
+});
+export type ClickButton = typeof ClickButton.Type;
+
+// Which way a scroll turns the wheel.
+export const ScrollDirection = Schema.Literals(["up", "down", "left", "right"]).annotate({
+  identifier: "@oligarchy/shared/domain/ScrollDirection",
+});
+export type ScrollDirection = typeof ScrollDirection.Type;
+
+// A key held around a click or a drag, by the name a driver writes; qemu/qemu.ts maps it to a
+// qcode.
+export const MouseModifier = Schema.Literals(["shift", "ctrl", "alt", "super"]).annotate({
+  identifier: "@oligarchy/shared/domain/MouseModifier",
+});
+export type MouseModifier = typeof MouseModifier.Type;
+
+// A point on the screenshot as fractions of its width and height, 0 the top-left edge, 1 the
+// bottom-right; the range is checked by the handler with a fixed message.
+export const ScreenPoint = Schema.Struct({ x: Schema.Number, y: Schema.Number }).annotate({
+  identifier: "@oligarchy/shared/domain/ScreenPoint",
+});
+export type ScreenPoint = typeof ScreenPoint.Type;
+
+// A server the reverse proxy forwards to, as an operator registers it: an http(s) url with a
+// host, used exactly as given, as --server-url is.
+export const ServerUrl = Schema.String.check(
+  Schema.makeFilter(
+    (value: string) => {
+      if (!URL.canParse(value)) {
+        return false;
+      }
+      const url = new URL(value);
+      return (url.protocol === "http:" || url.protocol === "https:") && url.hostname !== "";
+    },
+    { message: "url must be an http or https url" },
+  ),
+).annotate({ identifier: "@oligarchy/shared/domain/ServerUrl" });
+export type ServerUrl = typeof ServerUrl.Type;
+
+// The automation steps for a test result, the twin of the automation_action pgEnum in
+// src/db/schema.ts, maintained by hand together. A mint and a drive both boot a guest and so
+// reserve one; a mint does not resume, it installs. A diagnose reads the session back and
+// reserves a client only.
+export const AutomationAction = Schema.Literals(["drive", "diagnose", "mint"]).annotate({
+  identifier: "@oligarchy/shared/domain/AutomationAction",
+});
+export type AutomationAction = typeof AutomationAction.Type;
 
 export class StartBody extends Schema.Class<StartBody>("@oligarchy/shared/contract/StartBody")({
   iso: Schema.NonEmptyString,
   disk: Schema.optionalKey(Schema.String),
   agent: Schema.NonEmptyString,
   // Absent means fresh: only a resume says so.
-  mode: Schema.optionalKey(Domain.SessionMode),
+  mode: Schema.optionalKey(SessionMode),
 }) {}
 
 export class StartResponse extends Schema.Class<StartResponse>(
@@ -50,8 +114,8 @@ export class MouseClickBody extends Schema.Class<MouseClickBody>(
   id: Schema.String,
   x: Schema.Number,
   y: Schema.Number,
-  button: Domain.ClickButton,
-  modifiers: Schema.optionalKey(Schema.NonEmptyArray(Domain.MouseModifier)),
+  button: ClickButton,
+  modifiers: Schema.optionalKey(Schema.NonEmptyArray(MouseModifier)),
   agent: Schema.NonEmptyString,
 }) {}
 
@@ -61,7 +125,7 @@ export class MouseScrollBody extends Schema.Class<MouseScrollBody>(
   id: Schema.String,
   x: Schema.Number,
   y: Schema.Number,
-  direction: Domain.ScrollDirection,
+  direction: ScrollDirection,
   ticks: Schema.Number,
   agent: Schema.NonEmptyString,
 }) {}
@@ -71,10 +135,10 @@ export class MouseDragBody extends Schema.Class<MouseDragBody>(
   "@oligarchy/shared/contract/MouseDragBody",
 )({
   id: Schema.String,
-  from: Domain.ScreenPoint,
-  to: Domain.ScreenPoint,
-  button: Domain.ClickButton,
-  modifiers: Schema.optionalKey(Schema.NonEmptyArray(Domain.MouseModifier)),
+  from: ScreenPoint,
+  to: ScreenPoint,
+  button: ClickButton,
+  modifiers: Schema.optionalKey(Schema.NonEmptyArray(MouseModifier)),
   agent: Schema.NonEmptyString,
 }) {}
 
@@ -85,14 +149,14 @@ export class MouseButtonBody extends Schema.Class<MouseButtonBody>(
   id: Schema.String,
   x: Schema.Number,
   y: Schema.Number,
-  button: Domain.ClickButton,
+  button: ClickButton,
   agent: Schema.NonEmptyString,
 }) {}
 
 export class StopBody extends Schema.Class<StopBody>("@oligarchy/shared/contract/StopBody")({
   id: Schema.String,
   agent: Schema.NonEmptyString,
-  status: Schema.optionalKey(Domain.StopStatus),
+  status: Schema.optionalKey(StopStatus),
   reason: Schema.optionalKey(Schema.String),
 }) {}
 
@@ -145,7 +209,7 @@ export class Stats extends Schema.Class<Stats>("@oligarchy/shared/contract/Stats
 
 // POST and DELETE /servers on the reverse proxy: the one server the operator names.
 export class ServerBody extends Schema.Class<ServerBody>("@oligarchy/shared/contract/ServerBody")({
-  url: Domain.ServerUrl,
+  url: ServerUrl,
 }) {}
 
 // One registered server as GET /servers reports it; stats is null when its probe failed.
@@ -201,11 +265,11 @@ export class ReserveBody extends Schema.Class<ReserveBody>(
   "@oligarchy/shared/contract/ReserveBody",
 )({
   ticket: Schema.NonEmptyString,
-  action: Domain.AutomationAction,
+  action: AutomationAction,
   // Absent is a diagnose or a fresh drive. The key is left off, never sent as null.
   // A mint requires it: the qemu server the setup lock named. The handler refuses a mint without one.
   resume: Schema.optionalKey(Schema.NonEmptyString),
-  server: Schema.optionalKey(Domain.ServerUrl),
+  server: Schema.optionalKey(ServerUrl),
 }) {}
 
 export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
@@ -214,7 +278,7 @@ export class ReserveAgentBody extends Schema.Class<ReserveAgentBody>(
   agent: Schema.NonEmptyString,
   // The one server this reserve may land on, by the url the fleet knows it under. The proxy
   // sends the reserve there and nowhere else. That server refuses it when the url is not its own.
-  server: Schema.optionalKey(Domain.ServerUrl),
+  server: Schema.optionalKey(ServerUrl),
   // Present when this reserve is a resume: the iso url whose minted disk the slot must boot.
   // Absent is a fresh placement.
   resume: Schema.optionalKey(Schema.NonEmptyString),
@@ -231,7 +295,7 @@ export class AbortJobBody extends Schema.Class<AbortJobBody>(
   "@oligarchy/shared/contract/AbortJobBody",
 )({
   ticket: Schema.NonEmptyString,
-  action: Domain.AutomationAction,
+  action: AutomationAction,
 }) {}
 
 const STORED_IMAGE_ORIGIN = "https://oligarchy.trm.sh";

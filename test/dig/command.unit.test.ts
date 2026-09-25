@@ -16,8 +16,8 @@ import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Api from "@oligarchy/routes/api";
 import * as DigCommand from "../../src/dig/command.ts";
-import * as Api from "../../src/shared/api.ts";
 
 const CliTestLayer = Layer.mergeAll(
   FileSystem.layerNoop({}),

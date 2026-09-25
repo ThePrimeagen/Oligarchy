@@ -1,25 +1,25 @@
 import { Effect } from "effect";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import type * as ProxyClient from "../client/proxy-client.ts";
-import * as Contract from "../shared/contract.ts";
-import * as Errors from "../shared/errors.ts";
 import type * as Sessions from "./sessions.ts";
 
 // The guest host, reached through the reverse proxy, as Sessions sees it: a 503 is the fleet
 // being full, which the dispatcher places elsewhere; every other failure is this client's to
 // report. The cause is the proxy failure itself, so a network error under it is not replaced
 // by a fresh error that only keeps the message.
-const internal = (agent: string, error: ProxyClient.Failure): Errors.Internal =>
-  Errors.Internal.make({ cause: error, agentId: agent });
+const internal = (agent: string, error: ProxyClient.Failure): ApiErrors.Internal =>
+  ApiErrors.Internal.make({ cause: error, agentId: agent });
 
 const refused = (
   agent: string,
   error: ProxyClient.Failure,
-): Effect.Effect<never, Errors.AtCapacity | Errors.SetupNeeded | Errors.Internal> => {
+): Effect.Effect<never, ApiErrors.AtCapacity | ApiErrors.SetupNeeded | ApiErrors.Internal> => {
   if (error._tag === "ProxyRefusal" && error.status === 503) {
-    return Errors.AtCapacity.make({ message: error.message, agentId: agent });
+    return ApiErrors.AtCapacity.make({ message: error.message, agentId: agent });
   }
   if (error._tag === "ProxyRefusal" && error.status === 409) {
-    return Errors.SetupNeeded.make({ message: error.message, agentId: agent });
+    return ApiErrors.SetupNeeded.make({ message: error.message, agentId: agent });
   }
   return internal(agent, error);
 };
@@ -42,7 +42,10 @@ export const reserve =
 // The guest host already let this reservation go (its own ten minutes ran out first, or it
 // restarted) and the proxy has forgotten the route: there is nothing to give back, which is what
 // relinquish was for.
-const gone = (agent: string, error: ProxyClient.Failure): Effect.Effect<void, Errors.Internal> =>
+const gone = (
+  agent: string,
+  error: ProxyClient.Failure,
+): Effect.Effect<void, ApiErrors.Internal> =>
   error._tag === "ProxyRefusal" && error.status === 400 ? Effect.void : internal(agent, error);
 
 // The sweep that gives expired reservations back is one fiber with nobody waiting on it, and
@@ -58,7 +61,7 @@ export const relinquish =
       Effect.timeoutOrElse({
         duration: RELINQUISH_TIMEOUT,
         orElse: () =>
-          Errors.Internal.make({
+          ApiErrors.Internal.make({
             cause: new Error(`relinquish: no answer within ${RELINQUISH_TIMEOUT}`),
             agentId: agent,
           }),

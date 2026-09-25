@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Redacted, Schema } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
@@ -45,7 +46,7 @@ type Fixture = {
   // is no promise it has arrived.
   readonly reachedQemu?: Deferred.Deferred<void>;
   // When set, each QEMU reserve fails with it once asked.
-  readonly qemuFailure?: Errors.Internal;
+  readonly qemuFailure?: ApiErrors.Internal;
 };
 
 // Room for the two runs some tests hold at once; the capacity test passes 1.
@@ -528,7 +529,7 @@ describe("POST /run unhappy path", () => {
       });
       const fixed: Fixture = {
         ...fixture(),
-        qemuFailure: Errors.Internal.make({ cause: unreachable, agentId: TICKET }),
+        qemuFailure: ApiErrors.Internal.make({ cause: unreachable, agentId: TICKET }),
       };
       yield* Effect.gen(function* () {
         const http = yield* HttpClient.HttpClient;

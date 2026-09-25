@@ -3,10 +3,9 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
 import * as Config from "../config.ts";
-import * as Api from "../shared/api.ts";
-import * as Contract from "../shared/contract.ts";
-import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 export class OligarchyToken extends Context.Service<OligarchyToken>()(
@@ -62,7 +61,7 @@ const makeClient = Effect.fn("makeClient")(function* (url: string) {
 export const reserve = Effect.fn("reserve")(function* (
   url: string,
   ticket: string,
-  action: Domain.AutomationAction,
+  action: Contract.AutomationAction,
   resume?: string,
   server?: string,
 ) {

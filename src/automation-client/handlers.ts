@@ -1,10 +1,10 @@
 import { Effect, Layer } from "effect";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as QemuServerHandlers from "../qemu-server/handlers.ts";
 import * as Middleware from "../qemu-server/middleware.ts";
-import * as Api from "../shared/api.ts";
-import * as Contract from "../shared/contract.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Sessions from "./sessions.ts";
 
 const ok = Contract.Ok.make({});
@@ -21,7 +21,7 @@ export const RunsLive = HttpApiBuilder.group(Api.AutomationClientApi, "Runs", (h
         Effect.gen(function* () {
           const sessions = yield* Sessions.Sessions;
           if (payload.action === "mint" && payload.server === undefined) {
-            return yield* Errors.BadRequest.make({
+            return yield* ApiErrors.BadRequest.make({
               message: "a mint reserves its pinned server",
               agentId: payload.ticket,
             });

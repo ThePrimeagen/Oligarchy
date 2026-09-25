@@ -11,12 +11,12 @@ import {
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
 import * as Config from "../../src/config.ts";
 import * as Handlers from "../../src/qemu-reverse-proxy/handlers.ts";
 import * as Router from "../../src/qemu-reverse-proxy/router.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
-import * as Api from "../../src/shared/api.ts";
-import * as Contract from "../../src/shared/contract.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";

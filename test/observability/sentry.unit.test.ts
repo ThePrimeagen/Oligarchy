@@ -4,6 +4,7 @@ import { it } from "@effect/vitest";
 import { Cause, Effect, ErrorReporter, Exit, Layer, Schema } from "effect";
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Sentry from "../../src/observability/sentry.ts";
 import * as Errors from "../../src/shared/errors.ts";
 
@@ -367,8 +368,8 @@ describe("reporter", () => {
   it.live("ignores an error carrying [ErrorReporter.ignore]", () =>
     Effect.gen(function* () {
       const captured = capture();
-      yield* ErrorReporter.report(Cause.fail(Errors.BadRequest.make({ message: "nope" })));
-      yield* ErrorReporter.report(Cause.fail(Errors.unknownSession("x")));
+      yield* ErrorReporter.report(Cause.fail(ApiErrors.BadRequest.make({ message: "nope" })));
+      yield* ErrorReporter.report(Cause.fail(ApiErrors.unknownSession("x")));
       yield* ErrorReporter.report(Cause.interrupt());
       const events = yield* captured.events;
       expect(events).toEqual([]);

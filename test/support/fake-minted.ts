@@ -1,7 +1,7 @@
 import { Effect, Layer, Option } from "effect";
+import type * as ApiErrors from "@oligarchy/routes/errors";
 import type * as Iso from "../../src/qemu/iso.ts";
 import * as Minted from "../../src/qemu/minted.ts";
-import type * as Errors from "../../src/shared/errors.ts";
 
 export type Save = {
   readonly iso: string;
@@ -11,7 +11,7 @@ export type Save = {
 
 export type Script = {
   // Scripts the save's failure; a save that is not scripted succeeds.
-  readonly save?: (save: Save) => Effect.Effect<void, Errors.SaveFailed>;
+  readonly save?: (save: Save) => Effect.Effect<void, ApiErrors.SaveFailed>;
   // What this machine holds for an iso; nothing is minted unless scripted. An Effect lets a test
   // hold the lookup open.
   readonly find?: (

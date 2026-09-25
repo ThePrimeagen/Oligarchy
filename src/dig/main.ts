@@ -10,8 +10,8 @@ import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
 import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Api from "@oligarchy/routes/api";
 import * as Render from "../observability/render.ts";
-import * as Api from "../shared/api.ts";
 import * as DigCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 

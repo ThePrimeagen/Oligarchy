@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import * as Flag from "effect/unstable/cli/Flag";
+import * as Contract from "@oligarchy/routes/contract";
 import * as Config from "../config.ts";
-import * as Domain from "../shared/domain.ts";
 
 export const DEFAULT_ISO = "omarchy.iso";
 export const DEFAULT_ENCODING = "oligarchy";
@@ -42,7 +42,7 @@ export const disk = Flag.string("disk").pipe(
 );
 
 export const server = Flag.string("server").pipe(
-  Flag.withSchema(Domain.ServerUrl),
+  Flag.withSchema(Contract.ServerUrl),
   Flag.optional,
   Flag.withDescription(
     "Reserve on this qemu server (its registered url) instead of the best-ranked one",
@@ -104,17 +104,17 @@ export const toY = Flag.float("to-y").pipe(
   Flag.withDescription("Where the button comes up, fraction from the top, 0..1"),
 );
 
-export const button = Flag.choice("button", Domain.ClickButton.literals).pipe(
+export const button = Flag.choice("button", Contract.ClickButton.literals).pipe(
   Flag.withDefault("left"),
   Flag.withDescription("left, middle or right; left when omitted"),
 );
 
-export const modifier = Flag.choice("modifier", Domain.MouseModifier.literals).pipe(
-  Flag.atMost(Domain.MouseModifier.literals.length),
+export const modifier = Flag.choice("modifier", Contract.MouseModifier.literals).pipe(
+  Flag.atMost(Contract.MouseModifier.literals.length),
   Flag.withDescription("Hold this key around the gesture; repeat the flag to hold several"),
 );
 
-export const direction = Flag.choice("direction", Domain.ScrollDirection.literals).pipe(
+export const direction = Flag.choice("direction", Contract.ScrollDirection.literals).pipe(
   Flag.withDescription("Which way the wheel turns"),
 );
 
@@ -141,7 +141,7 @@ export const message = Flag.string("message").pipe(
   Flag.withDescription("What you are about to do"),
 );
 
-export const status = Flag.choice("status", Domain.StopStatus.literals).pipe(
+export const status = Flag.choice("status", Contract.StopStatus.literals).pipe(
   Flag.optional,
   Flag.withDescription("Verdict; omit to abort"),
 );

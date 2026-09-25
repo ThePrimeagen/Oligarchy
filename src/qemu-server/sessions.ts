@@ -19,6 +19,8 @@ import {
   Stream,
   Tracer,
 } from "effect";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Actions from "../db/actions.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
 import * as SessionStore from "../db/sessions.ts";
@@ -32,7 +34,6 @@ import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import type * as Qmp from "../qmp/client.ts";
-import * as Contract from "../shared/contract.ts";
 import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
@@ -74,7 +75,7 @@ export type LiveSession = {
   // The iso as the start named it: a save keeps the disk beside it. A resumed session's disk is
   // an overlay on the minted one and is never kept.
   readonly iso: string;
-  readonly mode: Domain.SessionMode;
+  readonly mode: Contract.SessionMode;
   readonly qemu: Qemu.QemuHandle;
   readonly span: Tracer.Span;
   readonly scope: Scope.Closeable;
@@ -99,11 +100,13 @@ export type SessionsService = {
     agent: string,
     resume?: string,
     pinned?: string,
-  ) => Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest | Errors.SetupNeeded>;
+  ) => Effect.Effect<void, ApiErrors.AtCapacity | ApiErrors.BadRequest | ApiErrors.SetupNeeded>;
   // Gives back everything the agent holds: an unused reservation, and its running session,
   // which is stopped as aborted. Fails BadRequest when it holds nothing, a start in flight
   // included.
-  readonly relinquish: (agent: string) => Effect.Effect<void, Errors.BadRequest | Errors.Internal>;
+  readonly relinquish: (
+    agent: string,
+  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.Internal>;
   // Consumes this agent's reservation. Fails BadRequest, before anything is minted or written,
   // when there is none. A start that fails hands the reservation back, so the same agent may
   // retry without reserving again.
@@ -111,42 +114,45 @@ export type SessionsService = {
     body: Contract.StartBody,
     display: Domain.QemuDisplay,
     automation: boolean,
-  ) => Effect.Effect<string, Errors.BadRequest | Errors.StartFailed | Errors.Internal>;
+  ) => Effect.Effect<string, ApiErrors.BadRequest | ApiErrors.StartFailed | ApiErrors.Internal>;
   // Resets lastCommandAt before returning: a valid request counts as activity.
   readonly lookup: (
     id: string,
     agent: string,
-  ) => Effect.Effect<LiveSession, Errors.BadRequest | Errors.UnknownSession | Errors.Forbidden>;
+  ) => Effect.Effect<
+    LiveSession,
+    ApiErrors.BadRequest | ApiErrors.UnknownSession | ApiErrors.Forbidden
+  >;
   readonly image: (
     live: LiveSession,
   ) => Effect.Effect<
     { readonly png: Uint8Array; readonly imageId: string },
-    Errors.ExchangeFailed | Errors.Internal
+    ApiErrors.ExchangeFailed | ApiErrors.Internal
   >;
-  readonly serial: (live: LiveSession) => Effect.Effect<Uint8Array, Errors.Internal>;
+  readonly serial: (live: LiveSession) => Effect.Effect<Uint8Array, ApiErrors.Internal>;
   readonly sendKeys: (
     live: LiveSession,
     keys: string,
     encoding: string | undefined,
-  ) => Effect.Effect<void, Errors.BadRequest | Errors.ExchangeFailed>;
+  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.ExchangeFailed>;
   // One mouse operation; a point off the screenshot or a tick count out of range is BadRequest
   // before any exchange.
   readonly mouse: (
     live: LiveSession,
     gesture: Qemu.MouseGesture,
-  ) => Effect.Effect<void, Errors.BadRequest | Errors.ExchangeFailed>;
+  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.ExchangeFailed>;
   readonly intentStart: (
     live: LiveSession,
     testResultId: string,
     message: string,
-  ) => Effect.Effect<void, Errors.BadRequest>;
-  readonly intentEnd: (live: LiveSession) => Effect.Effect<void, Errors.BadRequest>;
+  ) => Effect.Effect<void, ApiErrors.BadRequest>;
+  readonly intentEnd: (live: LiveSession) => Effect.Effect<void, ApiErrors.BadRequest>;
   // Fails unknownSession when the sweep took the session first: one session, one verdict.
   readonly stop: (
     live: LiveSession,
-    status: Domain.StopStatus | undefined,
+    status: Contract.StopStatus | undefined,
     reason: string | undefined,
-  ) => Effect.Effect<void, Errors.Internal | Errors.UnknownSession>;
+  ) => Effect.Effect<void, ApiErrors.Internal | ApiErrors.UnknownSession>;
   // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
   // powered down, its disk and firmware copy are kept, the row closes succeeded. A guest that
   // will not power off, or a disk that cannot be kept, ends the session errored instead. A
@@ -156,13 +162,13 @@ export type SessionsService = {
     live: LiveSession,
   ) => Effect.Effect<
     void,
-    Errors.BadRequest | Errors.SaveFailed | Errors.Internal | Errors.UnknownSession
+    ApiErrors.BadRequest | ApiErrors.SaveFailed | ApiErrors.Internal | ApiErrors.UnknownSession
   >;
   readonly follow: (
     id: string,
   ) => Effect.Effect<
     Stream.Stream<Domain.FollowEvent>,
-    Errors.UnknownSession | Errors.Conflict | Errors.Internal
+    ApiErrors.UnknownSession | ApiErrors.Conflict | ApiErrors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
   // Whether this machine holds the iso's minted disk, by the name a start would give.
@@ -219,25 +225,25 @@ const mapWithout = <V>(
 const attribution = (location: string, agentId: string | undefined): Log.Attribution =>
   agentId === undefined ? { location } : { location, agentId };
 
-const internal = (cause: unknown, sessionId: string, agentId?: string): Errors.Internal =>
+const internal = (cause: unknown, sessionId: string, agentId?: string): ApiErrors.Internal =>
   agentId === undefined
-    ? Errors.Internal.make({ cause, sessionId })
-    : Errors.Internal.make({ cause, sessionId, agentId });
+    ? ApiErrors.Internal.make({ cause, sessionId })
+    : ApiErrors.Internal.make({ cause, sessionId, agentId });
 
-const exchangeFailed = (error: unknown, live: OpenSession): Errors.ExchangeFailed =>
-  Errors.ExchangeFailed.make({
+const exchangeFailed = (error: unknown, live: OpenSession): ApiErrors.ExchangeFailed =>
+  ApiErrors.ExchangeFailed.make({
     message: detail(error),
     cause: error,
     sessionId: live.id,
     agentId: live.agent,
   });
 
-const badRequest = (message: string, live: OpenSession): Errors.BadRequest =>
-  Errors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent });
+const badRequest = (message: string, live: OpenSession): ApiErrors.BadRequest =>
+  ApiErrors.BadRequest.make({ message, sessionId: live.id, agentId: live.agent });
 
 // The gesture as the log line reads it: its point or points, its button, the keys held.
 const describeGesture = (gesture: Qemu.MouseGesture): string => {
-  const held = (modifiers: ReadonlyArray<Domain.MouseModifier> | undefined) =>
+  const held = (modifiers: ReadonlyArray<Contract.MouseModifier> | undefined) =>
     modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
   switch (gesture._tag) {
     case "move":
@@ -510,17 +516,17 @@ const make = (maxJobs: number, selfUrl?: string) =>
     const admit = (
       outcome: "ok" | "held" | "full",
       agent: string,
-    ): Effect.Effect<void, Errors.AtCapacity | Errors.BadRequest> => {
+    ): Effect.Effect<void, ApiErrors.AtCapacity | ApiErrors.BadRequest> => {
       if (outcome === "ok") {
         return Effect.void;
       }
       if (outcome === "held") {
-        return Errors.BadRequest.make({
+        return ApiErrors.BadRequest.make({
           message: "already reserved",
           agentId: agent,
         });
       }
-      return Errors.AtCapacity.make({
+      return ApiErrors.AtCapacity.make({
         message: `at capacity: max-jobs is ${String(maxJobs)}`,
         agentId: agent,
       });
@@ -533,7 +539,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     ) {
       // A pin names one server. This machine takes the slot only when that name is its own.
       if (pinned !== undefined && pinned !== selfUrl) {
-        return yield* Errors.BadRequest.make({
+        return yield* ApiErrors.BadRequest.make({
           message:
             selfUrl === undefined
               ? `reserve is for ${pinned}`
@@ -551,7 +557,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         return yield* admit("full", agent);
       }
       if (resume !== undefined && Option.isNone(yield* minted.find(resume))) {
-        return yield* Errors.SetupNeeded.make({
+        return yield* ApiErrors.SetupNeeded.make({
           message: `setup needed: max-jobs is ${String(maxJobs)}`,
           agentId: agent,
         });
@@ -597,7 +603,10 @@ const make = (maxJobs: number, selfUrl?: string) =>
       automation: boolean,
     ) {
       const agent = body.agent;
-      const noReservation = Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+      const noReservation = ApiErrors.BadRequest.make({
+        message: "no reservation",
+        agentId: agent,
+      });
       // Refused before the reservation is consumed, so a caller told no can relinquish it, or
       // start fresh instead.
       if (!(yield* Ref.get(slots)).reserved.has(agent)) {
@@ -612,7 +621,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
             : { _tag: "existing" as const, path: disk };
         }
         if (disk !== undefined) {
-          return yield* Errors.BadRequest.make({
+          return yield* ApiErrors.BadRequest.make({
             message: "a resume boots the minted disk; --disk cannot be given",
             agentId: agent,
           });
@@ -621,7 +630,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         // A resume is only reserved where this disk already is, so a start that finds none is
         // this process breaking its own contract. 500, reported: the reservation stands.
         if (Option.isNone(found)) {
-          return yield* Errors.Internal.make({
+          return yield* ApiErrors.Internal.make({
             cause: new Error(`no minted disk for ${body.iso} on this machine`),
             agentId: agent,
           });
@@ -682,7 +691,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
           failStart(
             live,
             since,
-            Errors.StartFailed.make({
+            ApiErrors.StartFailed.make({
               message: detail(error),
               cause: error,
               sessionId: id,
@@ -708,14 +717,17 @@ const make = (maxJobs: number, selfUrl?: string) =>
 
     const lookup = Effect.fn("Sessions.lookup")(function* (id: string, agent: string) {
       if (id === "") {
-        return yield* Errors.BadRequest.make({ message: "session id is required", agentId: agent });
+        return yield* ApiErrors.BadRequest.make({
+          message: "session id is required",
+          agentId: agent,
+        });
       }
       const live = (yield* Ref.get(sessions)).get(id);
       if (live === undefined) {
-        return yield* Errors.unknownSession(id, agent);
+        return yield* ApiErrors.unknownSession(id, agent);
       }
       if (live.agent !== agent) {
-        return yield* Errors.Forbidden.make({
+        return yield* ApiErrors.Forbidden.make({
           message: `agent "${agent}" does not own session "${id}"`,
           sessionId: id,
           agentId: agent,
@@ -847,7 +859,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
       gesture: Qemu.MouseGesture,
     ) {
       const started = yield* Clock.currentTimeMillis;
-      const onScreen = (point: Domain.ScreenPoint) =>
+      const onScreen = (point: Contract.ScreenPoint) =>
         point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1;
       if (gesture._tag === "drag") {
         if (!onScreen(gesture.from) || !onScreen(gesture.to)) {
@@ -981,7 +993,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
 
     const stop = Effect.fn("Sessions.stop")(function* (
       live: LiveSession,
-      status: Domain.StopStatus | undefined,
+      status: Contract.StopStatus | undefined,
       reason: string | undefined,
     ) {
       // The sweep may have taken the session between the lookup and here; whoever removes the id
@@ -990,7 +1002,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
       );
       if (!owned) {
-        return yield* Errors.unknownSession(live.id, live.agent);
+        return yield* ApiErrors.unknownSession(live.id, live.agent);
       }
       return yield* close(live, status ?? "aborted", reason);
     });
@@ -1002,9 +1014,9 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // fiber, so a death line written on SIGTERM can be lost.
     const close = (
       live: LiveSession,
-      finalStatus: Domain.StopStatus,
+      finalStatus: Contract.StopStatus,
       reason: string | undefined,
-    ): Effect.Effect<void, Errors.Internal> =>
+    ): Effect.Effect<void, ApiErrors.Internal> =>
       Effect.gen(function* () {
         const captured = yield* captureDebugLog(live);
         // The kill destroys the socket and signals QEMU before it removes the dir, so a cleanup
@@ -1053,7 +1065,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         return [live, Option.isNone(live) ? map : mapWithout(map, [live.value.id])] as const;
       });
       if (!released && Option.isNone(running)) {
-        return yield* Errors.BadRequest.make({ message: "no reservation", agentId: agent });
+        return yield* ApiErrors.BadRequest.make({ message: "no reservation", agentId: agent });
       }
       return yield* Option.match(running, {
         onNone: () => Effect.void,
@@ -1065,8 +1077,12 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // save
     // -------------------------------------------------------------------------
 
-    const saveFailed = (message: string, live: LiveSession, cause?: unknown): Errors.SaveFailed =>
-      Errors.SaveFailed.make(
+    const saveFailed = (
+      message: string,
+      live: LiveSession,
+      cause?: unknown,
+    ): ApiErrors.SaveFailed =>
+      ApiErrors.SaveFailed.make(
         Object.assign(
           { message, sessionId: live.id, agentId: live.agent },
           cause === undefined ? undefined : { cause },
@@ -1076,7 +1092,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // A clean shutdown makes a clean disk: the power button, then QEMU's exit, then the copy. A
     // guest the driver already shut down needs no button, and a socket closing under the button
     // is a guest already on its way out.
-    const powerOff = (live: LiveSession): Effect.Effect<void, Errors.SaveFailed> =>
+    const powerOff = (live: LiveSession): Effect.Effect<void, ApiErrors.SaveFailed> =>
       Effect.gen(function* () {
         if (yield* live.qemu.running) {
           yield* live.qemu.powerdown(recorder(live)).pipe(
@@ -1104,7 +1120,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
         map.has(live.id) ? [true, mapWithout(map, [live.id])] : [false, map],
       );
       if (!owned) {
-        return yield* Errors.unknownSession(live.id, live.agent);
+        return yield* ApiErrors.unknownSession(live.id, live.agent);
       }
       const who = { sessionId: live.id, agentId: live.agent };
       // The disk is read while the session dir still exists; the kill comes after.
@@ -1170,11 +1186,11 @@ const make = (maxJobs: number, selfUrl?: string) =>
               .pipe(Effect.mapError((cause) => internal(cause, id)))
           : Option.none<Domain.SessionStatus>();
         if (Option.isNone(status)) {
-          return yield* Errors.unknownSession(id);
+          return yield* ApiErrors.unknownSession(id);
         }
         // A row still downloading or running that this qemu server does not hold was booted by
         // another server, or by one that died with it.
-        return yield* Errors.Conflict.make({
+        return yield* ApiErrors.Conflict.make({
           message:
             status.value === "downloading" || status.value === "running"
               ? `session "${id}" is not running on this qemu server`

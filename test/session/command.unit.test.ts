@@ -5,9 +5,9 @@ import { Cause, Deferred, Effect, Exit, FileSystem, Layer, Path, Terminal } from
 import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Api from "@oligarchy/routes/api";
 import * as SessionCommand from "../../src/session/command.ts";
 import * as State from "../../src/session/state.ts";
-import * as Api from "../../src/shared/api.ts";
 import * as Config from "../support/config.ts";
 import * as FakeTty from "../support/fake-tty.ts";
 import * as StdioSupport from "../support/stdio.ts";

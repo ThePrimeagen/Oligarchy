@@ -2,6 +2,7 @@ import { Deferred, Effect, Layer, Option } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Contract from "@oligarchy/routes/contract";
 import * as Client from "../db/client.ts";
 import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
@@ -54,7 +55,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
       // No default: the fleet knows a client by the address something reaches it at, which is
       // nothing this process can see. Without it the client announces nothing.
       url: Flag.string("url").pipe(
-        Flag.withSchema(Domain.ServerUrl),
+        Flag.withSchema(Contract.ServerUrl),
         Flag.optional,
         Flag.withDescription(
           "Announce this client to the fleet under this url, every 30 seconds, and delete the row on shutdown",

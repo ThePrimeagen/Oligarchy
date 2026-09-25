@@ -6,8 +6,9 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as UrlParams from "effect/unstable/http/UrlParams";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
-import * as Api from "../shared/api.ts";
-import * as Contract from "../shared/contract.ts";
+import * as Api from "@oligarchy/routes/api";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Errors from "../shared/errors.ts";
 
 export type Failure = Errors.ProxyRefusal | Errors.ProxyUnreachable;
@@ -87,7 +88,10 @@ const classify = (error: HttpClientError.HttpClientError): Effect.Effect<never, 
 
 const run = <A>(
   label: string,
-  effect: Effect.Effect<A, Errors.ApiError | HttpClientError.HttpClientError | Schema.SchemaError>,
+  effect: Effect.Effect<
+    A,
+    ApiErrors.ApiError | HttpClientError.HttpClientError | Schema.SchemaError
+  >,
 ): Effect.Effect<A, Failure> =>
   effect.pipe(
     Effect.catch((error) => {
@@ -99,7 +103,7 @@ const run = <A>(
         return Effect.fail(Errors.ProxyUnreachable.make({ message: label, cause: error }));
       }
       return Effect.fail(
-        Errors.ProxyRefusal.make({ status: Errors.apiStatus(error), message: error.message }),
+        Errors.ProxyRefusal.make({ status: ApiErrors.apiStatus(error), message: error.message }),
       );
     }),
   );

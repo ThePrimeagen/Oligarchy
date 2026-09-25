@@ -9,10 +9,10 @@ import {
   Stream,
   type Tracer,
 } from "effect";
+import * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
-import * as Contract from "../../src/shared/contract.ts";
 import type * as Domain from "../../src/shared/domain.ts";
-import * as Errors from "../../src/shared/errors.ts";
 
 // The ids Sessions mints come from crypto.randomUUID(), whose type is this template.
 type Uuid = `${string}-${string}-${string}-${string}-${string}`;
@@ -119,22 +119,22 @@ export const fakeSessions = (
         agent: string,
       ): Effect.Effect<
         Sessions.LiveSession,
-        Errors.BadRequest | Errors.UnknownSession | Errors.Forbidden
+        ApiErrors.BadRequest | ApiErrors.UnknownSession | ApiErrors.Forbidden
       > =>
         Effect.gen(function* () {
           yield* record("lookup", id, agent);
           if (id === "") {
-            return yield* Errors.BadRequest.make({
+            return yield* ApiErrors.BadRequest.make({
               message: "session id is required",
               agentId: agent,
             });
           }
           const found = sessions.get(id);
           if (found === undefined) {
-            return yield* Errors.unknownSession(id, agent);
+            return yield* ApiErrors.unknownSession(id, agent);
           }
           if (found.agent !== agent) {
-            return yield* Errors.Forbidden.make({
+            return yield* ApiErrors.Forbidden.make({
               message: `agent "${agent}" does not own session "${id}"`,
               sessionId: id,
               agentId: agent,
@@ -145,11 +145,11 @@ export const fakeSessions = (
       const known = (
         method: string,
         id: string,
-      ): Effect.Effect<Sessions.LiveSession, Errors.UnknownSession> =>
+      ): Effect.Effect<Sessions.LiveSession, ApiErrors.UnknownSession> =>
         Effect.gen(function* () {
           yield* record(method, id);
           const found = sessions.get(id);
-          return found === undefined ? yield* Errors.unknownSession(id) : found;
+          return found === undefined ? yield* ApiErrors.unknownSession(id) : found;
         });
       return Sessions.Sessions.of({
         reserve: (agent) => record("reserve", agent),

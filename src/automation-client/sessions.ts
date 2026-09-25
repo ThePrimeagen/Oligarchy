@@ -12,12 +12,12 @@ import {
   Semaphore,
 } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import type * as Contract from "@oligarchy/routes/contract";
+import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Cli from "../cli.ts";
 import * as HarnessConfig from "../harness/config.ts";
 import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
-import type * as Domain from "../shared/domain.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Driver from "./driver.ts";
 import * as OpenCode from "./opencode.ts";
 
@@ -43,14 +43,14 @@ export type ReserveQemu = (
   agent: string,
   resume?: string,
   server?: string,
-) => Effect.Effect<void, Errors.AtCapacity | Errors.SetupNeeded | Errors.Internal>;
+) => Effect.Effect<void, ApiErrors.AtCapacity | ApiErrors.SetupNeeded | ApiErrors.Internal>;
 
-export type RelinquishQemu = (agent: string) => Effect.Effect<void, Errors.Internal>;
+export type RelinquishQemu = (agent: string) => Effect.Effect<void, ApiErrors.Internal>;
 
 // What a ticket holds before its run: what it was reserved as, so an expired drive gives its
 // guest slot back and the same reserve again is told from another, and since when.
 type Reservation = {
-  readonly action: Domain.AutomationAction;
+  readonly action: Contract.AutomationAction;
   readonly resume: string | undefined;
   readonly server: string | undefined;
   readonly since: number;
@@ -78,11 +78,11 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const log = yield* Log.Log;
 
-    const shuttingDown = (ticket: string): Errors.AtCapacity =>
-      Errors.AtCapacity.make({ message: "shutting down", agentId: ticket });
+    const shuttingDown = (ticket: string): ApiErrors.AtCapacity =>
+      ApiErrors.AtCapacity.make({ message: "shutting down", agentId: ticket });
 
-    const atCapacity = (ticket: string): Errors.AtCapacity =>
-      Errors.AtCapacity.make({
+    const atCapacity = (ticket: string): ApiErrors.AtCapacity =>
+      ApiErrors.AtCapacity.make({
         message: `at capacity: max-jobs is ${String(maxJobs)}`,
         agentId: ticket,
       });
@@ -93,7 +93,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
 
     const reserve = Effect.fn("Sessions.reserve")(function* (
       ticket: string,
-      action: Domain.AutomationAction,
+      action: Contract.AutomationAction,
       resume?: string,
       server?: string,
     ) {
@@ -111,7 +111,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
             return yield* Effect.void;
           }
           if (held !== undefined) {
-            return yield* Errors.BadRequest.make({
+            return yield* ApiErrors.BadRequest.make({
               message: "already reserved",
               agentId: ticket,
             });
@@ -165,7 +165,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         }),
       );
       if (Option.isNone(ran)) {
-        return yield* Errors.AtCapacity.make({
+        return yield* ApiErrors.AtCapacity.make({
           message: "a reserve is already in flight",
           agentId: ticket,
         });
@@ -173,7 +173,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       return yield* Effect.void;
     });
 
-    const consume = (ticket: string): Effect.Effect<void, Errors.BadRequest> =>
+    const consume = (ticket: string): Effect.Effect<void, ApiErrors.BadRequest> =>
       Effect.flatMap(
         Ref.modify(slots, (held) =>
           held.reserved.has(ticket)
@@ -183,7 +183,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         (held) =>
           held
             ? Effect.void
-            : Errors.BadRequest.make({ message: "no reservation", agentId: ticket }),
+            : ApiErrors.BadRequest.make({ message: "no reservation", agentId: ticket }),
       );
 
     // Every reservation past the deadline leaves the reserved set and gives its slot back in one
@@ -257,7 +257,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           const args = diagnose
             ? yield* HarnessConfig.load.pipe(
                 Effect.mapError((error) =>
-                  Errors.RunFailed.make({ message: error.message, cause: error }),
+                  ApiErrors.RunFailed.make({ message: error.message, cause: error }),
                 ),
                 Effect.map((config) =>
                   OpenCode.args(prompt, config.models.diagnose, config.reasoning.diagnose),
@@ -285,18 +285,18 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           const exit = yield* Effect.exit(Cli.awaitExit(bin, handle));
           const stopping = (yield* Ref.get(aborts)).get(ticket);
           if (stopping !== undefined && (yield* Deferred.await(stopping))) {
-            return yield* Errors.RunAborted.make({ agentId: ticket });
+            return yield* ApiErrors.RunAborted.make({ agentId: ticket });
           }
           return yield* exit;
         }),
       ).pipe(
         Effect.catchTag("CliFailed", (error) =>
-          Errors.RunFailed.make({ message: error.message, cause: error }),
+          ApiErrors.RunFailed.make({ message: error.message, cause: error }),
         ),
         // Leaving the scope kills the child and gives the slot back before the failure is raised.
         Effect.timeoutOrElse({
           duration: ceiling,
-          orElse: () => Errors.RunFailed.make({ message: exceeded }),
+          orElse: () => ApiErrors.RunFailed.make({ message: exceeded }),
         }),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
@@ -319,7 +319,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           ] as const;
         });
         if (reservation === undefined) {
-          return yield* Errors.unknownSession(ticket, ticket);
+          return yield* ApiErrors.unknownSession(ticket, ticket);
         }
         if (reservation.action === "drive" || reservation.action === "mint") {
           yield* relinquishQemu(ticket).pipe(
@@ -349,7 +349,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           // still running so a probe failure does not look like a successful abort.
           Effect.flatMap(handle.isRunning.pipe(Effect.orElseSucceed(() => true)), (alive) =>
             alive
-              ? Errors.RunFailed.make({ message: error.message, cause: error })
+              ? ApiErrors.RunFailed.make({ message: error.message, cause: error })
               : Effect.succeed(false),
           ),
         ),

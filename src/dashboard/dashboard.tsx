@@ -743,7 +743,7 @@ const serversPage = (
 
 const SERVER_URL_RULE = "url must be an http or https url";
 
-// Domain.ServerUrl's rule, without Effect in the Worker: http or https with a host, kept as given.
+// Contract.ServerUrl's rule, without Effect in the Worker: http or https with a host, kept as given.
 const isServerUrl = (url: string): boolean => {
   if (!URL.canParse(url)) {
     return false;

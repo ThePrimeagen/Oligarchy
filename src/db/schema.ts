@@ -70,7 +70,7 @@ export const automationJobStatus = pgEnum("automation_job_status", [
   "errored",
 ]);
 
-// mode is the twin of Domain.SessionMode, maintained by hand with it; absent means fresh.
+// mode is the twin of Contract.SessionMode, maintained by hand with it; absent means fresh.
 export type SessionConfig = {
   iso: string;
   disk?: string;
