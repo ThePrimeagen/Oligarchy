@@ -32,7 +32,7 @@ describe("wrangler environments", () => {
       { binding: "HYPERDRIVE", id: "da54bf43f004492996574a6db26d8895" },
     ]);
     expect(config.env.local.hyperdrive).toEqual([
-      { binding: "HYPERDRIVE", id: "be7183f62d6e488a9a46fb4d396b8c60" },
+      { binding: "HYPERDRIVE", id: "394204722f5c4d44bd7262be3bc2b1d6" },
     ]);
   });
 
