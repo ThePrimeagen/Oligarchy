@@ -284,19 +284,21 @@ describe("POST /linear", () => {
     }),
   );
 
-  it.effect("records an edit of a ticket already in Automation Needed without queueing (unhappy)", () =>
-    Effect.gen(function* () {
-      const body = issueBody("Automation Needed", { updatedFrom: { title: "the old title" } });
-      const fixed = fixture();
-      seedResult(fixed, "OLI-1063");
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        expect((yield* webhook(http, body, sign(body))).status).toBe(200);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.stores.automation.jobs).toEqual([]);
-      expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook recorded; Automation Needed"]);
-      expect(labeled(fixed)).toEqual([]);
-    }),
+  it.effect(
+    "records an edit of a ticket already in Automation Needed without queueing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const body = issueBody("Automation Needed", { updatedFrom: { title: "the old title" } });
+        const fixed = fixture();
+        seedResult(fixed, "OLI-1063");
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs).toEqual([]);
+        expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook recorded; Automation Needed"]);
+        expect(labeled(fixed)).toEqual([]);
+      }),
   );
 });
 
@@ -383,37 +385,39 @@ describe("POST /linear refusals", () => {
 });
 
 describe("POST /abort", () => {
-  it.effect("aborts a running job at the client that claimed it, then moves its ticket to Aborted", () =>
-    Effect.gen(function* () {
-      const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
-      const fixed = fixture();
-      seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* abort(http);
-        expect(response.status).toBe(200);
-        expect(yield* response.json).toEqual({ ok: "true" });
-      }).pipe(Effect.provide(serve(fixed, outbound.layer)));
-      expect(outbound.requests).toEqual([
-        expect.objectContaining({
-          method: "POST",
-          url: `${CLIENT_URL}/abort`,
-        }),
-      ]);
-      expect(JSON.parse(outbound.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
-      expect(fixed.stores.automation.jobs[0]).toMatchObject({
-        status: "aborted",
-        reason: "aborted",
-        finishedAt: expect.any(Date),
-      });
-      expect(FakeLog.texts(fixed.log)).toEqual([`aborted drive; ${CLIENT_URL}`]);
-      expect(fixed.linear.calls).toEqual([
-        { method: "clearReady", identifier: TICKET },
-        { method: "moveToAborted", identifier: TICKET },
-      ]);
-      expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
-    }),
+  it.effect(
+    "aborts a running job at the client that claimed it, then moves its ticket to Aborted",
+    () =>
+      Effect.gen(function* () {
+        const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http);
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+        }).pipe(Effect.provide(serve(fixed, outbound.layer)));
+        expect(outbound.requests).toEqual([
+          expect.objectContaining({
+            method: "POST",
+            url: `${CLIENT_URL}/abort`,
+          }),
+        ]);
+        expect(JSON.parse(outbound.requests[0]?.body ?? "")).toEqual({ ticket: TICKET });
+        expect(fixed.stores.automation.jobs[0]).toMatchObject({
+          status: "aborted",
+          reason: "aborted",
+          finishedAt: expect.any(Date),
+        });
+        expect(FakeLog.texts(fixed.log)).toEqual([`aborted drive; ${CLIENT_URL}`]);
+        expect(fixed.linear.calls).toEqual([
+          { method: "clearReady", identifier: TICKET },
+          { method: "moveToAborted", identifier: TICKET },
+        ]);
+        expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
+      }),
   );
 
   it.effect("routes abort to the client that claimed that ticket", () =>
@@ -481,29 +485,31 @@ describe("POST /abort", () => {
       }),
   );
 
-  it.effect("closes a pending job as aborted and moves its ticket to Aborted; no client is called", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      seedResult(fixed, TICKET, RESULT);
-      seedJob(fixed, RESULT, "pending", null);
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* abort(http);
-        expect(response.status).toBe(200);
-        expect(yield* response.json).toEqual({ ok: "true" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.stores.automation.jobs[0]).toMatchObject({
-        status: "aborted",
-        reason: "aborted",
-        finishedAt: expect.any(Date),
-      });
-      expect(FakeLog.texts(fixed.log)).toEqual(["aborted pending drive"]);
-      expect(fixed.linear.calls).toEqual([
-        { method: "clearReady", identifier: TICKET },
-        { method: "moveToAborted", identifier: TICKET },
-      ]);
-      expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
-    }),
+  it.effect(
+    "closes a pending job as aborted and moves its ticket to Aborted; no client is called",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        seedResult(fixed, TICKET, RESULT);
+        seedJob(fixed, RESULT, "pending", null);
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* abort(http);
+          expect(response.status).toBe(200);
+          expect(yield* response.json).toEqual({ ok: "true" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs[0]).toMatchObject({
+          status: "aborted",
+          reason: "aborted",
+          finishedAt: expect.any(Date),
+        });
+        expect(FakeLog.texts(fixed.log)).toEqual(["aborted pending drive"]);
+        expect(fixed.linear.calls).toEqual([
+          { method: "clearReady", identifier: TICKET },
+          { method: "moveToAborted", identifier: TICKET },
+        ]);
+        expect(fixed.log.lines[0]?.agentId).toBe(TICKET);
+      }),
   );
 
   it.effect(

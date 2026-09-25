@@ -100,7 +100,11 @@ const seedResult = (
   });
 };
 
-const seedFacts = (tests: TestingStores.FakeTestStore, instruction: string, name = "lock-screen") => {
+const seedFacts = (
+  tests: TestingStores.FakeTestStore,
+  instruction: string,
+  name = "lock-screen",
+) => {
   tests.definitions.push({
     id: 1,
     name,
@@ -932,7 +936,6 @@ describe("the harness closes the board", () => {
       ]);
     }),
   );
-
 });
 
 describe("a drive that returns with its result still open", () => {
@@ -1031,7 +1034,6 @@ describe("a drive that returns with its result still open", () => {
       });
     }),
   );
-
 });
 
 describe("a diagnose is dispatched only after its drive completed", () => {
@@ -1865,7 +1867,9 @@ describe("dispatch unhappy path", () => {
       cause: new Error("connection reset"),
     });
     let attempts = 0;
-    const held: { automation: TestingStores.FakeAutomationStore | undefined } = { automation: undefined };
+    const held: { automation: TestingStores.FakeAutomationStore | undefined } = {
+      automation: undefined,
+    };
     const automation = TestingStores.fakeAutomationStore({
       markRunning: (id, serverId) =>
         Effect.gen(function* () {
@@ -2076,7 +2080,9 @@ describe("dispatch unhappy path", () => {
       cause: new Error("finish reset"),
     });
     let finishes = 0;
-    const held: { automation: TestingStores.FakeAutomationStore | undefined } = { automation: undefined };
+    const held: { automation: TestingStores.FakeAutomationStore | undefined } = {
+      automation: undefined,
+    };
     const automation = TestingStores.fakeAutomationStore({
       markRunning: () => Effect.fail(markFailure),
       finish: (id, status, reason) =>
@@ -2443,7 +2449,9 @@ describe("a running job left by the last automation server", () => {
       message: "connection reset",
       cause: new Error("connection reset"),
     });
-    const automation = TestingStores.fakeAutomationStore({ listRunning: () => Effect.fail(failure) });
+    const automation = TestingStores.fakeAutomationStore({
+      listRunning: () => Effect.fail(failure),
+    });
     return Effect.gen(function* () {
       const fixed = harness(FakeLinear.fakeLinear(), automation);
       seedResult(fixed.tests);

@@ -204,7 +204,9 @@ describe("renderMintIssue happy path", () => {
 
   it.effect("mint-issue.html keeps the pinned reserve and leaves the board and labels alone", () =>
     Effect.gen(function* () {
-      const text = yield* Templates.renderMintIssue(mint).pipe(Effect.provide(NodeFileSystem.layer));
+      const text = yield* Templates.renderMintIssue(mint).pipe(
+        Effect.provide(NodeFileSystem.layer),
+      );
       expect(text).toContain("relinquish");
       expect(text).toContain("--server");
       expect(text).not.toContain("In Progress");

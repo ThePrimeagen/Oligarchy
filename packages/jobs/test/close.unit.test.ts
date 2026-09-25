@@ -21,77 +21,89 @@ const dbFailure = (operation: string) =>
   });
 
 describe("Close.close happy path", () => {
-  it.effect("a drive that ran to its end is completed, its ready label cleared, and its ticket moved to Needs Review", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "passed" });
-      const action = H.seedAction(h.automation, { status: "running" });
-      const closed = yield* Close.close(action, { status: "completed", reason: null }).pipe(
-        Effect.provide(h.layer),
-      );
-      expect(closed).toBe(true);
-      expect(h.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
-      expect(h.linear.calls).toEqual([
-        { method: "clearReady", identifier: H.TICKET },
-        { method: "moveToNeedsReview", identifier: H.TICKET },
-      ]);
-      expect(h.log.lines).toEqual([
-        {
-          level: "info",
-          text: "drive completed",
-          location: "automation",
-          agentId: undefined,
-          cause: undefined,
-        },
-      ]);
-    }),
+  it.effect(
+    "a drive that ran to its end is completed, its ready label cleared, and its ticket moved to Needs Review",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "passed" });
+        const action = H.seedAction(h.automation, { status: "running" });
+        const closed = yield* Close.close(action, { status: "completed", reason: null }).pipe(
+          Effect.provide(h.layer),
+        );
+        expect(closed).toBe(true);
+        expect(h.automation.jobs[0]).toMatchObject({ status: "completed", reason: null });
+        expect(h.linear.calls).toEqual([
+          { method: "clearReady", identifier: H.TICKET },
+          { method: "moveToNeedsReview", identifier: H.TICKET },
+        ]);
+        expect(h.log.lines).toEqual([
+          {
+            level: "info",
+            text: "drive completed",
+            location: "automation",
+            agentId: undefined,
+            cause: undefined,
+          },
+        ]);
+      }),
   );
 
-  it.effect("a diagnose that succeeded moves the ticket by its verdict and leaves the ready label alone", () =>
-    Effect.gen(function* () {
-      const failed = H.harness();
-      H.seedResult(failed.tests, { status: "failed", sessionId: H.SESSION });
-      failed.verdicts.set(H.SESSION, "failed");
-      const judged = H.seedAction(failed.automation, { action: "diagnose", status: "running" });
-      yield* Close.close(judged, { status: "succeeded", reason: null }).pipe(
-        Effect.provide(failed.layer),
-      );
-      expect(failed.linear.calls).toEqual([{ method: "moveToFailed", identifier: H.TICKET }]);
-      expect(failed.log.texts()).toEqual(["diagnose succeeded"]);
+  it.effect(
+    "a diagnose that succeeded moves the ticket by its verdict and leaves the ready label alone",
+    () =>
+      Effect.gen(function* () {
+        const failed = H.harness();
+        H.seedResult(failed.tests, { status: "failed", sessionId: H.SESSION });
+        failed.verdicts.set(H.SESSION, "failed");
+        const judged = H.seedAction(failed.automation, { action: "diagnose", status: "running" });
+        yield* Close.close(judged, { status: "succeeded", reason: null }).pipe(
+          Effect.provide(failed.layer),
+        );
+        expect(failed.linear.calls).toEqual([{ method: "moveToFailed", identifier: H.TICKET }]);
+        expect(failed.log.texts()).toEqual(["diagnose succeeded"]);
 
-      const passed = H.harness();
-      H.seedResult(passed.tests, { status: "passed", sessionId: H.SESSION });
-      passed.verdicts.set(H.SESSION, "passed");
-      const approved = H.seedAction(passed.automation, { action: "diagnose", status: "running" });
-      yield* Close.close(approved, { status: "succeeded", reason: null }).pipe(
-        Effect.provide(passed.layer),
-      );
-      expect(passed.linear.calls).toEqual([{ method: "moveToSucceeded", identifier: H.TICKET }]);
-    }),
+        const passed = H.harness();
+        H.seedResult(passed.tests, { status: "passed", sessionId: H.SESSION });
+        passed.verdicts.set(H.SESSION, "passed");
+        const approved = H.seedAction(passed.automation, { action: "diagnose", status: "running" });
+        yield* Close.close(approved, { status: "succeeded", reason: null }).pipe(
+          Effect.provide(passed.layer),
+        );
+        expect(passed.linear.calls).toEqual([{ method: "moveToSucceeded", identifier: H.TICKET }]);
+      }),
   );
 
-  it.effect("an errored drive errors its result and moves the ticket to Errored with the reason", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "running" });
-      const action = H.seedAction(h.automation, { status: "running" });
-      yield* Close.close(action, { status: "errored", reason: "opencode exited 1" }).pipe(
-        Effect.provide(h.layer),
-      );
-      expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason: "opencode exited 1" });
-      expect(h.tests.results[0]).toMatchObject({ status: "errored", reason: "opencode exited 1" });
-      expect(h.linear.calls).toEqual([
-        { method: "clearReady", identifier: H.TICKET },
-        {
-          method: "moveToErrored",
-          identifier: H.TICKET,
-          message: "drive errored; opencode exited 1",
-        },
-      ]);
-      expect(h.log.lines.map((line) => [line.level, line.text])).toEqual([
-        ["error", "drive errored; opencode exited 1"],
-      ]);
-    }),
+  it.effect(
+    "an errored drive errors its result and moves the ticket to Errored with the reason",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "running" });
+        const action = H.seedAction(h.automation, { status: "running" });
+        yield* Close.close(action, { status: "errored", reason: "opencode exited 1" }).pipe(
+          Effect.provide(h.layer),
+        );
+        expect(h.automation.jobs[0]).toMatchObject({
+          status: "errored",
+          reason: "opencode exited 1",
+        });
+        expect(h.tests.results[0]).toMatchObject({
+          status: "errored",
+          reason: "opencode exited 1",
+        });
+        expect(h.linear.calls).toEqual([
+          { method: "clearReady", identifier: H.TICKET },
+          {
+            method: "moveToErrored",
+            identifier: H.TICKET,
+            message: "drive errored; opencode exited 1",
+          },
+        ]);
+        expect(h.log.lines.map((line) => [line.level, line.text])).toEqual([
+          ["error", "drive errored; opencode exited 1"],
+        ]);
+      }),
   );
 
   it.effect("an aborted mint clears its ready label and leaves the ticket where it is", () =>
@@ -141,59 +153,63 @@ describe("Close.close happy path", () => {
 });
 
 describe("Close.close unhappy path", () => {
-  it.effect("a row write that fails three times is one line, answers false, and moves nothing", () =>
-    Effect.gen(function* () {
-      const failure = dbFailure("finishAutomationJob");
-      const finish = H.failing(failure);
-      const h = H.harness({
-        automation: TestingStores.fakeAutomationStore({ finish: () => finish.effect }),
-      });
-      H.seedResult(h.tests, { status: "passed" });
-      const action = H.seedAction(h.automation, { status: "running" });
-      const closed = yield* Close.close(action, { status: "completed", reason: null }).pipe(
-        Effect.provide(h.layer),
-      );
-      expect(closed).toBe(false);
-      expect(finish.counter.attempts).toBe(3);
-      expect(h.automation.jobs[0]?.status).toBe("running");
-      expect(h.linear.calls).toEqual([]);
-      expect(h.log.lines).toEqual([
-        {
-          level: "error",
-          text: `close write failed; ${action.id} should be completed`,
-          location: "automation",
-          agentId: undefined,
-          cause: failure,
-        },
-      ]);
-    }),
+  it.effect(
+    "a row write that fails three times is one line, answers false, and moves nothing",
+    () =>
+      Effect.gen(function* () {
+        const failure = dbFailure("finishAutomationJob");
+        const finish = H.failing(failure);
+        const h = H.harness({
+          automation: TestingStores.fakeAutomationStore({ finish: () => finish.effect }),
+        });
+        H.seedResult(h.tests, { status: "passed" });
+        const action = H.seedAction(h.automation, { status: "running" });
+        const closed = yield* Close.close(action, { status: "completed", reason: null }).pipe(
+          Effect.provide(h.layer),
+        );
+        expect(closed).toBe(false);
+        expect(finish.counter.attempts).toBe(3);
+        expect(h.automation.jobs[0]?.status).toBe("running");
+        expect(h.linear.calls).toEqual([]);
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: `close write failed; ${action.id} should be completed`,
+            location: "automation",
+            agentId: undefined,
+            cause: failure,
+          },
+        ]);
+      }),
   );
 
-  it.effect("a ticket that will not move after three attempts is one line and the row stays closed", () =>
-    Effect.gen(function* () {
-      const refused = refusal("moveToNeedsReview");
-      const move = H.failing(refused);
-      const h = H.harness({
-        linear: TestingLinear.fakeLinear({ overrides: { moveToNeedsReview: () => move.effect } }),
-      });
-      H.seedResult(h.tests, { status: "passed" });
-      const action = H.seedAction(h.automation, { status: "running" });
-      const closed = yield* Close.close(action, { status: "completed", reason: null }).pipe(
-        Effect.provide(h.layer),
-      );
-      expect(closed).toBe(true);
-      expect(move.counter.attempts).toBe(3);
-      expect(h.automation.jobs[0]?.status).toBe("completed");
-      expect(h.log.lines.filter((line) => line.level === "error")).toEqual([
-        {
-          level: "error",
-          text: "move to Needs Review failed: linear: moveToNeedsReview refused",
-          location: "automation",
-          agentId: H.TICKET,
-          cause: refused,
-        },
-      ]);
-    }),
+  it.effect(
+    "a ticket that will not move after three attempts is one line and the row stays closed",
+    () =>
+      Effect.gen(function* () {
+        const refused = refusal("moveToNeedsReview");
+        const move = H.failing(refused);
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({ overrides: { moveToNeedsReview: () => move.effect } }),
+        });
+        H.seedResult(h.tests, { status: "passed" });
+        const action = H.seedAction(h.automation, { status: "running" });
+        const closed = yield* Close.close(action, { status: "completed", reason: null }).pipe(
+          Effect.provide(h.layer),
+        );
+        expect(closed).toBe(true);
+        expect(move.counter.attempts).toBe(3);
+        expect(h.automation.jobs[0]?.status).toBe("completed");
+        expect(h.log.lines.filter((line) => line.level === "error")).toEqual([
+          {
+            level: "error",
+            text: "move to Needs Review failed: linear: moveToNeedsReview refused",
+            location: "automation",
+            agentId: H.TICKET,
+            cause: refused,
+          },
+        ]);
+      }),
   );
 
   it.effect("a second close of a closed row answers false and moves nothing", () =>
@@ -282,22 +298,24 @@ describe("Close.close unhappy path", () => {
 });
 
 describe("Close.judge happy path", () => {
-  it.effect("a drive whose result its driver closed is completed, and a diagnose is succeeded", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "failed", sessionId: H.SESSION });
-      h.sessions.set(H.SESSION, H.session(H.SESSION, "succeeded"));
-      const drive = H.seedAction(h.automation, { status: "running" });
-      const diagnose = H.seedAction(h.automation, { action: "diagnose", status: "running" });
-      expect(yield* Close.judge(drive).pipe(Effect.provide(h.layer))).toEqual({
-        status: "completed",
-        reason: null,
-      });
-      expect(yield* Close.judge(diagnose).pipe(Effect.provide(h.layer))).toEqual({
-        status: "succeeded",
-        reason: null,
-      });
-    }),
+  it.effect(
+    "a drive whose result its driver closed is completed, and a diagnose is succeeded",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "failed", sessionId: H.SESSION });
+        h.sessions.set(H.SESSION, H.session(H.SESSION, "succeeded"));
+        const drive = H.seedAction(h.automation, { status: "running" });
+        const diagnose = H.seedAction(h.automation, { action: "diagnose", status: "running" });
+        expect(yield* Close.judge(drive).pipe(Effect.provide(h.layer))).toEqual({
+          status: "completed",
+          reason: null,
+        });
+        expect(yield* Close.judge(diagnose).pipe(Effect.provide(h.layer))).toEqual({
+          status: "succeeded",
+          reason: null,
+        });
+      }),
   );
 });
 
@@ -314,23 +332,25 @@ describe("Close.judge unhappy path", () => {
     }),
   );
 
-  it.effect("a session the qemu server errored errors the drive, whatever verdict was written", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "passed", sessionId: H.SESSION });
-      h.sessions.set(H.SESSION, H.session(H.SESSION, "errored", "qemu server restarted"));
-      const action = H.seedAction(h.automation, { status: "running" });
-      expect(yield* Close.judge(action).pipe(Effect.provide(h.layer))).toEqual({
-        status: "errored",
-        reason: `session ${H.SESSION} errored; qemu server restarted`,
-      });
+  it.effect(
+    "a session the qemu server errored errors the drive, whatever verdict was written",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "passed", sessionId: H.SESSION });
+        h.sessions.set(H.SESSION, H.session(H.SESSION, "errored", "qemu server restarted"));
+        const action = H.seedAction(h.automation, { status: "running" });
+        expect(yield* Close.judge(action).pipe(Effect.provide(h.layer))).toEqual({
+          status: "errored",
+          reason: `session ${H.SESSION} errored; qemu server restarted`,
+        });
 
-      h.sessions.set(H.SESSION, H.session(H.SESSION, "errored"));
-      expect(yield* Close.judge(action).pipe(Effect.provide(h.layer))).toEqual({
-        status: "errored",
-        reason: `session ${H.SESSION} errored`,
-      });
-    }),
+        h.sessions.set(H.SESSION, H.session(H.SESSION, "errored"));
+        expect(yield* Close.judge(action).pipe(Effect.provide(h.layer))).toEqual({
+          status: "errored",
+          reason: `session ${H.SESSION} errored`,
+        });
+      }),
   );
 
   it.effect("a result that vanished during the drive is a defect", () =>
@@ -405,28 +425,30 @@ describe("Close.fail unhappy path", () => {
     }),
   );
 
-  it.effect("a ticket that will not move after three attempts is one line and the result stays errored", () =>
-    Effect.gen(function* () {
-      const refused = refusal("moveToErrored");
-      const move = H.failing(refused);
-      const h = H.harness({
-        linear: TestingLinear.fakeLinear({ overrides: { moveToErrored: () => move.effect } }),
-      });
-      H.seedResult(h.tests, { status: "running" });
-      const action = H.seedAction(h.automation, { status: "errored" });
-      yield* Close.fail(action, H.TICKET, "boom").pipe(Effect.provide(h.layer));
-      expect(move.counter.attempts).toBe(3);
-      expect(h.tests.results[0]?.status).toBe("errored");
-      expect(h.log.lines).toEqual([
-        {
-          level: "error",
-          text: "move to Errored failed: linear: moveToErrored refused",
-          location: "automation",
-          agentId: H.TICKET,
-          cause: refused,
-        },
-      ]);
-    }),
+  it.effect(
+    "a ticket that will not move after three attempts is one line and the result stays errored",
+    () =>
+      Effect.gen(function* () {
+        const refused = refusal("moveToErrored");
+        const move = H.failing(refused);
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({ overrides: { moveToErrored: () => move.effect } }),
+        });
+        H.seedResult(h.tests, { status: "running" });
+        const action = H.seedAction(h.automation, { status: "errored" });
+        yield* Close.fail(action, H.TICKET, "boom").pipe(Effect.provide(h.layer));
+        expect(move.counter.attempts).toBe(3);
+        expect(h.tests.results[0]?.status).toBe("errored");
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: "move to Errored failed: linear: moveToErrored refused",
+            location: "automation",
+            agentId: H.TICKET,
+            cause: refused,
+          },
+        ]);
+      }),
   );
 
   it.effect("an action without a ticket errors its result and moves nothing", () =>

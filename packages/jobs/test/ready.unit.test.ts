@@ -43,32 +43,35 @@ describe("Ready.mark unhappy path", () => {
     }),
   );
 
-  it.effect("a label Linear never answers gives up at three seconds, inside the webhook's five", () =>
-    Effect.gen(function* () {
-      const asked = yield* Deferred.make<void>();
-      const h = H.harness({
-        linear: TestingLinear.fakeLinear({
-          overrides: {
-            markReady: () => Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+  it.effect(
+    "a label Linear never answers gives up at three seconds, inside the webhook's five",
+    () =>
+      Effect.gen(function* () {
+        const asked = yield* Deferred.make<void>();
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: {
+              markReady: () =>
+                Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
+            },
+          }),
+        });
+        const marking = yield* Ready.mark(H.TICKET).pipe(Effect.provide(h.layer), Effect.forkChild);
+        yield* Deferred.await(asked);
+        yield* TestClock.adjust("2999 millis");
+        expect(marking.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust("1 millis");
+        yield* Fiber.join(marking);
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: `ready label add failed: linear: labeling ${H.TICKET} ready failed: no answer within 3 seconds`,
+            location: "automation",
+            agentId: H.TICKET,
+            cause: expect.objectContaining({ _tag: "LinearError", operation: "markReady" }),
           },
-        }),
-      });
-      const marking = yield* Ready.mark(H.TICKET).pipe(Effect.provide(h.layer), Effect.forkChild);
-      yield* Deferred.await(asked);
-      yield* TestClock.adjust("2999 millis");
-      expect(marking.pollUnsafe()).toBeUndefined();
-      yield* TestClock.adjust("1 millis");
-      yield* Fiber.join(marking);
-      expect(h.log.lines).toEqual([
-        {
-          level: "error",
-          text: `ready label add failed: linear: labeling ${H.TICKET} ready failed: no answer within 3 seconds`,
-          location: "automation",
-          agentId: H.TICKET,
-          cause: expect.objectContaining({ _tag: "LinearError", operation: "markReady" }),
-        },
-      ]);
-    }),
+        ]);
+      }),
   );
 });
 

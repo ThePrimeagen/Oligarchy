@@ -33,124 +33,146 @@ const dbFailure = (operation: string) =>
   });
 
 describe("Reclaim.reclaim happy path", () => {
-  it.effect("a drive or mint whose result its driver closed is completed and moved to Needs Review, and nothing is stopped", () =>
-    Effect.gen(function* () {
-      for (const action of ["drive", "mint"] as const) {
+  it.effect(
+    "a drive or mint whose result its driver closed is completed and moved to Needs Review, and nothing is stopped",
+    () =>
+      Effect.gen(function* () {
+        for (const action of ["drive", "mint"] as const) {
+          const h = H.harness();
+          H.seedResult(h.tests, { status: "failed" });
+          h.clients.set(H.CLIENT, H.CLIENT_URL);
+          const row = H.seedAction(h.automation, { action, status: "running", serverId: H.CLIENT });
+          const client = recordingStop(h);
+          yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
+          expect(client.stops, action).toEqual([]);
+          expect(h.automation.jobs[0], action).toMatchObject({ status: "completed", reason: null });
+          expect(h.linear.calls, action).toEqual([
+            { method: "clearReady", identifier: H.TICKET },
+            { method: "moveToNeedsReview", identifier: H.TICKET },
+          ]);
+          expect(h.log.texts(), action).toEqual([`${action} completed`]);
+        }
+      }),
+  );
+
+  it.effect(
+    "a drive closed on a session the qemu server errored is errored with the session's reason",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "passed", sessionId: H.SESSION });
+        h.sessions.set(H.SESSION, H.session(H.SESSION, "errored", "qemu exited 137"));
+        const row = H.seedAction(h.automation, { status: "running", serverId: H.CLIENT });
+        const client = recordingStop(h);
+        yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
+        const reason = `session ${H.SESSION} errored; qemu exited 137`;
+        expect(client.stops).toEqual([]);
+        expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason });
+        expect(h.tests.results[0]).toMatchObject({ status: "errored", reason });
+        expect(h.linear.calls).toContainEqual({
+          method: "moveToErrored",
+          identifier: H.TICKET,
+          message: `drive errored; ${reason}`,
+        });
+      }),
+  );
+
+  it.effect(
+    "any other drive is stopped at its client first, then errored restarted and moved to Errored",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "running" });
+        h.clients.set(H.CLIENT, H.CLIENT_URL);
+        const row = H.seedAction(h.automation, { status: "running", serverId: H.CLIENT });
+        const client = recordingStop(h);
+        yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
+        expect(client.stops).toEqual([{ url: H.CLIENT_URL, ticket: H.TICKET, status: "running" }]);
+        expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
+        expect(h.tests.results[0]).toMatchObject({ status: "errored", reason: RESTARTED });
+        expect(h.linear.calls).toEqual([
+          { method: "clearReady", identifier: H.TICKET },
+          { method: "moveToErrored", identifier: H.TICKET, message: `drive errored; ${RESTARTED}` },
+        ]);
+        expect(h.log.texts()).toEqual([`drive errored; ${RESTARTED}`]);
+      }),
+  );
+
+  it.effect(
+    "a diagnose is stopped and errored, though its result was closed before it was queued",
+    () =>
+      Effect.gen(function* () {
         const h = H.harness();
         H.seedResult(h.tests, { status: "failed" });
         h.clients.set(H.CLIENT, H.CLIENT_URL);
-        const row = H.seedAction(h.automation, { action, status: "running", serverId: H.CLIENT });
+        const row = H.seedAction(h.automation, {
+          action: "diagnose",
+          status: "running",
+          serverId: H.CLIENT,
+        });
         const client = recordingStop(h);
         yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
-        expect(client.stops, action).toEqual([]);
-        expect(h.automation.jobs[0], action).toMatchObject({ status: "completed", reason: null });
-        expect(h.linear.calls, action).toEqual([
-          { method: "clearReady", identifier: H.TICKET },
-          { method: "moveToNeedsReview", identifier: H.TICKET },
+        expect(client.stops).toEqual([{ url: H.CLIENT_URL, ticket: H.TICKET, status: "running" }]);
+        expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
+        expect(h.tests.results[0]?.status).toBe("failed");
+        expect(h.linear.calls).toEqual([
+          {
+            method: "moveToErrored",
+            identifier: H.TICKET,
+            message: `diagnose errored; ${RESTARTED}`,
+          },
         ]);
-        expect(h.log.texts(), action).toEqual([`${action} completed`]);
-      }
-    }),
-  );
-
-  it.effect("a drive closed on a session the qemu server errored is errored with the session's reason", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "passed", sessionId: H.SESSION });
-      h.sessions.set(H.SESSION, H.session(H.SESSION, "errored", "qemu exited 137"));
-      const row = H.seedAction(h.automation, { status: "running", serverId: H.CLIENT });
-      const client = recordingStop(h);
-      yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
-      const reason = `session ${H.SESSION} errored; qemu exited 137`;
-      expect(client.stops).toEqual([]);
-      expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason });
-      expect(h.tests.results[0]).toMatchObject({ status: "errored", reason });
-      expect(h.linear.calls).toContainEqual({
-        method: "moveToErrored",
-        identifier: H.TICKET,
-        message: `drive errored; ${reason}`,
-      });
-    }),
-  );
-
-  it.effect("any other drive is stopped at its client first, then errored restarted and moved to Errored", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "running" });
-      h.clients.set(H.CLIENT, H.CLIENT_URL);
-      const row = H.seedAction(h.automation, { status: "running", serverId: H.CLIENT });
-      const client = recordingStop(h);
-      yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
-      expect(client.stops).toEqual([{ url: H.CLIENT_URL, ticket: H.TICKET, status: "running" }]);
-      expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
-      expect(h.tests.results[0]).toMatchObject({ status: "errored", reason: RESTARTED });
-      expect(h.linear.calls).toEqual([
-        { method: "clearReady", identifier: H.TICKET },
-        { method: "moveToErrored", identifier: H.TICKET, message: `drive errored; ${RESTARTED}` },
-      ]);
-      expect(h.log.texts()).toEqual([`drive errored; ${RESTARTED}`]);
-    }),
-  );
-
-  it.effect("a diagnose is stopped and errored, though its result was closed before it was queued", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      H.seedResult(h.tests, { status: "failed" });
-      h.clients.set(H.CLIENT, H.CLIENT_URL);
-      const row = H.seedAction(h.automation, {
-        action: "diagnose",
-        status: "running",
-        serverId: H.CLIENT,
-      });
-      const client = recordingStop(h);
-      yield* Reclaim.reclaim(row, client.stop).pipe(Effect.provide(h.layer));
-      expect(client.stops).toEqual([{ url: H.CLIENT_URL, ticket: H.TICKET, status: "running" }]);
-      expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
-      expect(h.tests.results[0]?.status).toBe("failed");
-      expect(h.linear.calls).toEqual([
-        {
-          method: "moveToErrored",
-          identifier: H.TICKET,
-          message: `diagnose errored; ${RESTARTED}`,
-        },
-      ]);
-    }),
+      }),
   );
 });
 
 describe("Reclaim.reclaim unhappy path", () => {
-  it.effect("no client recorded, the client forgotten, or no ticket: nothing is stopped and the row is errored", () =>
-    Effect.gen(function* () {
-      const unplaced = H.harness();
-      H.seedResult(unplaced.tests, { status: "running" });
-      const first = H.seedAction(unplaced.automation, { status: "running" });
-      const none = recordingStop(unplaced);
-      yield* Reclaim.reclaim(first, none.stop).pipe(Effect.provide(unplaced.layer));
-      expect(none.stops).toEqual([]);
-      expect(unplaced.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
-      expect(unplaced.linear.calls.map((call) => call.method)).toEqual([
-        "clearReady",
-        "moveToErrored",
-      ]);
+  it.effect(
+    "no client recorded, the client forgotten, or no ticket: nothing is stopped and the row is errored",
+    () =>
+      Effect.gen(function* () {
+        const unplaced = H.harness();
+        H.seedResult(unplaced.tests, { status: "running" });
+        const first = H.seedAction(unplaced.automation, { status: "running" });
+        const none = recordingStop(unplaced);
+        yield* Reclaim.reclaim(first, none.stop).pipe(Effect.provide(unplaced.layer));
+        expect(none.stops).toEqual([]);
+        expect(unplaced.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
+        expect(unplaced.linear.calls.map((call) => call.method)).toEqual([
+          "clearReady",
+          "moveToErrored",
+        ]);
 
-      const forgotten = H.harness();
-      H.seedResult(forgotten.tests, { status: "running" });
-      const second = H.seedAction(forgotten.automation, { status: "running", serverId: H.CLIENT });
-      const gone = recordingStop(forgotten);
-      yield* Reclaim.reclaim(second, gone.stop).pipe(Effect.provide(forgotten.layer));
-      expect(gone.stops).toEqual([]);
-      expect(forgotten.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
+        const forgotten = H.harness();
+        H.seedResult(forgotten.tests, { status: "running" });
+        const second = H.seedAction(forgotten.automation, {
+          status: "running",
+          serverId: H.CLIENT,
+        });
+        const gone = recordingStop(forgotten);
+        yield* Reclaim.reclaim(second, gone.stop).pipe(Effect.provide(forgotten.layer));
+        expect(gone.stops).toEqual([]);
+        expect(forgotten.automation.jobs[0]).toMatchObject({
+          status: "errored",
+          reason: RESTARTED,
+        });
 
-      const unticketed = H.harness();
-      H.seedResult(unticketed.tests, { status: "running", linearId: null });
-      unticketed.clients.set(H.CLIENT, H.CLIENT_URL);
-      const third = H.seedAction(unticketed.automation, { status: "running", serverId: H.CLIENT });
-      const blind = recordingStop(unticketed);
-      yield* Reclaim.reclaim(third, blind.stop).pipe(Effect.provide(unticketed.layer));
-      expect(blind.stops).toEqual([]);
-      expect(unticketed.automation.jobs[0]).toMatchObject({ status: "errored", reason: RESTARTED });
-      expect(unticketed.linear.calls).toEqual([]);
-    }),
+        const unticketed = H.harness();
+        H.seedResult(unticketed.tests, { status: "running", linearId: null });
+        unticketed.clients.set(H.CLIENT, H.CLIENT_URL);
+        const third = H.seedAction(unticketed.automation, {
+          status: "running",
+          serverId: H.CLIENT,
+        });
+        const blind = recordingStop(unticketed);
+        yield* Reclaim.reclaim(third, blind.stop).pipe(Effect.provide(unticketed.layer));
+        expect(blind.stops).toEqual([]);
+        expect(unticketed.automation.jobs[0]).toMatchObject({
+          status: "errored",
+          reason: RESTARTED,
+        });
+        expect(unticketed.linear.calls).toEqual([]);
+      }),
   );
 
   it.effect("a job someone else closed during the stop is not errored or moved", () =>

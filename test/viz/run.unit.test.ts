@@ -78,7 +78,8 @@ const storesLayer = (
     Stores.fakeProcessStatsStore({
       listSeries: scripted.series ?? (() => Effect.succeed([garageSeries, runnerSeries])),
     }).layer,
-    TestingStores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) }).layer,
+    TestingStores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) })
+      .layer,
     actions.layer,
     tests.layer,
     logs.layer,

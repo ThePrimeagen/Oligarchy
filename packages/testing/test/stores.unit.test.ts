@@ -152,18 +152,20 @@ describe("fakeAutomationStore happy path", () => {
 });
 
 describe("fakeAutomationStore unhappy path", () => {
-  it.effect("a second insert for the same result and action is the unique index's DatabaseError", () =>
-    Effect.gen(function* () {
-      const fake = Stores.fakeAutomationStore();
-      const error = yield* Effect.gen(function* () {
-        const store = yield* Automation.AutomationStore;
-        yield* store.enqueue({ resultId: RESULT, action: "drive" });
-        return yield* Effect.flip(store.enqueue({ resultId: RESULT, action: "drive" }));
-      }).pipe(Effect.provide(fake.layer));
-      expect(error._tag).toBe("DatabaseError");
-      expect(String(error.cause)).toContain("duplicate key");
-      expect(fake.jobs).toHaveLength(1);
-    }),
+  it.effect(
+    "a second insert for the same result and action is the unique index's DatabaseError",
+    () =>
+      Effect.gen(function* () {
+        const fake = Stores.fakeAutomationStore();
+        const error = yield* Effect.gen(function* () {
+          const store = yield* Automation.AutomationStore;
+          yield* store.enqueue({ resultId: RESULT, action: "drive" });
+          return yield* Effect.flip(store.enqueue({ resultId: RESULT, action: "drive" }));
+        }).pipe(Effect.provide(fake.layer));
+        expect(error._tag).toBe("DatabaseError");
+        expect(String(error.cause)).toContain("duplicate key");
+        expect(fake.jobs).toHaveLength(1);
+      }),
   );
 
   it.effect("a result with a running action has no next pending action", () =>
@@ -180,19 +182,21 @@ describe("fakeAutomationStore unhappy path", () => {
     }),
   );
 
-  it.effect("a row running for another server, or closed, is not taken, and an unknown id is not", () =>
-    Effect.gen(function* () {
-      const fake = Stores.fakeAutomationStore();
-      yield* Effect.gen(function* () {
-        const store = yield* Automation.AutomationStore;
-        const job = yield* store.enqueue({ resultId: RESULT, action: "drive" });
-        yield* store.markRunning(job.id, SERVER);
-        expect(yield* store.markRunning(job.id, OTHER_SERVER)).toBe(false);
-        expect(yield* store.finish(job.id, "aborted", "aborted")).toBe(true);
-        expect(yield* store.markRunning(job.id, SERVER)).toBe(false);
-        expect(yield* store.markRunning(OTHER_RESULT, SERVER)).toBe(false);
-      }).pipe(Effect.provide(fake.layer));
-    }),
+  it.effect(
+    "a row running for another server, or closed, is not taken, and an unknown id is not",
+    () =>
+      Effect.gen(function* () {
+        const fake = Stores.fakeAutomationStore();
+        yield* Effect.gen(function* () {
+          const store = yield* Automation.AutomationStore;
+          const job = yield* store.enqueue({ resultId: RESULT, action: "drive" });
+          yield* store.markRunning(job.id, SERVER);
+          expect(yield* store.markRunning(job.id, OTHER_SERVER)).toBe(false);
+          expect(yield* store.finish(job.id, "aborted", "aborted")).toBe(true);
+          expect(yield* store.markRunning(job.id, SERVER)).toBe(false);
+          expect(yield* store.markRunning(OTHER_RESULT, SERVER)).toBe(false);
+        }).pipe(Effect.provide(fake.layer));
+      }),
   );
 
   it.effect("a closed row answers true only for the status and reason it closed with", () =>

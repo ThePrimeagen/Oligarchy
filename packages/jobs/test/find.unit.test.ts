@@ -82,35 +82,39 @@ describe("Find.status and Find.hasPending", () => {
 });
 
 describe("Find.running and Find.inherited", () => {
-  it.effect("running answers a job's action in flight; inherited lists every one, oldest first", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      const job = H.seedResult(h.tests);
-      const drive = H.seedAction(h.automation, { status: "running", serverId: H.CLIENT });
-      const other = H.seedAction(h.automation, {
-        resultId: OTHER_RESULT,
-        status: "running",
-        serverId: H.CLIENT,
-      });
-      H.seedAction(h.automation, { resultId: OTHER_RESULT, action: "diagnose" });
-      const running = yield* Find.running(job).pipe(Effect.provide(h.layer));
-      const inherited = yield* Find.inherited().pipe(Effect.provide(h.layer));
-      expect(running).toEqual(Option.some(drive));
-      expect(inherited.map((action) => action.id)).toEqual([drive.id, other.id]);
-    }),
+  it.effect(
+    "running answers a job's action in flight; inherited lists every one, oldest first",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        const job = H.seedResult(h.tests);
+        const drive = H.seedAction(h.automation, { status: "running", serverId: H.CLIENT });
+        const other = H.seedAction(h.automation, {
+          resultId: OTHER_RESULT,
+          status: "running",
+          serverId: H.CLIENT,
+        });
+        H.seedAction(h.automation, { resultId: OTHER_RESULT, action: "diagnose" });
+        const running = yield* Find.running(job).pipe(Effect.provide(h.layer));
+        const inherited = yield* Find.inherited().pipe(Effect.provide(h.layer));
+        expect(running).toEqual(Option.some(drive));
+        expect(inherited.map((action) => action.id)).toEqual([drive.id, other.id]);
+      }),
   );
 
-  it.effect("a job with nothing in flight is none, and a quiet fleet inherits nothing (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      const job = H.seedResult(h.tests);
-      H.seedAction(h.automation);
-      H.seedAction(h.automation, { action: "diagnose", status: "aborted" });
-      const running = yield* Find.running(job).pipe(Effect.provide(h.layer));
-      const inherited = yield* Find.inherited().pipe(Effect.provide(h.layer));
-      expect(running).toEqual(Option.none());
-      expect(inherited).toEqual([]);
-    }),
+  it.effect(
+    "a job with nothing in flight is none, and a quiet fleet inherits nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        const job = H.seedResult(h.tests);
+        H.seedAction(h.automation);
+        H.seedAction(h.automation, { action: "diagnose", status: "aborted" });
+        const running = yield* Find.running(job).pipe(Effect.provide(h.layer));
+        const inherited = yield* Find.inherited().pipe(Effect.provide(h.layer));
+        expect(running).toEqual(Option.none());
+        expect(inherited).toEqual([]);
+      }),
   );
 });
 

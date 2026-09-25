@@ -2,7 +2,11 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, Exit, FileSystem } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../src/dashboard/dashboard.tsx";
-import { bundledPrompts, createTestSuiteRun, SuiteRequestError } from "../../src/dashboard/suite.ts";
+import {
+  bundledPrompts,
+  createTestSuiteRun,
+  SuiteRequestError,
+} from "../../src/dashboard/suite.ts";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Templates from "@oligarchy/jobs/templates";
 import * as SharedErrors from "@oligarchy/shared/errors";

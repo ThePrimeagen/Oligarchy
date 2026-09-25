@@ -116,7 +116,7 @@ const diagnosisLayer = (
   Layer.succeed(Diagnosis.DiagnosisStore)(
     Diagnosis.DiagnosisStore.of({
       createErrorType: () => unexpected("DiagnosisStore.createErrorType"),
-      listErrorTypes: unexpected("DiagnosisStore.listErrorTypes"),
+      listErrorTypes: () => unexpected("DiagnosisStore.listErrorTypes"),
       findErrorType: () => unexpected("DiagnosisStore.findErrorType"),
       saveDiagnosis: () => unexpected("DiagnosisStore.saveDiagnosis"),
       getDiagnosis:
@@ -174,7 +174,11 @@ const serverLayer = (clients: Map<string, string>) =>
     }),
   );
 
-export const session = (id: string, status: SessionRow["status"], reason: string | null = null) => ({
+export const session = (
+  id: string,
+  status: SessionRow["status"],
+  reason: string | null = null,
+) => ({
   id,
   config: { iso: "omarchy.iso" },
   status,

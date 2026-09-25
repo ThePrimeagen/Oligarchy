@@ -24,22 +24,24 @@ describe("Board.actionFor happy path", () => {
     }),
   );
 
-  it.effect("Automation Needed for the mint definition is a mint, and Needs Review stays a diagnose", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      h.tests.definitions.push(H.definition(1, "mint"));
-      const job = H.seedResult(h.tests);
-      const needed = yield* Board.actionFor(Linear.AUTOMATION_NEEDED_STATE, job).pipe(
-        Effect.provide(h.layer),
-      );
-      const review = yield* Board.actionFor(Linear.NEEDS_REVIEW_STATE, job).pipe(
-        Effect.provide(h.layer),
-      );
-      const moved = yield* Board.driveOrMint(job).pipe(Effect.provide(h.layer));
-      expect(needed).toEqual(Option.some("mint"));
-      expect(review).toEqual(Option.some("diagnose"));
-      expect(moved).toBe("mint");
-    }),
+  it.effect(
+    "Automation Needed for the mint definition is a mint, and Needs Review stays a diagnose",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        h.tests.definitions.push(H.definition(1, "mint"));
+        const job = H.seedResult(h.tests);
+        const needed = yield* Board.actionFor(Linear.AUTOMATION_NEEDED_STATE, job).pipe(
+          Effect.provide(h.layer),
+        );
+        const review = yield* Board.actionFor(Linear.NEEDS_REVIEW_STATE, job).pipe(
+          Effect.provide(h.layer),
+        );
+        const moved = yield* Board.driveOrMint(job).pipe(Effect.provide(h.layer));
+        expect(needed).toEqual(Option.some("mint"));
+        expect(review).toEqual(Option.some("diagnose"));
+        expect(moved).toBe("mint");
+      }),
   );
 });
 
@@ -87,15 +89,17 @@ describe("Board.enqueue happy path", () => {
 });
 
 describe("Board.enqueue unhappy path", () => {
-  it.effect("a second insert for the same result and action is named by the status the index kept", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      const job = H.seedResult(h.tests);
-      H.seedAction(h.automation, { status: "running" });
-      const placed = yield* Board.enqueue(job, "drive").pipe(Effect.provide(h.layer));
-      expect(placed).toEqual({ result: "duplicate", action: "drive", status: "running" });
-      expect(h.automation.jobs).toHaveLength(1);
-    }),
+  it.effect(
+    "a second insert for the same result and action is named by the status the index kept",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        const job = H.seedResult(h.tests);
+        H.seedAction(h.automation, { status: "running" });
+        const placed = yield* Board.enqueue(job, "drive").pipe(Effect.provide(h.layer));
+        expect(placed).toEqual({ result: "duplicate", action: "drive", status: "running" });
+        expect(h.automation.jobs).toHaveLength(1);
+      }),
   );
 
   it.effect("an insert that fails for any other reason fails with that error", () =>
