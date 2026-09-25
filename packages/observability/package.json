@@ -1,0 +1,30 @@
+{
+  "name": "@oligarchy/observability",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./dsn": "./src/dsn.ts",
+    "./instrument": "./src/instrument.ts",
+    "./log": "./src/log.ts",
+    "./sentry": "./src/sentry.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "@sentry/bun": "catalog:",
+    "@sentry/effect": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -3,8 +3,8 @@
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
-(`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`) and phase 5
-(`@oligarchy/db`). The rest of
+(`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
+(`@oligarchy/db`) and phase 6 (`@oligarchy/observability`). The rest of
 this file is the plan for the remaining phases and the reasoning behind each choice; a phase's
 checklist is ticked as it lands.
 
@@ -299,15 +299,15 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 6: `@oligarchy/observability`**
 
-- [ ] TEST (move) the `Log rows` describe of `test/observability/log.unit.test.ts` to
+- [x] TEST (move) the `Log rows` describe of `test/observability/log.unit.test.ts` to
       `packages/observability/test/log.unit.test.ts`, on `LogLive` with an inline `LogStore`
       fake. Happy: each row is inserted, then its line is written to stdout, in call order, and
       no line appears before its row has landed; `flush` waits for the last line. Unhappy: a
       refused row still writes its line, then `db: log insert failed: <detail>`, then reports the
       failure to the reporters, in that order, and the rows behind it still land; an interrupt
       mid-drain writes nothing more and is not reported.
-- [ ] TEST (move) `test/observability/sentry.unit.test.ts` to `packages/observability/test/`.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the instrumented processes preload the
+- [x] TEST (move) `test/observability/sentry.unit.test.ts` to `packages/observability/test/`.
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the instrumented processes preload the
       package's `instrument.ts`, in the package scripts and the wrappers.
 
 **Phase 7: `@oligarchy/linear`**
@@ -666,13 +666,27 @@ Decided while working the phase:
 
 **Phase 6: `@oligarchy/observability`**
 
-- [ ] Create `packages/observability` with `sentry.ts`, `instrument.ts`, `dsn.ts` and `log.ts`
+- [x] Create `packages/observability` with `sentry.ts`, `instrument.ts`, `dsn.ts` and `log.ts`
       holding `LogLive`: `Log.layer((write, report) => makeSink(store.insertLog, write, report))`
       over `LogStore`. `makeSink`, its queue, and the `Row` alias derived from
       `LogStore.insertLog` stay here; `LogRow` is the type `offer` accepts.
-- [ ] The four servers' `main.ts` and `ctrl/command.ts`, which build the row-writing log, use `Observability.LogLive` where
+- [x] The four servers' `main.ts` and `ctrl/command.ts`, which build the row-writing log, use `Observability.LogLive` where
       they used `Log.Log.layer`.
-- [ ] Update every `--preload` path and the dashboard's `dsn` import.
+- [x] Update every `--preload` path and the dashboard's `dsn` import.
+
+Decided while working the phase:
+
+- The moved sentry test used two errors from above and beside the package (`ApiErrors.BadRequest`
+  from routes, `QemuStartError` from the staged root file) as "an error marked
+  `[ErrorReporter.ignore]`" and "any tagged error"; it now declares two of its own, so the
+  package's tests import only its dependencies. `@effect/platform-node` is a devDependency for the
+  one test that serves a request through `NodeHttpServer.layerTest`.
+- The moved `Log rows` test's interrupt case: the drain's interrupt-only branch is reached only
+  while the drain fiber itself is being interrupted (no insert answers an interrupt on its own,
+  and a fiber that is being interrupted cannot be observed from a test without exposing the
+  fiber), so the case is not written; the branch stays as it was.
+- `@sentry/bun`, `@sentry/effect` and `@sentry/cloudflare` join the catalog, so the three stay
+  one version; the root keeps only `@sentry/cloudflare`.
 
 **Phase 7: `@oligarchy/linear`**
 

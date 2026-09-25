@@ -2,9 +2,9 @@ import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Cause, Context, Effect, Exit, Layer, Redacted, Scope } from "effect";
 import { Pool } from "pg";
-import * as DbErrors from "@oligarchy/db/errors";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Render from "@oligarchy/log/render";
+import * as Errors from "./errors.ts";
 import * as DbSchema from "./schema.ts";
 
 export type Db = NodePgDatabase<typeof DbSchema> & { readonly $client: Pool };
@@ -18,11 +18,11 @@ export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 // store, so dropping the parameter keeps the url's exact semantics; sslmode=verify-full stays.
 export const normalizeDatabaseUrl = (
   url: Redacted.Redacted,
-): Effect.Effect<Redacted.Redacted, DbErrors.DatabaseError> =>
+): Effect.Effect<Redacted.Redacted, Errors.DatabaseError> =>
   Effect.gen(function* () {
     const raw = Redacted.value(url);
     if (!URL.canParse(raw)) {
-      return yield* DbErrors.DatabaseError.make({
+      return yield* Errors.DatabaseError.make({
         operation: "connect",
         message: "db: database url is not a valid url",
       });
@@ -35,8 +35,8 @@ export const normalizeDatabaseUrl = (
     return Redacted.make(parsed.toString());
   });
 
-const databaseError = (operation: string, thrown: unknown): DbErrors.DatabaseError =>
-  DbErrors.DatabaseError.make({
+const databaseError = (operation: string, thrown: unknown): Errors.DatabaseError =>
+  Errors.DatabaseError.make({
     operation,
     message: ExternalFailure.describeThrowable(thrown, "database request failed"),
     cause: ExternalFailure.causeOf(thrown),
@@ -46,7 +46,7 @@ const databaseError = (operation: string, thrown: unknown): DbErrors.DatabaseErr
 export const attempt = <A>(
   operation: string,
   query: () => Promise<A>,
-): Effect.Effect<A, DbErrors.DatabaseError> =>
+): Effect.Effect<A, Errors.DatabaseError> =>
   Effect.tryPromise({ try: query, catch: (thrown) => databaseError(operation, thrown) });
 
 // The body runs inside drizzle's promise transaction; a failing body throws its Exit so the
@@ -55,11 +55,11 @@ export const runInTransaction = <TX, A, E, R>(
   operation: string,
   begin: (body: (tx: TX) => Promise<A>) => Promise<A>,
   body: (tx: TX) => Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | DbErrors.DatabaseError, R> =>
+): Effect.Effect<A, E | Errors.DatabaseError, R> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<R>();
     const rolledBack: { cause: Cause.Cause<E> | undefined } = { cause: undefined };
-    const attempted: Effect.Effect<A, Cause.Cause<E> | DbErrors.DatabaseError> = Effect.tryPromise({
+    const attempted: Effect.Effect<A, Cause.Cause<E> | Errors.DatabaseError> = Effect.tryPromise({
       try: () =>
         begin(async (tx) => {
           const exit = await Effect.runPromiseExitWith(context)(body(tx));
@@ -73,7 +73,7 @@ export const runInTransaction = <TX, A, E, R>(
     });
     return yield* Effect.catch(
       attempted,
-      (failure): Effect.Effect<never, E | DbErrors.DatabaseError> =>
+      (failure): Effect.Effect<never, E | Errors.DatabaseError> =>
         Cause.isCause(failure) ? Effect.failCause(failure) : Effect.fail(failure),
     );
   });
@@ -82,17 +82,17 @@ export type DatabaseService = {
   readonly run: <A>(
     operation: string,
     query: (db: Db) => Promise<A>,
-  ) => Effect.Effect<A, DbErrors.DatabaseError>;
+  ) => Effect.Effect<A, Errors.DatabaseError>;
   readonly transaction: <A, E, R>(
     operation: string,
     body: (tx: Tx) => Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | DbErrors.DatabaseError, R>;
-  readonly ping: Effect.Effect<void, DbErrors.DatabaseError>;
+  ) => Effect.Effect<A, E | Errors.DatabaseError, R>;
+  readonly ping: Effect.Effect<void, Errors.DatabaseError>;
 };
 
 const makeDatabase = (
   url: Redacted.Redacted,
-): Effect.Effect<DatabaseService, DbErrors.DatabaseError, Scope.Scope> =>
+): Effect.Effect<DatabaseService, Errors.DatabaseError, Scope.Scope> =>
   Effect.gen(function* () {
     const connectionString = Redacted.value(yield* normalizeDatabaseUrl(url));
     const context = yield* Effect.context();
@@ -131,6 +131,6 @@ const makeDatabase = (
 export class Database extends Context.Service<Database>()("@oligarchy/db/Database", {
   make: makeDatabase,
 }) {
-  static readonly layer = (url: Redacted.Redacted): Layer.Layer<Database, DbErrors.DatabaseError> =>
+  static readonly layer = (url: Redacted.Redacted): Layer.Layer<Database, Errors.DatabaseError> =>
     Layer.effect(this)(this.make(url));
 }

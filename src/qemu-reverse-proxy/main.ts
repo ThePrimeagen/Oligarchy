@@ -15,10 +15,10 @@ import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
+import * as Observability from "@oligarchy/observability/log";
+import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
 import * as Linear from "../ctrl/linear.ts";
-import * as RowLog from "../observability/log.ts";
-import * as Sentry from "../observability/sentry.ts";
 import * as StaleServers from "../shared/stale-servers.ts";
 import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
@@ -88,7 +88,7 @@ const MainLive = Layer.mergeAll(
   SetupRequests.SetupRequestStore.layer,
   Tests.TestStore.layer,
   LinearLive,
-  RowLog.layer,
+  Observability.LogLive,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),

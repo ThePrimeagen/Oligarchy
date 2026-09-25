@@ -16,7 +16,8 @@ exist.
 - Run on Bun 1.4 (CI installs 1.4.2), runtime and package manager both; there is no Node and no
   npm. Every executable is a `#!/bin/sh` wrapper running `bun --no-env-file` on the process's
   `main.ts` as written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
-  `./automation-client` and `./ctrl` add `--preload ./src/observability/instrument.ts`), and the
+  `./automation-client` and `./ctrl` add `--preload ./packages/observability/src/instrument.ts`),
+  and the
   session REPL spawns its children the same way. The exceptions are `./client` and `./driver`. A
   driving agent calls `./client` many times per task, so it runs `bun build --target=bun --bytecode`
   of its entry from `node_modules/.cache/oligarchy/client/`, rebuilt when a source (under `src/` or
@@ -62,12 +63,13 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today five: `@oligarchy/shared`, the
+  dashboard, the tests); `packages/*` are its libraries, today six: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
   from outside and the runner that installs it (Config and Runtime entry, below),
-  `@oligarchy/db`, the whole database (Database and Migrations, below), and `@oligarchy/routes`,
-  the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  `@oligarchy/db`, the whole database (Database and Migrations, below),
+  `@oligarchy/observability`, where lines, failures and spans go once written (Log and Sentry,
+  below), and `@oligarchy/routes`, the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
@@ -86,8 +88,8 @@ exist.
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
-  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` at 3 and `@oligarchy/routes` at
-  5, holding `http`'s
+  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` at 3, `@oligarchy/observability`
+  at 4 and `@oligarchy/routes` at 5, holding `http`'s
   slot). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
@@ -147,8 +149,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   other), the tooling files,
   `public/` and `prompts/`, the operator documents, this document, `src/`, `test/` and
   `packages/`.
-- `src/` is one directory per process plus the shared kernel (`src/shared/`,
-  `src/observability/`); `main.ts` files are the entries.
+- `src/` is one directory per process plus what is left of the shared kernel (`src/shared/`:
+  the staged errors, `process-usage.ts`, `stale-servers.ts`); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
   schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
@@ -186,7 +188,15 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Effect.logError` for pool errors on purpose, because a pool failure routed through the
   row-writing `Log` would try to insert a row through the failing pool. Its admission rule: a
   store reads and writes rows and returns them; refused are a loop, a clock, a call to another
-  system and a log line. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  system and a log line. `packages/observability/src/` is where lines, failures and spans go once
+  written: `log.ts` (`LogLive`, the row-writing `Log` layer: one drain fiber takes each line
+  with its row in call order, inserts the row, then writes the line; a refused row writes the
+  line, then `db: log insert failed: <detail>`, then reports the failure; a flush marker resolves
+  when the last line is out), `sentry.ts` (the reporter, the tracer and the spans), `instrument.ts`
+  (the SDK, preloaded) and `dsn.ts`. It imports `effect`, Sentry, `@oligarchy/db`,
+  `@oligarchy/log`, `@oligarchy/shared` and its own files. Its admission rule: a destination for
+  lines, failures and spans; refused are text formatting (log) and anything a package would need
+  in order to log. `packages/routes/src/` holds `api.ts`, `contract.ts` and
   `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
@@ -231,8 +241,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `import * as DbSchema from "@oligarchy/db/schema"`, `import * as DbErrors from
   "@oligarchy/db/errors"`. The five errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`,
   `EnvErrors` and `DbErrors` everywhere so none shadows the main package's staged `Errors`; when
-  that file is gone, `SharedErrors` becomes `Errors`. The root's `src/observability/log.ts` is the row-writing `Log` layer, imported as
-  `RowLog` by the five graphs that build it.
+  that file is gone, `SharedErrors` becomes `Errors`. The observability package is `import * as
+  Observability from "@oligarchy/observability/log"` (`Observability.LogLive`, the row-writing
+  `Log` layer the five graphs build), `import * as Sentry from "@oligarchy/observability/sentry"`
+  and `import * as Dsn from "@oligarchy/observability/dsn"`.
 - Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
   every other Effect module as a namespace by its module path
   (`import * as Command from "effect/unstable/cli/Command"`,
@@ -1001,7 +1013,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   R>)`, built once with the `write` that puts a rendered line on stdout and the `report` that
   reaches the reporters captured at build, so a sink can name its own failure without depending
   on the `Log` it is part of. `Log.layerStdout`'s sink writes each line as it is offered and has
-  nothing to flush. The row-writing sink, `src/observability/log.ts` (`RowLog.layer`, over
+  nothing to flush. The row-writing sink, `@oligarchy/observability/log` (`Observability.LogLive`, over
   `LogStore`), `Queue.offerUnsafe`s each line with its row to a `Queue.unbounded` drained by one
   `forkScoped` fiber that inserts the row, then writes the line, so lines land in call order and
   each stdout line trails its insert. The queue is unbounded by policy: a log call never blocks
@@ -1039,10 +1051,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   refusals set `skipSentry`: they are the client's mistake.
 - `flush` waits for the sink's flush: for the row sink, until every offered row has been inserted
   or its failure reported; the sink's finalizer runs `flush` before the drain fiber is
-  interrupted, and `RowLog.layer` sits above `Database` so the flush completes before the pool
+  interrupted, and `Observability.LogLive` sits above `Database` so the flush completes before the pool
   closes. `Log.layer` reads `ErrorReporter.CurrentErrorReporters` once at build, so `SentryLive`
   is provided beneath it, never only to callers. `Log.layerStdout` persists nothing: it is for
-  tests. The automation server persists through `RowLog.layer` once it has a database; its lines use
+  tests. The automation server persists through `Observability.LogLive` once it has a database; its lines use
   `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` renders, builds the row and offers both at once. `console.*`
@@ -1051,14 +1063,14 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 
 ## Sentry
 
-- Initialise the SDK before any Effect code in `src/observability/instrument.ts`, loaded by the
+- Initialise the SDK before any Effect code in `packages/observability/src/instrument.ts`, loaded by the
   `qemu-server`, `qemu-reverse-proxy`, `automation-server`, `automation-client` and `ctrl` wrappers' `--preload`: `Sentry.init({ dsn: SENTRY_DSN,
   tracesSampleRate: 1,
   traceLifecycle: "stream", integrations: [Sentry.httpIntegration({ spans: false }),
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
   hard-coded constant (public by design) and is shared with the dashboard.
 - `@sentry/bun` (Sentry's SDK for the runtime, `@sentry/node` underneath) and `@sentry/effect`
-  are imported only in `src/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
+  are imported only in `packages/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
   three are pinned to one version so `@sentry/core` is not duplicated (`SentryEffectTracer`
   relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
@@ -1088,7 +1100,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - Test the policy with `ErrorReporter.make` collecting errors (`test/support/reporter.ts`), a
   recording `Tracer` (`test/support/tracer.ts`) and an in-memory Sentry transport; never mock it.
 
-The reporter in `src/observability/sentry.ts` (`tag`/`toSentryLevel` are its helpers): one
+The reporter in `packages/observability/src/sentry.ts` (`tag`/`toSentryLevel` are its helpers): one
 `captureException` per reported cause, a `LogLine` unwrapped to the cause it carries.
 
 ```ts
@@ -1174,7 +1186,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   it fails, so only a defect, which nothing logged, is printed. `Env.run` is the one
   `NodeRuntime.runMain` call, with error reporting off, the platform (`NodeServices.layer`)
   provided beneath, and the no-op `error` listeners on `process.stdout` and `process.stderr`
-  (Log, above). `db/migrate.ts` is not a `Command`, so it runs a bare effect through `Env.run`,
+  (Log, above). `packages/db/src/migrate.ts` is not a `Command`, so it runs a bare effect through
+  `Env.run`,
   guarded by `import.meta.main`. `src/session/main.ts` uses `Env.program` and its own
   `Runtime.makeRunMain`, because its REPL answers SIGTERM and SIGHUP itself.
   `test/repo/architecture.unit.test.ts` pins where each lives. Every other module returns an
@@ -1264,7 +1277,10 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
   with `.ts`, the shared package importing only `effect` and itself, the log and routes packages
-  only `effect`, shared and themselves, none of the three reading `process.*`, the main package
+  only `effect`, shared and themselves, none of the three reading `process.*`, every package's
+  sources importing only the packages its `package.json` declares and itself by relative path
+  (a bare `@oligarchy/<self>/…` resolves through the root's install, which tsc and Bun both
+  allow and the isolated linker means to refuse), the main package
   reaching a
   workspace package only by an exported subpath, every package in the layer list and depending
   only on strictly lower layers, every package's lanes, deep-path Effect imports, no `as` but
@@ -1337,7 +1353,7 @@ change ships (Tests, above).
   `class-self-mismatch`, `non-object-effect-service-type`, `schema-opaque-instance-member`,
   `overridden-schema-constructor`, `schema-literal-non-finite`, `outdated-api`,
   `promise-in-effect-success`, `strict-effect-provide`, the last off only for `src/**/main.ts`,
-  `packages/env/src/run.ts`, `src/observability/instrument.ts`, `test/**`, `packages/*/test/**`
+  `packages/env/src/run.ts`, `packages/observability/src/instrument.ts`, `test/**`, `packages/*/test/**`
   and `vitest.global-setup.ts`); `typescript/no-floating-promises` off for `test/**`,
   `packages/*/test/**` and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,

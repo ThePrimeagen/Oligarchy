@@ -12,10 +12,10 @@ import * as Servers from "@oligarchy/db/servers";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
 import * as Log from "@oligarchy/log/log";
+import * as Observability from "@oligarchy/observability/log";
+import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as RowLog from "../observability/log.ts";
-import * as Sentry from "../observability/sentry.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as ProcessUsage from "../shared/process-usage.ts";
 import * as AutomationClientCommand from "./command.ts";
@@ -86,7 +86,7 @@ const DatabaseLive = Layer.unwrap(
 const MainLive = Layer.mergeAll(
   Servers.ServerStore.layer,
   ProcessStats.ProcessStatsStore.layer,
-  RowLog.layer,
+  Observability.LogLive,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
   Layer.provideMerge(DatabaseLive),

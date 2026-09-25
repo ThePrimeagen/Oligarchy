@@ -56,7 +56,7 @@ const WORKSPACES = readdirSync(join(root, "packages"), { withFileTypes: true })
 
 // Every process and what its wrapper and script preload before the entry loads: Sentry on the
 // instrumented ones, and on viz the Solid JSX transform its OpenTUI components are written for.
-const INSTRUMENT = "src/observability/instrument.ts";
+const INSTRUMENT = "packages/observability/src/instrument.ts";
 const SOLID_JSX = "src/viz/preload.ts";
 const PROCESSES: Readonly<Record<string, ReadonlyArray<string>>> = {
   client: [],

@@ -27,11 +27,11 @@ import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as Log from "@oligarchy/log/log";
 import * as Failure from "@oligarchy/log/render";
+import * as Observability from "@oligarchy/observability/log";
 import * as Contract from "@oligarchy/routes/contract";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as RowLog from "../observability/log.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Linear from "./linear.ts";
 import * as Prompts from "./prompts.ts";
@@ -73,7 +73,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, DbErrors.Da
     DebugLogs.DebugLogStore.layer,
     Diagnosis.DiagnosisStore.layer,
     Servers.ServerStore.layer,
-    RowLog.layer,
+    Observability.LogLive,
   ).pipe(
     Layer.provideMerge(Actions.ActionStore.layer),
     Layer.provideMerge(Logs.LogStore.layer),

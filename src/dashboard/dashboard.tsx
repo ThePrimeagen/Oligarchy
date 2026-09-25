@@ -50,7 +50,7 @@ import { FollowBody, FollowFrame } from "./follow.tsx";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { createTestSuiteRun, SuiteRequestError } from "./suite.ts";
 import { isTicket } from "./ticket.ts";
-import { SENTRY_DSN } from "../observability/dsn.ts";
+import * as Dsn from "@oligarchy/observability/dsn";
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -1129,7 +1129,7 @@ export const scheduled = async (
 // so Sentry keeps hooking its error handler for a route that throws; the cron is added to it.
 export default Sentry.withSentry(
   () => ({
-    dsn: SENTRY_DSN,
+    dsn: Dsn.SENTRY_DSN,
     dataCollection: {},
   }),
   Object.assign(app, { scheduled }),

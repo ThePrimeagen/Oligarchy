@@ -16,10 +16,10 @@ import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
 import * as Log from "@oligarchy/log/log";
+import * as Observability from "@oligarchy/observability/log";
+import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
 import * as Linear from "../ctrl/linear.ts";
-import * as RowLog from "../observability/log.ts";
-import * as Sentry from "../observability/sentry.ts";
 import * as StaleServers from "../shared/stale-servers.ts";
 import * as Backlog from "./backlog.ts";
 import * as AutomationClient from "./client.ts";
@@ -83,7 +83,7 @@ const LinearLive = Layer.unwrap(
 // live-server list and the logs rows. Sentry sits beneath Log so Log captures the reporter.
 // Lines land in logs with location/agentId "automation"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(
-  RowLog.layer,
+  Observability.LogLive,
   Handlers.LinearWebhookSecret.layer,
   AutomationClient.OligarchyToken.layer,
   Tests.TestStore.layer,
