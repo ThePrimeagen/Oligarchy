@@ -1,5 +1,5 @@
 import { Array as Arr, Effect, FileSystem, Option, Result } from "effect";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "@oligarchy/jobs/errors";
 
 const besideModule = (relative: string): string =>
   decodeURIComponent(new URL(relative, import.meta.url).pathname);
