@@ -1,9 +1,9 @@
 import { Console, Effect, Schema } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
-import * as Config from "../config.ts";
-import * as EnvFile from "../env-file.ts";
-import * as HarnessConfig from "../harness/config.ts";
+import * as Config from "@oligarchy/env/config";
+import * as EnvFile from "@oligarchy/env/env-file";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Loop from "./loop.ts";
 
 // drive and mint are the harness. A diagnose is opencode, and this program does not run it.
@@ -38,7 +38,7 @@ export const makeDriverCommand = <E, R>(
     flags,
     Effect.fn("driver")(function* (input: Command.Command.Config.Infer<typeof flags>) {
       // The file is reported before the token, so a broken config is never a missing key.
-      const config = yield* HarnessConfig.load;
+      const config = yield* Oligarchy.load;
       const token = yield* Config.openRouterToken;
       const stopped = yield* run({
         model: input.action === "mint" ? config.models.mint : config.models.drive,

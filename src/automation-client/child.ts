@@ -3,7 +3,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Render from "@oligarchy/log/render";
-import * as Errors from "./shared/errors.ts";
+import * as Errors from "../shared/errors.ts";
 
 export const FORCE_KILL_AFTER = "5 seconds";
 

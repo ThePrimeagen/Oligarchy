@@ -18,13 +18,13 @@ import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Client from "../../src/db/client.ts";
 import * as QemuServerCommand from "../../src/qemu-server/command.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as Support from "../support/config.ts";
 import * as FakeLog from "../support/log.ts";
 
 const CliTestLayer = Layer.mergeAll(
@@ -109,13 +109,13 @@ const run = (
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
   ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
-  env: Record<string, string> = {},
+  env: Config.Values = {},
 ) =>
   Command.runWith(QemuServerCommand.makeQemuServerCommand(server), { version: Api.VERSION })(
     args,
   ).pipe(
     Effect.provide(
-      Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping), Support.withEnv(env)),
+      Layer.mergeAll(CliTestLayer, log.layer, fakeDatabase(ping), Config.fromValues(env)),
     ),
   );
 

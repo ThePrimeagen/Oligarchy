@@ -3,6 +3,7 @@ import { it, layer } from "@effect/vitest";
 import { eq, sql } from "drizzle-orm";
 import { Cause, Context, Effect, Exit, Layer, Option, Redacted, Scope } from "effect";
 import { TestConsole } from "effect/testing";
+import * as Config from "@oligarchy/env/config";
 import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Actions from "../../src/db/actions.ts";
@@ -18,7 +19,6 @@ import * as Sessions from "../../src/db/sessions.ts";
 import * as Automation from "../../src/db/automation.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as Tests from "../../src/db/tests.ts";
-import * as Support from "../support/config.ts";
 import * as Postgres from "../support/postgres.ts";
 
 // Selects the next pending job and marks it running, which is what a placement does once a
@@ -62,7 +62,7 @@ Postgres.describeWithDatabase("database", () => {
         expect(lines).toEqual(["database migrations applied", "database migrations applied"]);
       }).pipe(
         Effect.provide(
-          Support.withEnv({
+          Config.fromValues({
             // A dead app url: the program must migrate the container, not this.
             DATABASE_URL: "postgres://user:pw@127.0.0.1:1/oligarchy",
             DATABASE_MIGRATION_URL: Postgres.getDbUrl(),
@@ -77,7 +77,7 @@ Postgres.describeWithDatabase("database", () => {
         Effect.gen(function* () {
           const error = yield* Effect.flip(Migrate.program);
           expect(error.message).toBe("DATABASE_MIGRATION_URL is not set");
-        }).pipe(Effect.provide(Support.withEnv({ DATABASE_URL: Postgres.getDbUrl() }))),
+        }).pipe(Effect.provide(Config.fromValues({ DATABASE_URL: Postgres.getDbUrl() }))),
     );
 
     scoped.effect("SessionStore writes the documented columns and stamps one now()", () =>

@@ -3,14 +3,14 @@ import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Redacted, Schema } from "effect";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as Config from "@oligarchy/env/config";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Log from "@oligarchy/log/log";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
-import * as Config from "../../src/config.ts";
-import * as HarnessConfig from "../../src/harness/config.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
@@ -91,9 +91,9 @@ const appConfig = JSON.stringify({
 });
 
 const configFs = FileSystem.layerNoop({
-  exists: (path) => Effect.succeed(path === HarnessConfig.PATH),
+  exists: (path) => Effect.succeed(path === Oligarchy.PATH),
   readFileString: (path) =>
-    path === HarnessConfig.PATH ? Effect.succeed(appConfig) : Effect.die(`unexpected read ${path}`),
+    path === Oligarchy.PATH ? Effect.succeed(appConfig) : Effect.die(`unexpected read ${path}`),
 });
 
 const serve = (fixed: Fixture) =>

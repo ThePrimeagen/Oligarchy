@@ -5,7 +5,8 @@
     "": {
       "name": "oligarchy",
       "dependencies": {
-        "@effect/platform-node": "4.0.0-rc.112",
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/env": "workspace:*",
         "@oligarchy/log": "workspace:*",
         "@oligarchy/routes": "workspace:*",
         "@oligarchy/shared": "workspace:*",
@@ -37,6 +38,21 @@
         "typescript": "catalog:",
         "vitest": "catalog:",
         "wrangler": "^4.127.1",
+      },
+    },
+    "packages/env": {
+      "name": "@oligarchy/env",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/log": {
@@ -83,6 +99,7 @@
     "effect": "4.0.0-rc.112",
   },
   "catalog": {
+    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/vitest": "4.0.0-rc.112",
     "@types/node": "^26.4.0",
     "effect": "4.0.0-rc.112",
@@ -335,6 +352,8 @@
     "@msgpackr-extract/msgpackr-extract-linux-x64": ["@msgpackr-extract/msgpackr-extract-linux-x64@3.0.4", "", { "os": "linux", "cpu": "x64" }, "sha512-8TNXMEjJc3QEy7R/x1INhgiU+XakDAFUzBhaz7+Rbrs8NH5UQeHQxxmzsSBJGyV6I1jW79undiQm8tOI+D+8FQ=="],
 
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4", "", { "os": "win32", "cpu": "x64" }, "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ=="],
+
+    "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
     "@oligarchy/log": ["@oligarchy/log@workspace:packages/log"],
 

@@ -6,9 +6,9 @@ import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import * as ClientCommand from "../../src/client/command.ts";
-import * as Support from "../support/config.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
@@ -36,7 +36,7 @@ const SpawnerStub = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
 );
 
 type Options = {
-  readonly env?: Record<string, string>;
+  readonly env?: Config.Values;
   readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
   readonly stdio?: Stdio.Captured;
@@ -46,7 +46,7 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
   Command.runWith(ClientCommand.makeClientCommand(), { version: Api.VERSION })(args).pipe(
     Effect.provide(
       Layer.mergeAll(
-        Support.withEnv(options.env ?? { OLIGARCHY_TOKEN: TOKEN }),
+        Config.fromValues(options.env ?? { OLIGARCHY_TOKEN: TOKEN }),
         options.http ?? FakeHttp.die,
         (options.stdio ?? Stdio.capture()).layer,
         options.fs ?? NodeFileSystem.layer,

@@ -3,8 +3,8 @@ import { it } from "@effect/vitest";
 import { Effect, Fiber, Layer, PlatformError, Sink, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import * as Cli from "../src/cli.ts";
-import * as FakeSpawner from "./support/fake-spawner.ts";
+import * as Child from "../../src/automation-client/child.ts";
+import * as FakeSpawner from "../support/fake-spawner.ts";
 
 // How long a run waits for stderr to end after the command exited; then the tail so far is the tail.
 const STDERR_GRACE = "2 seconds";
@@ -16,7 +16,7 @@ const settle = Effect.gen(function* () {
   }
 });
 
-describe("Cli.run happy path", () => {
+describe("Child.run happy path", () => {
   it.effect(
     "spawns the command with its args, its stdout inherited, and succeeds when it exits 0",
     () =>
@@ -26,7 +26,7 @@ describe("Cli.run happy path", () => {
           stdout: "printed result",
           stderr: "noise",
         }));
-        yield* Cli.run("tool", ["--flag", "value"]).pipe(Effect.provide(spawner.layer));
+        yield* Child.run("tool", ["--flag", "value"]).pipe(Effect.provide(spawner.layer));
         expect(spawner.spawned).toHaveLength(1);
         expect(spawner.spawned[0]).toMatchObject({
           command: "tool",
@@ -38,7 +38,7 @@ describe("Cli.run happy path", () => {
             extendEnv: true,
             detached: false,
             killSignal: "SIGTERM",
-            forceKillAfter: Cli.FORCE_KILL_AFTER,
+            forceKillAfter: Child.FORCE_KILL_AFTER,
           },
         });
       }),
@@ -47,7 +47,7 @@ describe("Cli.run happy path", () => {
   it.effect("runs with no variables of its own when none are given", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 0 }));
-      yield* Cli.run("tool", []).pipe(Effect.provide(spawner.layer));
+      yield* Child.run("tool", []).pipe(Effect.provide(spawner.layer));
       expect(spawner.spawned[0]?.options).toMatchObject({ env: {}, extendEnv: true });
     }),
   );
@@ -56,7 +56,7 @@ describe("Cli.run happy path", () => {
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({}));
       const running = yield* Effect.forkChild(
-        Cli.run("tool", ["wait"]).pipe(Effect.provide(spawner.layer)),
+        Child.run("tool", ["wait"]).pipe(Effect.provide(spawner.layer)),
       );
       yield* Effect.yieldNow;
       expect(running.pollUnsafe()).toBeUndefined();
@@ -78,7 +78,7 @@ describe("Cli.run happy path", () => {
           stderrStaysOpen: true,
         }));
         const running = yield* Effect.forkChild(
-          Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+          Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
         );
         yield* settle;
         expect(running.pollUnsafe()).toBeUndefined();
@@ -94,7 +94,7 @@ describe("Cli.run happy path", () => {
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({}));
       const running = yield* Effect.forkChild(
-        Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
       );
       yield* Effect.yieldNow;
       yield* spawner.spawned[0]?.exit(0, "last words\n") ?? Effect.void;
@@ -104,14 +104,14 @@ describe("Cli.run happy path", () => {
   );
 });
 
-describe("Cli.run unhappy path", () => {
+describe("Child.run unhappy path", () => {
   it.effect("fails with the spawn error when the binary cannot be opened", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({
         spawnError: "spawn tool ENOENT",
       }));
       const error = yield* Effect.flip(
-        Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
       );
       expect(error._tag).toBe("CliFailed");
       expect(error.command).toBe("tool");
@@ -126,7 +126,7 @@ describe("Cli.run unhappy path", () => {
         stderr: "out of token credits\n",
       }));
       const error = yield* Effect.flip(
-        Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
       );
       expect(error._tag).toBe("CliFailed");
       expect(error.message).toBe("out of token credits");
@@ -143,15 +143,15 @@ describe("Cli.run unhappy path", () => {
           stderr: `${head}\nbinary \u0000junk\u0000 then\nError: Invalid upload request.\n`,
         }));
         const error = yield* Effect.flip(
-          Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+          Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
         );
         expect(error._tag).toBe("CliFailed");
         expect(error.message.includes("\u0000")).toBe(false);
-        expect(error.message.length).toBeLessThanOrEqual(Cli.STDERR_TAIL);
+        expect(error.message.length).toBeLessThanOrEqual(Child.STDERR_TAIL);
         expect(error.message.endsWith("Error: Invalid upload request.")).toBe(true);
         expect(error.message).toContain("binary junk then");
         expect(error.message.startsWith("x")).toBe(true);
-        expect(error.message.length).toBe(Cli.STDERR_TAIL);
+        expect(error.message.length).toBe(Child.STDERR_TAIL);
       }),
   );
 
@@ -164,7 +164,7 @@ describe("Cli.run unhappy path", () => {
         stderr: `Error: Invalid upload request.\n${"\u0000".repeat(20_000)}`,
       }));
       const error = yield* Effect.flip(
-        Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
+        Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer)),
       );
       expect(error.message).toBe("Error: Invalid upload request.");
     }),
@@ -173,7 +173,7 @@ describe("Cli.run unhappy path", () => {
   it.effect("names the exit when the command exits non-zero with empty stderr", () =>
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({ exitCode: 2 }));
-      const error = yield* Effect.flip(Cli.run("tool", []).pipe(Effect.provide(spawner.layer)));
+      const error = yield* Effect.flip(Child.run("tool", []).pipe(Effect.provide(spawner.layer)));
       expect(error.message).toBe("tool exited 2");
     }),
   );
@@ -188,7 +188,7 @@ describe("Cli.run unhappy path", () => {
           stderrStaysOpen: true,
         }));
         const running = yield* Effect.forkChild(
-          Effect.flip(Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer))),
+          Effect.flip(Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer))),
         );
         yield* settle;
         expect(running.pollUnsafe()).toBeUndefined();
@@ -203,7 +203,7 @@ describe("Cli.run unhappy path", () => {
     Effect.gen(function* () {
       const spawner = FakeSpawner.fakeSpawner(() => ({}));
       const running = yield* Effect.forkChild(
-        Effect.flip(Cli.run("tool", ["run"]).pipe(Effect.provide(spawner.layer))),
+        Effect.flip(Child.run("tool", ["run"]).pipe(Effect.provide(spawner.layer))),
       );
       yield* Effect.yieldNow;
       yield* spawner.spawned[0]?.die("SIGKILL") ?? Effect.void;
@@ -241,7 +241,7 @@ describe("Cli.run unhappy path", () => {
           ),
         ),
       );
-      const error = yield* Effect.flip(Cli.run("tool", []).pipe(Effect.provide(layer)));
+      const error = yield* Effect.flip(Child.run("tool", []).pipe(Effect.provide(layer)));
       expect(error._tag).toBe("CliFailed");
       expect(error.message).toBe("stderr pipe broken");
     }),

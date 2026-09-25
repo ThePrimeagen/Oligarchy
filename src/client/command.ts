@@ -1,5 +1,5 @@
 import * as Command from "effect/unstable/cli/Command";
-import * as EnvFile from "../env-file.ts";
+import * as EnvFile from "@oligarchy/env/env-file";
 import * as Actions from "./actions.ts";
 import * as Flags from "./flags.ts";
 

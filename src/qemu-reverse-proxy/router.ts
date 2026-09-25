@@ -8,13 +8,13 @@ import type * as HttpClientResponse from "effect/unstable/http/HttpClientRespons
 import * as HttpMethod from "effect/unstable/http/HttpMethod";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as Config from "../config.ts";
 import * as Servers from "../db/servers.ts";
 import * as Setup from "./setup.ts";
 import * as SessionStore from "../db/sessions.ts";

@@ -11,7 +11,7 @@ import {
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import * as Config from "../config.ts";
+import * as Config from "@oligarchy/env/config";
 import * as Errors from "../shared/errors.ts";
 
 export const LINEAR_API_URL = Config.DEFAULT_LINEAR_API_URL;

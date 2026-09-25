@@ -1,9 +1,8 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Console, Effect, Layer } from "effect";
+import * as Config from "@oligarchy/env/config";
+import * as Env from "@oligarchy/env/run";
 import * as Render from "@oligarchy/log/render";
-import * as Config from "../config.ts";
 import * as Client from "./client.ts";
 
 export const migrateDatabase = Effect.gen(function* () {
@@ -18,16 +17,13 @@ export const program = Effect.gen(function* () {
   yield* migrateDatabase.pipe(Effect.provideService(Client.Database, database));
 }).pipe(Effect.scoped);
 
+// Not a Command, so not Env.program: the one entry that is a bare effect, still run by the runner.
+// The print sits outside the environment, so an unreadable `.env` prints its cause too.
 if (import.meta.main) {
-  const MainLive = Layer.provideMerge(Config.providerLayer, NodeServices.layer);
-  NodeRuntime.runMain(
+  Env.run(
     Effect.gen(function* () {
-      const services = yield* Layer.build(MainLive);
-      yield* program.pipe(
-        Effect.tapCause((cause) => Console.error(Render.renderFailure(cause))),
-        Effect.provide(services),
-      );
-    }).pipe(Effect.scoped),
-    { disableErrorReporting: true },
+      const services = yield* Layer.build(Config.live);
+      yield* program.pipe(Effect.provide(services));
+    }).pipe(Effect.scoped, Effect.tapCause(Render.reportFailure)),
   );
 }

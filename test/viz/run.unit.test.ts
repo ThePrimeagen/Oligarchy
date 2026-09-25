@@ -5,6 +5,7 @@ import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as Config from "@oligarchy/env/config";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import type * as Automation from "../../src/db/automation.ts";
@@ -13,7 +14,6 @@ import type * as Servers from "../../src/db/servers.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Run from "../../src/viz/run.ts";
 import * as View from "../../src/viz/view.ts";
-import * as Config from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import { type FakeRenderer, fakeRenderer, rows, spans } from "../support/fake-renderer.ts";
 import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawner.ts";
@@ -92,7 +92,7 @@ type Extra = {
   readonly tests?: Stores.FakeTestStore;
   readonly logs?: Stores.FakeLogStore;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
-  readonly env?: Record<string, string>;
+  readonly env?: Config.Values;
 };
 
 const live = (
@@ -112,7 +112,7 @@ const live = (
         screen.layer,
         (extra.spawner ?? fakeSpawner()).layer,
         extra.http ?? FakeHttp.respondWith(() => new Response(null, { status: 404 })),
-        Config.withEnv(extra.env ?? ABORT_ENV),
+        Config.fromValues(extra.env ?? ABORT_ENV),
       ),
     ),
   );

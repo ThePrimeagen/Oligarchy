@@ -9,12 +9,12 @@ import { Effect, FileSystem, Layer, Path, Redacted, Terminal } from "effect";
 import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Config from "@oligarchy/env/config";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Api from "@oligarchy/routes/api";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as DriverCommand from "../../src/driver/command.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as HarnessConfig from "../../src/harness/config.ts";
-import * as Support from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
@@ -69,16 +69,16 @@ const TerminalStub = Layer.succeed(Terminal.Terminal)(
 
 const file = (contents: string | undefined) =>
   FileSystem.layerNoop({
-    exists: (path) => Effect.succeed(path === HarnessConfig.PATH && contents !== undefined),
+    exists: (path) => Effect.succeed(path === Oligarchy.PATH && contents !== undefined),
     readFileString: (path) => {
-      if (path !== HarnessConfig.PATH || contents === undefined) {
+      if (path !== Oligarchy.PATH || contents === undefined) {
         return Effect.die(`unexpected read ${path}`);
       }
       return Effect.succeed(contents);
     },
   });
 
-const app = readFileSync(HarnessConfig.PATH, "utf8");
+const app = readFileSync(Oligarchy.PATH, "utf8");
 
 type Seen = { input: Loop.Input | undefined };
 
@@ -96,7 +96,7 @@ const run = (
   args: ReadonlyArray<string>,
   seen: Seen,
   options?: {
-    readonly env?: Record<string, string>;
+    readonly env?: Config.Values;
     readonly contents?: string | undefined;
     readonly outcome?: Effect.Effect<Loop.Stopped, Loop.Failure>;
   },
@@ -106,7 +106,7 @@ const run = (
   })(args).pipe(
     Effect.provide(
       Layer.mergeAll(
-        Support.withEnv(options?.env ?? { OPENROUTER_API_KEY: TOKEN }),
+        Config.fromValues(options?.env ?? { OPENROUTER_API_KEY: TOKEN }),
         file(options && "contents" in options ? options.contents : app),
         Stdio.capture().layer,
         TerminalStub,
@@ -282,7 +282,7 @@ describe("driver command", () => {
       const missing = yield* Effect.flip(run(FLAGS, seen, { env: {}, contents: undefined }));
       expect(missing._tag).toBe("CommandError");
       if (missing._tag === "CommandError") {
-        expect(missing.message).toContain(HarnessConfig.PATH);
+        expect(missing.message).toContain(Oligarchy.PATH);
         expect(missing.message).toContain("missing");
       }
       expect(seen.input).toBeUndefined();

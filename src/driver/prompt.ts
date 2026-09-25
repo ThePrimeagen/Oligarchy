@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Option } from "effect";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 
 const TEMPLATE = "custom-harness-driving-agent.html";
 
@@ -7,7 +8,7 @@ const TEMPLATE = "custom-harness-driving-agent.html";
 // Reasons, definition, proof, the client tools, the model's last reply, and the action the
 // screenshot is the result of are filled on each turn.
 export const template = readFileSync(
-  new URL(`../../prompts/${TEMPLATE}`, import.meta.url),
+  new URL(`prompts/${TEMPLATE}`, Oligarchy.ROOT),
   "utf8",
 ).trimEnd();
 

@@ -4,6 +4,7 @@ import { NodeFileSystem, NodeServices } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
+import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
@@ -11,7 +12,6 @@ import * as CtrlCommand from "../../src/ctrl/command.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Errors from "../../src/shared/errors.ts";
-import * as Config from "../support/config.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -145,21 +145,21 @@ const harness = (
   // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
   const services =
     options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
-  const program = (args: ReadonlyArray<string>, env: Record<string, string>) =>
+  const program = (args: ReadonlyArray<string>, env: Config.Values) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(
         Layer.mergeAll(
           services,
-          Config.withEnv(env),
+          Config.fromValues(env),
           options.proxy?.layer ?? FakeHttp.die,
           options.reporter?.layer ?? Layer.empty,
         ),
       ),
     );
-  const run = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const run = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
     Effect.exit(program(args, env));
   // The failure itself, for a command refused after parsing.
-  const fail = (args: ReadonlyArray<string>, env: Record<string, string> = WITH_DB) =>
+  const fail = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
     Effect.flip(program(args, env));
   return { stores, log, linear, touched, teams, program, run, fail };
 };

@@ -29,7 +29,7 @@ exist.
   names them. `--no-env-file`
   because Bun's own loader would
   read `.env.local` and `.env.<NODE_ENV>` as well and expand `$` inside values, ahead of
-  `Config.providerLayer`, which reads `.env` alone, as written, for what the environment lacks,
+  `Config.live`, which reads `.env` alone, as written, for what the environment lacks,
   and `--env-file` when one was passed (Config, below). Bun transpiles the sources on load, and `erasableSyntaxOnly` stays on so they
   remain plain JavaScript once the annotations go: no enums, namespaces or parameter properties.
 - `./viz` draws with OpenTUI (`@opentui/core`, cells rendered by a native core behind a
@@ -62,10 +62,11 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today three: `@oligarchy/shared`, the
+  dashboard, the tests); `packages/*` are its libraries, today four: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
-  the service a line is written through (Log, below), and `@oligarchy/routes`, the HTTP contract
-  (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
+  from outside and the runner that installs it (Config and Runtime entry, below), and
+  `@oligarchy/routes`, the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `typescript`, `vitest`,
@@ -83,7 +84,8 @@ exist.
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
-  `@oligarchy/log` at 1 and `@oligarchy/routes` at 5, holding `http`'s slot). A package missing from the list, an upward
+  `@oligarchy/log` at 1, `@oligarchy/env` at 2 and `@oligarchy/routes` at 5, holding `http`'s
+  slot). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
@@ -142,8 +144,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   other), the tooling files,
   `drizzle/` (migrations), `public/` and `prompts/`, the operator documents, this document, `src/`,
   `test/` and `packages/`.
-- `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
-  `src/cli.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
+- `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/observability/`,
+  `src/db/`); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
   schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
@@ -162,13 +164,21 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   failure, the text of a line or a failure, and the service that writes a line to the console;
   refused are any destination but the console (a store, a file, Sentry) and any reading of the
   terminal or the environment, so the package has no boundary file and every package above it
-  may take `Log`. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  may take `Log`. `packages/env/src/` holds `config.ts` (the one list of variables, the accessors,
+  `ProxyConfig`, and the three environments `live`, `fromValues` and `override`), `errors.ts`
+  (`MissingVariable`), `env-file.ts` (the `--env-file` global flag), `oligarchy.ts` (the settings
+  file's schema and loader, and `ROOT`), `colors.ts` (`wantsColor` and the stdout probe, a
+  boundary file) and `run.ts` (`Env.program` and `Env.run`, a boundary file), and imports
+  `effect`, `@effect/platform-node`, `@oligarchy/log`, `@oligarchy/shared` and its own files. Its
+  admission rule: a value a process is given from outside (a variable, an env file, the settings
+  file) and installing those before the command runs; refused are a command's flags, anything a
+  command does while running, and anything that writes, except the runner's one print of a
+  failure at the process boundary. `packages/routes/src/` holds `api.ts`, `contract.ts` and
   `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
-  package that raises it exists: `src/shared/errors.ts` holds those (`MissingVariable`,
-  `DatabaseError`, the app errors) and shrinks as each package is created, re-exporting
-  nothing.
+  package that raises it exists: `src/shared/errors.ts` holds those (`DatabaseError`, the app
+  errors) and shrinks as each package is created, re-exporting nothing.
 - `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
@@ -199,10 +209,13 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   "@oligarchy/shared/errors"`, `import * as Steps from "@oligarchy/shared/steps"`, `import * as
   Log from "@oligarchy/log/log"`, `import * as Render from "@oligarchy/log/render"`, `import *
   as Palette from "@oligarchy/log/palette"`, `import * as ExternalFailure from
-  "@oligarchy/log/external-failure"`, `import * as LogErrors from "@oligarchy/log/errors"`. The
-  three errors modules are `ApiErrors`, `SharedErrors` and `LogErrors` everywhere so none
-  shadows the main package's staged `Errors`; when that file is gone, `SharedErrors` becomes
-  `Errors`. The root's `src/observability/log.ts` is the row-writing `Log` layer, imported as
+  "@oligarchy/log/external-failure"`, `import * as LogErrors from "@oligarchy/log/errors"`,
+  `import * as Config from "@oligarchy/env/config"`, `import * as Env from
+  "@oligarchy/env/run"`, `import * as EnvFile from "@oligarchy/env/env-file"`, `import * as
+  Oligarchy from "@oligarchy/env/oligarchy"`, `import * as Colors from "@oligarchy/env/colors"`,
+  `import * as EnvErrors from "@oligarchy/env/errors"`. The four errors modules are `ApiErrors`,
+  `SharedErrors`, `LogErrors` and `EnvErrors` everywhere so none shadows the main package's
+  staged `Errors`; when that file is gone, `SharedErrors` becomes `Errors`. The root's `src/observability/log.ts` is the row-writing `Log` layer, imported as
   `RowLog` by the five graphs that build it.
 - Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
   every other Effect module as a namespace by its module path
@@ -309,11 +322,12 @@ const MainLive = Layer.mergeAll(
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Config.ProxyConfig.layer),
   Layer.provideMerge(Sentry.SentryLive),
-  Layer.provideMerge(Config.providerLayer),
   Layer.provideMerge(NodeHttpClient.layerNodeHttp),
-  Layer.provideMerge(NodeServices.layer),
 );
 ```
+
+The variable lookup, the CLI's output and config, `Log.Colors` and the platform are not in it:
+`Env.program` builds them beneath the graph (Runtime entry, below).
 
 ## Errors
 
@@ -486,13 +500,22 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
 
 ## Config
 
-- Declare every variable a process reads in `src/config.ts`; domain code never calls
-  `Config.string("KEY")` or reads `process.env` (a host probe of the environment is a host check,
-  not configuration). Consumers import it as `Config`; the module imports Effect's as
-  `import { Config as EffectConfig } from "effect"`.
+- Declare every variable a process reads in `packages/env/src/config.ts`, in `VARIABLES`, the
+  one list; domain code never calls `Config.string("KEY")` or reads `process.env` (a host probe
+  of the environment is a host check, not configuration). Consumers import it as `Config`
+  (`@oligarchy/env/config`); the module imports Effect's as `import { Config as EffectConfig }
+  from "effect"`. Because the list is one, its names are a type, `Config.Variable`, and the
+  package builds every environment the fleet runs under: `Config.live`, the chain below;
+  `Config.fromValues(values)`, an explicit record and nothing else (unit tests, and the
+  dashboard's in-process `ctrl` run, which has no process to read); `Config.override(values)`,
+  the record ahead of the live chain, so one variable points elsewhere (a local Postgres) and
+  every other still comes from the process, the env file and `.env`. `values` is a partial
+  record over `Variable`, so a name not in the list does not compile; an empty string counts as
+  absent, as `fromEnv` treats it. A spawned process still gets its variables through its
+  environment; these constructors are for the process that calls them.
 - Read with `Config.nonEmptyString`, `Config.redacted`, `Config.string`; secrets are `Redacted`
   from parse to use and unwrapped with `Redacted.value` exactly once at the SDK or header boundary.
-- Install the provider once at the entry with `Config.providerLayer`
+- The runner installs `Config.live` once at the entry
   (`Layer<never, never, FileSystem | Stdio>`): `ConfigProvider.fromEnv()` first, then
   `--env-file` when the process arguments name one (`--env-file <path>` or `--env-file=<path>`,
   last one wins, `--` ends the scan), then `ConfigProvider.fromDotEnv({ path: ".env" })` when
@@ -512,12 +535,16 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   with a comment saying so), after parsing but before any work, so the first name reported is
   always the same one.
 - Configuration is either a hardcoded constant or a required value, never a silent optional; CLI
-  knobs (`isTTY`, `FORCE_COLOR`, `TERM`, `execPath`) are read in `main.ts` and
-  `src/observability/colors.ts` only.
-- The harness's non-secret configuration is the checked-in `oligarchy.json`, read from beside
-  the package by `src/harness/config.ts`. `load` fails when the file is missing or malformed,
-  and the message names the field. The OpenRouter token stays an environment variable, and a
-  token key in the file is refused.
+  knobs (`isTTY`, `FORCE_COLOR`, `TERM`, `execPath`) are read in `main.ts`, the runner
+  (`packages/env/src/run.ts`) and `packages/env/src/colors.ts` only.
+- The harness's non-secret configuration is the checked-in `oligarchy.json`, read from the
+  workspace root by `@oligarchy/env/oligarchy` (imported as `Oligarchy`). `Oligarchy.ROOT` is
+  that root as a URL, three directories up from the loader, and `client.md` and the prompts are
+  read against it too: the driver's bytecode bundle defines `import.meta.url` once, as the
+  loader's, so one URL keeps every checked-in sibling beside the package. `load` fails when the
+  file is missing or malformed, and the message names the field. The OpenRouter token stays an
+  environment variable, and a token key in the file is refused. A missing or invalid variable is
+  `EnvErrors.MissingVariable` (`@oligarchy/env/errors`).
 - The harness loop's pure pieces live in `src/harness`: the message history, the one model tool,
   the command line a tool call becomes and the tool result a command's output becomes, and the
   stop decision. That tool's description is `client.md`, read as the file, so the client's
@@ -589,27 +616,39 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   `stop`, and `save` are not guest actions. A diagnose is not this program: it still runs under
   OpenCode. The OpenRouter token is `OPENROUTER_API_KEY`.
 
-`src/config.ts` (an excerpt): the provider chain, one accessor family and a process's pair.
+`packages/env/src/config.ts` (an excerpt): the provider chain, the three environments over it,
+one accessor family and a process's pair.
 
 ```ts
-export const providerLayer: Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =
+const chain: Effect.Effect<ConfigProvider.ConfigProvider, never, FileSystem.FileSystem | Stdio.Stdio> =
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const args = yield* (yield* Stdio.Stdio).args;
+    let provider = ConfigProvider.fromEnv();
+    const extra = yield* envFileArg(args);
+    if (Option.isSome(extra)) {
+      const file = yield* ConfigProvider.fromDotEnv({ path: extra.value }).pipe(Effect.orDie);
+      provider = ConfigProvider.orElse(provider, file);
+    }
+    const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
+    if (!hasDotEnv) {
+      return provider;
+    }
+    const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
+    return ConfigProvider.orElse(provider, dotEnv);
+  });
+
+export const live: Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =
+  ConfigProvider.layer(chain);
+
+export const fromValues = (values: Values): Layer.Layer<never> =>
+  ConfigProvider.layer(ConfigProvider.fromEnv({ env: values }));
+
+export const override = (
+  values: Values,
+): Layer.Layer<never, never, FileSystem.FileSystem | Stdio.Stdio> =>
   ConfigProvider.layer(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const args = yield* (yield* Stdio.Stdio).args;
-      let provider = ConfigProvider.fromEnv();
-      const extra = yield* envFileArg(args);
-      if (Option.isSome(extra)) {
-        const file = yield* ConfigProvider.fromDotEnv({ path: extra.value }).pipe(Effect.orDie);
-        provider = ConfigProvider.orElse(provider, file);
-      }
-      const hasDotEnv = yield* fs.exists(".env").pipe(Effect.orElseSucceed(() => false));
-      if (!hasDotEnv) {
-        return provider;
-      }
-      const dotEnv = yield* ConfigProvider.fromDotEnv({ path: ".env" }).pipe(Effect.orDie);
-      return ConfigProvider.orElse(provider, dotEnv);
-    }),
+    Effect.map(chain, (rest) => ConfigProvider.orElse(ConfigProvider.fromEnv({ env: values }), rest)),
   );
 
 const missing = (name: string) => () => Errors.MissingVariable.make({ name });
@@ -625,7 +664,7 @@ export const databaseUrl = requiredRedacted("DATABASE_URL");
 // migrations stay on a direct connection.
 export const databaseMigrationUrl = requiredRedacted("DATABASE_MIGRATION_URL");
 
-export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/config/ProxyConfig", {
+export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/env/config/ProxyConfig", {
   // Sequential on purpose: OLIGARCHY_TOKEN is reported before DATABASE_URL.
   make: Effect.all({ token: oligarchyToken, databaseUrl }),
 }) {
@@ -657,15 +696,18 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
   local refusal is a `CommandError` with a sentence that names the flags; a platform failure keeps
   Node's own message one level down, never the `PlatformError` wrapper.
 - `--help` is side-effect free: no network, no database, no spawn. No business logic in the CLI.
-- Run with `Command.run(cmd, { version: Api.VERSION })` (argv from `Stdio`, provided by
-  `NodeServices.layer`). It renders help, usage errors and `UserError`s itself before re-failing;
-  `--help` on a command with a handler succeeds, a bare group fails `ShowHelp` with no errors, and
+- Run through the runner, `Env.program(command, { version: Api.VERSION, layer: MainLive })`
+  (`@oligarchy/env/run`, imported as `Env`; Runtime entry, below). It calls `Command.run` with
+  the version (argv from `Stdio`, provided by `NodeServices.layer`, which `Env.run` supplies).
+  `Command.run` renders help, usage errors and `UserError`s itself before re-failing; `--help` on
+  a command with a handler succeeds, a bare group fails `ShowHelp` with no errors, and
   `Runtime.errorExitCode` gives both exit 0. At the boundary a `CliError` therefore needs no
   rendering; any other failure gets `renderFailure` on stderr and exits 1. `Render.reportFailure`
-  is that one print for every CLI, applied outside `Effect.provide(MainLive)` so a layer failure
-  (an unreadable `.env`) prints its cause too. Never mutate `process.exitCode`.
-- Every CLI's `MainLive` provides `CliOutput.layer` and `CliConfig.layer` without the wizard
-  builtin (below); the `--log-level` builtin stays and is a no-op for `Log` lines.
+  is that one print for every CLI, and the runner applies it outside the process's layer so a
+  layer failure (an unreadable `.env`, a missing variable) prints its cause too. Never mutate
+  `process.exitCode`.
+- The runner provides `CliOutput.layer` and `CliConfig.layer` without the wizard builtin
+  (below) to every CLI; the `--log-level` builtin stays and is a no-op for `Log` lines.
 - Exit codes: 0 on success and 1 on any failure; `--help` and a bare group 0; an unknown action is
   an Effect CLI usage error, exit 1.
 - The action is the first argument; flags follow in any order as `--flag value` or `--flag=value`,
@@ -676,20 +718,12 @@ export class ProxyConfig extends Context.Service<ProxyConfig>()("@oligarchy/conf
 `src/client/main.ts`: the whole entry.
 
 ```ts
-const MainLive = Layer.mergeAll(
-  CliOutput.layer(CliOutput.defaultFormatter({ colors: process.stdout.isTTY })),
-  CliConfig.layer({ builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.Wizard) }),
-  NodeHttpClient.layerNodeHttp,
-  Config.providerLayer,
-).pipe(Layer.provideMerge(NodeServices.layer));
-
-const main = Command.run(ClientCommand.makeClientCommand(), { version: Api.VERSION }).pipe(
-  Effect.provide(MainLive),
-  Effect.scoped,
-  Effect.tapCause(Render.reportFailure),
+Env.run(
+  Env.program(ClientCommand.makeClientCommand(), {
+    version: Api.VERSION,
+    layer: NodeHttpClient.layerNodeHttp,
+  }),
 );
-
-NodeRuntime.runMain(main, { disableErrorReporting: true });
 ```
 
 ## HttpApi server
@@ -960,9 +994,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   to Sentry as a defect, and never fails the caller or the rows behind it. `id`, not
   `created_at`, orders rows.
 - The row is the record and stdout its convenience copy, so the copy follows the record; the
-  rows and Sentry are what is kept. A process's `main.ts`
-  attaches a no-op `error` listener to `process.stdout` and `process.stderr`, so a write refused by
-  a full filesystem (`ENOSPC`) drops that line instead of raising an uncaught exception per line.
+  rows and Sentry are what is kept. `Env.run` attaches a no-op `error` listener to
+  `process.stdout` and `process.stderr`, so a write refused by a full filesystem (`ENOSPC`) drops
+  that line instead of raising an uncaught exception per line.
 - The stdout line is `[LEVEL] [<agent>] <location>: <text>`: the level in capitals (`INFO`,
   `WARN`, `ERROR`, `FATAL`), `global` for a line with no agent, the location only when there is
   one. `Render.logPieces` is the one description of that line as coloured runs; stdout paints
@@ -971,9 +1005,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   active agent holds, and it keeps it; once an hour the palette drops agents with no line in the
   last hour, so the map stays bounded. Each process holds one palette, and the viz holds its own
   fed by the rows it pulls. Colour is the `Log.Colors` `Context.Reference`, off by default: the
-  package reads no terminal, so each graph that builds a `Log` provides
-  `Layer.succeed(Log.Colors)(Colors.stdoutColors)` from `src/observability/colors.ts` (a TTY or
-  `FORCE_COLOR`, and `hasColors(16)`, decided once for the process); tests provide `true`. The row is the original text, level and attribution; prefix and colour are stdout
+  package reads no terminal, so the runner provides
+  `Layer.succeed(Log.Colors)(Colors.stdoutColors)` from `@oligarchy/env/colors` (a TTY or
+  `FORCE_COLOR`, and `hasColors(16)`, decided once for the process) to every entry; tests
+  provide `true`. The row is the original text, level and attribution; prefix and colour are stdout
   only.
 - Levels are the `log_level` enum in ascending severity and mean severity of the operation, not of
   the state recorded: `info` is the normal story, a verdict included; `warning` is degraded but
@@ -1113,16 +1148,26 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 
 ## Runtime entry
 
-- One runner call per process, in its entry: `NodeRuntime.runMain(program, {
-  disableErrorReporting: true, teardown? })` (`db/migrate.ts` guards its call with
-  `import.meta.main`), or `Runtime.makeRunMain(...)` for a process that answers its own signals, over
-  `program.pipe(Effect.provide(MainLive), Effect.scoped, Effect.tapCause(Render.reportFailure))`.
-  Every other module returns an Effect; the only other sanctioned runners are
-  `Effect.runForkWith(context)` and `Effect.runPromiseExitWith(context)` re-entering Effect from a
-  non-Effect callback after `const context = yield* Effect.context<R>()`;
-  `test/repo/architecture.unit.test.ts` allows them in `src/db/client.ts` alone, nowhere else.
-- A CLI runs `Command.run(cmd, { version })` directly under `runMain`; a server `Layer.launch`es
-  inside its command handler, its stop condition `Effect.raceFirst(Layer.launch(serve),
+- One runner, `@oligarchy/env/run` (imported as `Env`), and one call to it per process, in its
+  entry: `Env.run(Env.program(command, { version, layer, failuresLogged? }), { teardown? })`.
+  `Env.program` is the effect: it builds the process's `layer` over the environment (`Config.live`,
+  `CliOutput` and `CliConfig` without the Wizard, `Log.Colors` from `Colors.stdoutColors`) with
+  `Layer.build`, printing a failure there through `Render.reportFailure`, then runs `Command.run`
+  with the version under the services and prints what it fails with once, outside every layer.
+  A server passes `failuresLogged: true`: its command logs every failure as a fatal line before
+  it fails, so only a defect, which nothing logged, is printed. `Env.run` is the one
+  `NodeRuntime.runMain` call, with error reporting off, the platform (`NodeServices.layer`)
+  provided beneath, and the no-op `error` listeners on `process.stdout` and `process.stderr`
+  (Log, above). `db/migrate.ts` is not a `Command`, so it runs a bare effect through `Env.run`,
+  guarded by `import.meta.main`. `src/session/main.ts` uses `Env.program` and its own
+  `Runtime.makeRunMain`, because its REPL answers SIGTERM and SIGHUP itself.
+  `test/repo/architecture.unit.test.ts` pins where each lives. Every other module returns an
+  Effect; the only other sanctioned runners are `Effect.runForkWith(context)` and
+  `Effect.runPromiseExitWith(context)` re-entering Effect from a non-Effect callback after
+  `const context = yield* Effect.context<R>()`; the architecture test allows them in
+  `src/db/client.ts` alone, nowhere else.
+- A CLI's command runs directly under the runner; a server `Layer.launch`es inside its command
+  handler, its stop condition `Effect.raceFirst(Layer.launch(serve),
   Deferred.await(serverFailed))`, the `Deferred` completed by the Node server's `error` listener
   in `main.ts`, where the server is created so that listener can be attached; only the first
   error counts.
@@ -1137,10 +1182,10 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   is logged `fatal` and exits 1 after the flush; a server `error` after listen completes the
   `Deferred`, names the reason, and exits 1; a second error is ignored.
 - State both ends of a process must share outside Effect (a shutdown reason set by a Node listener
-  and read in the teardown) is a `Context.Reference` over `MutableRef`s. `MainLive` is built with
-  `Layer.build` before the command runs, so a missing variable or a bad `DATABASE_URL`, the one
-  failure no `Log` exists to record, prints `<NAME> is not set` and `Cause.pretty` on stderr
-  through `Render.reportFailure`.
+  and read in the teardown) is a `Context.Reference` over `MutableRef`s. The runner builds the
+  graph with `Layer.build` before the command runs, so a missing variable or a bad
+  `DATABASE_URL`, the one failure no `Log` exists to record, prints `<NAME> is not set` and
+  `Cause.pretty` on stderr through `Render.reportFailure`.
 
 ## Tests
 
@@ -1276,8 +1321,8 @@ change ships (Tests, above).
   `class-self-mismatch`, `non-object-effect-service-type`, `schema-opaque-instance-member`,
   `overridden-schema-constructor`, `schema-literal-non-finite`, `outdated-api`,
   `promise-in-effect-success`, `strict-effect-provide`, the last off only for `src/**/main.ts`,
-  `src/observability/instrument.ts`, `test/**`, `packages/*/test/**` and
-  `vitest.global-setup.ts`); `typescript/no-floating-promises` off for `test/**`,
+  `packages/env/src/run.ts`, `src/observability/instrument.ts`, `test/**`, `packages/*/test/**`
+  and `vitest.global-setup.ts`); `typescript/no-floating-promises` off for `test/**`,
   `packages/*/test/**` and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
   final newline; `drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and

@@ -2,12 +2,12 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
-import * as Cli from "../../src/cli.ts";
-import * as HarnessConfig from "../../src/harness/config.ts";
+import * as Child from "../../src/automation-client/child.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
@@ -38,9 +38,9 @@ const appConfig = (diagnose = MODEL): string =>
 
 const configFs = (text: string | undefined) =>
   FileSystem.layerNoop({
-    exists: (path) => Effect.succeed(path === HarnessConfig.PATH && text !== undefined),
+    exists: (path) => Effect.succeed(path === Oligarchy.PATH && text !== undefined),
     readFileString: (path) => {
-      if (path !== HarnessConfig.PATH || text === undefined) {
+      if (path !== Oligarchy.PATH || text === undefined) {
         return Effect.die(`unexpected read ${path}`);
       }
       return Effect.succeed(text);
@@ -177,7 +177,7 @@ describe("Sessions.run happy path", () => {
       const error = yield* Effect.flip(sessions.run(TICKET, "diagnose the session"));
       expect(error._tag).toBe("RunFailed");
       if (error._tag === "RunFailed") {
-        expect(error.message).toContain(HarnessConfig.PATH);
+        expect(error.message).toContain(Oligarchy.PATH);
         expect(error.message).toContain("missing");
       }
       expect(spawner.spawned).toEqual([]);
@@ -316,7 +316,7 @@ describe("Sessions.abort happy path", () => {
       yield* sessions.abort(TICKET);
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
       expect(spawner.spawned[0]?.killOptions).toEqual([
-        { killSignal: "SIGTERM", forceKillAfter: Cli.FORCE_KILL_AFTER },
+        { killSignal: "SIGTERM", forceKillAfter: Child.FORCE_KILL_AFTER },
       ]);
       const error = yield* Effect.flip(Fiber.join(running));
       expect(error).toMatchObject({ _tag: "RunAborted", message: "run aborted", agentId: TICKET });
@@ -360,7 +360,7 @@ describe("Sessions.abort happy path", () => {
       }
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
       expect(aborting.pollUnsafe()).toBeUndefined();
-      yield* TestClock.adjust(Cli.FORCE_KILL_AFTER);
+      yield* TestClock.adjust(Child.FORCE_KILL_AFTER);
       yield* Fiber.join(aborting);
       expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM", "SIGKILL"]);
       const error = yield* Effect.flip(Fiber.join(running));

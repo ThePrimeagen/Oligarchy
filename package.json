@@ -13,6 +13,7 @@
       "packages/*"
     ],
     "catalog": {
+      "@effect/platform-node": "4.0.0-rc.112",
       "@effect/vitest": "4.0.0-rc.112",
       "@types/node": "^26.4.0",
       "effect": "4.0.0-rc.112",
@@ -46,7 +47,8 @@
     "prepare": "effect-tsgo patch --oxlint"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node": "catalog:",
+    "@oligarchy/env": "workspace:*",
     "@oligarchy/log": "workspace:*",
     "@oligarchy/routes": "workspace:*",
     "@oligarchy/shared": "workspace:*",

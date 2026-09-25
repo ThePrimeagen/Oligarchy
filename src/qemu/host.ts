@@ -1,4 +1,5 @@
-import { Config, Effect, FileSystem, Option } from "effect";
+import { Effect, FileSystem, Option } from "effect";
+import * as Config from "@oligarchy/env/config";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Args from "./args.ts";
 import * as Process from "./process.ts";
@@ -8,9 +9,8 @@ const FIRMWARE = [
   [Args.OVMF_VARS, "OVMF vars"],
 ] as const;
 
-// Read through the ConfigProvider so the check sees the same environment as the rest of the
-// proxy; an absent or empty DISPLAY both count as unset.
-const displayVariable = Config.string("DISPLAY").pipe(Effect.orElseSucceed(() => ""));
+// An absent or empty DISPLAY both count as unset.
+const displayVariable = Config.display.pipe(Effect.orElseSucceed(() => ""));
 
 export const missingHostRequirements = Effect.fn("Host.missingHostRequirements")(function* (
   display: Domain.QemuDisplay,

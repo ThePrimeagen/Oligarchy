@@ -1,11 +1,11 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
-import * as Config from "../config.ts";
 import * as Automation from "../db/automation.ts";
 import * as Servers from "../db/servers.ts";
 import * as Tests from "../db/tests.ts";

@@ -48,6 +48,7 @@ const packageGraph: PackageGraph = new Map(
 const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
   "@oligarchy/log": 1,
+  "@oligarchy/env": 2,
   "@oligarchy/routes": 5,
 };
 
@@ -153,7 +154,9 @@ const BOUNDARY_FILES = new Set([
   "src/shared/process-usage.ts",
   "src/observability/instrument.ts",
   // Whether stdout takes colour: the tty's depth and FORCE_COLOR, decided once for the process.
-  "src/observability/colors.ts",
+  "packages/env/src/colors.ts",
+  // The entry runner: the one NodeRuntime.runMain, the stdout and stderr error listeners.
+  "packages/env/src/run.ts",
   "src/db/client.ts",
 ]);
 
@@ -259,6 +262,27 @@ describe("Effect.run placement", () => {
         return calls.filter((call) => !allowed.includes(call)).map((call) => `Effect.${call}`);
       }),
     ).toEqual([]);
+  });
+
+  // Every entry runs through the one runner, `bun run db:migrate`'s included; the session REPL
+  // answers its own signals, so it is the one process with a runtime of its own. Exact lists, so
+  // an entry that stops using the runner, or a second runner, is named.
+  it("NodeRuntime.runMain lives in env's runner, Runtime.makeRunMain in the session entry, and Env.run in every other entry", () => {
+    const calling = (pattern: RegExp): ReadonlyArray<string> =>
+      sources().filter((path) => pattern.test(stripStringsAndComments(read(path))));
+    expect(calling(/\bNodeRuntime\.runMain\b/)).toEqual(["packages/env/src/run.ts"]);
+    expect(calling(/\bRuntime\.makeRunMain\b/)).toEqual(["src/session/main.ts"]);
+    expect(calling(/\bEnv\.run\(/)).toEqual([
+      "src/automation-client/main.ts",
+      "src/automation-server/main.ts",
+      "src/client/main.ts",
+      "src/ctrl/main.ts",
+      "src/db/migrate.ts",
+      "src/driver/main.ts",
+      "src/qemu-reverse-proxy/main.ts",
+      "src/qemu-server/main.ts",
+      "src/viz/main.ts",
+    ]);
   });
 
   it("never runs an effect through ManagedRuntime or runSync outside main", () => {
