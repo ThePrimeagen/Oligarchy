@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as TestingLinear from "@oligarchy/testing/linear";
@@ -178,9 +179,10 @@ describe("decide", () => {
 const harness = (
   definitions: ReadonlyArray<typeof MINT> = [MINT],
   linear: TestingLinear.FakeLinear = TestingLinear.fakeLinear(),
+  testStore: Parameters<typeof TestingStores.fakeTestStore>[1] = {},
 ) => {
   const store = memory();
-  const tests = TestingStores.fakeTestStore({ definitions });
+  const tests = TestingStores.fakeTestStore({ definitions }, testStore);
   const log = FakeLog.fakeLog();
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -376,6 +378,47 @@ describe("opening a setup", () => {
       }),
     );
   });
+
+  it.effect(
+    "a run that will not take a failed ticket is a line, and the ticket's own failure unlocks (unhappy)",
+    () => {
+      const linear = TestingLinear.fakeLinear({
+        overrides: {
+          createIssue: () =>
+            Effect.fail(
+              LinearErrors.LinearError.make({
+                operation: "createIssue",
+                message: "linear: request failed",
+              }),
+            ),
+        },
+      });
+      const h = harness([MINT], linear, {
+        failRun: () =>
+          Effect.fail(
+            DbErrors.DatabaseError.make({
+              operation: "failRun",
+              message: "Failed query: update test_runs",
+              cause: new Error("connection reset"),
+            }),
+          ),
+      });
+      return h.run(
+        Effect.gen(function* () {
+          const setup = yield* Setup.Setup;
+          yield* setup.install();
+          yield* setup.open(ISO, SERVER, PROXY);
+          const [run] = h.tests.runs;
+          expect(run?.status).toBe("pending");
+          expect(h.store.rows).toHaveLength(0);
+          expect(h.log.lines.map((line) => line.text)).toEqual([
+            `failRun failed; ${run?.id ?? ""}: connection reset`,
+            `setup ticket failed: linear: request failed; ${SERVER}; ${ISO}`,
+          ]);
+        }),
+      );
+    },
+  );
 
   it.effect(
     "a lock deleted while its ticket is made fails the run and names the ticket left in Backlog (unhappy)",

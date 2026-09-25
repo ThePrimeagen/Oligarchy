@@ -154,7 +154,8 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
         }
         // 3. The mint job and its ticket, pinned to this server on the lock before the ticket
         // reaches Automation Needed. A failure has already failed the run, naming any ticket
-        // left in Backlog, and a lock deleted meanwhile is one of them.
+        // left in Backlog, or logged why the run would not take it; a lock deleted meanwhile
+        // is one such failure.
         // A failed ticket calls drop, which deletes the row. If that delete fails, drop
         // logs `setup release failed` through log.error. That line is reported to Sentry,
         // because it does not set skipSentry, and the delete's own cause is not attached.

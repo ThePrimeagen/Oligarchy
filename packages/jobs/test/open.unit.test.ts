@@ -3,9 +3,11 @@ import { it } from "@effect/vitest";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
 import { TestConsole } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as TestingLinear from "@oligarchy/testing/linear";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as Open from "../src/open.ts";
 import * as Templates from "../src/templates.ts";
 import * as H from "./harness.ts";
@@ -65,6 +67,15 @@ const rendered = (values: Templates.Values) =>
   Templates.renderLinearIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
 
 const methods = (h: H.Harness) => h.linear.calls.map((call) => call.method);
+
+// A test store whose run will not take its failure.
+const runStaysOpen = DbErrors.DatabaseError.make({
+  operation: "failRun",
+  message: "Failed query: update test_runs",
+  cause: new Error("connection reset"),
+});
+const unfailable = () =>
+  TestingStores.fakeTestStore({}, { failRun: () => Effect.fail(runStaysOpen) });
 
 describe("Open.open happy path", () => {
   it.effect(
@@ -244,6 +255,36 @@ describe("Open.open unhappy path", () => {
           ["failed", refused.message],
         ]);
         expect(h.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a run that will not take the failure is a line, and the failure that stopped it goes on",
+    () =>
+      Effect.gen(function* () {
+        const refused = LinearErrors.LinearError.make({
+          operation: "teamId",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        const h = H.harness({
+          tests: unfailable(),
+          linear: TestingLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
+        });
+        h.tests.definitions.push(install, terminal);
+        const error = yield* Open.open(suite).pipe(Effect.provide(services(h)), Effect.flip);
+        expect(error).toBe(refused);
+        const [run] = h.tests.runs;
+        expect(run?.status).toBe("pending");
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: `failRun failed; ${run?.id ?? ""}: connection reset`,
+            location: undefined,
+            agentId: undefined,
+            cause: runStaysOpen,
+          },
+        ]);
       }),
   );
 
@@ -498,6 +539,34 @@ describe("Open.openMint unhappy path", () => {
             "ticket trapped in Backlog; setup row gone before its result was stored",
             "OLI-42",
           ],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a run that will not take a gone setup is a line, and SetupGone still names the ticket",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness({ tests: unfailable() });
+        h.tests.definitions.push(mint);
+        const setup = setupStore(false);
+        const error = yield* Open.openMint({ iso: ISO, serverUrl: SERVER, pinned: PINNED }).pipe(
+          Effect.provide(Layer.mergeAll(h.layer, NodeFileSystem.layer, setup.layer)),
+          Effect.flip,
+        );
+        expect(error).toMatchObject({
+          _tag: "SetupGone",
+          message: "setup row gone before its result was stored; created OLI-42",
+        });
+        const [run] = h.tests.runs;
+        expect(run?.status).toBe("pending");
+        expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          [
+            "error",
+            "ticket trapped in Backlog; setup row gone before its result was stored",
+            "OLI-42",
+          ],
+          ["error", `failRun failed; ${run?.id ?? ""}: connection reset`, undefined],
         ]);
       }),
   );

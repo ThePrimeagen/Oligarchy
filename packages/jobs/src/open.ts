@@ -152,7 +152,8 @@ export const withReason = {
 };
 
 // A failure fails the run and every job in it with the reason, naming the tickets that did get
-// created so they can be cleaned up by hand; the error goes on carrying that reason.
+// created so they can be cleaned up by hand; the error goes on carrying that reason. A run that
+// will not take it is a line: the failure that stopped the run is the one the caller reports.
 export const failRun = <E extends { readonly message: string }>(
   runId: string,
   tickets: ReadonlyArray<Linear.LinearTicket>,
@@ -161,9 +162,16 @@ export const failRun = <E extends { readonly message: string }>(
 ) =>
   Effect.gen(function* () {
     const tests = yield* Tests.TestStore;
+    const log = yield* Log.Log;
     const created = tickets.map((issued) => issued.identifier).join(", ");
     const reason = created === "" ? error.message : `${error.message}; created ${created}`;
-    yield* tests.failRun(runId, reason);
+    yield* tests
+      .failRun(runId, reason)
+      .pipe(
+        Effect.catchTag("DatabaseError", (write) =>
+          log.error(`failRun failed; ${runId}: ${Errors.detail(write)}`, { cause: write }),
+        ),
+      );
     return yield* Effect.fail(created === "" ? error : rename(error, reason));
   });
 
