@@ -357,6 +357,23 @@ container and stay in the root's integration project until phase 12.
       pending action row and moves the ticket to Aborted, in that order. Unhappy: no pending
       action is a typed refusal and the ticket does not move; a ticket that will not move is one
       line and the row stays aborted.
+- [ ] TEST (move) the search cases of `test/automation-server/worker.unit.test.ts` and
+      `backlog.unit.test.ts` (`diagnosable`, `isOpen`, the `nextPending` skip list, the
+      `findResultByLinearId` lookups) to `packages/jobs/test/find.unit.test.ts` as `Jobs.find`.
+      Happy: `byTicket` answers the job behind a ticket; `nextPending` skips the ids it is given
+      and answers the oldest pending action; `running` lists actions in flight; `inherited` lists
+      only the running actions whose server is not this one; `isDiagnosable` is true for a drive
+      or mint whose result is closed and unjudged. Unhappy: an unknown ticket is none; an action
+      still pending holds `isDiagnosable` false; a diagnose is never diagnosable. The
+      automation-server tests keep one case each that dispatch and the watch call `find`.
+- [ ] TEST (move) the `closeInherited` cases of `test/automation-server/worker.unit.test.ts` to
+      `packages/jobs/test/reclaim.unit.test.ts`. Happy: an inherited drive whose result is closed
+      is judged and closed as completed or errored, and its ticket moves accordingly; every other
+      inherited action is failed `restarted` and its ticket moved to Errored. Unhappy: a row that
+      will not close is one line; a ticket that will not move is one line and the row stays
+      closed; an action without a ticket closes the row and moves nothing. The
+      automation-server test keeps one case that startup stops the driver at its client, then
+      calls `Jobs.reclaim`.
 - [ ] TEST (alter) `test/automation-server/handlers.unit.test.ts` and
       `test/dashboard/dashboard.unit.test.ts`: `POST /abort` on automation-server calls
       `Jobs.abort`; the dashboard's `POST /abort` forwards to automation-server and no longer
@@ -617,13 +634,18 @@ container and stay in the root's integration project until phase 12.
   - `board.ts`: `actionFor(column, result)` and `enqueue(ticket)`, the one copy of the rule in
     `backlog.ts`, `enqueue.ts` and `webhook.ts`.
   - `abort.ts`: `abort`, from automation-server's `/abort` handler plus `moveToAborted`.
+  - `find.ts`: `byTicket`, `nextPending`, `running`, `inherited`, `status`, `hasPending`,
+    `isDiagnosable`, from `worker.ts` and `backlog.ts`.
+  - `reclaim.ts`: `reclaim`, the row-and-ticket half of `worker.ts`'s `closeInherited`.
 - [ ] Create `packages/testing` (`@oligarchy/testing`, `private`, dev only) with
       `fakeTestStore`, `fakeAutomationStore` and `fakeLinear`; it depends on `db` and `linear`.
       It grows one fake at a time, each when a second consumer appears.
 - [ ] `ctrl test run` and `testsuite` call `Jobs.open` and print the JSON. The proxy's `setup.ts`
-      calls `Jobs.openMint`. automation-server's worker calls `Jobs.close` and `Jobs.fail`, its
-      webhook and board watch call `Jobs.ready`, `Jobs.release`, `Jobs.actionFor` and
-      `Jobs.enqueue`, and its `/abort` handler calls `Jobs.abort`. The dashboard's `suite.ts`
+      calls `Jobs.openMint`. automation-server's worker calls `Jobs.find` to pick and judge
+      actions, `Jobs.close` and `Jobs.fail` to settle them, and at startup stops each inherited
+      action's driver at its client and calls `Jobs.reclaim`; its webhook and board watch call
+      `Jobs.ready`, `Jobs.release`, `Jobs.actionFor` and `Jobs.enqueue`; its `/abort` handler
+      calls `Jobs.abort`. No app queries a store for a job directly. The dashboard's `suite.ts`
       builds its `ManagedRuntime` (database and `TestStore`, `Linear`, `Log.layerStdout`, the
       bundled templates as the file system, `FetchHttpClient`) and calls `Jobs.open`, dropping
       the in-process `ctrl` run and the recording console; its `POST /abort` only forwards to
@@ -993,8 +1015,10 @@ The Linear API and nothing else: the primitives `jobs` is built from.
 
 A job is a test result and its Linear ticket, which move together. An action is a row in
 `automation_jobs`: a drive, a mint or a diagnose on one job, and an action moves the job's
-ticket. Everything that writes a job's row *and* moves its ticket lives here, so no process can
-do one without the other.
+ticket. Every transition of a job and every search for one lives here: no process writes a
+job's row without moving its ticket, or reads jobs by its own query, or decides for itself what a
+board column means. The apps call `Jobs.*`; the package is the one lockstep procedure, so it is
+the one place to get it right.
 
 - **Vocabulary, without renaming tables.** `test_results.linear_id` is the one column that ties
   a row to a ticket (unique: one job per ticket). `automation_jobs` rows are actions. `test_runs`
@@ -1021,23 +1045,46 @@ do one without the other.
   - `abort.ts`: `abort(ticket, action)`: abort the pending row, then move the ticket to Aborted.
     Today the dashboard moves the ticket with its own client and closes the row through
     automation-server's `/abort`: two processes, two clients, one job.
+  - `find.ts`: every search for a job or an action, named for what the caller means rather than
+    for the table: `byTicket(identifier)` (the job behind a ticket, or none), `nextPending(skip)`
+    (the next action to dispatch), `running()` (every action in flight), `inherited()` (the
+    running actions this process did not start: the previous automation server's), `status(job,
+    action)`, `hasPending(job, action)`, `isDiagnosable(job)` (a drive or mint that ran to its
+    end and has not been judged). From `worker.ts`'s `diagnosable`, `isOpen` and the
+    `store.nextPending`/`listRunning`/`jobStatus` calls, and `backlog.ts`'s
+    `findResultByLinearId` lookups.
+  - `reclaim.ts`: `reclaim(action)`, from `worker.ts`'s `closeInherited`: an inherited action
+    whose result its driver already closed is judged and closed as the dead server's fiber would
+    have closed it; every other inherited action is failed with `restarted` and its ticket moved
+    to Errored. Stopping the driver at its automation client first is transport and stays in the
+    app: the app calls the client, then `Jobs.reclaim`.
   - `templates.ts` (from `ctrl/prompts.ts`, with `PromptError`): the test and mint ticket
     bodies, filled from `prompts/*.html`. A job's ticket text is the job's.
   - **One policy.** Three attempts on a row write, three on a ticket move, one log line per
     failure, and a row that is closed stays closed whatever the board answers. Written once,
     with the one `detail` helper that unwraps a `DatabaseError` (a copy of which sits in
     `worker.ts`, `backlog.ts` and the two heartbeats today).
-- **Used by** ctrl (`open`), qemu-reverse-proxy (`openMint`), automation-server (`close`,
-  `fail`, `ready`, `release`, `actionFor`, `enqueue`, `abort`) and the dashboard (`open`; its
-  abort forwards to automation-server).
-- **Depends on** db (`TestStore`, `AutomationStore`), linear, env, log and shared. Not on http:
-  a job never talks to an automation client.
-- **Admission rule.** An operation on a job's row and its ticket together, the rule that keeps
-  them consistent, or the text of its ticket. Refused: dispatching an action to a client (HTTP,
-  slots, the `/run` wait — automation-server's `dispatch` and `place`), the poll loop and the
-  webhook handler (the schedule is the app's; the rule it applies is jobs'), and the drive and
-  diagnose agent prompts (`automation-server/prompts.ts` is what the agent reads, not what the
-  ticket says).
+- **Later, not in this plan** (recorded in `NEED_FIXING.md`, item 10): once every transition
+  goes through `jobs`, the package can also *find what is out of step* and put it back. Today a
+  ticket move that fails three times is one log line and the ticket stays wrong for good; a
+  ticket a person drags on the board is invisible to the row; an action row can be `running` for
+  a server that is gone until the next automation server starts. A `reconcile()` search
+  (row-and-ticket pairs whose states disagree, actions running for a dead server, tickets in a
+  working column with no open action) and the transitions that settle each are `jobs`' to
+  offer and the automation server's to schedule.
+- **Used by** ctrl (`open`, `find`), qemu-reverse-proxy (`openMint`), automation-server
+  (`close`, `fail`, `ready`, `release`, `actionFor`, `enqueue`, `abort`, `find`, `reclaim`) and
+  the dashboard (`open`; its abort forwards to automation-server; its read model may adopt
+  `find` later, out of scope here).
+- **Depends on** db (`TestStore`, `AutomationStore`, `ServerStore` for `inherited`), linear,
+  env, log and shared. Not on http: a job never talks to an automation client.
+- **Admission rule.** A transition of a job (its row and its ticket together), a search for
+  jobs or actions, the rule that keeps row and ticket consistent, or the text of its ticket.
+  Refused: the transport (HTTP to an automation client: `dispatch`, `place`, `abortAt`, the
+  `/run` wait), the schedule (the poll loop, the dispatch tick, the webhook handler; the rule
+  each applies is jobs'), the drive and diagnose agent prompts (`automation-server/prompts.ts`
+  is what the agent reads, not what the ticket says), and rendering. An app that finds itself
+  querying a store for a job, or moving a ticket, is missing a `Jobs.*` and should add it here.
 
 ### `@oligarchy/observability` (layer 4, phase 6)
 
