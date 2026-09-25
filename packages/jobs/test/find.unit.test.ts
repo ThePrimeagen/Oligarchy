@@ -26,6 +26,28 @@ describe("Find.byTicket", () => {
   );
 });
 
+describe("Find.ofAction", () => {
+  it.effect("answers the job an action belongs to", () =>
+    Effect.gen(function* () {
+      const h = H.harness();
+      const job = H.seedResult(h.tests);
+      const action = H.seedAction(h.automation);
+      const found = yield* Find.ofAction(action).pipe(Effect.provide(h.layer));
+      expect(found).toEqual(Option.some(job));
+    }),
+  );
+
+  it.effect("an action whose job is gone is none (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = H.harness();
+      H.seedResult(h.tests);
+      const action = H.seedAction(h.automation, { resultId: OTHER_RESULT });
+      const found = yield* Find.ofAction(action).pipe(Effect.provide(h.layer));
+      expect(found).toEqual(Option.none());
+    }),
+  );
+});
+
 describe("Find.nextPending", () => {
   it.effect("answers the next action in queue order and skips the ids it is given", () =>
     Effect.gen(function* () {
