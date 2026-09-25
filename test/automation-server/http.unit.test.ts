@@ -5,10 +5,10 @@ import { Deferred, Effect, Fiber, Layer, Redacted, Stdio } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Handlers from "../../src/automation-server/handlers.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
@@ -220,7 +220,7 @@ describe("POST /linear", () => {
     () =>
       Effect.gen(function* () {
         const body = issueBody("Automation Needed");
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "markReady",
           message: "linear: labeling OLI-1063 ready failed",
         });

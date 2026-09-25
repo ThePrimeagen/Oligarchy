@@ -8,6 +8,7 @@
         "@effect/platform-node": "catalog:",
         "@oligarchy/db": "workspace:*",
         "@oligarchy/env": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
         "@oligarchy/log": "workspace:*",
         "@oligarchy/observability": "workspace:*",
         "@oligarchy/routes": "workspace:*",
@@ -64,6 +65,19 @@
         "@effect/platform-node": "catalog:",
         "@oligarchy/log": "workspace:*",
         "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/linear": {
+      "name": "@oligarchy/linear",
+      "dependencies": {
+        "@oligarchy/env": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -398,6 +412,8 @@
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
+
+    "@oligarchy/linear": ["@oligarchy/linear@workspace:packages/linear"],
 
     "@oligarchy/log": ["@oligarchy/log@workspace:packages/log"],
 

@@ -1,10 +1,10 @@
 import { Effect, Schedule, Schema } from "effect";
 import * as DbErrors from "@oligarchy/db/errors";
+import * as Linear from "@oligarchy/linear/client";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Linear from "../ctrl/linear.ts";
-import * as Errors from "../shared/errors.ts";
 
 const isDatabaseError = Schema.is(DbErrors.DatabaseError);
 
@@ -26,7 +26,7 @@ export const mark = Effect.fn("markReady")(function* (identifier: string) {
     Effect.timeoutOrElse({
       duration: MARK_BUDGET,
       orElse: () =>
-        Errors.LinearError.make({
+        LinearErrors.LinearError.make({
           operation: "markReady",
           message: `linear: labeling ${identifier} ready failed: no answer within ${MARK_BUDGET}`,
         }),

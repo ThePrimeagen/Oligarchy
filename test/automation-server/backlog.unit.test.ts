@@ -4,9 +4,9 @@ import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import type * as Automation from "@oligarchy/db/automation";
 import * as DbErrors from "@oligarchy/db/errors";
+import * as Linear from "@oligarchy/linear/client";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Backlog from "../../src/automation-server/backlog.ts";
-import * as Linear from "../../src/ctrl/linear.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
@@ -562,7 +562,7 @@ describe("backlog watch unhappy path", () => {
     "a failed Linear poll is one error line, keeps the rounds already saved, and the next polls still run",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "listBacklog",
           message: "linear: request failed",
         });
@@ -615,7 +615,7 @@ describe("backlog watch unhappy path", () => {
 
   it.effect("a failed move keeps the queued job and retries the move on the next poll", () =>
     Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "moveIssue",
         message: `linear: moving ${TICKET} failed`,
       });
@@ -663,7 +663,7 @@ describe("backlog watch unhappy path", () => {
     "a ready label that fails leaves the ticket in Backlog, and the next poll labels and moves it",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "markReady",
           message: `linear: labeling ${TICKET} ready failed`,
         });
@@ -835,7 +835,7 @@ describe("backlog watch unhappy path", () => {
     "a failed move spends the check, so a second ripe ticket is not queued until the next check",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "moveIssue",
           message: `linear: moving ${TICKET} failed`,
         });
@@ -1489,7 +1489,7 @@ describe("automation needed and needs review watch unhappy path", () => {
     "a ready label that fails leaves the pending drive unlabeled and the next poll tries again",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "markReady",
           message: "linear: labeling OLI-45 ready failed",
         });
@@ -1613,7 +1613,7 @@ describe("automation needed and needs review watch unhappy path", () => {
     "a failed Automation Needed poll keeps the rounds already saved, and Needs Review still queues",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "listAutomationNeeded",
           message: "linear: request failed",
         });

@@ -12,7 +12,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Config from "@oligarchy/env/config";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 export const LINEAR_API_URL = Config.DEFAULT_LINEAR_API_URL;
 // A request Linear never answers must not hold the automation server's dispatch or its watches.
@@ -36,6 +36,8 @@ export const ERRORED_STATE = "Errored";
 // does not require the column to exist.
 export const FAILED_STATE = "Failed";
 export const SUCCEEDED_STATE = "Succeeded";
+// Where an aborted job's ticket goes, so the ticket says what the queue says.
+export const ABORTED_STATE = "Aborted";
 // A ticket in Automation Needed that already has its pending job. The watch's list leaves
 // these out, so a restart does not keep a map of tickets that are waiting to run.
 export const READY_LABEL = "ready";
@@ -95,6 +97,11 @@ const ASSIGNEE_QUERY =
 const STATE_QUERY =
   "query ExperimentState($name: String!, $teamId: ID!) { workflowStates(filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }, first: 1) { nodes { id } } }";
 
+// A state by name on the ticket's own team, for a caller that knows the ticket and not the board.
+// A ticket Linear does not know is a 200 with one error and a null data.
+const TICKET_STATE_QUERY =
+  "query ExperimentTicketState($ticket: String!, $state: String!) { issue(id: $ticket) { team { states(filter: { name: { eq: $state } }, first: 1) { nodes { id } } } } }";
+
 const ISSUE_CREATE_MUTATION = `mutation ExperimentIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     success
@@ -152,6 +159,9 @@ const Teams = Schema.Struct({ teams: Nodes });
 const Labels = Schema.Struct({ issueLabels: Nodes });
 const Users = Schema.Struct({ users: Nodes });
 const States = Schema.Struct({ workflowStates: Nodes });
+const TicketStates = Schema.Struct({
+  issue: Schema.Struct({ team: Schema.Struct({ states: Nodes }) }),
+});
 const LabelCreate = Schema.Struct({
   issueLabelCreate: Schema.Struct({
     success: Schema.Boolean,
@@ -222,6 +232,9 @@ export type LinearService = {
   readonly moveToNeedsReview: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToFailed: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly moveToSucceeded: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
+  // The Aborted state is the ticket's own team's, not the configured team's: the dashboard aborts
+  // by identifier alone. Two requests, the second only once the state is known.
+  readonly moveToAborted: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly listBacklog: Effect.Effect<ReadonlyArray<LinearBacklogTicket>, Errors.LinearError>;
   readonly listAutomationNeeded: Effect.Effect<
     ReadonlyArray<LinearBacklogTicket>,
@@ -408,11 +421,16 @@ const makeLinear = (
       );
     });
 
-    const moveToInProgress = Effect.fn("Linear.moveToInProgress")(function* (identifier: string) {
-      const team = yield* teamId;
-      const stateId = yield* stateNamed(team, IN_PROGRESS_STATE);
-      yield* request(
-        "moveToInProgress",
+    // The update every move ends in: the ticket by identifier, refused by the state's name when
+    // Linear says the move did not take.
+    const moveTo = (
+      operation: string,
+      identifier: string,
+      stateName: string,
+      stateId: string,
+    ): Effect.Effect<void, Errors.LinearError> =>
+      request(
+        operation,
         ISSUE_UPDATE_MUTATION,
         { id: identifier, input: { stateId } },
         IssueUpdate,
@@ -421,43 +439,55 @@ const makeLinear = (
           (updated) => updated.issueUpdate.success,
           () =>
             Errors.LinearError.make({
-              operation: "moveToInProgress",
-              message: `linear: moving ${identifier} to In Progress failed`,
+              operation,
+              message: `linear: moving ${identifier} to ${stateName} failed`,
             }),
         ),
+        Effect.asVoid,
       );
-    });
 
     // Looked up on their own, not in stateIds: `test run` and `mint` must not need the columns
     // the automation server moves a ticket through.
     const moveByName = (
-      operation: "moveToInReview" | "moveToNeedsReview" | "moveToFailed" | "moveToSucceeded",
+      operation:
+        | "moveToInProgress"
+        | "moveToInReview"
+        | "moveToNeedsReview"
+        | "moveToFailed"
+        | "moveToSucceeded",
       stateName: string,
     ) =>
       Effect.fn(`Linear.${operation}`)(function* (identifier: string) {
         const team = yield* teamId;
         const stateId = yield* stateNamed(team, stateName);
-        yield* request(
-          operation,
-          ISSUE_UPDATE_MUTATION,
-          { id: identifier, input: { stateId } },
-          IssueUpdate,
-        ).pipe(
-          Effect.filterOrFail(
-            (updated) => updated.issueUpdate.success,
-            () =>
-              Errors.LinearError.make({
-                operation,
-                message: `linear: moving ${identifier} to ${stateName} failed`,
-              }),
-          ),
-        );
+        yield* moveTo(operation, identifier, stateName, stateId);
       });
 
+    const moveToInProgress = moveByName("moveToInProgress", IN_PROGRESS_STATE);
     const moveToInReview = moveByName("moveToInReview", IN_REVIEW_STATE);
     const moveToNeedsReview = moveByName("moveToNeedsReview", NEEDS_REVIEW_STATE);
     const moveToFailed = moveByName("moveToFailed", FAILED_STATE);
     const moveToSucceeded = moveByName("moveToSucceeded", SUCCEEDED_STATE);
+
+    // The state is the ticket's own team's: the caller knows the ticket and not the board, and a
+    // ticket Linear does not know is refused before any update.
+    const moveToAborted = Effect.fn("Linear.moveToAborted")(function* (identifier: string) {
+      const found = yield* request(
+        "moveToAborted",
+        TICKET_STATE_QUERY,
+        { ticket: identifier, state: ABORTED_STATE },
+        TicketStates,
+      );
+      const stateId = yield* Option.match(Arr.head(found.issue.team.states.nodes), {
+        onNone: () =>
+          Errors.LinearError.make({
+            operation: "moveToAborted",
+            message: `linear: no state named ${ABORTED_STATE}`,
+          }),
+        onSome: (state) => Effect.succeed(state.id),
+      });
+      yield* moveTo("moveToAborted", identifier, ABORTED_STATE, stateId);
+    });
 
     // Looked up on its own, not in stateIds: `test run` and `mint` must not need an Errored
     // column.
@@ -467,21 +497,7 @@ const makeLinear = (
     ) {
       const team = yield* teamId;
       const stateId = yield* stateNamed(team, ERRORED_STATE);
-      yield* request(
-        "moveToErrored",
-        ISSUE_UPDATE_MUTATION,
-        { id: identifier, input: { stateId } },
-        IssueUpdate,
-      ).pipe(
-        Effect.filterOrFail(
-          (updated) => updated.issueUpdate.success,
-          () =>
-            Errors.LinearError.make({
-              operation: "moveToErrored",
-              message: `linear: moving ${identifier} to Errored failed`,
-            }),
-        ),
-      );
+      yield* moveTo("moveToErrored", identifier, ERRORED_STATE, stateId);
       yield* request(
         "moveToErrored",
         COMMENT_CREATE_MUTATION,
@@ -641,13 +657,14 @@ const makeLinear = (
       moveToNeedsReview,
       moveToFailed,
       moveToSucceeded,
+      moveToAborted,
       listBacklog,
       listAutomationNeeded,
       listNeedsReview,
     } satisfies LinearService;
   });
 
-export class Linear extends Context.Service<Linear>()("@oligarchy/ctrl/Linear", {
+export class Linear extends Context.Service<Linear>()("@oligarchy/linear/Linear", {
   make: makeLinear,
 }) {
   static readonly layer = (

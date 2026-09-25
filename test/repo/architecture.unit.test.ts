@@ -50,6 +50,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/log": 1,
   "@oligarchy/env": 2,
   "@oligarchy/db": 3,
+  "@oligarchy/linear": 3,
   "@oligarchy/observability": 4,
   "@oligarchy/routes": 5,
 };
@@ -107,6 +108,7 @@ const sources = (): ReadonlyArray<string> =>
 
 const SHARED_SOURCES = "packages/shared/src/";
 const LOG_SOURCES = "packages/log/src/";
+const LINEAR_SOURCES = "packages/linear/src/";
 const ROUTES_SOURCES = "packages/routes/src/";
 
 const importSpecifiers = (source: string): ReadonlyArray<string> =>
@@ -136,6 +138,14 @@ const sharedImportProblems = confinedImportProblems(SHARED_SOURCES, EFFECT_ONLY)
 // it knows shared's vocabulary and nothing of the terminal (node:tty), the database, the
 // row-writing layer or Sentry, so every package above it may take it.
 const logImportProblems = confinedImportProblems(LOG_SOURCES, EFFECT_AND_SHARED);
+
+// linear is the Linear API and the names the board uses: it knows a ticket identifier, never a
+// result, so it takes the packages below it (shared, log, env) and no store, template or rule
+// about what a column means for a job.
+const linearImportProblems = confinedImportProblems(
+  LINEAR_SOURCES,
+  /^(?:effect(?:\/|$)|@oligarchy\/(?:shared|log|env)\/)/,
+);
 
 // The routes package is the HTTP contract alone: Effect's schemas, the shared vocabularies its
 // bodies carry, and its own modules.
@@ -430,6 +440,34 @@ describe("workspace packages", () => {
       "@oligarchy/observability/log",
       "@sentry/bun",
       "process.stdout",
+      "process.env",
+    ]);
+  });
+
+  it("the linear package imports only effect, shared, log, env and its own modules, and reads no process.* (happy)", () => {
+    expect(filesUnder(LINEAR_SOURCES).length).toBeGreaterThan(0);
+    expect(violationsIn(filesUnder(LINEAR_SOURCES), linearImportProblems)).toEqual([]);
+  });
+
+  it("names a linear import of a store, a template, a test helper or the main package, and a process.* read (unhappy)", () => {
+    expect(
+      linearImportProblems(
+        `${LINEAR_SOURCES}client.ts`,
+        [
+          'import { Effect, Layer } from "effect";',
+          'import * as HttpClient from "effect/unstable/http/HttpClient";',
+          'import * as Config from "@oligarchy/env/config";',
+          'import * as Errors from "./errors.ts";',
+          'import * as Tests from "@oligarchy/db/tests";',
+          'import * as Prompts from "../../../src/ctrl/prompts.ts";',
+          'import * as Stores from "../test/stores.ts";',
+          "const url = process.env.LINEAR_API_URL ?? Config.DEFAULT_LINEAR_API_URL;",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "@oligarchy/db/tests",
+      "../../../src/ctrl/prompts.ts",
+      "../test/stores.ts",
       "process.env",
     ]);
   });

@@ -1202,26 +1202,23 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
 
 const TOKEN = "test-token";
 const LINEAR_TOKEN = "lin_api_test";
-// The ids Linear answered for OLI-1448 and the Oligarchy team's Aborted status on 2026-09-14.
-const ISSUE_ID = "3990cc5d-3e5f-44a3-ad3d-d2a5ed1fa2bc";
+// The id Linear answered for the Oligarchy team's Aborted status on 2026-09-14.
 const ABORTED_STATE_ID = "2ec3c6a2-934b-4869-9aaf-bfe5d37e6fa4";
 // Every url an abort may reach when the test does not stand one up: each refuses.
 const REFUSED_HTTP = "http://127.0.0.1:1";
 
-// Linear's two answers as its GraphQL sends them: the issue with its team's one state of that
-// name, then the update's success. `states` scripts the first, `success` the second.
+// Linear's two answers as its GraphQL sends them: the ticket's team's one state of that name,
+// then the update's success. `states` scripts the first, `success` the second.
 const linearAnswering = (
   states: ReadonlyArray<{ readonly id: string }> = [{ id: ABORTED_STATE_ID }],
   success = true,
 ): StubProxy.Script => {
   return (received) => {
     const text = JSON.stringify(received.body);
-    if (text.includes("query AbortedState")) {
-      return StubProxy.json(200, {
-        data: { issue: { id: ISSUE_ID, team: { states: { nodes: states } } } },
-      });
+    if (text.includes("issue(id:")) {
+      return StubProxy.json(200, { data: { issue: { team: { states: { nodes: states } } } } });
     }
-    if (text.includes("mutation AbortIssue")) {
+    if (text.includes("issueUpdate")) {
       return StubProxy.json(200, { data: { issueUpdate: { success } } });
     }
     return StubProxy.json(200, { errors: [{ message: "unexpected operation" }], data: null });
@@ -1235,16 +1232,17 @@ const linearNotFound: StubProxy.Script = () =>
     data: null,
   });
 
-// The two requests the dashboard's abort makes of Linear for a ticket: the raw token in the
-// authorization header (a personal API key takes no Bearer), the state asked by name, the
-// update by the ids the first answer carried.
+// The two requests the dashboard's abort makes of Linear for a ticket (`Linear.moveToAborted`):
+// the raw token in the authorization header (a personal API key takes no Bearer), the Aborted
+// state asked by name on the ticket's team, the update by identifier with the state id the first
+// answer carried.
 const linearMove = (ticket: string): ReadonlyArray<StubProxy.Received> => [
   {
     method: "POST",
     url: "/graphql",
     authorization: LINEAR_TOKEN,
     body: {
-      query: expect.stringContaining("query AbortedState"),
+      query: expect.stringContaining("issue(id: $ticket)"),
       variables: { ticket, state: "Aborted" },
     },
   },
@@ -1253,8 +1251,8 @@ const linearMove = (ticket: string): ReadonlyArray<StubProxy.Received> => [
     url: "/graphql",
     authorization: LINEAR_TOKEN,
     body: {
-      query: expect.stringContaining("mutation AbortIssue"),
-      variables: { id: ISSUE_ID, stateId: ABORTED_STATE_ID },
+      query: expect.stringContaining("issueUpdate"),
+      variables: { id: ticket, input: { stateId: ABORTED_STATE_ID } },
     },
   },
 ];

@@ -25,6 +25,8 @@ import * as Sessions from "@oligarchy/db/sessions";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
+import * as Linear from "@oligarchy/linear/client";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Failure from "@oligarchy/log/render";
 import * as Observability from "@oligarchy/observability/log";
@@ -33,7 +35,6 @@ import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Errors from "../shared/errors.ts";
-import * as Linear from "./linear.ts";
 import * as Prompts from "./prompts.ts";
 import * as Render from "./render.ts";
 
@@ -224,8 +225,8 @@ const selectDefinitions = Effect.fn("ctrl.selectDefinitions")(function* (
   );
 });
 
-const withReason = (error: Errors.LinearError, message: string): Errors.LinearError =>
-  Errors.LinearError.make(
+const withReason = (error: LinearErrors.LinearError, message: string): LinearErrors.LinearError =>
+  LinearErrors.LinearError.make(
     Object.assign(
       { operation: error.operation, message },
       error.status === undefined ? undefined : { status: error.status },

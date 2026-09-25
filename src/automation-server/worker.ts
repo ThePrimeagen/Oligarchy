@@ -6,10 +6,11 @@ import * as Servers from "@oligarchy/db/servers";
 import * as Sessions from "@oligarchy/db/sessions";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
+import * as Linear from "@oligarchy/linear/client";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Linear from "../ctrl/linear.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
@@ -331,7 +332,7 @@ const reportErrored = Effect.fn("reportErrored")(function* (
 const moveTicket = Effect.fn("moveTicket")(function* (
   ticket: string,
   column: string,
-  move: Effect.Effect<void, Errors.LinearError>,
+  move: Effect.Effect<void, LinearErrors.LinearError>,
 ) {
   const log = yield* Log.Log;
   yield* move.pipe(

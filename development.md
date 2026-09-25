@@ -73,11 +73,15 @@ exist.
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
-  `@effect/vitest`, `typescript`, `vitest`, `@types/node`, `drizzle-orm`, `pg`, `@types/pg`) is
-  named once in the root's `workspaces.catalog` and each package says
-  `"catalog:"`. Why: two `effect`s would make two sets of Schema types that do not assign to each
-  other. `bunfig.toml` sets `linker = "isolated"`: a package sees only what its own `package.json`
-  declares, so an import it never named fails instead of borrowing the root's copy. Every
+  `@effect/vitest`, `typescript`, `vitest`, `@types/node`, `drizzle-orm`, `pg`, `@types/pg`,
+  `@sentry/bun`, `@sentry/effect`, `@sentry/cloudflare`) is named once in the root's
+  `workspaces.catalog` and each package says `"catalog:"`. Why: two `effect`s would make two
+  sets of Schema types that do not assign to each other. `bunfig.toml` sets `linker =
+  "isolated"`: a package's `node_modules` holds only what its own `package.json` declares, so an
+  import it never named fails instead of borrowing the root's copy, except for what the root
+  itself declares: resolution walks up to the root's `node_modules`, where every workspace
+  package is linked, so a package importing a workspace package it does not declare, or itself
+  by name, resolves all the same. `test/repo/architecture.unit.test.ts` names both. Every
   `tsconfig.json` extends `tsconfig.base.json`; the root adds only hono's JSX. `check:types` and
   `test:unit` run the root's lane, then `bun run --workspaces <lane>`, which runs that script in
   every package and fails when one does; every package has both scripts, on Bun. Lint and format
@@ -188,7 +192,19 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Effect.logError` for pool errors on purpose, because a pool failure routed through the
   row-writing `Log` would try to insert a row through the failing pool. Its admission rule: a
   store reads and writes rows and returns them; refused are a loop, a clock, a call to another
-  system and a log line. `packages/observability/src/` is where lines, failures and spans go once
+  system and a log line. `packages/linear/src/` is the Linear API and nothing else: `client.ts`
+  (the `Linear` service, service key `@oligarchy/linear/Linear`: `teamId`, `labelIds`,
+  `assigneeId`, `stateIds`, `createIssue`, `describeIssue`, `moveIssue`, `markReady`,
+  `clearReady`, the `moveTo*` family, `listBacklog`, `listAutomationNeeded`, `listNeedsReview`;
+  the board vocabulary `BACKLOG_STATE` ... `ABORTED_STATE`, `READY_LABEL`, `AGENT_TEST_LABEL`;
+  `LinearTicket`, `LinearBacklogTicket`) and `errors.ts` (`LinearError`). It imports `effect`,
+  `@oligarchy/env` and its own files. Every `moveTo*` but one finds its state by name on the
+  configured team; `moveToAborted` finds it on the ticket's own team, because its caller (the
+  dashboard) knows the ticket and not the board, and a ticket Linear does not know is refused
+  before any update. Its admission rule: a call to the Linear API, or a name the board uses;
+  refused are a store (a Linear primitive knows a ticket identifier, never a result), a template,
+  a rule about what a column means for a job, and a retry policy: those are jobs'.
+  `packages/observability/src/` is where lines, failures and spans go once
   written: `log.ts` (`LogLive`, the row-writing `Log` layer: one drain fiber takes each line
   with its row in call order, inserts the row, then writes the line; a refused row writes the
   line, then `db: log insert failed: <detail>`, then reports the failure; a flush marker resolves
@@ -211,8 +227,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `wrangler.jsonc` it deletes every row older than seven days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
   fleet) alone; a row is history for a week and then gone. What it calls beyond Postgres is the
-  automation server's `/abort` and, in `linear.ts`, Linear's GraphQL to move an aborted job's
-  ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
+  automation server's `/abort` and, through `@oligarchy/linear`'s `moveToAborted` on a
+  `ManagedRuntime` built per call over `FetchHttpClient`, Linear's GraphQL to move an aborted
+  job's ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
   points them at stubs, and the tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
   secrets, as is `LINEAR_TEAM`: the team `POST /create-test-suite-run` files tickets on, with no
   default, so a local worker and production can name different teams. A dashboard var would be
@@ -239,9 +256,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `import * as EnvErrors from "@oligarchy/env/errors"`, `import * as Client from
   "@oligarchy/db/client"` and one namespace per store (`Logs`, `Servers`, `Tests`, ...),
   `import * as DbSchema from "@oligarchy/db/schema"`, `import * as DbErrors from
-  "@oligarchy/db/errors"`. The five errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`,
-  `EnvErrors` and `DbErrors` everywhere so none shadows the main package's staged `Errors`; when
-  that file is gone, `SharedErrors` becomes `Errors`. The observability package is `import * as
+  "@oligarchy/db/errors"`, `import * as Linear from "@oligarchy/linear/client"`, `import * as
+  LinearErrors from "@oligarchy/linear/errors"`. The six errors modules are `ApiErrors`,
+  `SharedErrors`, `LogErrors`, `EnvErrors`, `DbErrors` and `LinearErrors` everywhere so none
+  shadows the main package's staged `Errors`; when that file is gone, `SharedErrors` becomes
+  `Errors`. The observability package is `import * as
   Observability from "@oligarchy/observability/log"` (`Observability.LogLive`, the row-writing
   `Log` layer the five graphs build), `import * as Sentry from "@oligarchy/observability/sentry"`
   and `import * as Dsn from "@oligarchy/observability/dsn"`.
@@ -320,8 +339,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Layer.effectDiscard` for background loops and fail-fast preconditions.
 - Background fibers belong to the layer scope: `Effect.forkScoped`, never `Effect.runFork`. Do not
   use `Layer.fresh` in production, or `Layer.catch` (not exported). `ManagedRuntime` is only the
-  dashboard request that runs `./ctrl test run testsuite`: that request is the entry, and it
-  disposes the runtime when the command returns.
+  dashboard's: the request that runs `./ctrl test run testsuite` and the abort that runs
+  `Linear.moveToAborted` (until phase 8 forwards it to automation-server). Each request is the
+  entry, and it disposes the runtime when the call returns.
 - `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
   one graph share one router and both listeners serve both route sets. A process has one
   listener; a page for an operator is the dashboard's, not a second port (below).
@@ -1071,8 +1091,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   hard-coded constant (public by design) and is shared with the dashboard.
 - `@sentry/bun` (Sentry's SDK for the runtime, `@sentry/node` underneath) and `@sentry/effect`
   are imported only in `packages/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
-  three are pinned to one version so `@sentry/core` is not duplicated (`SentryEffectTracer`
-  relies on one `getActiveSpan()`).
+  three are pinned to one version through the catalog so `@sentry/core` is not duplicated
+  (`SentryEffectTracer` relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
   (below); never call `captureException` elsewhere in Effect code. Tags are `location`/`agent_id`
   read from `fiber.getRef(References.CurrentLogAnnotations)` (the `Log` methods annotate them,

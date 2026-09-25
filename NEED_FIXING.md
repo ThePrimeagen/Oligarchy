@@ -95,7 +95,7 @@ probe on the cause (the same shape `packages/log/src/external-failure.ts` uses) 
 ## 8. Convention drifts, one line each
 
 - `Record<string, unknown>` (forbidden by `development.md`) in `packages/observability/src/sentry.ts`
-  (`tag`) and `src/ctrl/linear.ts` (`variables`).
+  (`tag`) and `packages/linear/src/client.ts` (`variables`).
 - `src/shared/process-usage.ts` wraps `collect` in `Effect.withSpan`; every other service method is
   `Effect.fn("Service.method")`.
 - `packages/db/src/logs.ts` `listLogs` orders by `created_at, id`; `development.md` says `id`, not
@@ -142,8 +142,8 @@ grow into once it exists, and what it prevents.
   then a line" policy. Ready: `src/automation-server/ready.ts`, with a different policy again.
   Which board column means which action: three copies, `src/automation-server/backlog.ts`,
   `enqueue.ts` and `webhook.ts`. Abort: split between the dashboard, which moves the ticket to
-  Aborted with its own hand-rolled Linear client (`src/dashboard/linear.ts`), and
-  automation-server's `POST /abort`, which closes the row. Two processes, two clients, one job.
+  Aborted through `@oligarchy/linear`'s `moveToAborted` (its hand-rolled client is gone since
+  phase 7), and automation-server's `POST /abort`, which closes the row. Two processes, one job.
 - **Where the searches are today.** `worker.ts` (`diagnosable`, `isOpen`, `nextPending` with a
   skip list, `listRunning` at startup), `backlog.ts` (`findResultByLinearId`, `jobStatus`,
   `hasPending`), `handlers.ts` (the abort lookup), `src/dashboard/query.ts` (its own read model

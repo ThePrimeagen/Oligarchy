@@ -1,4 +1,6 @@
 import * as Sentry from "@sentry/cloudflare";
+import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import { type Context, Hono } from "hono";
 import { html } from "hono/html";
 import type { FC, PropsWithChildren } from "hono/jsx";
@@ -45,17 +47,17 @@ import {
   type EditNotice,
 } from "./definitions.tsx";
 import { HTMX_INTEGRITY, HTMX_URL } from "./htmx.ts";
-import { abortLinearIssue, type LinearEnv } from "./linear.ts";
 import { FollowBody, FollowFrame } from "./follow.tsx";
 import { Fleet, type Halves, Process, Queue, ServersPage } from "./servers.tsx";
 import { createTestSuiteRun, SuiteRequestError } from "./suite.ts";
 import { isTicket } from "./ticket.ts";
+import * as Linear from "@oligarchy/linear/client";
 import * as Dsn from "@oligarchy/observability/dsn";
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
-type Bindings = LinearEnv & {
+type Bindings = {
   HYPERDRIVE: {
     connectionString: string;
   };
@@ -65,6 +67,32 @@ type Bindings = LinearEnv & {
   AUTOMATION_SERVER_URL: string;
   // The Linear team POST /create-test-suite-run files tickets on. A wrangler secret, no default.
   LINEAR_TEAM: string;
+  // A Cloudflare var beside the automation server's url, so the integration lane can point it at
+  // a stub: no test calls Linear.
+  LINEAR_API_URL: string;
+  // wrangler secret; a personal API key, which Linear takes raw, with no `Bearer`.
+  LINEAR_API_TOKEN: string;
+};
+
+// The dashboard's one Linear call: an aborted job's ticket moves to the board's Aborted status,
+// so the ticket says what the queue says. Rejects with the reason when the ticket did not move:
+// the route logs it and answers all the same. A runtime per call, as the worker has no process
+// to hold one.
+const abortLinearIssue = async (env: Bindings, ticket: string): Promise<void> => {
+  const runtime = ManagedRuntime.make(
+    Linear.Linear.layer(
+      Redacted.make(env.LINEAR_API_TOKEN),
+      env.LINEAR_TEAM,
+      env.LINEAR_API_URL,
+    ).pipe(Layer.provide(FetchHttpClient.layer)),
+  );
+  try {
+    await runtime.runPromise(
+      Effect.flatMap(Linear.Linear, (client) => client.moveToAborted(ticket)),
+    );
+  } finally {
+    await runtime.dispose();
+  }
 };
 
 type SessionListProps = {
