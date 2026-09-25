@@ -134,7 +134,7 @@ The issue is created in `Backlog` and moved to `Automation Needed` once its resu
 
 One pending result for every stored test definition but `mint`, each in its newest wording, and one Linear ticket each, printed as the same JSON. There is no `--name`; one definition is `test run --name`. `mint` is left out because a mint job runs only on the server a setup request pinned, which [mint](#mint) and the proxy open and a suite ticket never has; `test run --name mint` still files it. Not used while driving a guest. Reads `LINEAR_API_TOKEN` and `LINEAR_TEAM`.
 
-The dashboard answers the same run at `POST /create-test-suite-run` by running `./ctrl test run testsuite`, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
+The dashboard answers the same run at `POST /create-test-suite-run`, opening the suite the way `./ctrl test run testsuite` does, JSON `{ iso, version, serverUrl }` in and the same JSON out. It is not linked from a page. The button would sit in the definitions heading, beside "Test definitions", not on a selected card: a card button would read as running that one name. It would post those three fields and show the run id and ticket identifiers, and stay disabled when the list is empty.
 
 Tickets are born in `Backlog` and moved to `Automation Needed` as in `test run`. An empty table, or one holding only `mint`, is refused before Linear: `test: no test definitions found`.
 

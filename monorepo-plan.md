@@ -4,9 +4,10 @@ Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pul
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
 (`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
-(`@oligarchy/db`), phase 6 (`@oligarchy/observability`) and phase 7 (`@oligarchy/linear`). The rest of
-this file is the plan for the remaining phases and the reasoning behind each choice; a phase's
-checklist is ticked as it lands.
+(`@oligarchy/db`), phase 6 (`@oligarchy/observability`), phase 7 (`@oligarchy/linear`) and phase 8
+(`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`). The rest of this file is the plan for
+the remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it
+lands.
 
 Revised 2026-09-25 after review. What changed from the first version, and why:
 
@@ -322,11 +323,11 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 8: `@oligarchy/jobs`**
 
-- [ ] TEST (move) `fakeTestStore` and `fakeAutomationStore` from `test/support/stores.ts` and
+- [x] TEST (move) `fakeTestStore` and `fakeAutomationStore` from `test/support/stores.ts` and
       `test/support/fake-linear.ts` to `packages/testing/src/`, with their own cases: jobs' tests
       and the apps' are the two consumers. This creates `@oligarchy/testing`.
-- [ ] TEST (move) `test/ctrl/prompts.unit.test.ts` to `packages/jobs/test/templates.unit.test.ts`.
-- [ ] TEST (move) the `test run` and `testsuite` cases of `test/ctrl/command.unit.test.ts` that
+- [x] TEST (move) `test/ctrl/prompts.unit.test.ts` to `packages/jobs/test/templates.unit.test.ts`.
+- [x] TEST (move) the `test run` and `testsuite` cases of `test/ctrl/command.unit.test.ts` that
       exercise `openRun` to `packages/jobs/test/open.unit.test.ts`. Happy: `Jobs.open` for the
       suite creates one run, one result per definition but mint in its newest wording, one
       ticket each, sets each result's Linear id, and returns the run and its tickets; for one
@@ -334,10 +335,10 @@ container and stay in the root's integration project until phase 12.
       (`failRun`) and fails with the cause; an unknown name is refused. The ctrl command test
       keeps one case per command proving it calls `Jobs.open` with its flags and prints what came
       back as JSON.
-- [ ] TEST (new) `packages/jobs/test/open.unit.test.ts`: `Jobs.openMint` (from the proxy's
+- [x] TEST (new) `packages/jobs/test/open.unit.test.ts`: `Jobs.openMint` (from the proxy's
       `setup.ts`) creates the mint result and its ticket from the mint template. Unhappy: a
       second mint for the same setup is refused by the store and files no ticket.
-- [ ] TEST (move) the `closeJob`, `reportErrored`, `moveTicket` and `reportDiagnosis` cases of
+- [x] TEST (move) the `closeJob`, `reportErrored`, `moveTicket` and `reportDiagnosis` cases of
       `test/automation-server/worker.unit.test.ts` to `packages/jobs/test/close.unit.test.ts`.
       Happy: `Jobs.close(action, outcome)` finishes the row, then moves the ticket to Succeeded,
       Failed or Needs Review by the outcome, and answers true when this call closed it;
@@ -347,10 +348,10 @@ container and stay in the root's integration project until phase 12.
       one line and the row stays closed; a second `close` of a closed row answers false and moves
       nothing (a board that will not move does not reopen a job); an action without a ticket
       writes the row and moves nothing.
-- [ ] TEST (move) `test/automation-server/ready.unit.test.ts` to `packages/jobs/test/ready.unit.test.ts`:
+- [x] TEST (move) `test/automation-server/ready.unit.test.ts` to `packages/jobs/test/ready.unit.test.ts`:
       `Jobs.ready` marks the ticket once inside the webhook deadline and logs a miss;
       `Jobs.release` clears it with two immediate retries and never reopens the closed row.
-- [ ] TEST (move) the column-to-action cases of `test/automation-server/backlog.unit.test.ts`,
+- [x] TEST (move) the column-to-action cases of `test/automation-server/backlog.unit.test.ts`,
       `enqueue.unit.test.ts` and `webhook.unit.test.ts` to `packages/jobs/test/board.unit.test.ts`.
       Happy: Automation Needed is a drive, unless the result is the mint definition, then a mint;
       Needs Review is a diagnose; `Jobs.enqueue(ticket)` inserts the pending action for the
@@ -358,11 +359,11 @@ container and stay in the root's integration project until phase 12.
       same (result, action) is named by the status the unique index kept; any other column is
       no action. The automation-server tests keep one case each that the watch loop and the
       webhook handler call these.
-- [ ] TEST (new) `packages/jobs/test/abort.unit.test.ts`: `Jobs.abort(ticket, action)` aborts the
+- [x] TEST (new) `packages/jobs/test/abort.unit.test.ts`: `Jobs.abort(ticket, action)` aborts the
       pending action row and moves the ticket to Aborted, in that order. Unhappy: no pending
       action is a typed refusal and the ticket does not move; a ticket that will not move is one
       line and the row stays aborted.
-- [ ] TEST (move) the search cases of `test/automation-server/worker.unit.test.ts` and
+- [x] TEST (move) the search cases of `test/automation-server/worker.unit.test.ts` and
       `backlog.unit.test.ts` (`diagnosable`, `isOpen`, the `nextPending` skip list, the
       `findResultByLinearId` lookups) to `packages/jobs/test/find.unit.test.ts` as `Jobs.find`.
       Happy: `byTicket` answers the job behind a ticket; `nextPending` skips the ids it is given
@@ -371,7 +372,7 @@ container and stay in the root's integration project until phase 12.
       or mint whose result is closed and unjudged. Unhappy: an unknown ticket is none; an action
       still pending holds `isDiagnosable` false; a diagnose is never diagnosable. The
       automation-server tests keep one case each that dispatch and the watch call `find`.
-- [ ] TEST (move) the `closeInherited` cases of `test/automation-server/worker.unit.test.ts` to
+- [x] TEST (move) the `closeInherited` cases of `test/automation-server/worker.unit.test.ts` to
       `packages/jobs/test/reclaim.unit.test.ts`. Happy: an inherited drive whose result is closed
       is judged and closed as completed or errored, and its ticket moves accordingly; every other
       inherited action is failed `restarted` and its ticket moved to Errored. Unhappy: a row that
@@ -379,15 +380,15 @@ container and stay in the root's integration project until phase 12.
       closed; an action without a ticket closes the row and moves nothing. The
       automation-server test keeps one case that startup stops the driver at its client, then
       calls `Jobs.reclaim`.
-- [ ] TEST (alter) `test/automation-server/handlers.unit.test.ts` and
+- [x] TEST (alter) `test/automation-server/handlers.unit.test.ts` and
       `test/dashboard/dashboard.unit.test.ts`: `POST /abort` on automation-server calls
       `Jobs.abort`; the dashboard's `POST /abort` forwards to automation-server and no longer
       moves the ticket itself.
-- [ ] TEST (alter) `test/dashboard/suite.unit.test.ts`: `createTestSuiteRun` builds its runtime
+- [x] TEST (alter) `test/dashboard/suite.unit.test.ts`: `createTestSuiteRun` builds its runtime
       (database and `TestStore`, `Linear`, `Log.layerStdout`, the bundled templates as the file
       system, `FetchHttpClient`), calls `Jobs.open`, and answers with what it returned. It no
       longer runs `ctrl` or scrapes a console.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no file in jobs imports `http`, a
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: no file in jobs imports `http`, a
       platform, or an app. Unhappy: an `AutomationClient` import inside jobs is named.
 
 **Phase 9: `@oligarchy/fleet`**
@@ -725,7 +726,7 @@ Decided while working the phase:
 
 **Phase 8: `@oligarchy/jobs`**
 
-- [ ] Create `packages/jobs` with:
+- [x] Create `packages/jobs` with:
   - `templates.ts` (from `src/ctrl/prompts.ts`, with `PromptError`): the test and mint ticket
     bodies, filled from `prompts/*.html`.
   - `open.ts`: `open` lifted out of `makeCtrlCommand`'s closure (`openRun`) together with
@@ -742,10 +743,10 @@ Decided while working the phase:
   - `find.ts`: `byTicket`, `nextPending`, `running`, `inherited`, `status`, `hasPending`,
     `isDiagnosable`, from `worker.ts` and `backlog.ts`.
   - `reclaim.ts`: `reclaim`, the row-and-ticket half of `worker.ts`'s `closeInherited`.
-- [ ] Create `packages/testing` (`@oligarchy/testing`, `private`, dev only) with
+- [x] Create `packages/testing` (`@oligarchy/testing`, `private`, dev only) with
       `fakeTestStore`, `fakeAutomationStore` and `fakeLinear`; it depends on `db` and `linear`.
       It grows one fake at a time, each when a second consumer appears.
-- [ ] `ctrl test run` and `testsuite` call `Jobs.open` and print the JSON. The proxy's `setup.ts`
+- [x] `ctrl test run` and `testsuite` call `Jobs.open` and print the JSON. The proxy's `setup.ts`
       calls `Jobs.openMint`. automation-server's worker calls `Jobs.find` to pick and judge
       actions, `Jobs.close` and `Jobs.fail` to settle them, and at startup stops each inherited
       action's driver at its client and calls `Jobs.reclaim`; its webhook and board watch call
@@ -755,8 +756,65 @@ Decided while working the phase:
       bundled templates as the file system, `FetchHttpClient`) and calls `Jobs.open`, dropping
       the in-process `ctrl` run and the recording console; its `POST /abort` only forwards to
       automation-server.
-- [ ] Delete `automation-server/ready.ts` and `enqueue.ts`; `worker.ts`, `backlog.ts` and
+- [x] Delete `automation-server/ready.ts` and `enqueue.ts`; `worker.ts`, `backlog.ts` and
       `webhook.ts` keep the dispatch, the poll loop and the HTTP decoding.
+
+Decided while working the phase:
+
+- Each module is its own namespace, as every other package's are: `Open.open`, `Close.close`,
+  `Find.byTicket`, `Board.enqueue`, `Abort.abort`, `Ready.mark`, `Reclaim.reclaim`, and
+  `JobsErrors` for `errors.ts`. The plan's `Jobs.ready` is `Ready.mark`, since `Ready.ready`
+  says nothing; `release` keeps its name.
+- `Close.fail(action, ticket, reason)` takes the ticket: `close` has already looked the job up
+  (through `Find.ofAction`, added for the four places that read an action's job), and the
+  worker's DATABASE FAILURE path knows the ticket its placement carried. That path stays in the
+  worker: its row write, retries and lines are pinned by the worker tests, and only its
+  ticket half goes through `Close.fail`.
+- `Find.isDiagnosable` is `Find.diagnosable`, which answers `ready`, `held` (the drive or mint is
+  still pending or running) or `never` with the reason, because the watch and the webhook each
+  treat the three differently; a boolean would have made each ask again.
+- `Find.inherited()` lists every running row, not only another server's: it runs once at
+  startup, before this server dispatches anything, so no running row can be its own, and
+  `automation_jobs.server_id` names the automation client, not the server.
+- `Board.actionFor(column, job)` and `Board.enqueue(job, action)` take the job the caller already
+  found, so the webhook and the watch look a ticket up once. `Board.asks(column)` is added: the
+  webhook records a column that asks for nothing before any lookup, as it did before, rather
+  than logging "no result" for a ticket in Backlog. `Board.driveOrMint(job)` is the one copy of
+  "Automation Needed is a drive, unless the job is the mint install".
+- `Reclaim.reclaim(action, stop)` takes the app's `stop`: stopping a driver at its automation
+  client is transport and the client is the app's, so jobs never imports it. `Abort.running`
+  likewise closes a running row the app has already stopped.
+- The board watch keeps calling `linear.markReady` itself: a missed label must fail its poll so
+  the ticket stays in Backlog, or unlabeled, and the next poll tries again. `Ready.mark` logs a
+  miss and succeeds, which is the webhook's contract, not the watch's.
+- `openMint`'s unhappy cases are no mint definition and a setup row gone before the pin
+  (`SetupGone`, which fails the run and names the ticket). A second mint for the same setup is
+  refused by the setup store's insert before `openMint` runs, which stays the proxy's and its
+  test's. The proxy no longer writes the result's pin itself: `openMint` pins it before the
+  ticket reaches Automation Needed, once.
+- `ctrl mint`, one run over many servers, keeps building its run and uses `Open.mintDefinition`,
+  `Open.team`, `Open.ticket` and `Open.failRun` rather than calling `openMint` once per server,
+  which would have been one run per server. ctrl's other store calls (`test start`,
+  `test-results`, the session and automation reads) are the driver's and the operator's
+  commands, not transitions of a job's row and ticket together.
+- The worker's `place` still reads `driveFacts` and `resumeIso`: those are dispatch inputs (what
+  the automation client is sent), not a search for a job.
+- The dashboard's suite runtime reads `LINEAR_API_TOKEN` and `LINEAR_TEAM` through
+  `Config.linearAccess` over `Config.fromValues`, inside `Layer.unwrap`, so a missing team is
+  refused before any query, as ctrl refuses it; it uses Linear's default API url, as ctrl did.
+- The dashboard's `POST /abort` cases were in the integration lane
+  (`test/integration/dashboard.integration.test.ts`) and automation-server's in
+  `test/automation-server/http.unit.test.ts`, not the files the checklist names; they were
+  altered where they were. `POST /suites/abort` still aborts pending rows and moves tickets
+  itself (NEED_FIXING item 10).
+- `@oligarchy/testing` sits above every layer (`TOP` in the architecture test), so any
+  dependency on it is an upward edge and only a dev edge is allowed; a dev edge may not loop
+  back, so a fake of a package's own store stays in that package's `test/`. The app tests
+  import it as `TestingStores` and `TestingLinear`, and `test/support/stores.ts` builds its
+  remaining fakes on it.
+- The integration lane, run here with Docker (phase 7's run had none, so its database tests
+  skipped), has two failures that fail the same way on `master` (NEED_FIXING item 11); neither
+  is the phase's.
 
 **Phase 9: `@oligarchy/fleet`**
 

@@ -969,10 +969,10 @@ app.post("/abort", async (context) => {
 // A uuid, the shape test_runs.id has. Anything else is not a suite to abort.
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// POST /suites/abort stops one suite that never finished. Pending jobs abort here first, the
-// same way /abort does, so a claim during the round trip never sees them. A running job is the
-// automation server's to stop. A miss still aborts the row here, same as /abort's running
-// fallback, and the client may still be driving; the VM itself ends when commands stop. The
+// POST /suites/abort stops one suite that never finished. Pending jobs abort here first, so a
+// claim during the round trip never sees them. A running job is the automation server's to
+// stop, forwarded the way /abort forwards. A miss still aborts the row here, and the client may
+// still be driving; the VM itself ends when commands stop. The
 // results still pending or running become aborted, which is what takes the suite out of the
 // running count, and each of their tickets moves to Aborted. A suite that has already finished
 // is left as it is. A Linear miss is logged and the rows stay aborted. The click answers with
