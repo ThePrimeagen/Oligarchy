@@ -5,10 +5,10 @@ import { TestClock } from "effect/testing";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as LinearErrors from "@oligarchy/linear/errors";
+import * as FakeLinear from "@oligarchy/testing/linear";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
 import * as FakeLog from "../support/log.ts";
-import * as FakeLinear from "../support/fake-linear.ts";
-import * as Stores from "../support/stores.ts";
 
 const ISO = "https://example.com/omarchy.iso";
 const SERVER = "http://10.0.0.6:42069";
@@ -117,7 +117,7 @@ const memory = () => {
 
 const provide = (
   store: ReturnType<typeof memory>,
-  tests = Stores.fakeTestStore({ definitions: [MINT] }),
+  tests = TestingStores.fakeTestStore({ definitions: [MINT] }),
   linear = FakeLinear.fakeLinear(),
   log = FakeLog.fakeLog(),
 ) => Layer.mergeAll(store.layer, tests.layer, linear.layer, log.layer, NodeFileSystem.layer);
@@ -180,7 +180,7 @@ const harness = (
   linear: FakeLinear.FakeLinear = FakeLinear.fakeLinear(),
 ) => {
   const store = memory();
-  const tests = Stores.fakeTestStore({ definitions });
+  const tests = TestingStores.fakeTestStore({ definitions });
   const log = FakeLog.fakeLog();
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -367,12 +367,52 @@ describe("opening a setup", () => {
         yield* setup.install();
         yield* setup.open(ISO, SERVER, PROXY);
         expect(h.store.rows).toHaveLength(0);
-        expect(h.log.lines.some((line) => line.text.startsWith("setup ticket OLI"))).toBe(false);
+        expect(h.tests.runs[0]?.status).toBe("failed");
+        expect(h.log.lines.map((line) => line.text)).toEqual([
+          `setup ticket failed: linear: request failed; ${SERVER}; ${ISO}`,
+        ]);
         yield* TestClock.adjust("30 seconds");
         expect(h.store.removed).toBe(1);
       }),
     );
   });
+
+  it.effect(
+    "a lock deleted while its ticket is made fails the run and names the ticket left in Backlog (unhappy)",
+    () => {
+      const linear = FakeLinear.fakeLinear({
+        overrides: {
+          createIssue: () =>
+            Effect.sync(() => {
+              h.store.rows.splice(0);
+              return FakeLinear.ticketFor("OLI-42");
+            }),
+        },
+      });
+      const h = harness([MINT], linear);
+      return h.run(
+        Effect.gen(function* () {
+          const setup = yield* Setup.Setup;
+          yield* setup.install();
+          yield* setup.open(ISO, SERVER, PROXY);
+          const reason = "setup row gone before its result was stored";
+          expect(h.tests.runs[0]).toMatchObject({
+            status: "failed",
+            reason: `${reason}; created OLI-42`,
+          });
+          expect(h.linear.calls.map((call) => call.method)).not.toContain("describeIssue");
+          expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+            ["error", `ticket trapped in Backlog; ${reason}`, "OLI-42"],
+            [
+              "error",
+              `setup ticket failed: ${reason}; created OLI-42; ${SERVER}; ${ISO}`,
+              undefined,
+            ],
+          ]);
+        }),
+      );
+    },
+  );
 
   it.effect(
     "a failed unlock after a failed Linear ticket leaves the row and does not mint again (unhappy)",

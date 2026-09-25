@@ -21,11 +21,11 @@ import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as SharedErrors from "@oligarchy/shared/errors";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as DriverLog from "../../src/driver/log.ts";
 import * as Loop from "../../src/driver/loop.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
-import * as Stores from "../support/stores.ts";
 
 const TOKEN = "super-secret-token";
 const MODEL = "openrouter/test-model";
@@ -350,9 +350,9 @@ const storeFor = (
   overrides?: Partial<typeof Tests.TestStore.Service>,
 ) => {
   if (mode === "missing") {
-    return Stores.fakeTestStore({}, overrides);
+    return TestingStores.fakeTestStore({}, overrides);
   }
-  return Stores.fakeTestStore(
+  return TestingStores.fakeTestStore(
     {
       definitions: mode === "no-definition" ? [] : [definitionRow(seed)],
       runs: [runRow(seed)],

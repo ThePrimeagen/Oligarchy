@@ -1202,60 +1202,8 @@ describe("dashboard/servers page unhappy path: unreachable database", () => {
 
 const TOKEN = "test-token";
 const LINEAR_TOKEN = "lin_api_test";
-// The id Linear answered for the Oligarchy team's Aborted status on 2026-09-14.
-const ABORTED_STATE_ID = "2ec3c6a2-934b-4869-9aaf-bfe5d37e6fa4";
 // Every url an abort may reach when the test does not stand one up: each refuses.
 const REFUSED_HTTP = "http://127.0.0.1:1";
-
-// Linear's two answers as its GraphQL sends them: the ticket's team's one state of that name,
-// then the update's success. `states` scripts the first, `success` the second.
-const linearAnswering = (
-  states: ReadonlyArray<{ readonly id: string }> = [{ id: ABORTED_STATE_ID }],
-  success = true,
-): StubProxy.Script => {
-  return (received) => {
-    const text = JSON.stringify(received.body);
-    if (text.includes("issue(id:")) {
-      return StubProxy.json(200, { data: { issue: { team: { states: { nodes: states } } } } });
-    }
-    if (text.includes("issueUpdate")) {
-      return StubProxy.json(200, { data: { issueUpdate: { success } } });
-    }
-    return StubProxy.json(200, { errors: [{ message: "unexpected operation" }], data: null });
-  };
-};
-
-// Linear's refusal of a ticket it does not know: 200 with errors beside a null data.
-const linearNotFound: StubProxy.Script = () =>
-  StubProxy.json(200, {
-    errors: [{ message: "Entity not found: Issue", path: ["issue"] }],
-    data: null,
-  });
-
-// The two requests the dashboard's abort makes of Linear for a ticket (`Linear.moveToAborted`):
-// the raw token in the authorization header (a personal API key takes no Bearer), the Aborted
-// state asked by name on the ticket's team, the update by identifier with the state id the first
-// answer carried.
-const linearMove = (ticket: string): ReadonlyArray<StubProxy.Received> => [
-  {
-    method: "POST",
-    url: "/graphql",
-    authorization: LINEAR_TOKEN,
-    body: {
-      query: expect.stringContaining("issue(id: $ticket)"),
-      variables: { ticket, state: "Aborted" },
-    },
-  },
-  {
-    method: "POST",
-    url: "/graphql",
-    authorization: LINEAR_TOKEN,
-    body: {
-      query: expect.stringContaining("issueUpdate"),
-      variables: { id: ticket, input: { stateId: ABORTED_STATE_ID } },
-    },
-  },
-];
 
 type AbortEnv = {
   readonly databaseUrl: string;
@@ -1289,6 +1237,14 @@ const postAbort = async (
   );
   return { status: response.status, body: await response.json() };
 };
+
+// The one request the dashboard's abort makes: to the automation server, with the bearer.
+const forwarded = (ticket: string, action: QueuedJob["action"] = "drive") => ({
+  method: "POST",
+  url: "/abort",
+  authorization: `Bearer ${TOKEN}`,
+  body: { ticket, action },
+});
 
 const jobByTicket = async (
   databaseUrl: string,
@@ -1378,122 +1334,10 @@ const finishedJob = (ticket: string): QueuedJob => ({
   finishedSecondsAgo: 5,
 });
 
-describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob happy path", () => {
-  it("closes a running job for the ticket from running and ends the connection", async () => {
-    await seed(dbUrl, (db) => seedQueue(db, "abort-query-running", [runningJob("ABT-Q-1")]));
-    const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-1", "drive", "running");\nconsole.log(String(closed));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("true\n");
-    const job = await jobByTicket(dbUrl, "ABT-Q-1");
-    expect(job.status).toBe("aborted");
-    expect(job.reason).toBe("aborted");
-    expect(job.finishedAt).toBeInstanceOf(Date);
-  });
-
-  it("closes the one row named by ticket and action when the ticket has a running drive and a pending diagnose", async () => {
-    await seed(dbUrl, (db) => seedSiblings(db, "abort-query-siblings", "ABT-Q-SIB"));
-    const result = await runQuery(
-      'console.log(String(await query.abortAutomationJob(url, "ABT-Q-SIB", "drive", "pending")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-Q-SIB", "diagnose", "pending")));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("false\ntrue\n");
-    expect((await jobByTicket(dbUrl, "ABT-Q-SIB", "drive")).status).toBe("running");
-    expect((await jobByTicket(dbUrl, "ABT-Q-SIB", "diagnose")).status).toBe("aborted");
-  });
-
-  it("closes a pending job for the ticket from pending, its finish stamped, and ends the connection", async () => {
-    await seed(dbUrl, (db) => seedQueue(db, "abort-query-pending", [pendingJob("ABT-Q-P")]));
-    const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-P", "drive", "pending");\nconsole.log(String(closed));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("true\n");
-    const job = await jobByTicket(dbUrl, "ABT-Q-P");
-    expect(job.status).toBe("aborted");
-    expect(job.reason).toBe("aborted");
-    expect(job.finishedAt).toBeInstanceOf(Date);
-  });
-});
-
-describe.skipIf(dbUrl === "")("dashboard/query abortAutomationJob unhappy path", () => {
-  it("leaves a pending job pending when asked to close it from running, and ends the connection", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "abort-query-pending-as-running", [pendingJob("ABT-Q-2")]),
-    );
-    const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-2", "drive", "running");\nconsole.log(String(closed));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("false\n");
-    expect(await jobByTicket(dbUrl, "ABT-Q-2")).toMatchObject({
-      status: "pending",
-      reason: null,
-      finishedAt: null,
-    });
-  });
-
-  it("leaves a running job running when asked to close it from pending, and ends the connection", async () => {
-    await seed(dbUrl, (db) =>
-      seedQueue(db, "abort-query-running-as-pending", [runningJob("ABT-Q-4")]),
-    );
-    const result = await runQuery(
-      'const closed = await query.abortAutomationJob(url, "ABT-Q-4", "drive", "pending");\nconsole.log(String(closed));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("false\n");
-    expect(await jobByTicket(dbUrl, "ABT-Q-4")).toMatchObject({
-      status: "running",
-      reason: null,
-      finishedAt: null,
-    });
-  });
-
-  it("leaves a finished job finished from either, and ends the connection", async () => {
-    await seed(dbUrl, (db) => seedQueue(db, "abort-query-done", [finishedJob("ABT-Q-3")]));
-    const result = await runQuery(
-      'console.log(String(await query.abortAutomationJob(url, "ABT-Q-3", "drive", "running")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-Q-3", "drive", "pending")));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("false\nfalse\n");
-    expect((await jobByTicket(dbUrl, "ABT-Q-3")).status).toBe("succeeded");
-  });
-
-  it("returns false for an unknown ticket and ends the connection", async () => {
-    const result = await runQuery(
-      'console.log(String(await query.abortAutomationJob(url, "ABT-missing", "drive", "running")));\nconsole.log(String(await query.abortAutomationJob(url, "ABT-missing", "drive", "pending")));',
-      dbUrl,
-    );
-    expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
-    expect(result.stderr).toBe("");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("false\nfalse\n");
-  });
-});
-
 describe("dashboard POST /abort happy path: the outbound calls", () => {
   it("posts a form ticket the same way the servers page abort button does", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       const response = await app.request(
         "/abort",
@@ -1510,15 +1354,8 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
       );
       expect(response.status).toBe(303);
       expect(response.headers.get("location")).toBe("/servers");
-      expect(proxy.requests).toEqual([
-        {
-          method: "POST",
-          url: "/abort",
-          authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-FORM", action: "drive" },
-        },
-      ]);
-      expect(linear.requests).toEqual(linearMove("ABT-FORM"));
+      expect(proxy.requests).toEqual([forwarded("ABT-FORM")]);
+      expect(linear.requests).toEqual([]);
     } finally {
       await proxy.close();
       await linear.close();
@@ -1527,7 +1364,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
 
   it("posts a definitions-page abort the same way, and returns to that definition", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       const response = await app.request(
         "/abort",
@@ -1549,41 +1386,27 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
       );
       expect(response.status).toBe(303);
       expect(response.headers.get("location")).toBe("/definitions/lock-screen");
-      expect(proxy.requests).toEqual([
-        {
-          method: "POST",
-          url: "/abort",
-          authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-FORM-DEF", action: "drive" },
-        },
-      ]);
-      expect(linear.requests).toEqual(linearMove("ABT-FORM-DEF"));
+      expect(proxy.requests).toEqual([forwarded("ABT-FORM-DEF")]);
+      expect(linear.requests).toEqual([]);
     } finally {
       await proxy.close();
       await linear.close();
     }
   });
 
-  it("posts the ticket with the bearer, moves the ticket to Aborted once the automation server answers 200, and answers 200", async () => {
+  it("forwards the ticket and action with the bearer, answers 200, and asks Linear nothing", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
-      const response = await postAbort("ABT-200", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
+      const response = await postAbort(
+        "ABT-200",
+        { databaseUrl: REFUSED_URL, automationUrl: proxy.url, linearUrl: linear.url },
+        "diagnose",
+      );
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ ok: "true" });
-      expect(proxy.requests).toEqual([
-        {
-          method: "POST",
-          url: "/abort",
-          authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-200", action: "drive" },
-        },
-      ]);
-      expect(linear.requests).toEqual(linearMove("ABT-200"));
+      expect(proxy.requests).toEqual([forwarded("ABT-200", "diagnose")]);
+      expect(linear.requests).toEqual([]);
     } finally {
       await proxy.close();
       await linear.close();
@@ -1592,194 +1415,25 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
 });
 
 describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
-  it("leaves a running job running when the automation server answers 200, and moves the ticket", async () => {
+  it("forwards a running drive and the pending diagnose behind it, and writes no row", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
-      await seed(dbUrl, (db) => seedQueue(db, "abort-http-200", [runningJob("ABT-200")]));
-      const response = await postAbort("ABT-200", {
-        databaseUrl: dbUrl,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect(proxy.requests).toEqual([
-        {
-          method: "POST",
-          url: "/abort",
-          authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-200", action: "drive" },
-        },
-      ]);
-      expect((await jobByTicket(dbUrl, "ABT-200")).status).toBe("running");
-      expect(linear.requests).toEqual(linearMove("ABT-200"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("closes a pending job here without asking the automation server, then moves the ticket", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedQueue(db, "abort-http-pending", [pendingJob("ABT-PEND")]));
-      const response = await postAbort("ABT-PEND", {
-        databaseUrl: dbUrl,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      const job = await jobByTicket(dbUrl, "ABT-PEND");
-      expect(job.status).toBe("aborted");
-      expect(job.reason).toBe("aborted");
-      expect(job.finishedAt).toBeInstanceOf(Date);
-      expect(proxy.requests).toEqual([]);
-      expect(linear.requests).toEqual(linearMove("ABT-PEND"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("aborts only the pending diagnose of a ticket whose drive is running, asking the automation server nothing", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedSiblings(db, "abort-sibling-diagnose", "ABT-SIB-1"));
-      const response = await postAbort(
-        "ABT-SIB-1",
-        { databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url },
-        "diagnose",
-      );
-      expect(response.status).toBe(200);
-      expect((await jobByTicket(dbUrl, "ABT-SIB-1", "diagnose")).status).toBe("aborted");
-      expect((await jobByTicket(dbUrl, "ABT-SIB-1", "drive")).status).toBe("running");
-      expect(proxy.requests).toEqual([]);
-      expect(linear.requests).toEqual(linearMove("ABT-SIB-1"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("aborts only the running drive of a ticket whose diagnose is pending, through the automation server", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedSiblings(db, "abort-sibling-drive", "ABT-SIB-2"));
-      const response = await postAbort(
-        "ABT-SIB-2",
-        { databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url },
-        "drive",
-      );
-      expect(response.status).toBe(200);
-      expect(proxy.requests).toEqual([
-        {
-          method: "POST",
-          url: "/abort",
-          authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-SIB-2", action: "drive" },
-        },
-      ]);
-      expect((await jobByTicket(dbUrl, "ABT-SIB-2", "diagnose")).status).toBe("pending");
-      expect((await jobByTicket(dbUrl, "ABT-SIB-2", "drive")).status).toBe("running");
-      expect(linear.requests).toEqual(linearMove("ABT-SIB-2"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("leaves the running drive alone when the pending diagnose it already closed is aborted again", async () => {
-    // The automation server refuses the second post as the real one does: the ticket's running
-    // job is its drive, not the diagnose named.
-    const proxy = await StubProxy.startStubProxy(() =>
-      StubProxy.refusal(400, 'ticket "ABT-SIB-3" is running a drive, not a diagnose'),
-    );
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedSiblings(db, "abort-sibling-again", "ABT-SIB-3"));
+      await seed(dbUrl, (db) => seedSiblings(db, "abort-forward", "ABT-FWD"));
       const env = { databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url };
-      expect((await postAbort("ABT-SIB-3", env, "diagnose")).status).toBe(200);
-      expect((await postAbort("ABT-SIB-3", env, "diagnose")).status).toBe(200);
-      expect((await jobByTicket(dbUrl, "ABT-SIB-3", "diagnose")).status).toBe("aborted");
-      expect((await jobByTicket(dbUrl, "ABT-SIB-3", "drive")).status).toBe("running");
+      expect((await postAbort("ABT-FWD", env, "diagnose")).status).toBe(200);
+      expect((await postAbort("ABT-FWD", env, "drive")).status).toBe(200);
       expect(proxy.requests).toEqual([
-        {
-          method: "POST",
-          url: "/abort",
-          authorization: `Bearer ${TOKEN}`,
-          body: { ticket: "ABT-SIB-3", action: "diagnose" },
-        },
+        forwarded("ABT-FWD", "diagnose"),
+        forwarded("ABT-FWD", "drive"),
       ]);
-      expect(linear.requests).toEqual(linearMove("ABT-SIB-3"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("closes the pending job an htmx post names, leaves the other pending, and moves the ticket", async () => {
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) =>
-        seedQueue(db, "abort-htmx-pending", [pendingJob("ABT-HX-1"), pendingJob("ABT-HX-2")]),
-      );
-      const response = await app.request(
-        "/abort",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            "hx-request": "true",
-          },
-          body: new URLSearchParams({ ticket: "ABT-HX-1", action: "drive" }).toString(),
-        },
-        abortBindings({ databaseUrl: dbUrl, automationUrl: REFUSED_HTTP, linearUrl: linear.url }),
-      );
-      expect(response.status).toBe(200);
-      expect((await jobByTicket(dbUrl, "ABT-HX-1")).status).toBe("aborted");
-      expect((await jobByTicket(dbUrl, "ABT-HX-2")).status).toBe("pending");
-      expect(linear.requests).toEqual(linearMove("ABT-HX-1"));
-    } finally {
-      await linear.close();
-    }
-  });
-
-  it("aborts the running job a definitions-page htmx post names and leaves the other running", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.refusal(500, "opencode exited 1"));
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) =>
-        seedQueue(db, "abort-definitions", [
-          runningJob("ABT-DEF-STOP"),
-          runningJob("ABT-DEF-KEEP"),
-        ]),
-      );
-      const response = await app.request(
-        "/abort",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            "hx-request": "true",
-          },
-          body: new URLSearchParams({
-            ticket: "ABT-DEF-STOP",
-            action: "drive",
-            view: "definitions",
-            definition: "abort-definitions",
-          }).toString(),
-        },
-        abortBindings({ databaseUrl: dbUrl, automationUrl: proxy.url, linearUrl: linear.url }),
-      );
-      expect(response.status).toBe(200);
-      expect((await jobByTicket(dbUrl, "ABT-DEF-STOP")).status).toBe("aborted");
-      expect((await jobByTicket(dbUrl, "ABT-DEF-KEEP")).status).toBe("running");
-      expect(linear.requests).toEqual(linearMove("ABT-DEF-STOP"));
+      expect(await jobByTicket(dbUrl, "ABT-FWD", "diagnose")).toMatchObject({
+        status: "pending",
+        reason: null,
+        finishedAt: null,
+      });
+      expect((await jobByTicket(dbUrl, "ABT-FWD", "drive")).status).toBe("running");
+      expect(linear.requests).toEqual([]);
     } finally {
       await proxy.close();
       await linear.close();
@@ -1790,7 +1444,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort happy path", () => {
 describe("dashboard POST /abort unhappy path: always 200", () => {
   it("does nothing for a body whose action is missing or not one a job has", async () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       for (const body of [{ ticket: "ABT-NOACT" }, { ticket: "ABT-NOACT", action: "reboot" }]) {
         const response = await app.request(
@@ -1817,11 +1471,11 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     }
   });
 
-  it("answers 200 when the automation server returns 400 and the database is unreachable, asking Linear nothing", async () => {
+  it("answers 200 when the automation server returns 400, asking Linear nothing", async () => {
     const proxy = await StubProxy.startStubProxy(() =>
       StubProxy.refusal(400, 'ticket "ABT-400" is not running'),
     );
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       const response = await postAbort("ABT-400", {
         databaseUrl: REFUSED_URL,
@@ -1830,6 +1484,7 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
       });
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ ok: "true" });
+      expect(proxy.requests).toEqual([forwarded("ABT-400")]);
       expect(linear.requests).toEqual([]);
     } finally {
       await proxy.close();
@@ -1837,7 +1492,7 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     }
   });
 
-  it("answers 200 without a redirect when the definitions page asks over htmx and the database is unreachable", async () => {
+  it("answers 200 without a redirect when the definitions page asks over htmx and names no job", async () => {
     const response = await app.request(
       "/abort",
       {
@@ -1858,7 +1513,7 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
-  it("answers 200 when the automation server is unreachable and the database is too", async () => {
+  it("answers 200 when the automation server is unreachable", async () => {
     const response = await postAbort("ABT-DOWN", {
       databaseUrl: REFUSED_URL,
       automationUrl: REFUSED_HTTP,
@@ -1890,207 +1545,47 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
       await new Promise<void>((done) => server.close(() => done()));
     }
   });
-
-  it("answers 200 when the job closed and Linear is unreachable", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    try {
-      const response = await postAbort("ABT-LIN-DOWN", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: REFUSED_HTTP,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect(proxy.requests).toHaveLength(1);
-    } finally {
-      await proxy.close();
-    }
-  });
-
-  it("answers 200 when the job closed and Linear accepts the request and never answers", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const server = createHttpServer(() => {});
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => resolve());
-    });
-    try {
-      const address = server.address();
-      if (address === null || typeof address === "string") {
-        throw new Error("hanging linear server: no tcp address");
-      }
-      const response = await postAbort("ABT-LIN-HANG", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: `http://127.0.0.1:${String(address.port)}`,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-    } finally {
-      await proxy.close();
-      await new Promise<void>((done) => server.close(() => done()));
-    }
-  });
-
-  it("answers 200 and stops after the first request when Linear does not know the ticket", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearNotFound);
-    try {
-      const response = await postAbort("ABT-LIN-404", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect(linear.requests).toEqual([linearMove("ABT-LIN-404")[0]]);
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("answers 200 and stops after the first request when the ticket's team has no Aborted status", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearAnswering([]));
-    try {
-      const response = await postAbort("ABT-LIN-NOSTATE", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect(linear.requests).toEqual([linearMove("ABT-LIN-NOSTATE")[0]]);
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("answers 200 when Linear refuses the token with a 401", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(() =>
-      StubProxy.json(401, { errors: [{ message: "Authentication required, not authenticated" }] }),
-    );
-    try {
-      const response = await postAbort("ABT-LIN-401", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect(linear.requests).toHaveLength(1);
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("answers 200 when Linear answers the update with success false", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(
-      linearAnswering([{ id: ABORTED_STATE_ID }], false),
-    );
-    try {
-      const response = await postAbort("ABT-LIN-FALSE", {
-        databaseUrl: REFUSED_URL,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect(linear.requests).toEqual(linearMove("ABT-LIN-FALSE"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
 });
 
 describe.skipIf(dbUrl === "")("dashboard POST /abort unhappy path", () => {
-  it("answers 200, marks a running job aborted and moves the ticket when the automation server returns 400", async () => {
-    const proxy = await StubProxy.startStubProxy(() =>
+  it("answers 200 and leaves a running job running, moving nothing, when the automation server returns 400, returns 500 or is unreachable", async () => {
+    const refusing = await StubProxy.startStubProxy(() =>
       StubProxy.refusal(400, 'ticket "ABT-400" is not running'),
     );
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedQueue(db, "abort-http-400", [runningJob("ABT-400")]));
-      const response = await postAbort("ABT-400", {
-        databaseUrl: dbUrl,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      const job = await jobByTicket(dbUrl, "ABT-400");
-      expect(job.status).toBe("aborted");
-      expect(job.reason).toBe("aborted");
-      expect(linear.requests).toEqual(linearMove("ABT-400"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("answers 200, marks a running job aborted and moves the ticket when the automation server returns 500", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.refusal(500, "opencode exited 1"));
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedQueue(db, "abort-http-500", [runningJob("ABT-500")]));
-      const response = await postAbort("ABT-500", {
-        databaseUrl: dbUrl,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect((await jobByTicket(dbUrl, "ABT-500")).status).toBe("aborted");
-      expect(linear.requests).toEqual(linearMove("ABT-500"));
-    } finally {
-      await proxy.close();
-      await linear.close();
-    }
-  });
-
-  it("answers 200, marks a running job aborted and moves the ticket when the automation server is unreachable", async () => {
-    const linear = await StubProxy.startStubProxy(linearAnswering());
-    try {
-      await seed(dbUrl, (db) => seedQueue(db, "abort-http-down", [runningJob("ABT-DOWN")]));
-      const response = await postAbort("ABT-DOWN", {
-        databaseUrl: dbUrl,
-        automationUrl: REFUSED_HTTP,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect((await jobByTicket(dbUrl, "ABT-DOWN")).status).toBe("aborted");
-      expect(linear.requests).toEqual(linearMove("ABT-DOWN"));
-    } finally {
-      await linear.close();
-    }
-  });
-
-  it("answers 200 and leaves a pending job aborted when Linear then refuses the move", async () => {
-    const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
-    const linear = await StubProxy.startStubProxy(linearNotFound);
+    const failing = await StubProxy.startStubProxy(() =>
+      StubProxy.refusal(500, "opencode exited 1"),
+    );
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       await seed(dbUrl, (db) =>
-        seedQueue(db, "abort-http-pending-lin", [pendingJob("ABT-PEND-LIN")]),
+        seedQueue(db, "abort-http-refused", [
+          runningJob("ABT-400"),
+          runningJob("ABT-500"),
+          runningJob("ABT-DOWN"),
+        ]),
       );
-      const response = await postAbort("ABT-PEND-LIN", {
-        databaseUrl: dbUrl,
-        automationUrl: proxy.url,
-        linearUrl: linear.url,
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ ok: "true" });
-      expect((await jobByTicket(dbUrl, "ABT-PEND-LIN")).status).toBe("aborted");
-      expect(proxy.requests).toEqual([]);
-      expect(linear.requests).toHaveLength(1);
+      for (const [ticket, automationUrl] of [
+        ["ABT-400", refusing.url],
+        ["ABT-500", failing.url],
+        ["ABT-DOWN", REFUSED_HTTP],
+      ] as const) {
+        const response = await postAbort(ticket, {
+          databaseUrl: dbUrl,
+          automationUrl,
+          linearUrl: linear.url,
+        });
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ ok: "true" });
+        expect(await jobByTicket(dbUrl, ticket)).toMatchObject({
+          status: "running",
+          reason: null,
+          finishedAt: null,
+        });
+      }
+      expect(linear.requests).toEqual([]);
     } finally {
-      await proxy.close();
+      await refusing.close();
+      await failing.close();
       await linear.close();
     }
   });
@@ -2099,7 +1594,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort unhappy path", () => {
     const proxy = await StubProxy.startStubProxy(() =>
       StubProxy.refusal(400, 'ticket "ABT-DONE" is not running'),
     );
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       await seed(dbUrl, (db) => seedQueue(db, "abort-http-done", [finishedJob("ABT-DONE")]));
       const response = await postAbort("ABT-DONE", {
@@ -2121,7 +1616,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort unhappy path", () => {
     const proxy = await StubProxy.startStubProxy(() =>
       StubProxy.refusal(400, 'ticket "ABT-NOBODY" is not running'),
     );
-    const linear = await StubProxy.startStubProxy(linearAnswering());
+    const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       await seed(dbUrl, (db) => seedQueue(db, "abort-http-nobody", [pendingJob("ABT-OTHER")]));
       const response = await postAbort("ABT-NOBODY", {
@@ -2132,7 +1627,7 @@ describe.skipIf(dbUrl === "")("dashboard POST /abort unhappy path", () => {
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ ok: "true" });
       expect((await jobByTicket(dbUrl, "ABT-OTHER")).status).toBe("pending");
-      expect(proxy.requests).toHaveLength(1);
+      expect(proxy.requests).toEqual([forwarded("ABT-NOBODY")]);
       expect(linear.requests).toEqual([]);
     } finally {
       await proxy.close();

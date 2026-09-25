@@ -17,20 +17,27 @@ const PackageJson = Schema.Struct({
   name: Schema.String,
   exports: Schema.Record(Schema.String, Schema.String),
   dependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  devDependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 });
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 
+const workspaceNames = (deps: Readonly<Record<string, string>> | undefined) =>
+  Object.keys(deps ?? {}).filter((dep) => dep.startsWith("@oligarchy/"));
+
 // Each workspace package with the specifiers its exports answer (`./api` is
-// `@oligarchy/routes/api`) and the workspace packages its dependencies name.
+// `@oligarchy/routes/api`) and the workspace packages its dependencies and devDependencies name.
 const workspacePackages = readdirSync(join(root, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map(({ name: dir }) => {
-    const { name, exports, dependencies } = decodePackageJson(read(`packages/${dir}/package.json`));
+    const { name, exports, dependencies, devDependencies } = decodePackageJson(
+      read(`packages/${dir}/package.json`),
+    );
     return {
       dir: `packages/${dir}`,
       name,
       modules: Object.keys(exports).map((key) => `${name}${key.slice(1)}`),
-      dependsOn: Object.keys(dependencies ?? {}).filter((dep) => dep.startsWith("@oligarchy/")),
+      dependsOn: workspaceNames(dependencies),
+      devDependsOn: workspaceNames(devDependencies),
     };
   });
 
@@ -39,20 +46,28 @@ type PackageGraph = ReadonlyMap<string, ReadonlyArray<string>>;
 const packageGraph: PackageGraph = new Map(
   workspacePackages.map((pkg) => [pkg.name, pkg.dependsOn]),
 );
+const devPackageGraph: PackageGraph = new Map(
+  workspacePackages.map((pkg) => [pkg.name, pkg.devDependsOn]),
+);
+
+// testing's fakes sit above the apps that use them: nothing may depend on it, only dev-depend.
+const TOP = 7;
 
 // The layer each package sits on, numbered as in monorepo-plan.md's picture (shared 0, log 1,
-// env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6). A package's
-// dependencies name only packages on a strictly lower layer, so the graph reads one way and a
-// loop cannot hide in it. A package joins the list in the phase that creates it; routes holds
-// http's slot until it is renamed.
+// env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6, the dev-only
+// testing on top). A package's dependencies name only packages on a strictly lower layer, so the
+// graph reads one way and a loop cannot hide in it. A package joins the list in the phase that
+// creates it; routes holds http's slot until it is renamed.
 const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
   "@oligarchy/log": 1,
   "@oligarchy/env": 2,
   "@oligarchy/db": 3,
   "@oligarchy/linear": 3,
+  "@oligarchy/jobs": 4,
   "@oligarchy/observability": 4,
   "@oligarchy/routes": 5,
+  "@oligarchy/testing": TOP,
 };
 
 // A package's sources reach another package only through a dependency its package.json names,
@@ -100,6 +115,31 @@ const layerProblems = (
     });
   });
 
+// Every package a package's dependencies reach, however far down.
+const reachable = (graph: PackageGraph, from: string): ReadonlySet<string> => {
+  const seen = new Set<string>();
+  const visit = (name: string): void => {
+    for (const dep of graph.get(name) ?? []) {
+      if (!seen.has(dep)) {
+        seen.add(dep);
+        visit(dep);
+      }
+    }
+  };
+  visit(from);
+  return seen;
+};
+
+// A dev edge is not layered (an app's tests may take testing's fakes), but it may not loop back:
+// a package dev-depends on another only if that one's dependencies never reach it. So a fake of
+// db's own store stays in db's test/, never in a testing that db's tests would import.
+const devEdgeProblems = (graph: PackageGraph, devGraph: PackageGraph): ReadonlyArray<string> =>
+  [...devGraph].flatMap(([name, devDeps]) =>
+    devDeps
+      .filter((dep) => reachable(graph, dep).has(name))
+      .map((dep) => `${name} -dev-> ${dep} loops back: ${dep} depends on ${name}`),
+  );
+
 // The viz's Solid components are `.tsx`; the same rules bind them, and every workspace package's.
 const sources = (): ReadonlyArray<string> =>
   ["src", ...workspacePackages.map((pkg) => `${pkg.dir}/src`)]
@@ -109,6 +149,7 @@ const sources = (): ReadonlyArray<string> =>
 const SHARED_SOURCES = "packages/shared/src/";
 const LOG_SOURCES = "packages/log/src/";
 const LINEAR_SOURCES = "packages/linear/src/";
+const JOBS_SOURCES = "packages/jobs/src/";
 const ROUTES_SOURCES = "packages/routes/src/";
 
 const importSpecifiers = (source: string): ReadonlyArray<string> =>
@@ -145,6 +186,13 @@ const logImportProblems = confinedImportProblems(LOG_SOURCES, EFFECT_AND_SHARED)
 const linearImportProblems = confinedImportProblems(
   LINEAR_SOURCES,
   /^(?:effect(?:\/|$)|@oligarchy\/(?:shared|log|env)\/)/,
+);
+
+// jobs is the workflow over a result and its ticket: the stores and Linear below it, never the HTTP
+// contract, a platform or an app. Dispatching an action to a client stays in automation-server.
+const jobsImportProblems = confinedImportProblems(
+  JOBS_SOURCES,
+  /^(?:effect(?:\/|$)|@oligarchy\/(?:shared|log|env|db|linear)\/)/,
 );
 
 // The routes package is the HTTP contract alone: Effect's schemas, the shared vocabularies its
@@ -472,6 +520,36 @@ describe("workspace packages", () => {
     ]);
   });
 
+  it("the jobs package imports only effect, the packages below it and its own modules, and reads no process.* (happy)", () => {
+    expect(filesUnder(JOBS_SOURCES).length).toBeGreaterThan(0);
+    expect(violationsIn(filesUnder(JOBS_SOURCES), jobsImportProblems)).toEqual([]);
+  });
+
+  it("names a jobs import of the automation client, the HTTP contract, a platform or an app, and a process.* read (unhappy)", () => {
+    expect(
+      jobsImportProblems(
+        `${JOBS_SOURCES}abort.ts`,
+        [
+          'import { Effect } from "effect";',
+          'import * as Tests from "@oligarchy/db/tests";',
+          'import * as Linear from "@oligarchy/linear/client";',
+          'import * as Close from "./close.ts";',
+          'import * as AutomationClient from "../../../src/automation-server/client.ts";',
+          'import * as Api from "@oligarchy/routes/api";',
+          'import * as NodeServices from "@effect/platform-node/NodeServices";',
+          'import * as Observability from "@oligarchy/observability/log";',
+          "const url = process.env.AUTOMATION_SERVER_URL;",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "../../../src/automation-server/client.ts",
+      "@oligarchy/routes/api",
+      "@effect/platform-node/NodeServices",
+      "@oligarchy/observability/log",
+      "process.env",
+    ]);
+  });
+
   it("the routes package imports only effect, shared and its own modules (happy)", () => {
     expect(filesUnder(ROUTES_SOURCES).length).toBeGreaterThan(0);
     expect(violationsIn(filesUnder(ROUTES_SOURCES), routesImportProblems)).toEqual([]);
@@ -542,6 +620,43 @@ describe("workspace packages", () => {
   it("every package is in the layer list and depends only on strictly lower layers (happy)", () => {
     expect(packageGraph.size).toBeGreaterThan(0);
     expect(layerProblems(packageGraph, LAYERS)).toEqual([]);
+  });
+
+  it("every dev edge points at a package whose dependencies never reach back (happy)", () => {
+    expect(devPackageGraph.get("@oligarchy/jobs")).toContain("@oligarchy/testing");
+    expect(devEdgeProblems(packageGraph, devPackageGraph)).toEqual([]);
+  });
+
+  it("names a dependency on the dev-only testing, and a dev edge onto testing from a package it fakes (unhappy)", () => {
+    const graph = new Map([
+      ["@oligarchy/shared", []],
+      ["@oligarchy/db", ["@oligarchy/shared"]],
+      ["@oligarchy/linear", []],
+      ["@oligarchy/jobs", ["@oligarchy/db", "@oligarchy/testing"]],
+      ["@oligarchy/testing", ["@oligarchy/db", "@oligarchy/linear"]],
+    ]);
+    expect(
+      layerProblems(graph, {
+        "@oligarchy/shared": 0,
+        "@oligarchy/db": 3,
+        "@oligarchy/linear": 3,
+        "@oligarchy/jobs": 4,
+        "@oligarchy/testing": TOP,
+      }),
+    ).toEqual(["@oligarchy/jobs -> @oligarchy/testing is an upward edge (layer 4 -> 7)"]);
+    expect(
+      devEdgeProblems(
+        graph,
+        new Map([
+          ["@oligarchy/shared", ["@oligarchy/testing"]],
+          ["@oligarchy/linear", ["@oligarchy/testing"]],
+          ["@oligarchy/jobs", ["@oligarchy/testing"]],
+        ]),
+      ),
+    ).toEqual([
+      "@oligarchy/shared -dev-> @oligarchy/testing loops back: @oligarchy/testing depends on @oligarchy/shared",
+      "@oligarchy/linear -dev-> @oligarchy/testing loops back: @oligarchy/testing depends on @oligarchy/linear",
+    ]);
   });
 
   // A loop among listed packages is always an upward or a same-layer edge, so this one check
