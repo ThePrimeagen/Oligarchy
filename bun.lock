@@ -9,13 +9,12 @@
         "@oligarchy/db": "workspace:*",
         "@oligarchy/env": "workspace:*",
         "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
         "@oligarchy/routes": "workspace:*",
         "@oligarchy/shared": "workspace:*",
         "@opentui/core": "0.5.11",
         "@opentui/solid": "0.5.11",
-        "@sentry/bun": "10.73.0",
-        "@sentry/cloudflare": "10.73.0",
-        "@sentry/effect": "10.73.0",
+        "@sentry/cloudflare": "catalog:",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "hono": "^4.13.5",
@@ -87,6 +86,24 @@
         "vitest": "catalog:",
       },
     },
+    "packages/observability": {
+      "name": "@oligarchy/observability",
+      "dependencies": {
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "@sentry/bun": "catalog:",
+        "@sentry/effect": "catalog:",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/routes": {
       "name": "@oligarchy/routes",
       "dependencies": {
@@ -120,6 +137,9 @@
   "catalog": {
     "@effect/platform-node": "4.0.0-rc.112",
     "@effect/vitest": "4.0.0-rc.112",
+    "@sentry/bun": "10.73.0",
+    "@sentry/cloudflare": "10.73.0",
+    "@sentry/effect": "10.73.0",
     "@types/node": "^26.4.0",
     "@types/pg": "^8.23.1",
     "drizzle-orm": "^0.45.2",
@@ -380,6 +400,8 @@
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
     "@oligarchy/log": ["@oligarchy/log@workspace:packages/log"],
+
+    "@oligarchy/observability": ["@oligarchy/observability@workspace:packages/observability"],
 
     "@oligarchy/routes": ["@oligarchy/routes@workspace:packages/routes"],
 

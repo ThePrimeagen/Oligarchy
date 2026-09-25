@@ -16,10 +16,10 @@ import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
 import * as Log from "@oligarchy/log/log";
+import * as Observability from "@oligarchy/observability/log";
+import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
 import type * as Domain from "@oligarchy/shared/domain";
-import * as RowLog from "../observability/log.ts";
-import * as Sentry from "../observability/sentry.ts";
 import * as Host from "../qemu/host.ts";
 import * as Iso from "../qemu/iso.ts";
 import * as Minted from "../qemu/minted.ts";
@@ -108,7 +108,7 @@ const MainLive = Layer.mergeAll(
   Servers.ServerStore.layer,
   SetupRequests.SetupRequestStore.layer,
   ProcessStats.ProcessStatsStore.layer,
-  RowLog.layer,
+  Observability.LogLive,
 ).pipe(
   Layer.provideMerge(Actions.ActionStore.layer),
   Layer.provideMerge(Logs.LogStore.layer),

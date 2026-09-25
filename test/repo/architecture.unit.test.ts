@@ -50,6 +50,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/log": 1,
   "@oligarchy/env": 2,
   "@oligarchy/db": 3,
+  "@oligarchy/observability": 4,
   "@oligarchy/routes": 5,
 };
 
@@ -153,7 +154,7 @@ const BOUNDARY_FILES = new Set([
   "src/qemu/qemu.ts",
   // This process's own cpu and pid, and which host it is on: macOS has no /proc to read them.
   "src/shared/process-usage.ts",
-  "src/observability/instrument.ts",
+  "packages/observability/src/instrument.ts",
   // Whether stdout takes colour: the tty's depth and FORCE_COLOR, decided once for the process.
   "packages/env/src/colors.ts",
   // The entry runner: the one NodeRuntime.runMain, the stdout and stderr error listeners.
@@ -365,7 +366,7 @@ describe("workspace packages", () => {
           'import { readFileSync } from "node:fs";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
           'import * as Contract from "@oligarchy/routes/contract";',
-          'import * as Log from "../../../src/observability/log.ts";',
+          'import * as Log from "../../../src/shared/errors.ts";',
           "const home = process.env.HOME;",
           'const tag = "process.env in a string is not a read";',
         ].join("\n"),
@@ -374,7 +375,7 @@ describe("workspace packages", () => {
       "node:fs",
       "@effect/platform-node/NodeServices",
       "@oligarchy/routes/contract",
-      "../../../src/observability/log.ts",
+      "../../../src/shared/errors.ts",
       "process.env",
     ]);
   });
@@ -396,7 +397,7 @@ describe("workspace packages", () => {
           'import { WriteStream } from "node:tty";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
           'import * as Logs from "@oligarchy/db/logs";',
-          'import * as RowLog from "../../../src/observability/log.ts";',
+          'import * as Observability from "@oligarchy/observability/log";',
           'import * as Sentry from "@sentry/bun";',
           "export const stdoutColors = wantsColor(process.stdout, process.env);",
         ].join("\n"),
@@ -405,7 +406,7 @@ describe("workspace packages", () => {
       "node:tty",
       "@effect/platform-node/NodeServices",
       "@oligarchy/db/logs",
-      "../../../src/observability/log.ts",
+      "@oligarchy/observability/log",
       "@sentry/bun",
       "process.stdout",
       "process.env",
@@ -427,7 +428,7 @@ describe("workspace packages", () => {
           'import * as HttpApi from "effect/unstable/httpapi/HttpApi";',
           'import * as Domain from "@oligarchy/shared/domain";',
           'import * as Errors from "./errors.ts";',
-          'import * as Log from "../../../src/observability/log.ts";',
+          'import * as Log from "../../../src/shared/errors.ts";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
           'import { readFileSync } from "node:fs";',
           'import pg from "pg";',
@@ -436,7 +437,7 @@ describe("workspace packages", () => {
         ].join("\n"),
       ),
     ).toEqual([
-      "../../../src/observability/log.ts",
+      "../../../src/shared/errors.ts",
       "@effect/platform-node/NodeServices",
       "node:fs",
       "pg",
@@ -494,7 +495,7 @@ describe("workspace packages", () => {
         [
           'import * as Api from "@oligarchy/routes/api";',
           'import type * as Contract from "@oligarchy/routes/contract";',
-          'import * as Log from "../observability/log.ts";',
+          'import * as Errors from "../shared/errors.ts";',
           'import * as Errors from "../../packages/routes/src/errors.ts";',
           'import { QemuServerApi } from "@oligarchy/routes/api";',
           'import * as Routes from "@oligarchy/routes";',

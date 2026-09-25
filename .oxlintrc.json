@@ -41,7 +41,7 @@
       "files": [
         "src/**/main.ts",
         "packages/env/src/run.ts",
-        "src/observability/instrument.ts",
+        "packages/observability/src/instrument.ts",
         "test/**/*.ts",
         "packages/*/test/**/*.ts",
         "vitest.global-setup.ts"

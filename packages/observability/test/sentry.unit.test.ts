@@ -5,9 +5,20 @@ import { Cause, Effect, ErrorReporter, Exit, Layer, Schema } from "effect";
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as LogErrors from "@oligarchy/log/errors";
-import * as ApiErrors from "@oligarchy/routes/errors";
-import * as Sentry from "../../src/observability/sentry.ts";
-import * as Errors from "../../src/shared/errors.ts";
+import * as Sentry from "../src/sentry.ts";
+
+// Two errors of the kinds the reporter meets: a failure it reports, and a refusal a boundary
+// marked with [ErrorReporter.ignore] the way every API error is.
+class StartFailed extends Schema.TaggedError<StartFailed>(
+  "@oligarchy/observability/test/StartFailed",
+)("StartFailed", { message: Schema.String }) {}
+
+class Refused extends Schema.TaggedError<Refused>("@oligarchy/observability/test/Refused")(
+  "Refused",
+  { message: Schema.String },
+) {
+  override readonly [ErrorReporter.ignore] = true;
+}
 
 const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 const AGENT_ID = "OLI-61";
@@ -323,7 +334,7 @@ describe("reporter", () => {
     Effect.gen(function* () {
       const captured = capture();
       yield* ErrorReporter.report(
-        Cause.fail(Errors.QemuStartError.make({ message: "qemu: handshake timeout" })),
+        Cause.fail(StartFailed.make({ message: "qemu: handshake timeout" })),
       ).pipe(Effect.annotateLogs({ location: SESSION_ID, agent_id: AGENT_ID, log: "starting" }));
       const events = yield* captured.events;
       expect(events).toHaveLength(1);
@@ -371,8 +382,8 @@ describe("reporter", () => {
   it.live("ignores an error carrying [ErrorReporter.ignore]", () =>
     Effect.gen(function* () {
       const captured = capture();
-      yield* ErrorReporter.report(Cause.fail(ApiErrors.BadRequest.make({ message: "nope" })));
-      yield* ErrorReporter.report(Cause.fail(ApiErrors.unknownSession("x")));
+      yield* ErrorReporter.report(Cause.fail(Refused.make({ message: "nope" })));
+      yield* ErrorReporter.report(Cause.fail(Refused.make({ message: `unknown session "x"` })));
       yield* ErrorReporter.report(Cause.interrupt());
       const events = yield* captured.events;
       expect(events).toEqual([]);

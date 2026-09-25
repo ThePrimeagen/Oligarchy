@@ -61,4 +61,4 @@ const makeSink: Log.SinkFactory<Logs.LogStore> = (write, report) =>
   });
 
 // The Log every fleet process runs: every line a row, then its stdout copy.
-export const layer: Layer.Layer<Log.Log, never, Logs.LogStore> = Log.Log.layer(makeSink);
+export const LogLive: Layer.Layer<Log.Log, never, Logs.LogStore> = Log.Log.layer(makeSink);
