@@ -1,0 +1,35 @@
+{
+  "name": "@oligarchy/jobs",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./abort": "./src/abort.ts",
+    "./board": "./src/board.ts",
+    "./close": "./src/close.ts",
+    "./errors": "./src/errors.ts",
+    "./find": "./src/find.ts",
+    "./open": "./src/open.ts",
+    "./ready": "./src/ready.ts",
+    "./reclaim": "./src/reclaim.ts",
+    "./templates": "./src/templates.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/linear": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@oligarchy/testing": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

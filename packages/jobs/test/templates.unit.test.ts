@@ -1,9 +1,9 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { NodeFileSystem } from "@effect/platform-node";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { Effect, FileSystem, Layer } from "effect";
-import * as Prompts from "../../src/ctrl/prompts.ts";
-import * as FakeFs from "../support/fake-fs.ts";
+import * as Templates from "../src/templates.ts";
+import * as H from "./harness.ts";
 
 const SERVER = "https://qemu.example.com";
 const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
@@ -20,7 +20,7 @@ const ticket = {
   TEST_DESCRIPTION: "Install the operating system",
   TEST_INSTRUCTION: "Complete the installer",
   TEST_PROOF: "The desktop is visible",
-} satisfies Prompts.Values;
+} satisfies Templates.Values;
 
 // A FileSystem over the prompt files: each path answers with the text scripted for its file name
 // (`contents of <name>` when none is), or fails as an unreadable file would when `unreadable`
@@ -38,7 +38,7 @@ const promptFs = (
         reads.push(path);
         const name = path.slice(path.lastIndexOf("/") + 1);
         return options.unreadable?.test(path) === true
-          ? Effect.fail(FakeFs.permissionDenied("open", path))
+          ? Effect.fail(H.permissionDenied(path))
           : Effect.succeed(options.contents?.[name] ?? `contents of ${name}`);
       }),
   });
@@ -58,7 +58,7 @@ describe("renderLinearIssue happy path", () => {
           "ctrl-linear.md": "# Control\n\nRead the session.\n",
         },
       });
-      const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
+      const text = yield* Templates.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
       // The guide's trailing newline is trimmed so the closing tag sits under its last line.
       expect(text).toBe(
         `OLI-42 at ${SERVER}, again OLI-42; by ${SUB_AGENT}\n<guide>\n# Control\n\nRead the session.\n</guide>`,
@@ -78,7 +78,7 @@ describe("renderLinearIssue happy path", () => {
             "linear-issue.html": "ticket {{LINEAR_TICKET}} {not a placeholder} {{lower}}",
           },
         });
-        const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
+        const text = yield* Templates.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
         expect(text).toBe("ticket OLI-42 {not a placeholder} {{lower}}");
         expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
       }),
@@ -88,7 +88,7 @@ describe("renderLinearIssue happy path", () => {
     "the ticket tells the driver to start each step with that ActionList line exactly",
     () =>
       Effect.gen(function* () {
-        const text = yield* Prompts.renderLinearIssue(ticket).pipe(
+        const text = yield* Templates.renderLinearIssue(ticket).pipe(
           Effect.provide(NodeFileSystem.layer),
         );
         expect(text).toContain(ticket.TEST_INSTRUCTION);
@@ -114,7 +114,7 @@ describe("renderLinearIssue unhappy path", () => {
         contents: { "linear-issue.html": "{{RUN_ID}} {{NOPE}} {{ALSO}} {{CLIENT_MD}}" },
       });
       const error = yield* Effect.flip(
-        Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
+        Templates.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
       );
       expect(error).toMatchObject({
         _tag: "PromptError",
@@ -128,7 +128,7 @@ describe("renderLinearIssue unhappy path", () => {
     Effect.gen(function* () {
       const fs = promptFs({ unreadable: /linear-issue\.html$/ });
       const error = yield* Effect.flip(
-        Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
+        Templates.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
       );
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*linear-issue\.html/);
@@ -144,7 +144,7 @@ describe("renderLinearIssue unhappy path", () => {
         contents: { "linear-issue.html": "{{CLIENT_MD}} {{CTRL_MD}} {{LINEAR_TICKET}}" },
       });
       const error = yield* Effect.flip(
-        Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
+        Templates.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer)),
       );
       expect(error._tag).toBe("PromptError");
       expect(error.message).toMatch(/^prompt: .*ctrl-linear\.md/);
@@ -159,7 +159,7 @@ describe("renderLinearIssue unhappy path", () => {
         unreadable: /\/(client\.md|ctrl-linear\.md)$/,
         contents: { "linear-issue.html": "ticket {{LINEAR_TICKET}}" },
       });
-      const text = yield* Prompts.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
+      const text = yield* Templates.renderLinearIssue(ticket).pipe(Effect.provide(fs.layer));
       expect(text).toBe("ticket OLI-42");
       expect(fileNames(fs.reads)).toEqual(["linear-issue.html"]);
     }),
@@ -179,7 +179,7 @@ const mint = {
   INSTALL_DESCRIPTION: "Install Omarchy and keep the disk",
   INSTALL_INSTRUCTION: "User oligarchy, password oligarchy, disk passphrase oligarchy",
   INSTALL_PROOF: "The desktop is on screen after the reboot",
-} satisfies Prompts.MintValues;
+} satisfies Templates.MintValues;
 
 describe("renderMintIssue happy path", () => {
   it.effect(
@@ -193,7 +193,7 @@ describe("renderMintIssue happy path", () => {
             "client.md": "# Client\n\nDrive the guest.\n",
           },
         });
-        const text = yield* Prompts.renderMintIssue(mint).pipe(Effect.provide(fs.layer));
+        const text = yield* Templates.renderMintIssue(mint).pipe(Effect.provide(fs.layer));
         expect(text).toBe(
           `OLI-42 on ${mint.PINNED_SERVER} via ${SERVER}; mint: ${mint.INSTALL_INSTRUCTION}; by ${SUB_AGENT}\n<guide>\n# Client\n\nDrive the guest.\n</guide>`,
         );
@@ -204,7 +204,7 @@ describe("renderMintIssue happy path", () => {
 
   it.effect("mint-issue.html keeps the pinned reserve and leaves the board and labels alone", () =>
     Effect.gen(function* () {
-      const text = yield* Prompts.renderMintIssue(mint).pipe(Effect.provide(NodeFileSystem.layer));
+      const text = yield* Templates.renderMintIssue(mint).pipe(Effect.provide(NodeFileSystem.layer));
       expect(text).toContain("relinquish");
       expect(text).toContain("--server");
       expect(text).not.toContain("In Progress");
@@ -219,7 +219,7 @@ describe("renderMintIssue unhappy path", () => {
     Effect.gen(function* () {
       const fs = promptFs({ contents: { "mint-issue.html": "{{RUN_ID}} {{NOPE}}" } });
       const error = yield* Effect.flip(
-        Prompts.renderMintIssue(mint).pipe(Effect.provide(fs.layer)),
+        Templates.renderMintIssue(mint).pipe(Effect.provide(fs.layer)),
       );
       expect(error).toMatchObject({
         _tag: "PromptError",
@@ -234,7 +234,7 @@ describe("renderMintIssue unhappy path", () => {
       Effect.gen(function* () {
         const fs = promptFs({ unreadable: /mint-issue\.html$/ });
         const error = yield* Effect.flip(
-          Prompts.renderMintIssue(mint).pipe(Effect.provide(fs.layer)),
+          Templates.renderMintIssue(mint).pipe(Effect.provide(fs.layer)),
         );
         expect(error).toMatchObject({
           _tag: "PromptError",
@@ -248,8 +248,8 @@ describe("renderMintIssue unhappy path", () => {
 describe("modulePath", () => {
   it.effect("resolves a file beside this module from a file url (happy)", () =>
     Effect.sync(() => {
-      expect(Prompts.modulePath("../../client.md", import.meta.url)).toMatch(/\/client\.md$/);
-      expect(Prompts.modulePath("../../prompts/linear-issue.html", import.meta.url)).toMatch(
+      expect(Templates.modulePath("../../../client.md", import.meta.url)).toMatch(/\/client\.md$/);
+      expect(Templates.modulePath("../../../prompts/linear-issue.html", import.meta.url)).toMatch(
         /\/prompts\/linear-issue\.html$/,
       );
     }),
@@ -257,10 +257,10 @@ describe("modulePath", () => {
 
   it.effect("keeps the relative path when the base is not a url, as workerd's is (unhappy)", () =>
     Effect.sync(() => {
-      expect(Prompts.modulePath("../../prompts/linear-issue.html", "not a url")).toBe(
-        "../../prompts/linear-issue.html",
+      expect(Templates.modulePath("../../../prompts/linear-issue.html", "not a url")).toBe(
+        "../../../prompts/linear-issue.html",
       );
-      expect(Prompts.modulePath("../../client.md", "")).toBe("../../client.md");
+      expect(Templates.modulePath("../../../client.md", "")).toBe("../../../client.md");
     }),
   );
 });

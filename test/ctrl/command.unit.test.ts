@@ -1,20 +1,19 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodeFileSystem, NodeServices } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Config from "@oligarchy/env/config";
+import * as Templates from "@oligarchy/jobs/templates";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
+import * as FakeLinear from "@oligarchy/testing/linear";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
-import * as Prompts from "../../src/ctrl/prompts.ts";
-import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
-import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
@@ -115,8 +114,6 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 const harness = (
   options: {
     readonly linear?: FakeLinear.FakeLinear;
-    // Replaces the real FileSystem the prompt templates are read from.
-    readonly fs?: Layer.Layer<FileSystem.FileSystem>;
     readonly proxy?: FakeHttp.Recorder;
     // With a collector the command builds the real Log over stdout, as main.ts does, with the
     // collector installed at the root where main.ts installs Sentry's reporter.
@@ -142,14 +139,11 @@ const harness = (
       return linear.layer;
     },
   });
-  // A later layer's service wins the merge, so the fake FileSystem replaces Node's.
-  const services =
-    options.fs === undefined ? NodeServices.layer : Layer.merge(NodeServices.layer, options.fs);
   const program = (args: ReadonlyArray<string>, env: Config.Values) =>
     Command.runWith(command, { version: Api.VERSION })(args).pipe(
       Effect.provide(
         Layer.mergeAll(
-          services,
+          NodeServices.layer,
           Config.fromValues(env),
           options.proxy?.layer ?? FakeHttp.die,
           options.reporter?.layer ?? Layer.empty,
@@ -162,27 +156,6 @@ const harness = (
   const fail = (args: ReadonlyArray<string>, env: Config.Values = WITH_DB) =>
     Effect.flip(program(args, env));
   return { stores, log, linear, touched, teams, program, run, fail };
-};
-
-const TEMPLATE = "Review Linear ticket {{LINEAR_TICKET}}\n";
-
-// A FileSystem that serves one template for every prompt file except the ones matched, which
-// fail as an unreadable file in the checkout would.
-const promptFs = (
-  unreadable: RegExp,
-  template = TEMPLATE,
-): { readonly reads: Array<string>; readonly layer: Layer.Layer<FileSystem.FileSystem> } => {
-  const reads: Array<string> = [];
-  const layer = FileSystem.layerNoop({
-    readFileString: (path) =>
-      Effect.suspend(() => {
-        reads.push(path);
-        return unreadable.test(path)
-          ? Effect.fail(FakeFs.permissionDenied("open", path))
-          : Effect.succeed(template);
-      }),
-  });
-  return { reads, layer };
 };
 
 const failure = (exit: Exit.Exit<void, unknown>): unknown => {
@@ -203,10 +176,6 @@ const helpErrors = (exit: Exit.Exit<void, unknown>): ReadonlyArray<string> => {
 const stdout = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 
 const lastJson = Effect.map(stdout, (lines) => JSON.parse(lines.at(-1) ?? ""));
-
-// The text a command hands an agent, rendered from the checkout's own templates and guides.
-const rendered = (values: Prompts.Values) =>
-  Prompts.renderLinearIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
 
 // ---------------------------------------------------------------------------
 // test --list
@@ -550,105 +519,32 @@ const WITH_LINEAR = { ...WITH_DB, LINEAR_API_TOKEN: "linear-token", LINEAR_TEAM:
 
 describe("test run", () => {
   it.effect(
-    "creates the run and pending results, then one described Linear ticket per definition (happy)",
+    "opens a run for the named definition with its flags, and prints the run and its ticket as JSON (happy)",
     () =>
       Effect.gen(function* () {
         const h = harness();
-        h.stores.tests.definitions.push(terminal, install);
-        const exit = yield* h.run([...SUITE, `--server-url=${SERVER}`], WITH_LINEAR);
+        h.stores.tests.definitions.push(install, terminal);
+        const exit = yield* h.run([...NEW, `--server-url=${SERVER}`], WITH_LINEAR);
         expect(Exit.isSuccess(exit)).toBe(true);
-
         const [run] = h.stores.tests.runs;
         expect(run).toMatchObject({
-          name: "Omarchy experiment",
           iso: "https://example.com/omarchy.iso",
           serverUrl: SERVER,
           status: "pending",
-          reason: null,
         });
-        expect(run).not.toHaveProperty("model");
         const results = h.stores.tests.results;
-        expect(
-          results.map((row) => [row.runId, row.definitionId, row.status, row.model, row.linearId]),
-        ).toEqual([
-          [run?.id, 1, "pending", null, "OLI-42"],
-          [run?.id, 2, "pending", null, "OLI-43"],
-        ]);
-
-        // Each ticket is the one template filled with that definition's values and its own ids.
-        const descriptionOf = (definition: TestDefinitionRow, index: number, identifier: string) =>
-          rendered({
-            LINEAR_TICKET: identifier,
-            RUN_ID: run?.id ?? "",
-            RESULT_ID: results[index]?.id ?? "",
-            VERSION: "1.2.3",
-            ISO_URL: "https://example.com/omarchy.iso",
-            SERVER_URL: SERVER,
-            TEST_NAME: definition.name,
-            TEST_DESCRIPTION: definition.description,
-            TEST_INSTRUCTION: definition.instruction,
-            TEST_PROOF: definition.proof,
-          });
-        const installDescription = yield* descriptionOf(install, 0, "OLI-42");
-        const terminalDescription = yield* descriptionOf(terminal, 1, "OLI-43");
-        const labels = [FakeLinear.labelId("agent test"), FakeLinear.labelId("1.2.3")];
-        // Each ticket is born in Backlog and moves to Automation Needed with its body, in one
-        // update, so the automation server's webhook finds the result's Linear id already written.
-        expect(h.linear.calls).toEqual([
-          { method: "teamId" },
-          { method: "labelIds", teamId: "team-id", version: "1.2.3" },
-          { method: "assigneeId" },
-          { method: "stateIds", teamId: "team-id" },
-          {
-            method: "createIssue",
-            input: {
-              teamId: "team-id",
-              title: "Omarchy: Install Omarchy",
-              labelIds: labels,
-              assigneeId: "user-id",
-              stateId: FakeLinear.STATES.backlog,
-            },
-          },
-          {
-            method: "describeIssue",
-            ticket: FakeLinear.ticketFor("OLI-42"),
-            description: installDescription,
-            stateId: FakeLinear.STATES.automationNeeded,
-          },
-          {
-            method: "createIssue",
-            input: {
-              teamId: "team-id",
-              title: "Omarchy: Open a terminal",
-              labelIds: labels,
-              assigneeId: "user-id",
-              stateId: FakeLinear.STATES.backlog,
-            },
-          },
-          {
-            method: "describeIssue",
-            ticket: FakeLinear.ticketFor("OLI-43"),
-            description: terminalDescription,
-            stateId: FakeLinear.STATES.automationNeeded,
-          },
-        ]);
-
+        expect(results.map((row) => [row.definitionId, row.linearId])).toEqual([[1, "OLI-42"]]);
+        expect(h.linear.calls.find((call) => call.method === "labelIds")).toEqual({
+          method: "labelIds",
+          teamId: "team-id",
+          version: "1.2.3",
+        });
         expect(yield* lastJson).toEqual({
           id: run?.id,
-          tests: [
-            { id: results[0]?.id, linear: FakeLinear.ticketFor("OLI-42") },
-            { id: results[1]?.id, linear: FakeLinear.ticketFor("OLI-43") },
-          ],
+          tests: [{ id: results[0]?.id, linear: FakeLinear.ticketFor("OLI-42") }],
         });
-        expect(h.log.lines).toEqual([
-          {
-            level: "info",
-            text: `test ${run?.id} created; 2 tests; OLI-42, OLI-43`,
-            location: undefined,
-            agentId: undefined,
-            skipSentry: false,
-            cause: undefined,
-          },
+        expect(h.log.lines.map((line) => line.text)).toEqual([
+          `test ${run?.id} created; 1 tests; OLI-42`,
         ]);
         expect(h.touched).toEqual(["database", "linear"]);
       }),
@@ -666,56 +562,6 @@ describe("test run", () => {
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(h.teams).toEqual(["Local Board"]);
       expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
-    }),
-  );
-
-  it.effect("creates one result and one ticket for a named definition (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.tests.definitions.push(install, terminal);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([1]);
-      expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
-      expect(h.log.lines.map((line) => line.text)).toEqual([
-        `test ${h.stores.tests.runs[0]?.id} created; 1 tests; OLI-42`,
-      ]);
-    }),
-  );
-
-  it.effect("pins the newest wording of a definition that has several, and its text (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.tests.definitions.push(install, installRevised, terminal);
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([
-        installRevised.id,
-        terminal.id,
-      ]);
-      const described = h.linear.calls.find((call) => call.method === "describeIssue");
-      expect(described?.method === "describeIssue" ? described.description : "").toContain(
-        installRevised.instruction,
-      );
-    }),
-  );
-
-  it.effect("--name runs the newest wording of that definition, never an older one (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      // The older wording is listed last, so the newest wins by id, not by position.
-      h.stores.tests.definitions.push(installRevised, terminal, install);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([installRevised.id]);
-      const described = h.linear.calls.filter((call) => call.method === "describeIssue");
-      expect(described).toHaveLength(1);
-      const description = described[0]?.method === "describeIssue" ? described[0].description : "";
-      expect(description).toContain(installRevised.instruction);
-      expect(description).not.toContain(`<instruction>${install.instruction}</instruction>`);
-      expect(h.log.lines.map((line) => line.text)).toEqual([
-        `test ${h.stores.tests.runs[0]?.id} created; 1 tests; OLI-42`,
-      ]);
     }),
   );
 
@@ -761,158 +607,6 @@ describe("test run", () => {
     }),
   );
 
-  it.effect("marks the run and results failed when Linear refuses the token (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = LinearErrors.LinearError.make({
-        operation: "teamId",
-        status: 401,
-        message: "linear: request failed (401): unauthorized",
-      });
-      const h = harness({
-        linear: FakeLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
-      });
-      h.stores.tests.definitions.push(install);
-      const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "LinearError",
-        message: "linear: request failed (401): unauthorized",
-      });
-      expect(h.stores.tests.runs[0]).toMatchObject({
-        status: "failed",
-        reason: "linear: request failed (401): unauthorized",
-      });
-      expect(h.stores.tests.runs[0]?.endedAt).toBeInstanceOf(Date);
-      expect(h.stores.tests.results[0]).toMatchObject({
-        status: "failed",
-        reason: "linear: request failed (401): unauthorized",
-      });
-      expect(h.stores.tests.results[0]?.finishedAt).toBeInstanceOf(Date);
-      expect(h.log.lines).toEqual([]);
-      expect(yield* stdout).toEqual([]);
-    }),
-  );
-
-  it.effect("names every ticket created, including one whose description failed (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = LinearErrors.LinearError.make({
-        operation: "describeIssue",
-        status: 401,
-        message: "linear: request failed (401): unauthorized",
-      });
-      const h = harness({
-        linear: FakeLinear.fakeLinear({
-          overrides: {
-            describeIssue: (ticket) =>
-              ticket.id === "issue-OLI-43" ? Effect.fail(refused) : Effect.void,
-          },
-        }),
-      });
-      h.stores.tests.definitions.push(install, terminal);
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "LinearError",
-        message: "linear: request failed (401): unauthorized; created OLI-42, OLI-43",
-      });
-      expect(h.stores.tests.runs[0]?.reason).toBe(
-        "linear: request failed (401): unauthorized; created OLI-42, OLI-43",
-      );
-      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
-      expect(h.stores.tests.results.map((row) => row.linearId)).toEqual(["OLI-42", "OLI-43"]);
-      // OLI-42 was handed to automation; OLI-43 never left Backlog, and nobody would drive it, so
-      // that one is reported: the line reaches Sentry with the failure as its cause.
-      expect(h.log.lines).toEqual([
-        {
-          level: "error",
-          text: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
-          location: undefined,
-          agentId: "OLI-43",
-          skipSentry: false,
-          cause: refused,
-        },
-      ]);
-    }),
-  );
-
-  it.effect(
-    "a result already carrying the new ticket's identifier traps the ticket in Backlog and reports it (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        const h = harness();
-        h.stores.tests.definitions.push(install);
-        // The fake refuses a second result with the same linear_id, as the unique index does.
-        h.stores.tests.results.push({
-          ...result(OTHER_RESULT_ID, "passed", null),
-          linearId: "OLI-42",
-        });
-        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-        const error = failure(exit);
-        expect(error).toMatchObject({
-          _tag: "DatabaseError",
-          operation: "setLinearId",
-          message: expect.stringMatching(/; created OLI-42$/),
-        });
-        expect(h.linear.calls.map((call) => call.method)).toEqual([
-          "teamId",
-          "labelIds",
-          "assigneeId",
-          "stateIds",
-          "createIssue",
-        ]);
-        expect(h.stores.tests.runs[0]?.status).toBe("failed");
-        expect(h.log.lines).toHaveLength(1);
-        expect(h.log.lines[0]).toMatchObject({
-          level: "error",
-          text: expect.stringMatching(/^ticket trapped in Backlog; /),
-          agentId: "OLI-42",
-          skipSentry: false,
-          cause: expect.objectContaining({ _tag: "DatabaseError", operation: "setLinearId" }),
-        });
-        expect(h.log.lines[0]?.text).not.toMatch(/created OLI-42/);
-      }),
-  );
-
-  it.effect(
-    "an interrupt while the ticket is being handed off reports it trapped in Backlog (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        const reached = yield* Deferred.make<void>();
-        const h = harness({
-          linear: FakeLinear.fakeLinear({
-            overrides: {
-              // The update never answers; the operator's SIGINT lands while it is in flight.
-              describeIssue: () =>
-                Deferred.succeed(reached, undefined).pipe(Effect.andThen(Effect.never)),
-            },
-          }),
-        });
-        h.stores.tests.definitions.push(install);
-        const fiber = yield* Effect.forkChild(
-          h.program([...NEW, "--server-url", SERVER], WITH_LINEAR),
-        );
-        yield* Deferred.await(reached);
-        yield* Fiber.interrupt(fiber);
-        // An overridden method is not recorded; `reached` is the proof the update was in flight.
-        expect(h.linear.calls.map((call) => call.method)).toEqual([
-          "teamId",
-          "labelIds",
-          "assigneeId",
-          "stateIds",
-          "createIssue",
-        ]);
-        // No failure to carry: the line itself is what reaches Sentry.
-        expect(h.log.lines).toEqual([
-          {
-            level: "error",
-            text: "ticket trapped in Backlog; interrupted",
-            location: undefined,
-            agentId: "OLI-42",
-            skipSentry: false,
-            cause: undefined,
-          },
-        ]);
-      }),
-  );
-
   it.effect(
     "the trapped line reaches the reporter installed at the root, through the real Log, with the failure as its cause (unhappy)",
     () =>
@@ -952,78 +646,6 @@ describe("test run", () => {
         expect((yield* stdout).some((line) => line.includes("ticket trapped in Backlog"))).toBe(
           true,
         );
-      }),
-  );
-
-  it.effect(
-    "fails the run naming the ticket created when a guide its description embeds is unreadable (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        // The guide is read while describing the first ticket, so that ticket already exists.
-        const fs = promptFs(/\/client\.md$/, "{{LINEAR_TICKET}} {{CLIENT_MD}}");
-        const h = harness({ fs: fs.layer });
-        h.stores.tests.definitions.push(install, terminal);
-        const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-        const error = failure(exit);
-        expect(error).toMatchObject({
-          _tag: "PromptError",
-          message: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
-          cause: expect.anything(),
-        });
-        expect(h.linear.calls.map((call) => call.method)).toEqual([
-          "teamId",
-          "labelIds",
-          "assigneeId",
-          "stateIds",
-          "createIssue",
-        ]);
-        expect(h.stores.tests.runs[0]).toMatchObject({
-          status: "failed",
-          reason: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
-        });
-        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
-        // The ticket exists in Backlog without a body and without the move: reported.
-        expect(h.log.lines).toHaveLength(1);
-        expect(h.log.lines[0]).toMatchObject({
-          level: "error",
-          text: expect.stringMatching(/^ticket trapped in Backlog; prompt: .*client\.md/),
-          agentId: "OLI-42",
-          skipSentry: false,
-          cause: expect.objectContaining({ _tag: "PromptError" }),
-        });
-      }),
-  );
-
-  it.effect(
-    "names the ticket created when its description cannot be rendered, and describes nothing (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        // The ticket template asks for a value no run carries; the guides render fine.
-        const fs = promptFs(/never/, "{{RUN_ID}} {{NOPE}}");
-        const h = harness({ fs: fs.layer });
-        h.stores.tests.definitions.push(install);
-        const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-        const message =
-          "prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value; created OLI-42";
-        expect(failure(exit)).toMatchObject({ _tag: "PromptError", message });
-        expect(h.linear.calls.map((call) => call.method)).toEqual([
-          "teamId",
-          "labelIds",
-          "assigneeId",
-          "stateIds",
-          "createIssue",
-        ]);
-        expect(h.stores.tests.runs[0]).toMatchObject({ status: "failed", reason: message });
-        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
-        expect(yield* stdout).toEqual([]);
-        // The trapped line carries the failure itself, not the run's reason with the ticket list.
-        expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
-          [
-            "error",
-            "ticket trapped in Backlog; prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value",
-            "OLI-42",
-          ],
-        ]);
       }),
   );
 
@@ -1185,105 +807,6 @@ describe("test run testsuite", () => {
     }),
   );
 
-  it.effect("leaves the mint definition out of the suite (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.tests.definitions.push(install, suiteMint, terminal);
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([
-        install.id,
-        terminal.id,
-      ]);
-      expect(
-        h.linear.calls
-          .filter((call) => call.method === "createIssue")
-          .map((call) => (call.method === "createIssue" ? call.input.title : "")),
-      ).toEqual(["Omarchy: Install Omarchy", "Omarchy: Open a terminal"]);
-    }),
-  );
-
-  it.effect("refuses a suite whose only definition is mint, before Linear (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.tests.definitions.push(suiteMint);
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "CommandError",
-        message: "test: no test definitions found",
-      });
-      expect(h.stores.tests.runs).toEqual([]);
-      expect(h.linear.calls).toEqual([]);
-    }),
-  );
-
-  it.effect("test run --name mint still files the mint definition (happy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      h.stores.tests.definitions.push(install, suiteMint);
-      const exit = yield* h.run(
-        [
-          "test",
-          "run",
-          "--name",
-          "mint",
-          "--iso",
-          "https://example.com/omarchy.iso",
-          "--version",
-          "1.2.3",
-          "--server-url",
-          SERVER,
-        ],
-        WITH_LINEAR,
-      );
-      expect(Exit.isSuccess(exit)).toBe(true);
-      expect(h.stores.tests.results.map((row) => row.definitionId)).toEqual([suiteMint.id]);
-      expect(h.linear.calls.filter((call) => call.method === "createIssue")).toEqual([
-        expect.objectContaining({
-          input: expect.objectContaining({ title: "Omarchy: mint" }),
-        }),
-      ]);
-    }),
-  );
-
-  it.effect("rejects an empty table before touching Linear (unhappy)", () =>
-    Effect.gen(function* () {
-      const h = harness();
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "CommandError",
-        message: "test: no test definitions found",
-      });
-      expect(h.stores.tests.runs).toEqual([]);
-      expect(h.linear.calls).toEqual([]);
-    }),
-  );
-
-  it.effect("fails the run when Linear refuses, naming no ticket (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = LinearErrors.LinearError.make({
-        operation: "teamId",
-        status: 401,
-        message: "linear: request failed (401): unauthorized",
-      });
-      const h = harness({
-        linear: FakeLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
-      });
-      h.stores.tests.definitions.push(install, terminal);
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "LinearError",
-        message: "linear: request failed (401): unauthorized",
-      });
-      expect(h.stores.tests.runs[0]).toMatchObject({
-        status: "failed",
-        reason: "linear: request failed (401): unauthorized",
-      });
-      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
-      expect(yield* stdout).toEqual([]);
-    }),
-  );
-
   it.effect("refuses --name, a non-https ISO and a missing server (unhappy)", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -1394,8 +917,8 @@ describe("mint", () => {
       h.stores.servers.heartbeats.push({ url, type: "qemu", name, stats });
     }
   };
-  const minted = (values: Prompts.MintValues) =>
-    Prompts.renderMintIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
+  const minted = (values: Templates.MintValues) =>
+    Templates.renderMintIssue(values).pipe(Effect.provide(NodeFileSystem.layer));
 
   it.effect("creates one pinned run, result and ticket per live qemu server (happy)", () =>
     Effect.gen(function* () {
