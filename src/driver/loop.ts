@@ -14,6 +14,8 @@ import {
 } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as SharedErrors from "@oligarchy/shared/errors";
+import * as Steps from "@oligarchy/shared/steps";
 import * as Actions from "../client/actions.ts";
 import type * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
@@ -26,7 +28,6 @@ import * as Tools from "../harness/tools.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
-import * as Steps from "../viz/steps.ts";
 import * as Client from "./client.ts";
 import * as Log from "./log.ts";
 import * as Prompt from "./prompt.ts";
@@ -46,7 +47,10 @@ export type Stopped = {
   readonly reason: "model-stopped" | "machine-off" | "result-closed";
 };
 
-export type Failure = Errors.CommandError | Errors.OpenRouterRefusal | Errors.OpenRouterUnreachable;
+export type Failure =
+  | SharedErrors.CommandError
+  | Errors.OpenRouterRefusal
+  | Errors.OpenRouterUnreachable;
 
 type Ran = {
   readonly exitCode: number;
@@ -57,8 +61,8 @@ type Ran = {
 const detail = (error: unknown): string =>
   ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), Render.headline(error));
 
-const commandError = (message: string): Errors.CommandError =>
-  Errors.CommandError.make({ message });
+const commandError = (message: string): SharedErrors.CommandError =>
+  SharedErrors.CommandError.make({ message });
 
 const shown = (command: { readonly bin: string; readonly args: ReadonlyArray<string> }): string =>
   [command.bin, ...command.args.map((arg) => JSON.stringify(arg))].join(" ");
@@ -183,7 +187,7 @@ type Loaded = {
 
 const stored = <A>(
   effect: Effect.Effect<A, Errors.DatabaseError>,
-): Effect.Effect<A, Errors.CommandError> =>
+): Effect.Effect<A, SharedErrors.CommandError> =>
   effect.pipe(Effect.mapError((error) => commandError(error.message)));
 
 const loadRun = Effect.fn("Driver.loadRun")(function* (agentId: string) {

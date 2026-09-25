@@ -1,5 +1,5 @@
 import { Option } from "effect";
-import type * as Domain from "../shared/domain.ts";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Follow from "./follow.ts";
 import * as Text from "./text.ts";
 

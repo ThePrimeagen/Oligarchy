@@ -1,11 +1,11 @@
 import { Cause, Deferred, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { PlatformError } from "effect";
 import * as Contract from "@oligarchy/routes/contract";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
 import * as Stats from "../../src/qemu/stats.ts";
 import type * as Qmp from "../../src/qmp/client.ts";
-import type * as Domain from "../../src/shared/domain.ts";
 import type * as Errors from "../../src/shared/errors.ts";
 
 export type StartInput = Parameters<Qemu.QemuService["start"]>[1];

@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
-import type * as Domain from "../shared/domain.ts";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 

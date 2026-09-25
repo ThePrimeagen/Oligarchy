@@ -1,8 +1,7 @@
 import { Duration, Effect, FileSystem, Schema } from "effect";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Render from "../observability/render.ts";
-import * as Domain from "../shared/domain.ts";
-import * as Errors from "../shared/errors.ts";
 
 // The harness's configuration, the checked-in file beside the package. The
 // OpenRouter token stays in the environment: a token key in this file is
@@ -55,7 +54,7 @@ const Harness = Schema.Struct({
 export class AppConfig extends Schema.Class<AppConfig>("@oligarchy/harness/config/AppConfig")({
   models: Models,
   reasoning: Reasoning,
-  openRouterBaseUrl: Contract.ServerUrl,
+  openRouterBaseUrl: Domain.ServerUrl,
   timeouts: Timeouts,
   runCeiling: PositiveDuration,
   stepLimit: StepLimit,
@@ -82,19 +81,19 @@ const decodeFile = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.toCod
   onExcessProperty: "error",
 });
 
-const refused = (error: unknown): Errors.CommandError =>
-  Errors.CommandError.make({ message: `${PATH}: ${Render.headline(error)}` });
+const refused = (error: unknown): SharedErrors.CommandError =>
+  SharedErrors.CommandError.make({ message: `${PATH}: ${Render.headline(error)}` });
 
-export const parse = (text: string): Effect.Effect<AppConfig, Errors.CommandError> =>
+export const parse = (text: string): Effect.Effect<AppConfig, SharedErrors.CommandError> =>
   decodeFile(text).pipe(Effect.mapError(refused));
 
 // Absent is a failure, not a default: a guessed model or ceiling would run the fleet on the wrong one.
-export const load: Effect.Effect<AppConfig, Errors.CommandError, FileSystem.FileSystem> =
+export const load: Effect.Effect<AppConfig, SharedErrors.CommandError, FileSystem.FileSystem> =
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const there = yield* fs.exists(PATH).pipe(Effect.mapError(refused));
     if (!there) {
-      return yield* Errors.CommandError.make({ message: `${PATH}: file is missing` });
+      return yield* SharedErrors.CommandError.make({ message: `${PATH}: file is missing` });
     }
     const text = yield* fs.readFileString(PATH).pipe(Effect.mapError(refused));
     return yield* parse(text);

@@ -1,5 +1,4 @@
 import { Effect, Exit, Schema } from "effect";
-import * as Contract from "@oligarchy/routes/contract";
 
 // ---------------------------------------------------------------------------
 // Brands and vocabularies
@@ -155,10 +154,75 @@ export const ModelId = Schema.String.check(
 ).annotate({ identifier: "@oligarchy/shared/domain/ModelId" });
 export type ModelId = typeof ModelId.Type;
 
+// What a session boots: `fresh` is the iso on a blank disk, `resume` the machine's minted disk of
+// that iso with no iso attached. Absent on the wire and in a row means fresh.
+export const SessionMode = Schema.Literals(["fresh", "resume"]).annotate({
+  identifier: "@oligarchy/shared/domain/SessionMode",
+});
+export type SessionMode = typeof SessionMode.Type;
+
+export const StopStatus = Schema.Literals(["succeeded", "failed", "aborted", "completed"]).annotate(
+  {
+    identifier: "@oligarchy/shared/domain/StopStatus",
+  },
+);
+export type StopStatus = typeof StopStatus.Type;
+
+// The buttons a click, a drag, a hold or a release take; the wheel is a scroll, never a click.
+export const ClickButton = Schema.Literals(["left", "middle", "right"]).annotate({
+  identifier: "@oligarchy/shared/domain/ClickButton",
+});
+export type ClickButton = typeof ClickButton.Type;
+
+// Which way a scroll turns the wheel.
+export const ScrollDirection = Schema.Literals(["up", "down", "left", "right"]).annotate({
+  identifier: "@oligarchy/shared/domain/ScrollDirection",
+});
+export type ScrollDirection = typeof ScrollDirection.Type;
+
+// A key held around a click or a drag, by the name a driver writes; qemu/qemu.ts maps it to a
+// qcode.
+export const MouseModifier = Schema.Literals(["shift", "ctrl", "alt", "super"]).annotate({
+  identifier: "@oligarchy/shared/domain/MouseModifier",
+});
+export type MouseModifier = typeof MouseModifier.Type;
+
+// A point on the screenshot as fractions of its width and height, 0 the top-left edge, 1 the
+// bottom-right; the range is checked by the handler with a fixed message.
+export const ScreenPoint = Schema.Struct({ x: Schema.Number, y: Schema.Number }).annotate({
+  identifier: "@oligarchy/shared/domain/ScreenPoint",
+});
+export type ScreenPoint = typeof ScreenPoint.Type;
+
+// A server the reverse proxy forwards to, as an operator registers it: an http(s) url with a
+// host, used exactly as given, as --server-url is.
+export const ServerUrl = Schema.String.check(
+  Schema.makeFilter(
+    (value: string) => {
+      if (!URL.canParse(value)) {
+        return false;
+      }
+      const url = new URL(value);
+      return (url.protocol === "http:" || url.protocol === "https:") && url.hostname !== "";
+    },
+    { message: "url must be an http or https url" },
+  ),
+).annotate({ identifier: "@oligarchy/shared/domain/ServerUrl" });
+export type ServerUrl = typeof ServerUrl.Type;
+
+// The automation steps for a test result, the twin of the automation_action pgEnum in
+// src/db/schema.ts, maintained by hand together. A mint and a drive both boot a guest and so
+// reserve one; a mint does not resume, it installs. A diagnose reads the session back and
+// reserves a client only.
+export const AutomationAction = Schema.Literals(["drive", "diagnose", "mint"]).annotate({
+  identifier: "@oligarchy/shared/domain/AutomationAction",
+});
+export type AutomationAction = typeof AutomationAction.Type;
+
 export const SessionConfig = Schema.Struct({
   iso: Schema.String,
   disk: Schema.optionalKey(Schema.String),
-  mode: Schema.optionalKey(Contract.SessionMode),
+  mode: Schema.optionalKey(SessionMode),
 }).annotate({ identifier: "@oligarchy/shared/domain/SessionConfig" });
 export type SessionConfig = typeof SessionConfig.Type;
 

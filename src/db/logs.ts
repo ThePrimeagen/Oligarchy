@@ -1,6 +1,6 @@
 import { and, desc, eq, like, or } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import type * as Domain from "../shared/domain.ts";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
 

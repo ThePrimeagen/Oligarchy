@@ -1,5 +1,5 @@
 import { Config, Effect, FileSystem, Option } from "effect";
-import type * as Domain from "../shared/domain.ts";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Args from "./args.ts";
 import * as Process from "./process.ts";
 

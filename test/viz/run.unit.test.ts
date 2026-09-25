@@ -5,10 +5,11 @@ import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as Domain from "@oligarchy/shared/domain";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import type * as Automation from "../../src/db/automation.ts";
 import type * as ProcessStats from "../../src/db/process-stats.ts";
 import type * as Servers from "../../src/db/servers.ts";
-import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Run from "../../src/viz/run.ts";
 import * as View from "../../src/viz/view.ts";
@@ -98,7 +99,7 @@ const live = (
   screen: FakeRenderer,
   scripted: Scripted = {},
   extra: Extra = {},
-): Effect.Effect<void, Errors.CommandError> =>
+): Effect.Effect<void, SharedErrors.CommandError> =>
   Run.run.pipe(
     Effect.provide(
       Layer.mergeAll(
@@ -727,7 +728,7 @@ describe("run unhappy path", () => {
           imageProtocol: Effect.succeed("auto"),
           writeTerminal: () => undefined,
           open: Effect.fail(
-            Errors.CommandError.make({ message: "viz could not open the screen: no tty" }),
+            SharedErrors.CommandError.make({ message: "viz could not open the screen: no tty" }),
           ),
         }),
       );

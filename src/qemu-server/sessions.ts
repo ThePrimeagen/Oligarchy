@@ -21,6 +21,7 @@ import {
 } from "effect";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Actions from "../db/actions.ts";
 import * as DebugLogs from "../db/debug-logs.ts";
 import * as SessionStore from "../db/sessions.ts";
@@ -34,7 +35,6 @@ import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
 import * as Stats from "../qemu/stats.ts";
 import type * as Qmp from "../qmp/client.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -75,7 +75,7 @@ export type LiveSession = {
   // The iso as the start named it: a save keeps the disk beside it. A resumed session's disk is
   // an overlay on the minted one and is never kept.
   readonly iso: string;
-  readonly mode: Contract.SessionMode;
+  readonly mode: Domain.SessionMode;
   readonly qemu: Qemu.QemuHandle;
   readonly span: Tracer.Span;
   readonly scope: Scope.Closeable;
@@ -150,7 +150,7 @@ export type SessionsService = {
   // Fails unknownSession when the sweep took the session first: one session, one verdict.
   readonly stop: (
     live: LiveSession,
-    status: Contract.StopStatus | undefined,
+    status: Domain.StopStatus | undefined,
     reason: string | undefined,
   ) => Effect.Effect<void, ApiErrors.Internal | ApiErrors.UnknownSession>;
   // Ends the session keeping its disk as the machine's minted disk for its iso: the guest is
@@ -243,7 +243,7 @@ const badRequest = (message: string, live: OpenSession): ApiErrors.BadRequest =>
 
 // The gesture as the log line reads it: its point or points, its button, the keys held.
 const describeGesture = (gesture: Qemu.MouseGesture): string => {
-  const held = (modifiers: ReadonlyArray<Contract.MouseModifier> | undefined) =>
+  const held = (modifiers: ReadonlyArray<Domain.MouseModifier> | undefined) =>
     modifiers === undefined ? "" : modifiers.map((key) => ` +${key}`).join("");
   switch (gesture._tag) {
     case "move":
@@ -857,7 +857,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
       gesture: Qemu.MouseGesture,
     ) {
       const started = yield* Clock.currentTimeMillis;
-      const onScreen = (point: Contract.ScreenPoint) =>
+      const onScreen = (point: Domain.ScreenPoint) =>
         point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1;
       if (gesture._tag === "drag") {
         if (!onScreen(gesture.from) || !onScreen(gesture.to)) {
@@ -991,7 +991,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
 
     const stop = Effect.fn("Sessions.stop")(function* (
       live: LiveSession,
-      status: Contract.StopStatus | undefined,
+      status: Domain.StopStatus | undefined,
       reason: string | undefined,
     ) {
       // The sweep may have taken the session between the lookup and here; whoever removes the id
@@ -1012,7 +1012,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // fiber, so a death line written on SIGTERM can be lost.
     const close = (
       live: LiveSession,
-      finalStatus: Contract.StopStatus,
+      finalStatus: Domain.StopStatus,
       reason: string | undefined,
     ): Effect.Effect<void, ApiErrors.Internal> =>
       Effect.gen(function* () {

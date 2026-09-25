@@ -47,6 +47,7 @@
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
     "@oligarchy/routes": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
     "@opentui/core": "0.5.11",
     "@opentui/solid": "0.5.11",
     "@sentry/bun": "10.73.0",

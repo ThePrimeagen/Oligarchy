@@ -1,7 +1,7 @@
 import { Deferred, Effect, Result, Stream } from "effect";
 import type { Schema } from "effect";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Log from "../observability/log.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Framing from "./framing.ts";
 import type * as Socket from "./socket.ts";

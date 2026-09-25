@@ -5,35 +5,26 @@ import * as Contract from "../src/contract.ts";
 const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 const AGENT_ID = "OLI-61";
 
-describe("ServerUrl", () => {
-  it("accepts an http or https url with a host as a ServerUrl and refuses anything else", () => {
-    const is = Schema.is(Contract.ServerUrl);
-    expect(is("http://10.0.0.5:42069")).toBe(true);
-    expect(is("https://qemu.example.com")).toBe(true);
-    expect(is("https://qemu.example.com/")).toBe(true);
-    expect(is("")).toBe(false);
-    expect(is("qemu.example.com:42069")).toBe(false);
-    expect(is("ftp://qemu.example.com")).toBe(false);
-    expect(is("http://")).toBe(false);
-    expect(is("not a url")).toBe(false);
-  });
-
-  it("names the url rule in the ServerUrl decode failure", () => {
-    const exit = Schema.decodeUnknownExit(Contract.ServerUrl)("qemu.example.com:42069");
+// The vocabularies a body carries live in @oligarchy/shared/domain, where their own tests are;
+// here, one case each proving the body still refuses a bad value with the vocabulary's message.
+describe("bodies carrying shared vocabularies", () => {
+  it("a server body refuses a url that is not http or https, naming the rule", () => {
+    const exit = Schema.decodeUnknownExit(Contract.ServerBody)({ url: "qemu.example.com:42069" });
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
       expect(String(Cause.squash(exit.cause))).toMatch(/url must be an http or https url/);
     }
+    expect(Schema.decodeUnknownSync(Contract.ServerBody)({ url: "http://10.0.0.5:42069" })).toEqual(
+      Contract.ServerBody.make({ url: "http://10.0.0.5:42069" }),
+    );
   });
-});
 
-describe("SessionMode", () => {
-  it("is fresh or resume and nothing else", () => {
-    const is = Schema.is(Contract.SessionMode);
-    expect(is("fresh")).toBe(true);
-    expect(is("resume")).toBe(true);
-    expect(is("mint")).toBe(false);
-    expect(is("")).toBe(false);
+  it("a start body refuses a mode other than fresh or resume", () => {
+    const decodeStart = Schema.decodeUnknownSync(Contract.StartBody);
+    const start = { iso: "/isos/omarchy.iso", agent: AGENT_ID };
+    expect(decodeStart({ ...start, mode: "resume" })).toMatchObject({ mode: "resume" });
+    expect(decodeStart(start)).not.toHaveProperty("mode");
+    expect(() => decodeStart({ ...start, mode: "mint" })).toThrow();
   });
 });
 

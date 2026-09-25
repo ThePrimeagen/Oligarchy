@@ -1,10 +1,10 @@
 # Monorepo plan
 
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
-workspace and `@oligarchy/routes`) and so is phase 1 ([PR
-#236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks). The rest of this
-file is the plan for the remaining phases and the reasoning behind each choice; a phase's
-checklist is ticked as it lands.
+workspace and `@oligarchy/routes`), so is phase 1 ([PR
+#236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so is phase 2
+(`@oligarchy/shared`). The rest of this file is the plan for the remaining phases and the
+reasoning behind each choice; a phase's checklist is ticked as it lands.
 
 Revised 2026-09-25 after review. What changed from the first version, and why:
 
@@ -203,20 +203,20 @@ Write each phase's tests before any of that phase's code, and see them fail.
 
 **Phase 2: `@oligarchy/shared`**
 
-- [ ] TEST (move) `test/shared/domain.unit.test.ts` and `test/shared/errors.unit.test.ts` to
+- [x] TEST (move) `test/shared/domain.unit.test.ts` and `test/shared/errors.unit.test.ts` to
       `packages/shared/test/`. The errors test keeps only the domain errors' cases; each other
       error's cases move with its error in the phase its package appears.
-- [ ] TEST (move) `test/viz/steps.unit.test.ts` to `packages/shared/test/steps.unit.test.ts`,
+- [x] TEST (move) `test/viz/steps.unit.test.ts` to `packages/shared/test/steps.unit.test.ts`,
       keeping its cases. Happy: the steps of an instruction and the place of the last matched
       message. Unhappy: an instruction with no steps, and a message matching none, if either case
       is missing.
-- [ ] TEST (move) the vocabulary cases that move down (at least `SessionMode` and `ServerUrl`)
+- [x] TEST (move) the vocabulary cases that move down (at least `SessionMode` and `ServerUrl`)
       from `packages/routes/test/contract.unit.test.ts` to `packages/shared/test/`. The
       contract test keeps one case per moved vocabulary proving a body with a bad value is still
       refused with the same message.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no file in shared imports a Node module,
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: no file in shared imports a Node module,
       a platform, `process.*` or `@oligarchy/*`. Unhappy: each is named.
-- [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the routes package may import `effect`
+- [x] TEST (alter) `test/repo/architecture.unit.test.ts`: the routes package may import `effect`
       and `@oligarchy/shared`. Its unhappy case still names the main package, a platform, Node
       and a driver.
 
@@ -542,17 +542,24 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 2: `@oligarchy/shared`**
 
-- [ ] Create `packages/shared` with `domain.ts`, `errors.ts` (the domain errors only:
+- [x] Create `packages/shared` with `domain.ts`, `errors.ts` (the domain errors only:
       `CommandError` and the others every layer raises) and `steps.ts` (from `src/viz/steps.ts`).
-- [ ] Move the vocabularies domain code also uses from the routes contract into shared. The
-      contract imports them. Schema identifiers stay unchanged.
-- [ ] **Staged errors.** `src/shared/errors.ts` stays in the root, re-exporting nothing, holding
+- [x] Move the vocabularies domain code also uses from the routes contract into shared. The
+      contract imports them. Schema identifiers stay unchanged. Eight moved: `SessionMode`,
+      `StopStatus`, `ClickButton`, `ScrollDirection`, `MouseModifier`, `ScreenPoint`,
+      `ServerUrl` and `AutomationAction`, each used by `qemu/qemu.ts`, `qemu-server/sessions.ts`,
+      `session/grammar.ts`, `client/actions.ts` or `automation-client/sessions.ts` beside the
+      wire. `MintedState` stays: only the proxy's answer names it.
+- [x] **Staged errors.** `src/shared/errors.ts` stays in the root, re-exporting nothing, holding
       only the errors whose package does not exist yet (`MissingVariable`, `DatabaseError`,
       `LogLine`, the app errors). Each phase moves its errors out; the file is deleted in phase
       10 when the last app takes its own. Every import of a moved error is re-pointed in the
       phase that moves it.
-- [ ] Re-point every import of `src/shared/domain.ts` and `src/viz/steps.ts` (`viz/view.ts`,
-      `viz/follow.ts`, `driver/loop.ts`, `dashboard/follow.tsx`).
+- [x] Re-point every import of `src/shared/domain.ts` and `src/viz/steps.ts` (`viz/view.ts`,
+      `viz/follow.ts`, `driver/loop.ts`, `dashboard/follow.tsx`). Decided while working the
+      phase: `@oligarchy/shared/errors` is imported as `SharedErrors` in the root package while
+      the staged `Errors` file exists, the way `ApiErrors` never shadows it; `ChildExit`, which
+      nothing raised, is deleted rather than staged.
 
 **Phase 3: `@oligarchy/log`**
 
@@ -859,8 +866,8 @@ Each other error moves with the package that raises it:
 | `PngDecodeError` | session (root) |
 
 Until its package exists, an error stays in the root's `src/shared/errors.ts`, which shrinks each
-phase and is deleted in phase 11. No code raises `ChildExit`; only its own test names it, so it is
-a candidate for deletion.
+phase and is deleted in phase 11. No code raised `ChildExit`; only its own test named it, so
+phase 2 deleted it.
 
 ### `@oligarchy/log` (layer 1, phase 3)
 

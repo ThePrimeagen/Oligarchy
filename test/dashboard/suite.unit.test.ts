@@ -8,6 +8,7 @@ import {
   responseJson,
   SuiteRequestError,
 } from "../../src/dashboard/suite.ts";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Prompts from "../../src/ctrl/prompts.ts";
 import * as Errors from "../../src/shared/errors.ts";
 
@@ -174,7 +175,7 @@ describe("create test-suite-run runner", () => {
 
   it("turns the command's empty-table refusal into the route's 400, and nothing else (unhappy)", async () => {
     const refused = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
-      throw Errors.CommandError.make({ message: "test: no test definitions found" });
+      throw SharedErrors.CommandError.make({ message: "test: no test definitions found" });
     });
     await expect(refused).rejects.toBeInstanceOf(SuiteRequestError);
     await expect(refused).rejects.toThrow("test: no test definitions found");
@@ -185,9 +186,9 @@ describe("create test-suite-run runner", () => {
     await expect(database).rejects.toBeInstanceOf(Errors.DatabaseError);
 
     const other = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
-      throw Errors.CommandError.make({ message: "mint: no live qemu server" });
+      throw SharedErrors.CommandError.make({ message: "mint: no live qemu server" });
     });
-    await expect(other).rejects.toBeInstanceOf(Errors.CommandError);
+    await expect(other).rejects.toBeInstanceOf(SharedErrors.CommandError);
     await expect(other).rejects.not.toBeInstanceOf(SuiteRequestError);
   });
 

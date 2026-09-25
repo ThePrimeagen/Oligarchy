@@ -1,12 +1,12 @@
 import { Duration, Option } from "effect";
+import type * as Domain from "@oligarchy/shared/domain";
+import * as Steps from "@oligarchy/shared/steps";
 import type * as Automation from "../db/automation.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
 import * as Palette from "../observability/palette.ts";
 import * as Render from "../observability/render.ts";
-import type * as Domain from "../shared/domain.ts";
 import * as Follow from "./follow.ts";
-import * as Steps from "./steps.ts";
 import * as Text from "./text.ts";
 import * as Trail from "./trail.ts";
 

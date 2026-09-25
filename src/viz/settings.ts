@@ -1,6 +1,6 @@
 import { Context, Effect, FileSystem, Schema } from "effect";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Render from "../observability/render.ts";
-import * as Errors from "../shared/errors.ts";
 
 // What the screen asks for lives here, not in the environment: a missing file is the
 // default, a present file that does not parse is a refusal. `tickets` is how many
@@ -24,18 +24,18 @@ const decodeFile = Schema.decodeUnknownEffect(Schema.fromJsonString(File), {
   onExcessProperty: "error",
 });
 
-const refused = (error: unknown): Errors.CommandError =>
-  Errors.CommandError.make({ message: `${PATH}: ${Render.headline(error)}` });
+const refused = (error: unknown): SharedErrors.CommandError =>
+  SharedErrors.CommandError.make({ message: `${PATH}: ${Render.headline(error)}` });
 
-export const parse = (text: string): Effect.Effect<Settings, Errors.CommandError> =>
+export const parse = (text: string): Effect.Effect<Settings, SharedErrors.CommandError> =>
   decodeFile(text).pipe(
     Effect.mapError(refused),
     Effect.map((file) => ({ tickets: file.tickets ?? DEFAULT_TICKETS })),
   );
 
 // The working directory's file, read when viz opens. Absent is the default.
-export const load: Effect.Effect<Settings, Errors.CommandError, FileSystem.FileSystem> = Effect.gen(
-  function* () {
+export const load: Effect.Effect<Settings, SharedErrors.CommandError, FileSystem.FileSystem> =
+  Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const there = yield* fs.exists(PATH).pipe(Effect.mapError(refused));
     if (!there) {
@@ -43,8 +43,7 @@ export const load: Effect.Effect<Settings, Errors.CommandError, FileSystem.FileS
     }
     const text = yield* fs.readFileString(PATH).pipe(Effect.mapError(refused));
     return yield* parse(text);
-  },
-);
+  });
 
 // How many finished tickets this process keeps. Tests leave the default.
 export const Tickets = Context.Reference<number>("@oligarchy/viz/settings/Tickets", {

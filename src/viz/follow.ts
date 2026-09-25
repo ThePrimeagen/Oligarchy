@@ -1,6 +1,6 @@
 import { Encoding, Option, Result, Schema } from "effect";
-import type * as Domain from "../shared/domain.ts";
-import * as Steps from "./steps.ts";
+import type * as Domain from "@oligarchy/shared/domain";
+import * as Steps from "@oligarchy/shared/steps";
 import * as Text from "./text.ts";
 
 // The commands or entries take the left column; the image takes every column to its right,

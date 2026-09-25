@@ -1,8 +1,8 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Context, Effect, Exit, Redacted } from "effect";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Client from "../../src/db/client.ts";
-import * as Errors from "../../src/shared/errors.ts";
 
 const PASSWORD = "pa55w0rd-sentinel";
 
@@ -163,7 +163,9 @@ describe("runInTransaction", () => {
       const { begin, thrown } = recordingBegin();
       const error = yield* Effect.flip(
         Client.runInTransaction("createRun", begin, () =>
-          Effect.fail(Errors.CommandError.make({ message: "test: no test definitions found" })),
+          Effect.fail(
+            SharedErrors.CommandError.make({ message: "test: no test definitions found" }),
+          ),
         ),
       );
       expect(error).toMatchObject({

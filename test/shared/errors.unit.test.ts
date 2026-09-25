@@ -20,7 +20,7 @@ describe("Sentry policy", () => {
   });
 });
 
-describe("domain error messages", () => {
+describe("staged errors, each waiting for its package", () => {
   it("MissingVariable renders <NAME> is not set", () => {
     expect(Errors.MissingVariable.make({ name: "OLIGARCHY_TOKEN" }).message).toBe(
       "OLIGARCHY_TOKEN is not set",
@@ -54,13 +54,6 @@ describe("domain error messages", () => {
     ).toBe("missing host requirements:\nqemu-system-x86_64 not on PATH\nOVMF code not found: /x");
   });
 
-  it("ChildExit renders its stderr", () => {
-    expect(
-      Errors.ChildExit.make({ command: "client", code: 1, stderr: "OLIGARCHY_TOKEN is not set" })
-        .message,
-    ).toBe("OLIGARCHY_TOKEN is not set");
-  });
-
   it("DatabaseError keeps the driver message and an optional cause", () => {
     const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
     const error = Errors.DatabaseError.make({
@@ -92,7 +85,6 @@ describe("domain error messages", () => {
   });
 
   it("every class carries its short tag", () => {
-    expect(Errors.CommandError.make({ message: "x" })._tag).toBe("CommandError");
     expect(Errors.QmpClosed.make({ message: "qemu: closed" })._tag).toBe("QmpClosed");
     expect(Errors.QmpProtocolError.make({ message: "x" })._tag).toBe("QmpProtocolError");
     expect(Errors.QemuStartError.make({ message: "x" })._tag).toBe("QemuStartError");

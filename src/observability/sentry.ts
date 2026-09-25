@@ -13,7 +13,7 @@ import {
   Schema,
   Tracer,
 } from "effect";
-import type * as Domain from "../shared/domain.ts";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Errors from "../shared/errors.ts";
 
 // ---------------------------------------------------------------------------

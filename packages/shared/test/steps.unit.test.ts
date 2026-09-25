@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import * as Steps from "../../src/viz/steps.ts";
+import * as Steps from "../src/steps.ts";
 
 // The shape every newest wording uses. The last two bullets are the crash report and the
 // screenshot line; the desktop line is a real step and stays.

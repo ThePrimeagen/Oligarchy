@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Schema } from "effect";
-import * as Domain from "../../src/shared/domain.ts";
+import * as Domain from "../src/domain.ts";
 
 const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 
@@ -272,5 +272,37 @@ describe("QmpExchangeOutcome", () => {
     expect(is({ state: "completed", response: { return: {} } })).toBe(true);
     expect(is({ state: "failed", response: "qemu: send-key timed out" })).toBe(true);
     expect(is({ state: "failed", response: { return: {} } })).toBe(false);
+  });
+});
+
+describe("ServerUrl", () => {
+  it("accepts an http or https url with a host and refuses anything else", () => {
+    const is = Schema.is(Domain.ServerUrl);
+    expect(is("http://10.0.0.5:42069")).toBe(true);
+    expect(is("https://qemu.example.com")).toBe(true);
+    expect(is("https://qemu.example.com/")).toBe(true);
+    expect(is("")).toBe(false);
+    expect(is("qemu.example.com:42069")).toBe(false);
+    expect(is("ftp://qemu.example.com")).toBe(false);
+    expect(is("http://")).toBe(false);
+    expect(is("not a url")).toBe(false);
+  });
+
+  it("names the url rule in the decode failure", () => {
+    const exit = Schema.decodeUnknownExit(Domain.ServerUrl)("qemu.example.com:42069");
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(Cause.squash(exit.cause))).toMatch(/url must be an http or https url/);
+    }
+  });
+});
+
+describe("SessionMode", () => {
+  it("is fresh or resume and nothing else", () => {
+    const is = Schema.is(Domain.SessionMode);
+    expect(is("fresh")).toBe(true);
+    expect(is("resume")).toBe(true);
+    expect(is("mint")).toBe(false);
+    expect(is("")).toBe(false);
   });
 });

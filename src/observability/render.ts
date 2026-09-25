@@ -1,8 +1,8 @@
 import { WriteStream } from "node:tty";
 import { Cause, Console, Effect, Option } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as ExternalFailure from "../external-failure.ts";
-import type * as Domain from "../shared/domain.ts";
 
 // ---------------------------------------------------------------------------
 // Failures

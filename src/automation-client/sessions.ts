@@ -12,8 +12,8 @@ import {
   Semaphore,
 } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import type * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Cli from "../cli.ts";
 import * as HarnessConfig from "../harness/config.ts";
 import * as Log from "../observability/log.ts";
@@ -50,7 +50,7 @@ export type RelinquishQemu = (agent: string) => Effect.Effect<void, ApiErrors.In
 // What a ticket holds before its run: what it was reserved as, so an expired drive gives its
 // guest slot back and the same reserve again is told from another, and since when.
 type Reservation = {
-  readonly action: Contract.AutomationAction;
+  readonly action: Domain.AutomationAction;
   readonly resume: string | undefined;
   readonly server: string | undefined;
   readonly since: number;
@@ -93,7 +93,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
 
     const reserve = Effect.fn("Sessions.reserve")(function* (
       ticket: string,
-      action: Contract.AutomationAction,
+      action: Domain.AutomationAction,
       resume?: string,
       server?: string,
     ) {

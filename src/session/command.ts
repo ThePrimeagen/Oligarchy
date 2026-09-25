@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Layer, Option, type Redacted, Schema, Stdio, Stream } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
 import * as Actions from "../db/actions.ts";
@@ -62,7 +63,9 @@ export const makeSessionCommand = (deps: Deps = live) => {
         actions.getImage(input.imageId),
         Option.match({
           onNone: () =>
-            Effect.fail(Errors.CommandError.make({ message: `image: no image ${input.imageId}` })),
+            Effect.fail(
+              SharedErrors.CommandError.make({ message: `image: no image ${input.imageId}` }),
+            ),
           onSome: Effect.succeed,
         }),
       );

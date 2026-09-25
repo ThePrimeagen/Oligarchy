@@ -1,9 +1,9 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Args from "../../src/qemu/args.ts";
 import * as Host from "../../src/qemu/host.ts";
-import type * as Domain from "../../src/shared/domain.ts";
 import * as Support from "../support/config.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";

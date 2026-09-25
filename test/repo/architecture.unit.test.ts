@@ -45,7 +45,10 @@ const packageGraph: PackageGraph = new Map(
 // dependencies name only packages on a strictly lower layer, so the graph reads one way and a
 // loop cannot hide in it. A package joins the list in the phase that creates it; routes holds
 // http's slot until it is renamed.
-const LAYERS: Readonly<Record<string, number>> = { "@oligarchy/routes": 5 };
+const LAYERS: Readonly<Record<string, number>> = {
+  "@oligarchy/shared": 0,
+  "@oligarchy/routes": 5,
+};
 
 // A package outside the list, and an edge that does not go strictly downward, each named.
 const layerProblems = (
@@ -77,19 +80,37 @@ const sources = (): ReadonlyArray<string> =>
     .flatMap(filesUnder)
     .filter((path) => !path.startsWith("src/dashboard/"));
 
+const SHARED_SOURCES = "packages/shared/src/";
 const ROUTES_SOURCES = "packages/routes/src/";
 
 const importSpecifiers = (source: string): ReadonlyArray<string> =>
   [...source.matchAll(/^import\s(?:[^;]*?\sfrom\s+)?"([^"]+)";?$/gm)].map((m) => m[1] ?? "");
 
-// The routes package is the HTTP contract alone: Effect's schemas and its own modules, nothing of
-// the processes that serve it, no platform and no Node.
-const routesImportProblems = (path: string, source: string): ReadonlyArray<string> =>
-  importSpecifiers(source).filter((specifier) =>
-    specifier.startsWith(".")
-      ? !join(dirname(path), specifier).startsWith(ROUTES_SOURCES)
-      : !/^effect(?:\/|$)/.test(specifier),
-  );
+// A package that is vocabulary or contract alone imports Effect, the packages it is allowed and
+// its own modules: nothing of the processes, no platform and no Node.
+const confinedImportProblems =
+  (dir: string, allowed: RegExp) =>
+  (path: string, source: string): ReadonlyArray<string> =>
+    importSpecifiers(source).filter((specifier) =>
+      specifier.startsWith(".")
+        ? !join(dirname(path), specifier).startsWith(dir)
+        : !allowed.test(specifier),
+    );
+
+// shared is the vocabulary every process speaks, so it knows no other package; and it reads no
+// process.*, which the boundary rule below also says of every non-boundary file.
+const sharedConfined = confinedImportProblems(SHARED_SOURCES, /^effect(?:\/|$)/);
+const sharedImportProblems = (path: string, source: string): ReadonlyArray<string> => [
+  ...sharedConfined(path, source),
+  ...[...stripStringsAndComments(source).matchAll(/\bprocess\.\w+/g)].map((m) => m[0]),
+];
+
+// The routes package is the HTTP contract alone: Effect's schemas, the shared vocabularies its
+// bodies carry, and its own modules.
+const routesImportProblems = confinedImportProblems(
+  ROUTES_SOURCES,
+  /^(?:effect(?:\/|$)|@oligarchy\/shared\/)/,
+);
 
 // The main package imports a workspace package the way it imports its own modules, as a
 // namespace, and only by a specifier the package exports: a relative path into packages/ would
@@ -298,7 +319,36 @@ describe("HttpApi ownership", () => {
 });
 
 describe("workspace packages", () => {
-  it("the routes package imports only effect and its own modules (happy)", () => {
+  it("the shared package imports only effect and its own modules, and reads no process.* (happy)", () => {
+    expect(filesUnder(SHARED_SOURCES).length).toBeGreaterThan(0);
+    expect(violationsIn(filesUnder(SHARED_SOURCES), sharedImportProblems)).toEqual([]);
+  });
+
+  it("names a shared import of Node, a platform, another package or the main package, and a process.* read (unhappy)", () => {
+    expect(
+      sharedImportProblems(
+        `${SHARED_SOURCES}domain.ts`,
+        [
+          'import { Schema } from "effect";',
+          'import * as Errors from "./errors.ts";',
+          'import { readFileSync } from "node:fs";',
+          'import * as NodeServices from "@effect/platform-node/NodeServices";',
+          'import * as Contract from "@oligarchy/routes/contract";',
+          'import * as Log from "../../../src/observability/log.ts";',
+          "const home = process.env.HOME;",
+          'const tag = "process.env in a string is not a read";',
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "node:fs",
+      "@effect/platform-node/NodeServices",
+      "@oligarchy/routes/contract",
+      "../../../src/observability/log.ts",
+      "process.env",
+    ]);
+  });
+
+  it("the routes package imports only effect, shared and its own modules (happy)", () => {
     expect(filesUnder(ROUTES_SOURCES).length).toBeGreaterThan(0);
     expect(violationsIn(filesUnder(ROUTES_SOURCES), routesImportProblems)).toEqual([]);
   });
@@ -311,6 +361,7 @@ describe("workspace packages", () => {
         [
           'import { Schema } from "effect";',
           'import * as HttpApi from "effect/unstable/httpapi/HttpApi";',
+          'import * as Domain from "@oligarchy/shared/domain";',
           'import * as Errors from "./errors.ts";',
           'import * as Log from "../../../src/observability/log.ts";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',

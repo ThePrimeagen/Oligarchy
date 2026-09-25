@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Exit, Fiber, Result, Scope, Stream } from "effect";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Framing from "../../src/qmp/framing.ts";
 import * as Socket from "../../src/qmp/socket.ts";
-import type * as Domain from "../../src/shared/domain.ts";
 
 let dir = "";
 let path = "";

@@ -1,7 +1,7 @@
 import { Cause, Effect, Layer, Queue, Schema, Scope, Stream } from "effect";
+import * as Domain from "@oligarchy/shared/domain";
 import type * as Client from "../../src/qmp/client.ts";
 import * as Socket from "../../src/qmp/socket.ts";
-import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 
 export type Options = {

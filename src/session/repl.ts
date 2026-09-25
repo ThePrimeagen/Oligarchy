@@ -12,7 +12,7 @@ import {
   Stream,
 } from "effect";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Render from "../observability/render.ts";
 import * as Children from "./children.ts";
 import * as Grammar from "./grammar.ts";
@@ -81,7 +81,7 @@ const start = (repl: Repl, command: Grammar.Start): Effect.Effect<void, never, E
 
 const stop = (
   session: State.Session,
-  status: Option.Option<Contract.StopStatus>,
+  status: Option.Option<Domain.StopStatus>,
   reason: Option.Option<string>,
 ): Effect.Effect<void, never, Env> =>
   Effect.gen(function* () {

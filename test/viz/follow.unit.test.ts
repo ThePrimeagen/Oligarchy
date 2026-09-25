@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Encoding, Option } from "effect";
-import type * as Domain from "../../src/shared/domain.ts";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Follow from "../../src/viz/follow.ts";
 import type * as Text from "../../src/viz/text.ts";
 import {

@@ -5,8 +5,8 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
 import type * as Qemu from "../qemu/qemu.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Middleware from "./middleware.ts";
 import * as Sessions from "./sessions.ts";
 
