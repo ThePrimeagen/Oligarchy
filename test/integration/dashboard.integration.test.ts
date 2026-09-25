@@ -937,7 +937,7 @@ console.log([queue.runningCount, queue.pendingCount].join(" "));
         `
 const queue = await query.listAutomationQueue(url);
 for (const suite of queue.suites) {
-  console.log([suite.name, suite.status, suite.passed, suite.failed, suite.startedAt instanceof Date, suite.queriedAt instanceof Date].join(" "));
+  console.log([suite.name, suite.status, suite.passed, suite.failed, suite.running, suite.pending, suite.startedAt instanceof Date, suite.queriedAt instanceof Date].join(" "));
 }
 `,
         dbUrl,
@@ -946,14 +946,122 @@ for (const suite of queue.suites) {
       expect(result.stderr).toBe("");
       expect(result.code).toBe(0);
       expect(lines(result.stdout)).toEqual([
-        "suite-latest-stopped aborted 1 0 true true",
-        "suite-latest-open running 1 1 true true",
-        "suite-latest-done completed 2 1 true true",
+        "suite-latest-stopped aborted 1 0 0 0 true true",
+        "suite-latest-open running 1 1 1 0 true true",
+        "suite-latest-done completed 2 1 0 0 true true",
       ]);
     } finally {
       await seed(dbUrl, async (db) => {
         await db.delete(testResults).where(inArray(testResults.runId, inserted.runIds));
         await db.delete(testRuns).where(inArray(testRuns.id, inserted.runIds));
+        await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+      });
+    }
+  });
+
+  // A result closed failed after its ticket reached Automation Needed still has its drive job run.
+  it("counts a result closed failed while its drive job waits or runs as pending or running, and keeps one with no live drive job failed", async () => {
+    const inserted = await seed(dbUrl, async (db) => {
+      const definitions = await db
+        .insert(testDefinitions)
+        .values(
+          ["queued", "driving", "unfiled", "errored", "passed"].map((suffix) => ({
+            name: `suite-filing-${suffix}`,
+            description: "d",
+            instruction: "i",
+            proof: "p",
+          })),
+        )
+        .returning({ id: testDefinitions.id, name: testDefinitions.name });
+      const definitionId = (suffix: string): number => {
+        const found = definitions.find((row) => row.name === `suite-filing-${suffix}`);
+        if (found === undefined) {
+          throw new Error(`suite-filing-${suffix} was not inserted`);
+        }
+        return found.id;
+      };
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "suite-filing",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          status: "failed",
+          reason: "linear: request failed: no answer within 10 seconds; created FIL-1, FIL-2",
+          startedAt: secondsAgo(-600),
+        })
+        .returning({ id: testRuns.id });
+      if (run === undefined) {
+        throw new Error("suite-filing run was not inserted");
+      }
+      const results = await db
+        .insert(testResults)
+        .values([
+          {
+            runId: run.id,
+            definitionId: definitionId("queued"),
+            status: "failed",
+            linearId: "FIL-1",
+          },
+          {
+            runId: run.id,
+            definitionId: definitionId("driving"),
+            status: "failed",
+            linearId: "FIL-2",
+          },
+          { runId: run.id, definitionId: definitionId("unfiled"), status: "failed" },
+          {
+            runId: run.id,
+            definitionId: definitionId("errored"),
+            status: "failed",
+            linearId: "FIL-3",
+          },
+          {
+            runId: run.id,
+            definitionId: definitionId("passed"),
+            status: "passed",
+            linearId: "FIL-4",
+          },
+        ])
+        .returning({ id: testResults.id, definitionId: testResults.definitionId });
+      const resultId = (suffix: string): string => {
+        const found = results.find((row) => row.definitionId === definitionId(suffix));
+        if (found === undefined) {
+          throw new Error(`suite-filing-${suffix} result was not inserted`);
+        }
+        return found.id;
+      };
+      await db.insert(automationJobs).values([
+        { resultId: resultId("queued"), action: "drive", status: "pending" },
+        { resultId: resultId("driving"), action: "drive", status: "running" },
+        { resultId: resultId("errored"), action: "drive", status: "errored" },
+        { resultId: resultId("passed"), action: "drive", status: "completed" },
+        { resultId: resultId("passed"), action: "diagnose", status: "running" },
+      ]);
+      return {
+        runId: run.id,
+        resultIds: results.map((row) => row.id),
+        definitionIds: definitions.map((row) => row.id),
+      };
+    });
+    try {
+      const result = await runQuery(
+        `
+const queue = await query.listAutomationQueue(url);
+const suite = queue.suites[0];
+console.log([suite.name, suite.status, suite.passed, suite.failed, suite.running, suite.pending].join(" "));
+`,
+        dbUrl,
+      );
+      expect(result.hung, "process did not exit: the pg client was not ended").toBe(false);
+      expect(result.stderr).toBe("");
+      expect(result.code).toBe(0);
+      expect(lines(result.stdout)).toEqual(["suite-filing running 1 2 1 1"]);
+    } finally {
+      await seed(dbUrl, async (db) => {
+        await db.delete(automationJobs).where(inArray(automationJobs.resultId, inserted.resultIds));
+        await db.delete(testResults).where(eq(testResults.runId, inserted.runId));
+        await db.delete(testRuns).where(eq(testRuns.id, inserted.runId));
         await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
       });
     }
@@ -1102,6 +1210,111 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
         expect(job.reason).toBe("aborted");
         expect(job.finishedAt).toBeInstanceOf(Date);
       }
+    } finally {
+      await seed(dbUrl, async (db) => {
+        await db.delete(automationJobs).where(inArray(automationJobs.resultId, inserted.resultIds));
+        await db.delete(testResults).where(eq(testResults.runId, inserted.runId));
+        await db.delete(testRuns).where(eq(testRuns.id, inserted.runId));
+        await db.delete(testDefinitions).where(inArray(testDefinitions.id, inserted.definitionIds));
+      });
+    }
+  });
+
+  it("aborts a result closed failed whose drive job still waits, with that job, and leaves one with no live drive job failed", async () => {
+    const inserted = await seed(dbUrl, async (db) => {
+      const definitions = await db
+        .insert(testDefinitions)
+        .values(
+          ["queued", "unfiled", "errored"].map((suffix) => ({
+            name: `suite-close-filing-${suffix}`,
+            description: "d",
+            instruction: "i",
+            proof: "p",
+          })),
+        )
+        .returning({ id: testDefinitions.id, name: testDefinitions.name });
+      const definitionId = (suffix: string): number => {
+        const found = definitions.find((row) => row.name === `suite-close-filing-${suffix}`);
+        if (found === undefined) {
+          throw new Error(`suite-close-filing-${suffix} was not inserted`);
+        }
+        return found.id;
+      };
+      const [run] = await db
+        .insert(testRuns)
+        .values({
+          name: "suite-close-filing",
+          iso: "https://example.com/omarchy.iso",
+          serverUrl: "http://127.0.0.1:42069",
+          status: "failed",
+          reason: "linear: request failed: no answer within 10 seconds; created CLF-1",
+        })
+        .returning({ id: testRuns.id });
+      if (run === undefined) {
+        throw new Error("suite-close-filing run was not inserted");
+      }
+      const results = await db
+        .insert(testResults)
+        .values([
+          {
+            runId: run.id,
+            definitionId: definitionId("queued"),
+            status: "failed",
+            linearId: "CLF-1",
+          },
+          { runId: run.id, definitionId: definitionId("unfiled"), status: "failed" },
+          {
+            runId: run.id,
+            definitionId: definitionId("errored"),
+            status: "failed",
+            linearId: "CLF-3",
+          },
+        ])
+        .returning({ id: testResults.id, definitionId: testResults.definitionId });
+      const resultId = (suffix: string): string => {
+        const found = results.find((row) => row.definitionId === definitionId(suffix));
+        if (found === undefined) {
+          throw new Error(`suite-close-filing-${suffix} result was not inserted`);
+        }
+        return found.id;
+      };
+      await db.insert(automationJobs).values([
+        { resultId: resultId("queued"), action: "drive", status: "pending" },
+        { resultId: resultId("errored"), action: "drive", status: "errored" },
+      ]);
+      return {
+        runId: run.id,
+        queuedId: resultId("queued"),
+        erroredId: resultId("errored"),
+        resultIds: results.map((row) => row.id),
+        definitionIds: definitions.map((row) => row.id),
+      };
+    });
+    try {
+      expect(await postAbortSuite(dbUrl, inserted.runId)).toBe(200);
+      const stored = await seed(dbUrl, async (db) => {
+        const [run] = await db.select().from(testRuns).where(eq(testRuns.id, inserted.runId));
+        const results = await db
+          .select({ id: testResults.id, status: testResults.status, reason: testResults.reason })
+          .from(testResults)
+          .where(eq(testResults.runId, inserted.runId));
+        const jobs = await db
+          .select({ resultId: automationJobs.resultId, status: automationJobs.status })
+          .from(automationJobs)
+          .where(inArray(automationJobs.resultId, inserted.resultIds));
+        return { run, results, jobs };
+      });
+      expect(stored.run?.status).toBe("aborted");
+      expect(
+        stored.results
+          .map((row) => `${row.id === inserted.queuedId ? "queued" : "closed"}:${row.status}`)
+          .sort(),
+      ).toEqual(["closed:failed", "closed:failed", "queued:aborted"]);
+      expect(stored.results.find((row) => row.id === inserted.queuedId)?.reason).toBe("aborted");
+      expect(stored.jobs.find((job) => job.resultId === inserted.queuedId)?.status).toBe("aborted");
+      expect(stored.jobs.find((job) => job.resultId === inserted.erroredId)?.status).toBe(
+        "errored",
+      );
     } finally {
       await seed(dbUrl, async (db) => {
         await db.delete(automationJobs).where(inArray(automationJobs.resultId, inserted.resultIds));

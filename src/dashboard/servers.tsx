@@ -328,9 +328,10 @@ const Jobs: FC<{ jobs: ReadonlyArray<AutomationJob> }> = ({ jobs }) =>
 const shortRunId = (id: string): string => id.slice(0, 6);
 
 // The last three suites, newest first, as the database sorted them. Runs share one name, so
-// the short id tells them apart. Passed and failed count the results with a verdict, and the
-// word at the end is completed once every result has run. An open suite can be aborted: that
-// aborts the results still pending or running.
+// the short id tells them apart. Passed and failed count the results with a verdict, running
+// and pending the ones whose drive job, or failing that whose own row, still runs or waits, and
+// the word at the end is completed once every result has run. An open suite can be aborted:
+// that aborts the results still pending or running.
 const Suites: FC<{ suites: ReadonlyArray<Suite> }> = ({ suites }) =>
   suites.length === 0 ? (
     <p>no test suites</p>
@@ -346,6 +347,8 @@ const Suites: FC<{ suites: ReadonlyArray<Suite> }> = ({ suites }) =>
             <time datetime={suite.startedAt.toISOString()}>{age(elapsed)} ago</time>
             <span class="suite__passed">{suite.passed} passed</span>
             <span class="suite__failed">{suite.failed} failed</span>
+            {suite.running > 0 ? <span>{suite.running} running</span> : null}
+            {suite.pending > 0 ? <span>{suite.pending} pending</span> : null}
             <span>{suite.status}</span>
             {open ? (
               <form

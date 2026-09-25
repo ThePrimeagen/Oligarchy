@@ -54,6 +54,15 @@ const terminal: TestDefinitionRow = {
   createdAt: new Date("2026-09-01T00:00:00Z"),
 };
 
+const lighting: TestDefinitionRow = {
+  id: 20,
+  name: "Set the wallpaper",
+  description: "Verify the wallpaper changes",
+  instruction: "Open the wallpaper menu",
+  proof: "The new wallpaper is visible",
+  createdAt: new Date("2026-09-01T00:00:00Z"),
+};
+
 // A second wording of install: same name, higher id, so it is the one a run pins from now on.
 const installRevised: TestDefinitionRow = {
   ...install,
@@ -792,45 +801,149 @@ describe("test run", () => {
     }),
   );
 
-  it.effect("names every ticket created, including one whose description failed (unhappy)", () =>
-    Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
-        operation: "describeIssue",
-        status: 401,
-        message: "linear: request failed (401): unauthorized",
-      });
-      const h = harness({
-        linear: FakeLinear.fakeLinear({
-          overrides: {
-            describeIssue: (ticket) =>
-              ticket.id === "issue-OLI-43" ? Effect.fail(refused) : Effect.void,
+  it.effect(
+    "fails only the test whose description failed; the ticket already handed off stays pending (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "describeIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        const h = harness({
+          linear: FakeLinear.fakeLinear({
+            overrides: {
+              describeIssue: (ticket) =>
+                ticket.id === "issue-OLI-43" ? Effect.fail(refused) : Effect.void,
+            },
+          }),
+        });
+        h.stores.tests.definitions.push(install, terminal);
+        const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+        expect(failure(exit)).toMatchObject({
+          _tag: "LinearError",
+          message: "linear: request failed (401): unauthorized; failed 1 of 2: Open a terminal",
+        });
+        const [run] = h.stores.tests.runs;
+        expect(run).toMatchObject({ status: "pending", reason: null, endedAt: null });
+        expect(h.stores.tests.results.map((row) => [row.status, row.reason, row.linearId])).toEqual(
+          [
+            ["pending", null, "OLI-42"],
+            ["failed", "linear: request failed (401): unauthorized; created OLI-43", "OLI-43"],
+          ],
+        );
+        // OLI-42 was handed to automation; OLI-43 never left Backlog, and nobody would drive it, so
+        // that one is reported: the line reaches Sentry with the failure as its cause.
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
+            location: undefined,
+            agentId: "OLI-43",
+            skipSentry: false,
+            cause: refused,
           },
-        }),
-      });
-      h.stores.tests.definitions.push(install, terminal);
-      const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
-      expect(failure(exit)).toMatchObject({
-        _tag: "LinearError",
-        message: "linear: request failed (401): unauthorized; created OLI-42, OLI-43",
-      });
-      expect(h.stores.tests.runs[0]?.reason).toBe(
-        "linear: request failed (401): unauthorized; created OLI-42, OLI-43",
-      );
-      expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
-      expect(h.stores.tests.results.map((row) => row.linearId)).toEqual(["OLI-42", "OLI-43"]);
-      // OLI-42 was handed to automation; OLI-43 never left Backlog, and nobody would drive it, so
-      // that one is reported: the line reaches Sentry with the failure as its cause.
-      expect(h.log.lines).toEqual([
-        {
-          level: "error",
-          text: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
-          location: undefined,
-          agentId: "OLI-43",
-          skipSentry: false,
-          cause: refused,
-        },
-      ]);
-    }),
+          {
+            level: "info",
+            text: `test ${run?.id} created; 2 tests; OLI-42, OLI-43`,
+            location: undefined,
+            agentId: undefined,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "fails only the test whose ticket Linear would not create, and still files every test after it (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const timedOut = Errors.LinearError.make({
+          operation: "createIssue",
+          message: "linear: request failed: no answer within 10 seconds",
+        });
+        let created = 0;
+        const h = harness({
+          linear: FakeLinear.fakeLinear({
+            overrides: {
+              createIssue: (input) =>
+                input.title === "Omarchy: Open a terminal"
+                  ? Effect.fail(timedOut)
+                  : Effect.sync(() => {
+                      created++;
+                      return FakeLinear.ticketFor(`OLI-${String(41 + created)}`);
+                    }),
+            },
+          }),
+        });
+        h.stores.tests.definitions.push(install, terminal, lighting);
+        const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+        expect(failure(exit)).toMatchObject({
+          _tag: "LinearError",
+          operation: "createIssue",
+          message:
+            "linear: request failed: no answer within 10 seconds; failed 1 of 3: Open a terminal",
+        });
+        const [run] = h.stores.tests.runs;
+        expect(run).toMatchObject({ status: "pending", reason: null, endedAt: null });
+        const results = h.stores.tests.results;
+        expect(
+          results.map((row) => [row.definitionId, row.status, row.reason, row.linearId]),
+        ).toEqual([
+          [install.id, "pending", null, "OLI-42"],
+          [terminal.id, "failed", "linear: request failed: no answer within 10 seconds", null],
+          [lighting.id, "pending", null, "OLI-43"],
+        ]);
+        expect(results[1]?.finishedAt).toBeInstanceOf(Date);
+        expect(
+          h.linear.calls
+            .filter((call) => call.method === "describeIssue")
+            .map((call) => (call.method === "describeIssue" ? call.ticket.identifier : "")),
+        ).toEqual(["OLI-42", "OLI-43"]);
+        expect(yield* lastJson).toEqual({
+          id: run?.id,
+          tests: [
+            { id: results[0]?.id, linear: FakeLinear.ticketFor("OLI-42") },
+            { id: results[1]?.id, linear: null },
+            { id: results[2]?.id, linear: FakeLinear.ticketFor("OLI-43") },
+          ],
+        });
+        // No ticket exists for the failed test, so nothing is trapped in Backlog.
+        expect(h.log.lines.map((line) => [line.level, line.text])).toEqual([
+          ["info", `test ${run?.id} created; 3 tests; OLI-42, OLI-43`],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "fails each test on its own when Linear creates no ticket at all, and leaves the run open (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const refused = Errors.LinearError.make({
+          operation: "createIssue",
+          status: 429,
+          message: "linear: request failed (429): rate limited",
+        });
+        const h = harness({
+          linear: FakeLinear.fakeLinear({ overrides: { createIssue: () => Effect.fail(refused) } }),
+        });
+        h.stores.tests.definitions.push(install, terminal);
+        const exit = yield* h.run([...SUITE, "--server-url", SERVER], WITH_LINEAR);
+        expect(failure(exit)).toMatchObject({
+          _tag: "LinearError",
+          message:
+            "linear: request failed (429): rate limited; failed 2 of 2: Install Omarchy, Open a terminal",
+        });
+        expect(h.stores.tests.runs[0]).toMatchObject({ status: "pending", reason: null });
+        expect(h.stores.tests.results.map((row) => [row.status, row.reason, row.linearId])).toEqual(
+          [
+            ["failed", "linear: request failed (429): rate limited", null],
+            ["failed", "linear: request failed (429): rate limited", null],
+          ],
+        );
+        expect(h.log.lines.map((line) => line.level)).toEqual(["info"]);
+      }),
   );
 
   it.effect(
@@ -849,7 +962,7 @@ describe("test run", () => {
         expect(error).toMatchObject({
           _tag: "DatabaseError",
           operation: "setLinearId",
-          message: expect.stringMatching(/; created OLI-42$/),
+          message: expect.stringMatching(/; failed 1 of 1: Install Omarchy$/),
         });
         expect(h.linear.calls.map((call) => call.method)).toEqual([
           "teamId",
@@ -858,8 +971,18 @@ describe("test run", () => {
           "stateIds",
           "createIssue",
         ]);
-        expect(h.stores.tests.runs[0]?.status).toBe("failed");
-        expect(h.log.lines).toHaveLength(1);
+        expect(h.stores.tests.runs[0]?.status).toBe("pending");
+        const own = h.stores.tests.results.find((row) => row.id !== OTHER_RESULT_ID);
+        expect(own).toMatchObject({
+          status: "failed",
+          linearId: null,
+          reason: expect.stringMatching(/; created OLI-42$/),
+        });
+        // The other run's result that holds the identifier is not this run's to touch.
+        expect(h.stores.tests.results.find((row) => row.id === OTHER_RESULT_ID)?.status).toBe(
+          "passed",
+        );
+        expect(h.log.lines.map((line) => line.level)).toEqual(["error", "info"]);
         expect(h.log.lines[0]).toMatchObject({
           level: "error",
           text: expect.stringMatching(/^ticket trapped in Backlog; /),
@@ -956,7 +1079,7 @@ describe("test run", () => {
   );
 
   it.effect(
-    "fails the run naming the ticket created when a guide its description embeds is unreadable (unhappy)",
+    "fails each test whose description embeds an unreadable guide on its own, naming its ticket (unhappy)",
     () =>
       Effect.gen(function* () {
         // The guide is read while describing the first ticket, so that ticket already exists.
@@ -967,23 +1090,32 @@ describe("test run", () => {
         const error = failure(exit);
         expect(error).toMatchObject({
           _tag: "PromptError",
-          message: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
+          message: expect.stringMatching(
+            /^prompt: .*client\.md.*; failed 2 of 2: Install Omarchy, Open a terminal$/,
+          ),
           cause: expect.anything(),
         });
+        // Each test is tried on its own: the second ticket is still created after the first failed.
         expect(h.linear.calls.map((call) => call.method)).toEqual([
           "teamId",
           "labelIds",
           "assigneeId",
           "stateIds",
           "createIssue",
+          "createIssue",
         ]);
-        expect(h.stores.tests.runs[0]).toMatchObject({
-          status: "failed",
-          reason: expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
-        });
+        expect(h.stores.tests.runs[0]).toMatchObject({ status: "pending", reason: null });
         expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed", "failed"]);
-        // The ticket exists in Backlog without a body and without the move: reported.
-        expect(h.log.lines).toHaveLength(1);
+        expect(h.stores.tests.results.map((row) => row.reason)).toEqual([
+          expect.stringMatching(/^prompt: .*client\.md.*; created OLI-42$/),
+          expect.stringMatching(/^prompt: .*client\.md.*; created OLI-43$/),
+        ]);
+        // Both tickets exist in Backlog without a body and without the move: each is reported.
+        expect(h.log.lines.map((line) => [line.level, line.agentId])).toEqual([
+          ["error", "OLI-42"],
+          ["error", "OLI-43"],
+          ["info", undefined],
+        ]);
         expect(h.log.lines[0]).toMatchObject({
           level: "error",
           text: expect.stringMatching(/^ticket trapped in Backlog; prompt: .*client\.md/),
@@ -1003,9 +1135,11 @@ describe("test run", () => {
         const h = harness({ fs: fs.layer });
         h.stores.tests.definitions.push(install);
         const exit = yield* h.run([...NEW, "--server-url", SERVER], WITH_LINEAR);
-        const message =
-          "prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value; created OLI-42";
-        expect(failure(exit)).toMatchObject({ _tag: "PromptError", message });
+        const cause = "prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value";
+        expect(failure(exit)).toMatchObject({
+          _tag: "PromptError",
+          message: `${cause}; failed 1 of 1: Install Omarchy`,
+        });
         expect(h.linear.calls.map((call) => call.method)).toEqual([
           "teamId",
           "labelIds",
@@ -1013,16 +1147,19 @@ describe("test run", () => {
           "stateIds",
           "createIssue",
         ]);
-        expect(h.stores.tests.runs[0]).toMatchObject({ status: "failed", reason: message });
-        expect(h.stores.tests.results.map((row) => row.status)).toEqual(["failed"]);
-        expect(yield* stdout).toEqual([]);
-        // The trapped line carries the failure itself, not the run's reason with the ticket list.
+        const [run] = h.stores.tests.runs;
+        expect(run).toMatchObject({ status: "pending", reason: null });
+        const [own] = h.stores.tests.results;
+        expect(own).toMatchObject({ status: "failed", reason: `${cause}; created OLI-42` });
+        // The run exists and its ticket was created, so the answer still names both.
+        expect(yield* lastJson).toEqual({
+          id: run?.id,
+          tests: [{ id: own?.id, linear: FakeLinear.ticketFor("OLI-42") }],
+        });
+        // The trapped line carries the failure itself, not the result's reason with the ticket.
         expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
-          [
-            "error",
-            "ticket trapped in Backlog; prompt: prompts/linear-issue.html uses {{NOPE}}, which has no value",
-            "OLI-42",
-          ],
+          ["error", `ticket trapped in Backlog; ${cause}`, "OLI-42"],
+          ["info", `test ${run?.id} created; 1 tests; OLI-42`, undefined],
         ]);
       }),
   );

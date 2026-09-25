@@ -992,10 +992,10 @@ const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // same way /abort does, so a claim during the round trip never sees them. A running job is the
 // automation server's to stop. A miss still aborts the row here, same as /abort's running
 // fallback, and the client may still be driving; the VM itself ends when commands stop. The
-// results still pending or running become aborted, which is what takes the suite out of the
-// running count, and each of their tickets moves to Aborted. A suite that has already finished
-// is left as it is. A Linear miss is logged and the rows stay aborted. The click answers with
-// the queue.
+// results still pending or running, or whose drive job still waits or runs, become aborted,
+// which is what takes the suite out of the running count, and each of their tickets moves to
+// Aborted. A suite that has already finished is left as it is. A Linear miss is logged and the
+// rows stay aborted. The click answers with the queue.
 app.post("/suites/abort", async (context) => {
   const wantsFragment = context.req.header("hx-request") === "true";
   const connectionString = context.env.HYPERDRIVE.connectionString;
@@ -1018,7 +1018,7 @@ app.post("/suites/abort", async (context) => {
     if (typeof run !== "string" || !RUN_ID.test(run)) {
       return reply();
     }
-    await abortPendingSuiteJobs(connectionString, run);
+    const stopped = await abortPendingSuiteJobs(connectionString, run);
     // The first pass is the slow one. A claim that won the pending abort shows up on
     // the second. A job that becomes running during that second pass is still running
     // afterwards; that window is one read, not the whole abort loop.
@@ -1055,7 +1055,7 @@ app.post("/suites/abort", async (context) => {
     };
     const missedFirst = await stopRunning();
     const missed = (await stopRunning()) || missedFirst;
-    const suite = await abortTestSuite(connectionString, run);
+    const suite = await abortTestSuite(connectionString, run, stopped);
     if (suite.aborted && missed) {
       Sentry.captureException(new Error("Cloudflare aborted job"));
     }

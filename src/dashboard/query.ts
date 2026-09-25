@@ -8,10 +8,12 @@ import {
   like,
   lt,
   lte,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { alias } from "drizzle-orm/pg-core";
 import { Client } from "pg";
 import {
   actions,
@@ -77,6 +79,14 @@ export type AutomationJob = {
 // failed; one with a result aborted or timed out is aborted: that test never reached a verdict.
 export type SuiteStatus = "pending" | "running" | "completed" | "aborted";
 
+// How many of a run's results share one status and one drive job status; drive is null for
+// a result with no drive job.
+export type SuiteResultGroup = {
+  readonly status: (typeof testResults.$inferSelect)["status"];
+  readonly drive: (typeof automationJobs.$inferSelect)["status"] | null;
+  readonly total: number;
+};
+
 // One run's result tallies. stopped is results aborted or timed out.
 export type SuiteTally = {
   readonly pending: number;
@@ -94,6 +104,8 @@ export type Suite = {
   readonly startedAt: Date;
   readonly passed: number;
   readonly failed: number;
+  readonly running: number;
+  readonly pending: number;
   readonly queriedAt: Date;
 };
 
@@ -821,6 +833,24 @@ export const suiteStatusOf = (tally: SuiteTally): SuiteStatus => {
   return "completed";
 };
 
+// A drive job still waiting or running is what the result is doing, whatever the result row
+// says: the automation server claims a pending drive job without reading its result, so a
+// result closed failed while its ticket was already queued still runs. Otherwise the result's
+// own status counts. errored and completed have no bucket here.
+export const suiteTallyOf = (groups: ReadonlyArray<SuiteResultGroup>): SuiteTally => {
+  const tally = { pending: 0, running: 0, passed: 0, failed: 0, stopped: 0 };
+  for (const group of groups) {
+    const state =
+      group.drive === "running" || group.drive === "pending" ? group.drive : group.status;
+    if (state === "pending" || state === "running" || state === "passed" || state === "failed") {
+      tally[state] += group.total;
+    } else if (state === "aborted" || state === "timed_out") {
+      tally.stopped += group.total;
+    }
+  }
+  return tally;
+};
+
 // The queue in three lists, each ordered and cut by the database, plus the totals the headings
 // show and the latest suites. Running and pending follow claim order: mint, then diagnose, then
 // drive, each oldest first. Completed is every terminal status, newest finished first: finished_at is
@@ -877,51 +907,62 @@ export function listAutomationQueue(connectionString: string): Promise<Automatio
       .from(automationJobs)
       .where(inArray(automationJobs.status, ["running", "pending"]))
       .groupBy(automationJobs.status);
-    // The runs started last, one row each, newest first. A result still pending or running
-    // keeps the suite open even when every job for it has already stopped.
+    // The runs started last that have a result, one row each, newest first. A result still
+    // pending or running keeps the suite open even when every job for it has already stopped.
     const suiteRows = await db
-      .select({
+      .selectDistinct({
         id: testRuns.id,
         name: testRuns.name,
         startedAt: testRuns.startedAt,
-        pending: sql<number>`count(*) filter (where ${testResults.status} = 'pending')`.mapWith(
-          Number,
-        ),
-        running: sql<number>`count(*) filter (where ${testResults.status} = 'running')`.mapWith(
-          Number,
-        ),
-        passed: sql<number>`count(*) filter (where ${testResults.status} = 'passed')`.mapWith(
-          Number,
-        ),
-        failed: sql<number>`count(*) filter (where ${testResults.status} = 'failed')`.mapWith(
-          Number,
-        ),
-        stopped:
-          sql<number>`count(*) filter (where ${testResults.status} in ('aborted', 'timed_out'))`.mapWith(
-            Number,
-          ),
         queriedAt: sql<Date>`(select CURRENT_TIMESTAMP)`.mapWith(testRuns.startedAt),
       })
       .from(testRuns)
       .innerJoin(testResults, eq(testResults.runId, testRuns.id))
-      .groupBy(testRuns.id, testRuns.name, testRuns.startedAt)
       .orderBy(desc(testRuns.startedAt), desc(testRuns.id))
       .limit(SUITE_LIMIT);
+    // One drive job per result at most: automation_jobs is unique on result and action.
+    const groups =
+      suiteRows.length === 0
+        ? []
+        : await db
+            .select({
+              runId: testResults.runId,
+              status: testResults.status,
+              drive: automationJobs.status,
+              total: count().mapWith(Number),
+            })
+            .from(testResults)
+            .leftJoin(
+              automationJobs,
+              and(eq(automationJobs.resultId, testResults.id), eq(automationJobs.action, "drive")),
+            )
+            .where(
+              inArray(
+                testResults.runId,
+                suiteRows.map((row) => row.id),
+              ),
+            )
+            .groupBy(testResults.runId, testResults.status, automationJobs.status);
     return {
       running,
       pending,
       completed,
       runningCount: countOf(jobCounts, "running"),
       pendingCount: countOf(jobCounts, "pending"),
-      suites: suiteRows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        status: suiteStatusOf(row),
-        startedAt: row.startedAt,
-        passed: row.passed,
-        failed: row.failed,
-        queriedAt: row.queriedAt,
-      })),
+      suites: suiteRows.map((row) => {
+        const tally = suiteTallyOf(groups.filter((group) => group.runId === row.id));
+        return {
+          id: row.id,
+          name: row.name,
+          status: suiteStatusOf(tally),
+          startedAt: row.startedAt,
+          passed: tally.passed,
+          failed: tally.failed,
+          running: tally.running,
+          pending: tally.pending,
+          queriedAt: row.queriedAt,
+        };
+      }),
     };
   });
 }
@@ -1388,13 +1429,39 @@ export type OpenSuiteJob = {
   readonly action: (typeof automationJobs.$inferSelect)["action"];
 };
 
+const liveDriveJobs = alias(automationJobs, "live_drive_jobs");
+
+// A result of this suite that is still open: its row says pending or running, or its drive job
+// still waits or runs, which the suite tally counts the same way.
+const openSuiteResult = (db: Pick<NodePgDatabase, "select">, runId: string) =>
+  and(
+    eq(testResults.runId, runId),
+    or(
+      inArray(testResults.status, ["pending", "running"]),
+      inArray(
+        testResults.id,
+        db
+          .select({ id: liveDriveJobs.resultId })
+          .from(liveDriveJobs)
+          .where(
+            and(
+              eq(liveDriveJobs.action, "drive"),
+              inArray(liveDriveJobs.status, ["pending", "running"]),
+            ),
+          ),
+      ),
+    ),
+  );
+
 // Pending jobs of results this suite has not aborted. Aborting them before the
 // automation-server round trip is what keeps a claim from starting a guest during
-// that wait. A job whose result already passed or failed stays: its diagnose is
-// still the review.
-export function abortPendingSuiteJobs(connectionString: string, runId: string): Promise<void> {
+// that wait. A job whose result already passed or failed, with no drive job still
+// waiting or running, stays: its diagnose is still the review. Answers the results
+// whose jobs it aborted: abortTestSuite still has to close them, and one closed failed
+// no longer has a live drive job to be found by.
+export function abortPendingSuiteJobs(connectionString: string, runId: string): Promise<string[]> {
   return withDatabase(connectionString, async (db) => {
-    await db
+    const jobs = await db
       .update(automationJobs)
       .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
       .where(
@@ -1402,18 +1469,12 @@ export function abortPendingSuiteJobs(connectionString: string, runId: string): 
           eq(automationJobs.status, "pending"),
           inArray(
             automationJobs.resultId,
-            db
-              .select({ id: testResults.id })
-              .from(testResults)
-              .where(
-                and(
-                  eq(testResults.runId, runId),
-                  inArray(testResults.status, ["pending", "running"]),
-                ),
-              ),
+            db.select({ id: testResults.id }).from(testResults).where(openSuiteResult(db, runId)),
           ),
         ),
-      );
+      )
+      .returning({ resultId: automationJobs.resultId });
+    return [...new Set(jobs.map((job) => job.resultId))];
   });
 }
 
@@ -1433,13 +1494,7 @@ export function listOpenSuiteJobs(
       })
       .from(automationJobs)
       .innerJoin(testResults, eq(testResults.id, automationJobs.resultId))
-      .where(
-        and(
-          eq(testResults.runId, runId),
-          inArray(testResults.status, ["pending", "running"]),
-          eq(automationJobs.status, "running"),
-        ),
-      ),
+      .where(and(openSuiteResult(db, runId), eq(automationJobs.status, "running"))),
   );
 }
 
@@ -1451,15 +1506,30 @@ export type AbortedSuite = {
 // Aborts a suite that still has a result open. Those results, and the jobs still waiting
 // or running for them, become aborted, and the run row ends with them. A suite that has
 // already finished is left alone, so a second abort does not rewrite a pass. The tickets
-// are the ones the board should move; a result with none has nothing to move.
-export function abortTestSuite(connectionString: string, runId: string): Promise<AbortedSuite> {
+// are the ones the board should move; a result with none has nothing to move. stopped
+// is what abortPendingSuiteJobs answered: those results are open too.
+export function abortTestSuite(
+  connectionString: string,
+  runId: string,
+  stopped: ReadonlyArray<string> = [],
+): Promise<AbortedSuite> {
   return withDatabase(connectionString, (db) =>
     db.transaction(async (tx) => {
+      const open = openSuiteResult(tx, runId);
       const results = await tx
         .update(testResults)
         .set({ status: "aborted", reason: "aborted", finishedAt: sql`now()` })
         .where(
-          and(eq(testResults.runId, runId), inArray(testResults.status, ["pending", "running"])),
+          stopped.length === 0
+            ? open
+            : or(
+                open,
+                and(
+                  eq(testResults.runId, runId),
+                  inArray(testResults.id, [...stopped]),
+                  notInArray(testResults.status, ["aborted", "timed_out"]),
+                ),
+              ),
         )
         .returning({ id: testResults.id, ticket: testResults.linearId });
       if (results.length === 0) {
