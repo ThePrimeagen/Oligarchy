@@ -438,13 +438,7 @@ export const App = (props: Props) => {
               </text>
             </box>
             <Show when={image()}>
-              {(
-                found: Accessor<{
-                  readonly png: Uint8Array;
-                  readonly top: number;
-                  readonly height: number;
-                }>,
-              ) => (
+              {(found: Accessor<View.ScreenImage>) => (
                 <box
                   position="absolute"
                   top={found().top}
