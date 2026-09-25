@@ -834,10 +834,9 @@ export const suiteStatusOf = (tally: SuiteTally): SuiteStatus => {
 };
 
 // A drive job still waiting or running is what the result is doing, whatever the result row
-// says: the automation server claims a pending drive job without reading its result, and
-// `./ctrl test run testsuite` closes every result failed when Linear stops answering part-way,
-// including the ones whose tickets it already filed. Otherwise the result's own status counts.
-// errored and completed have no bucket here.
+// says: the automation server claims a pending drive job without reading its result, so a
+// result closed failed while its ticket was already queued still runs. Otherwise the result's
+// own status counts. errored and completed have no bucket here.
 export const suiteTallyOf = (groups: ReadonlyArray<SuiteResultGroup>): SuiteTally => {
   const tally = { pending: 0, running: 0, passed: 0, failed: 0, stopped: 0 };
   for (const group of groups) {

@@ -959,8 +959,7 @@ for (const suite of queue.suites) {
     }
   });
 
-  // `./ctrl test run testsuite` fails every result when Linear stops answering part-way, but the
-  // tickets it already filed are in Automation Needed and their drive jobs still run.
+  // A result closed failed after its ticket reached Automation Needed still has its drive job run.
   it("counts a result closed failed while its drive job waits or runs as pending or running, and keeps one with no live drive job failed", async () => {
     const inserted = await seed(dbUrl, async (db) => {
       const definitions = await db

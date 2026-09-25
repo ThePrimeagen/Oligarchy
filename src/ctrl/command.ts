@@ -221,6 +221,9 @@ const selectDefinitions = Effect.fn("ctrl.selectDefinitions")(function* (
   );
 });
 
+// What filing one test's ticket can fail with: Linear, its prompt, or the result write.
+type FilingError = Errors.LinearError | Errors.PromptError | Errors.DatabaseError;
+
 const withReason = (error: Errors.LinearError, message: string): Errors.LinearError =>
   Errors.LinearError.make(
     Object.assign(
@@ -398,23 +401,61 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       tests: experimentTests,
     };
 
-    const tickets: Array<Linear.LinearTicket> = [];
-    const createTickets = Effect.gen(function* () {
+    // The same error carrying another message, so the headline can name the tests it failed.
+    const withMessage = (error: FilingError, message: string): FilingError => {
+      const cause = error.cause === undefined ? undefined : { cause: error.cause };
+      if (error._tag === "LinearError") {
+        return withReason(error, message);
+      }
+      if (error._tag === "PromptError") {
+        return Errors.PromptError.make(Object.assign({ message }, cause));
+      }
+      return Errors.DatabaseError.make(
+        Object.assign({ operation: error.operation, message }, cause),
+      );
+    };
+
+    // Without the team, labels, assignee and states no ticket can be filed, so a failure here
+    // fails the run and every result with it.
+    const setup = yield* Effect.gen(function* () {
       const teamId = yield* linear.teamId;
       const labelIds = yield* linear.labelIds(teamId, experiment.version);
       const assigneeId = yield* linear.assigneeId;
       const states = yield* linear.stateIds(teamId);
-      for (const test of experiment.tests) {
+      return { teamId, labelIds, assigneeId, states };
+    }).pipe(
+      Effect.catchTag("LinearError", (error) =>
+        tests.failRun(experiment.id, error.message).pipe(Effect.andThen(Effect.fail(error))),
+      ),
+    );
+
+    // Past setup, one test's failure is that test's alone: its result closes failed with the
+    // reason, naming its ticket when one was created so it can be cleaned up by hand, and the
+    // rest are still filed. The run stays open for the tickets that were handed off.
+    const filed: Array<{ readonly id: string; readonly linear: Linear.LinearTicket | null }> = [];
+    const failed: Array<{ readonly name: string; readonly error: FilingError }> = [];
+    for (const test of experiment.tests) {
+      const issued: { ticket: Linear.LinearTicket | null } = { ticket: null };
+      const failTest = (error: FilingError) =>
+        Effect.suspend(() => {
+          failed.push({ name: test.name, error });
+          const reason =
+            issued.ticket === null
+              ? error.message
+              : `${error.message}; created ${issued.ticket.identifier}`;
+          return tests.closeResult(test.id, "failed", reason, null);
+        });
+      yield* Effect.gen(function* () {
         // Born in Backlog: the automation server queues nothing there, so the create webhook
         // cannot beat the linear_id write below to the row.
         const ticket = yield* linear.createIssue({
-          teamId,
+          teamId: setup.teamId,
           title: `Omarchy: ${test.name}`,
-          labelIds,
-          assigneeId,
-          stateId: states.backlog,
+          labelIds: setup.labelIds,
+          assigneeId: setup.assigneeId,
+          stateId: setup.states.backlog,
         });
-        tickets.push(ticket);
+        issued.ticket = ticket;
         yield* Effect.onError(
           Effect.gen(function* () {
             // Webhooks name the ticket by its human-readable id; store it on the result so the
@@ -435,56 +476,33 @@ export const makeCtrlCommand = (deps: Deps = live) => {
               TEST_PROOF: test.proof,
             });
             // The move into Automation Needed is what queues the drive, and it goes last.
-            yield* linear.describeIssue(ticket, description, states.automationNeeded);
+            yield* linear.describeIssue(ticket, description, setup.states.automationNeeded);
           }),
           trapped(log, ticket),
         );
-      }
-    });
-    // A failure fails the run and every result with the reason, naming the tickets that did get
-    // created so they can be cleaned up by hand; the error goes on carrying that reason.
-    const failRunWith = <E extends { readonly message: string }>(
-      error: E,
-      namingTickets: (reason: string) => E,
-    ) =>
-      Effect.gen(function* () {
-        const identifiers = tickets.map((ticket) => ticket.identifier).join(", ");
-        const reason =
-          identifiers === "" ? error.message : `${error.message}; created ${identifiers}`;
-        yield* tests.failRun(experiment.id, reason);
-        return yield* Effect.fail(identifiers === "" ? error : namingTickets(reason));
-      });
-    yield* createTickets.pipe(
-      Effect.catchTags({
-        LinearError: (error) => failRunWith(error, (reason) => withReason(error, reason)),
-        PromptError: (error) =>
-          failRunWith(error, (reason) =>
-            Errors.PromptError.make(
-              Object.assign(
-                { message: reason },
-                error.cause === undefined ? undefined : { cause: error.cause },
-              ),
-            ),
-          ),
-        DatabaseError: (error) =>
-          failRunWith(error, (reason) =>
-            Errors.DatabaseError.make(
-              Object.assign(
-                { operation: error.operation, message: reason },
-                error.cause === undefined ? undefined : { cause: error.cause },
-              ),
-            ),
-          ),
-      }),
-    );
+      }).pipe(
+        Effect.catchTags({ LinearError: failTest, PromptError: failTest, DatabaseError: failTest }),
+      );
+      filed.push({ id: test.id, linear: issued.ticket });
+    }
 
-    yield* log.info(
-      `test ${experiment.id} created; ${String(experiment.tests.length)} tests; ${tickets.map((ticket) => ticket.identifier).join(", ")}`,
+    const identifiers = filed.flatMap((test) =>
+      test.linear === null ? [] : [test.linear.identifier],
     );
-    yield* printJson({
-      id: experiment.id,
-      tests: experiment.tests.map((test, index) => ({ id: test.id, linear: tickets[index] })),
-    });
+    yield* log.info(
+      `test ${experiment.id} created; ${String(experiment.tests.length)} tests; ${identifiers.join(", ")}`,
+    );
+    yield* printJson({ id: experiment.id, tests: filed });
+    const [first] = failed;
+    if (first !== undefined) {
+      return yield* Effect.fail(
+        withMessage(
+          first.error,
+          `${first.error.message}; failed ${String(failed.length)} of ${String(experiment.tests.length)}: ${failed.map((test) => test.name).join(", ")}`,
+        ),
+      );
+    }
+    return yield* Effect.void;
   });
 
   // mint --iso <https-url> [--unminted]
