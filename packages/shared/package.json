@@ -1,18 +1,17 @@
 {
-  "name": "@oligarchy/routes",
+  "name": "@oligarchy/shared",
   "private": true,
   "type": "module",
   "exports": {
-    "./api": "./src/api.ts",
-    "./contract": "./src/contract.ts",
-    "./errors": "./src/errors.ts"
+    "./domain": "./src/domain.ts",
+    "./errors": "./src/errors.ts",
+    "./steps": "./src/steps.ts"
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
-    "@oligarchy/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

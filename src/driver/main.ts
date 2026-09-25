@@ -7,11 +7,11 @@ import * as CliOutput from "effect/unstable/cli/CliOutput";
 import * as Command from "effect/unstable/cli/Command";
 import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
 import * as Api from "@oligarchy/routes/api";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Tests from "../db/tests.ts";
 import * as Render from "../observability/render.ts";
-import * as Errors from "../shared/errors.ts";
 import * as DriverCommand from "./command.ts";
 import * as Loop from "./loop.ts";
 
@@ -28,7 +28,7 @@ const withStore = (input: Loop.Input) =>
     ),
     // A bad url fails while the layer is built, before a query can map it.
     Effect.catchTag("DatabaseError", (error) =>
-      Effect.fail(Errors.CommandError.make({ message: error.message })),
+      Effect.fail(SharedErrors.CommandError.make({ message: error.message })),
     ),
   );
 

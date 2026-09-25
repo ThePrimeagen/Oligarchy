@@ -10,10 +10,10 @@ import {
   Queue,
   Scope,
 } from "effect";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Logs from "../db/logs.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Errors from "../shared/errors.ts";
-import type * as Domain from "../shared/domain.ts";
 import * as Palette from "./palette.ts";
 import * as Render from "./render.ts";
 

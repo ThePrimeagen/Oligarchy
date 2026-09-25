@@ -2,11 +2,10 @@ import { homedir, tmpdir } from "node:os";
 import { Array as Arr, Context, Effect, FileSystem, Layer, Path } from "effect";
 import type { PlatformError, Scope } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import type * as Contract from "@oligarchy/routes/contract";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Log from "../observability/log.ts";
 import * as Client from "../qmp/client.ts";
 import * as Socket from "../qmp/socket.ts";
-import type * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Args from "./args.ts";
 import * as Process from "./process.ts";
@@ -36,7 +35,7 @@ const DRAG_STEPS = 8;
 const DRAG_STEP_GAP_MS = 20;
 
 // The qcode QEMU knows each held modifier by; super is the left meta key, as send-keys' <M-...>.
-const MODIFIER_QCODE: Readonly<Record<Contract.MouseModifier, string>> = {
+const MODIFIER_QCODE: Readonly<Record<Domain.MouseModifier, string>> = {
   shift: "shift",
   ctrl: "ctrl",
   alt: "alt",
@@ -73,30 +72,30 @@ export type MouseGesture =
       readonly _tag: "click" | "double-click";
       readonly x: number;
       readonly y: number;
-      readonly button: Contract.ClickButton;
+      readonly button: Domain.ClickButton;
       // Held around the click, within this gesture.
-      readonly modifiers?: Arr.NonEmptyReadonlyArray<Contract.MouseModifier>;
+      readonly modifiers?: Arr.NonEmptyReadonlyArray<Domain.MouseModifier>;
     }
   | {
       readonly _tag: "scroll";
       readonly x: number;
       readonly y: number;
-      readonly direction: Contract.ScrollDirection;
+      readonly direction: Domain.ScrollDirection;
       readonly ticks: number;
     }
   | {
       readonly _tag: "drag";
-      readonly from: Contract.ScreenPoint;
-      readonly to: Contract.ScreenPoint;
-      readonly button: Contract.ClickButton;
-      readonly modifiers?: Arr.NonEmptyReadonlyArray<Contract.MouseModifier>;
+      readonly from: Domain.ScreenPoint;
+      readonly to: Domain.ScreenPoint;
+      readonly button: Domain.ClickButton;
+      readonly modifiers?: Arr.NonEmptyReadonlyArray<Domain.MouseModifier>;
     }
   // Half a click each: the button stays as it was left until the next one.
   | {
       readonly _tag: "hold" | "release";
       readonly x: number;
       readonly y: number;
-      readonly button: Contract.ClickButton;
+      readonly button: Domain.ClickButton;
     };
 
 export type QemuHandle = {
@@ -263,7 +262,7 @@ const make: Effect.Effect<
       gesture: MouseGesture,
       record: Client.Recorder,
     ) {
-      const at = (point: Contract.ScreenPoint): ReadonlyArray<Domain.QmpInputEvent> => [
+      const at = (point: Domain.ScreenPoint): ReadonlyArray<Domain.QmpInputEvent> => [
         { type: "abs", data: { axis: "x", value: Math.round(point.x * TABLET_AXIS_MAX) } },
         { type: "abs", data: { axis: "y", value: Math.round(point.y * TABLET_AXIS_MAX) } },
       ];
@@ -277,7 +276,7 @@ const make: Effect.Effect<
       // usb-tablet applies the event list then syncs once: down and up in the same list leave
       // the button unchanged, so the guest never sees a click. The release always goes out, even
       // after a failed press, so the guest is never left with a button held down.
-      const pulses = (point: Contract.ScreenPoint, button: Domain.InputButton, count: number) =>
+      const pulses = (point: Domain.ScreenPoint, button: Domain.InputButton, count: number) =>
         Effect.gen(function* () {
           for (let pulse = 0; pulse < count; pulse++) {
             const pressed = yield* Effect.exit(send([...at(point), btn(button, true)]));
@@ -293,7 +292,7 @@ const make: Effect.Effect<
       // last: after a failed gesture, and after a failed press too, since the row can be refused
       // once QEMU has taken the keys. The guest is never left with a modifier held down.
       const withModifiers = (
-        modifiers: Arr.NonEmptyReadonlyArray<Contract.MouseModifier> | undefined,
+        modifiers: Arr.NonEmptyReadonlyArray<Domain.MouseModifier> | undefined,
         work: Effect.Effect<void, Client.ExecuteError>,
       ) =>
         Effect.gen(function* () {
@@ -302,7 +301,7 @@ const make: Effect.Effect<
           }
           const held = (
             pressed: boolean,
-            order: ReadonlyArray<Contract.MouseModifier>,
+            order: ReadonlyArray<Domain.MouseModifier>,
           ): ReadonlyArray<Domain.QmpInputEvent> =>
             order.map((modifier) => ({
               type: "key",

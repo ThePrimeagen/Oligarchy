@@ -1,5 +1,6 @@
 import { Effect, Layer, type Redacted, Terminal } from "effect";
 import * as Command from "effect/unstable/cli/Command";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
 import * as Actions from "../db/actions.ts";
@@ -53,10 +54,10 @@ export const makeVizCommand = (deps: Deps = live) => {
       const rows = yield* terminal.rows;
       // A pipe has no size.
       if (columns === 0 || rows === 0) {
-        return yield* Errors.CommandError.make({ message: "viz needs a terminal" });
+        return yield* SharedErrors.CommandError.make({ message: "viz needs a terminal" });
       }
       if (columns < View.MIN_COLUMNS || rows < View.MIN_ROWS) {
-        return yield* Errors.CommandError.make({ message: View.tooSmall(columns, rows) });
+        return yield* SharedErrors.CommandError.make({ message: View.tooSmall(columns, rows) });
       }
       return yield* Run.run;
     }),

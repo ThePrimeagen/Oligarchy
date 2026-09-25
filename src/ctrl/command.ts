@@ -14,6 +14,8 @@ import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
@@ -28,7 +30,6 @@ import * as Sessions from "../db/sessions.ts";
 import * as Tests from "../db/tests.ts";
 import * as Log from "../observability/log.ts";
 import * as Failure from "../observability/render.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Linear from "./linear.ts";
 import * as Prompts from "./prompts.ts";
@@ -170,7 +171,7 @@ const list = Flag.boolean("list").pipe(
 // Helpers
 // ---------------------------------------------------------------------------
 
-const refuse = (message: string) => Errors.CommandError.make({ message });
+const refuse = (message: string) => SharedErrors.CommandError.make({ message });
 
 // The one definition `mint` installs from, and the label its tickets carry beside the agent
 // test label the automation server watches.
@@ -181,7 +182,7 @@ const MINT_LABEL = "mint";
 const orRefuse = <A, E, R>(
   self: Effect.Effect<Option.Option<A>, E, R>,
   message: string,
-): Effect.Effect<A, E | Errors.CommandError, R> =>
+): Effect.Effect<A, E | SharedErrors.CommandError, R> =>
   Effect.flatMap(
     self,
     Option.match({
@@ -195,7 +196,7 @@ const printLines = (lines: ReadonlyArray<string>) =>
 
 const printJson = (value: unknown) => Console.log(Render.json(value));
 
-const noDefinitions = (name: Option.Option<string>): Errors.CommandError =>
+const noDefinitions = (name: Option.Option<string>): SharedErrors.CommandError =>
   refuse(
     Option.match(name, {
       onNone: () => "test: no test definitions found",

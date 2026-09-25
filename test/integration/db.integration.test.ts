@@ -3,6 +3,7 @@ import { it, layer } from "@effect/vitest";
 import { eq, sql } from "drizzle-orm";
 import { Cause, Context, Effect, Exit, Layer, Option, Redacted, Scope } from "effect";
 import { TestConsole } from "effect/testing";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Actions from "../../src/db/actions.ts";
 import * as Client from "../../src/db/client.ts";
 import * as DebugLogs from "../../src/db/debug-logs.ts";
@@ -17,7 +18,6 @@ import * as Automation from "../../src/db/automation.ts";
 import * as SetupRequests from "../../src/db/setup-requests.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as Render from "../../src/observability/render.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as Support from "../support/config.ts";
 import * as Postgres from "../support/postgres.ts";
 
@@ -418,7 +418,7 @@ Postgres.describeWithDatabase("database", () => {
                   .insert(DbSchema.sessions)
                   .values({ id, config: { iso: "x" }, status: "running" }),
               );
-              return yield* Errors.CommandError.make({
+              return yield* SharedErrors.CommandError.make({
                 message: "test: no test definitions found",
               });
             }),

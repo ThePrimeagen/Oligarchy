@@ -1,5 +1,8 @@
 import { Effect, ErrorReporter, type LogLevel, Schema } from "effect";
-import * as Domain from "./domain.ts";
+import * as Domain from "@oligarchy/shared/domain";
+
+// Each error here is waiting for the package that raises it (monorepo-plan.md's error table)
+// and moves out in the phase that creates it. The domain errors are @oligarchy/shared/errors.
 
 export class MissingVariable extends Schema.TaggedError<MissingVariable>(
   "@oligarchy/shared/errors/MissingVariable",
@@ -8,10 +11,6 @@ export class MissingVariable extends Schema.TaggedError<MissingVariable>(
     return `${this.name} is not set`;
   }
 }
-
-export class CommandError extends Schema.TaggedError<CommandError>(
-  "@oligarchy/shared/errors/CommandError",
-)("CommandError", { message: Schema.String }) {}
 
 // The harness loop appended a message the history cannot hold. The caller built
 // the turn; the model did not.
@@ -149,19 +148,6 @@ export class JobNotFound extends Schema.TaggedError<JobNotFound>(
 export class PromptError extends Schema.TaggedError<PromptError>(
   "@oligarchy/shared/errors/PromptError",
 )("PromptError", { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) }) {}
-
-export class ChildExit extends Schema.TaggedError<ChildExit>("@oligarchy/shared/errors/ChildExit")(
-  "ChildExit",
-  {
-    command: Schema.String,
-    code: Schema.Int,
-    stderr: Schema.String,
-  },
-) {
-  override get message(): string {
-    return this.stderr;
-  }
-}
 
 export class CliFailed extends Schema.TaggedError<CliFailed>("@oligarchy/shared/errors/CliFailed")(
   "CliFailed",

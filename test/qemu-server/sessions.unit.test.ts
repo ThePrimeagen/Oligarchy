@@ -20,10 +20,10 @@ import {
 import { TestClock } from "effect/testing";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
 import type * as Qemu from "../../src/qemu/qemu.ts";
 import * as Log from "../../src/observability/log.ts";
-import * as Domain from "../../src/shared/domain.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeMinted from "../support/fake-minted.ts";

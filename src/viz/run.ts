@@ -26,6 +26,8 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { createSignal } from "solid-js";
+import * as Domain from "@oligarchy/shared/domain";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
 import * as Config from "../config.ts";
 import * as Actions from "../db/actions.ts";
@@ -36,7 +38,6 @@ import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Follow from "./follow.ts";
 import * as Read from "./read.ts";
@@ -69,7 +70,7 @@ export type ImageDraw = "kitty" | "auto";
 // arrives as a key in raw mode and ends the view the same way q does. The mouse is left to the
 // terminal, so its own selection still works.
 type Opener = {
-  readonly open: Effect.Effect<CliRenderer, Errors.CommandError, Scope.Scope>;
+  readonly open: Effect.Effect<CliRenderer, SharedErrors.CommandError, Scope.Scope>;
   // Read when the screen opens, after the command has accepted its flags.
   readonly imageProtocol: Effect.Effect<ImageDraw>;
   // A graphics sequence, written whole. The screen sends a screenshot's placement through it.
@@ -97,7 +98,7 @@ export class Renderer extends Context.Service<Renderer, Opener>()("@oligarchy/vi
                 useThread: false,
               }),
             catch: (cause) =>
-              Errors.CommandError.make({
+              SharedErrors.CommandError.make({
                 message: `viz could not open the screen: ${Render.errorDetail(cause)}`,
               }),
           }),
@@ -225,12 +226,14 @@ const keysOf = (renderer: CliRenderer): Stream.Stream<KeyEvent> =>
 
 // A frame that throws is OpenTUI's word that the screen is broken, and left unanswered it would
 // open its console over the view and draw the frame again: the run ends with the reason instead.
-const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.CommandError> =>
-  Effect.callback<never, Errors.CommandError>((resume) => {
+const drawFailure = (renderer: CliRenderer): Effect.Effect<never, SharedErrors.CommandError> =>
+  Effect.callback<never, SharedErrors.CommandError>((resume) => {
     const onError = ({ error }: CliRendererErrorEvent) => {
       resume(
         Effect.fail(
-          Errors.CommandError.make({ message: `viz could not draw the screen: ${error.message}` }),
+          SharedErrors.CommandError.make({
+            message: `viz could not draw the screen: ${error.message}`,
+          }),
         ),
       );
     };
@@ -254,7 +257,7 @@ const drawFailure = (renderer: CliRenderer): Effect.Effect<never, Errors.Command
 // fails leaves its calls and says so in that pane, not on the footer.
 export const run: Effect.Effect<
   void,
-  Errors.CommandError,
+  SharedErrors.CommandError,
   | Renderer
   | ChildProcessSpawner.ChildProcessSpawner
   | HttpClient.HttpClient

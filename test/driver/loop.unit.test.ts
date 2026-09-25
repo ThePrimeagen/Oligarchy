@@ -15,6 +15,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as DbSchema from "../../src/db/schema.ts";
 import * as Tests from "../../src/db/tests.ts";
 import * as DriverLog from "../../src/driver/log.ts";
@@ -362,7 +363,7 @@ const storeFor = (
 };
 
 const run = (
-  app: Effect.Effect<HarnessConfig.AppConfig, Errors.CommandError>,
+  app: Effect.Effect<HarnessConfig.AppConfig, SharedErrors.CommandError>,
   http: Layer.Layer<HttpClient.HttpClient>,
   script: Script,
   log: Array<string>,

@@ -1,5 +1,5 @@
+import * as Domain from "@oligarchy/shared/domain";
 import { Option, Schema } from "effect";
-import * as Contract from "@oligarchy/routes/contract";
 
 export const HELP = `start [iso] [disk]                    boot a qemu session (default iso: omarchy.iso)
 get-image                             show the guest display inline
@@ -28,7 +28,7 @@ export const COMMANDS: ReadonlyArray<string> = [
   "quit",
 ];
 
-export const STOP_STATUSES: ReadonlyArray<string> = Contract.StopStatus.literals;
+export const STOP_STATUSES: ReadonlyArray<string> = Domain.StopStatus.literals;
 
 export const MOUSE_VERBS: ReadonlyArray<string> = [
   "move",
@@ -72,7 +72,7 @@ export type ClientCommand =
   | { readonly _tag: "intent-end" }
   | {
       readonly _tag: "stop";
-      readonly status: Option.Option<Contract.StopStatus>;
+      readonly status: Option.Option<Domain.StopStatus>;
       readonly reason: Option.Option<string>;
     };
 
@@ -100,7 +100,7 @@ const malformed = (command: MalformedCommand, usage: string): Command => ({
 
 const words = (rest: string): ReadonlyArray<string> => (rest === "" ? [] : rest.split(/\s+/));
 
-const isStopStatus = Schema.is(Contract.StopStatus);
+const isStopStatus = Schema.is(Domain.StopStatus);
 
 const parseIntent = (rest: string): Command => {
   const verb = rest.split(/\s+/, 1)[0];

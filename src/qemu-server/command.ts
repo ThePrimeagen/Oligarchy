@@ -3,7 +3,7 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
 import * as Client from "../db/client.ts";
@@ -12,7 +12,6 @@ import * as Log from "../observability/log.ts";
 import * as Render from "../observability/render.ts";
 import * as Args from "../qemu/args.ts";
 import * as Qemu from "../qemu/qemu.ts";
-import * as Domain from "../shared/domain.ts";
 import * as Errors from "../shared/errors.ts";
 
 const DEFAULT_PORT = 42069;
@@ -82,7 +81,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
       // tunnel's local port, say), which is nothing this process can see. Without it the server
       // announces nothing and is not on the dashboard: a development server stays out of the fleet.
       url: Flag.string("url").pipe(
-        Flag.withSchema(Contract.ServerUrl),
+        Flag.withSchema(Domain.ServerUrl),
         Flag.optional,
         Flag.withDescription(
           "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",

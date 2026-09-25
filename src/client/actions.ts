@@ -16,11 +16,11 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as Flag from "effect/unstable/cli/Flag";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Config from "../config.ts";
 import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
-import * as Domain from "../shared/domain.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Flags from "./flags.ts";
 import * as ProxyClient from "./proxy-client.ts";
 
@@ -40,7 +40,7 @@ const localIso = Effect.fn("client.localIso")(function* (iso: string) {
   const absolute = path.resolve(iso);
   yield* fs.stat(absolute).pipe(
     Effect.mapError((error) =>
-      Errors.CommandError.make({
+      SharedErrors.CommandError.make({
         message: `iso: ${ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message)}`,
       }),
     ),
@@ -100,7 +100,7 @@ export const start = Effect.fn("client.start")(function* (input: StartInput) {
 });
 
 export type ReserveInput = Shared & {
-  readonly server: Option.Option<Contract.ServerUrl>;
+  readonly server: Option.Option<Domain.ServerUrl>;
 };
 
 export const reserve = Effect.fn("client.reserve")(function* (input: ReserveInput) {
@@ -171,8 +171,8 @@ export const mouseMove = Effect.fn("client.mouse.move")(function* (input: PointI
 });
 
 export type ClickInput = PointInput & {
-  readonly button: Contract.ClickButton;
-  readonly modifier: ReadonlyArray<Contract.MouseModifier>;
+  readonly button: Domain.ClickButton;
+  readonly modifier: ReadonlyArray<Domain.MouseModifier>;
 };
 
 const clickBody = (input: ClickInput) =>
@@ -196,7 +196,7 @@ export const mouseDoubleClick = Effect.fn("client.mouse.doubleClick")(function* 
 });
 
 export type ScrollInput = PointInput & {
-  readonly direction: Contract.ScrollDirection;
+  readonly direction: Domain.ScrollDirection;
   readonly ticks: number;
 };
 
@@ -220,8 +220,8 @@ export type DragInput = Shared & {
   readonly fromY: number;
   readonly toX: number;
   readonly toY: number;
-  readonly button: Contract.ClickButton;
-  readonly modifier: ReadonlyArray<Contract.MouseModifier>;
+  readonly button: Domain.ClickButton;
+  readonly modifier: ReadonlyArray<Domain.MouseModifier>;
 };
 
 export const mouseDrag = Effect.fn("client.mouse.drag")(function* (input: DragInput) {
@@ -243,7 +243,7 @@ export const mouseDrag = Effect.fn("client.mouse.drag")(function* (input: DragIn
 });
 
 export type ButtonInput = PointInput & {
-  readonly button: Contract.ClickButton;
+  readonly button: Domain.ClickButton;
 };
 
 const buttonBody = (input: ButtonInput) =>
@@ -296,7 +296,7 @@ export const intentEnd = Effect.fn("client.intentEnd")(function* (input: IntentE
 
 export type StopInput = Shared & {
   readonly sessionId: string;
-  readonly status: Option.Option<Contract.StopStatus>;
+  readonly status: Option.Option<Domain.StopStatus>;
   readonly reason: Option.Option<string>;
 };
 
@@ -420,7 +420,7 @@ const specOf = (flag: AnyFlag): FlagSpec | undefined => {
 const booleanWord = (value: string): boolean =>
   Exit.isSuccess(Schema.decodeUnknownExit(EffectConfig.Boolean)(value));
 
-const reject = (message: string) => Errors.CommandError.make({ message });
+const reject = (message: string) => SharedErrors.CommandError.make({ message });
 
 // Words before the first flag are the action. What follows is parsed by the same Flag
 // values the ./client command declares.
@@ -543,7 +543,7 @@ const collect = Effect.fn("client.collect")(function* (
 const take = <A>(flag: Flag.Flag<A>, flags: { readonly [key: string]: ReadonlyArray<string> }) =>
   flag.parse({ flags, arguments: [] }).pipe(
     Effect.map((parsed) => parsed[1]),
-    Effect.mapError((error) => Errors.CommandError.make({ message: error.message })),
+    Effect.mapError((error) => SharedErrors.CommandError.make({ message: error.message })),
     Effect.provideService(Terminal.Terminal, unusedTerminal),
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, unusedSpawner),
   );
@@ -835,7 +835,7 @@ const dispatch = Effect.fn("client.dispatch")(function* (
     case "follow":
       return yield* runFollow(tokens, byName[name]);
   }
-  return yield* Errors.CommandError.make({ message: "unknown action" });
+  return yield* SharedErrors.CommandError.make({ message: "unknown action" });
 });
 
 // Find the action by the words the model wrote, then call that function.
@@ -843,7 +843,7 @@ export const call = Effect.fn("client.call")(function* (args: ReadonlyArray<stri
   const { name, tokens } = actionOf(args);
   if (!isActionName(name)) {
     const label = name === "" ? "missing action" : `unknown action ${name}`;
-    return yield* Errors.CommandError.make({ message: label });
+    return yield* SharedErrors.CommandError.make({ message: label });
   }
   return yield* dispatch(name, tokens);
 });

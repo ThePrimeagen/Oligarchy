@@ -11,8 +11,8 @@ import {
 } from "effect";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
+import type * as Domain from "@oligarchy/shared/domain";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
-import type * as Domain from "../../src/shared/domain.ts";
 
 // The ids Sessions mints come from crypto.randomUUID(), whose type is this template.
 type Uuid = `${string}-${string}-${string}-${string}-${string}`;

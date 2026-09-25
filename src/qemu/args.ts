@@ -1,4 +1,4 @@
-import * as Domain from "../shared/domain.ts";
+import * as Domain from "@oligarchy/shared/domain";
 
 export const QEMU_BIN = "qemu-system-x86_64";
 export const QEMU_IMG = "qemu-img";

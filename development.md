@@ -62,8 +62,9 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today one: `@oligarchy/routes`, the HTTP
-  contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  dashboard, the tests); `packages/*` are its libraries, today two: `@oligarchy/shared`, the
+  vocabulary every process speaks, and `@oligarchy/routes`, the HTTP contract (HttpApi server,
+  below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `typescript`, `vitest`,
@@ -80,8 +81,9 @@ exist.
   package depends only on packages on a strictly lower layer, never on one of its own layer:
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
-  picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/routes` alone, holding
-  `http`'s slot). A package missing from the list, an upward edge and a same-layer edge are each
+  picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0 and
+  `@oligarchy/routes` at 5, holding `http`'s slot). A package missing from the list, an upward
+  edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
   loop (`a/one.ts` imports `b/one.ts`, `b/two.ts` imports `a/two.ts`), and Bun installs such a
@@ -142,10 +144,21 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - `src/` is one directory per process plus the shared kernel (`src/shared/`, `src/config.ts`,
   `src/cli.ts`, `src/external-failure.ts`, `src/observability/`, `src/db/`); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
-  `src/` and `test/`. `packages/routes/src/` holds `api.ts`, `contract.ts` and `errors.ts` and
-  imports nothing but `effect` and its own files, so the contract can be read, and depended on,
-  without the processes that serve it. What only one side knows (QEMU, the database, the harness,
-  the domain errors) stays in `src/`.
+  `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
+  schemas, the follow stream), `errors.ts` (the domain errors every process raises,
+  `CommandError` today) and `steps.ts` (how a test instruction reads as steps and where a
+  message sits in them), and imports nothing but `effect` and its own files. A module enters
+  shared only if it imports nothing but `effect` and shared, has consumers in at least two
+  packages or apps, and is a schema, an id, an error class, or a pure function that reads a
+  domain value (`steps.ts` is the one such function); a service, anything that reads the OS or
+  `process.*`, anything that names a store, anything that turns a failure into text, and
+  anything with one consumer stays out. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
+  contract can be read, and depended on, without the processes that serve it. What only one side
+  knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
+  package that raises it exists: `src/shared/errors.ts` holds those (`MissingVariable`,
+  `DatabaseError`, `LogLine`, the app errors) and shrinks as each package is created,
+  re-exporting nothing.
 - `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
@@ -171,8 +184,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
 - Import a workspace package the same way, as a namespace of one exported subpath, never by a
   relative path into `packages/` and never from an index (there is none):
   `import * as Api from "@oligarchy/routes/api"`, `import * as Contract from
-  "@oligarchy/routes/contract"`, `import * as ApiErrors from "@oligarchy/routes/errors"`. The
-  errors module is `ApiErrors` everywhere so it never shadows the main package's `Errors`.
+  "@oligarchy/routes/contract"`, `import * as ApiErrors from "@oligarchy/routes/errors"`,
+  `import * as Domain from "@oligarchy/shared/domain"`, `import * as SharedErrors from
+  "@oligarchy/shared/errors"`, `import * as Steps from "@oligarchy/shared/steps"`. The two
+  errors modules are `ApiErrors` and `SharedErrors` everywhere so neither shadows the main
+  package's staged `Errors`; when that file is gone, `SharedErrors` becomes `Errors`.
 - Import Effect core from the barrel (`import { Effect, Layer, Schema } from "effect"`) and
   every other Effect module as a namespace by its module path
   (`import * as Command from "effect/unstable/cli/Command"`,
@@ -288,9 +304,10 @@ const MainLive = Layer.mergeAll(
 
 - Model every expected failure as
   `class X extends Schema.TaggedError<X>("@oligarchy/shared/errors/X")("X", fields, annotations?)`
-  in `src/shared/errors.ts`, or, when an HTTP API declares it (an `ApiError`), in
-  `packages/routes/src/errors.ts` beside its wire codec; never `Data.TaggedError`, never a bare
-  `Error` in an error channel.
+  in `packages/shared/src/errors.ts` when every process raises it, in the package that raises it
+  otherwise (in `src/shared/errors.ts` until that package exists), or, when an HTTP API declares
+  it (an `ApiError`), in `packages/routes/src/errors.ts` beside its wire codec; never
+  `Data.TaggedError`, never a bare `Error` in an error channel.
 - The class name equals the `_tag`; no `Error` suffix unless the concept is the error (`QmpError`,
   `DatabaseError`, `MissingVariable`). Never name a class `Error`.
 - Construct with `.make`; raise with `return yield* X.make({...})` (instances are yieldable).
@@ -393,7 +410,7 @@ boundary.
   never by identifier; export the domain name (`FollowEvent`, not `FollowEventSchema`).
 - Brand ids with `Schema.String.check(Schema.isUUID()).pipe(Schema.brand("SessionId"))`; bound
   scalars with `Schema.Number.check(Schema.isBetween({ minimum, maximum }, { message }))`; brands
-  live in `src/shared/domain.ts`, `Schema.is(Brand)` is the guard.
+  live in `packages/shared/src/domain.ts`, `Schema.is(Brand)` is the guard.
 - Decode `unknown` exactly once at the boundary and choose the runner by failure semantics:
   `Schema.decodeUnknownEffect` when failure belongs in the error channel,
   `Schema.decodeUnknownOption` for probes and "absence is the contract",
@@ -419,7 +436,7 @@ boundary.
   decoding; every `HttpApiClient` payload is built with the contract class's `.make`. Never add
   Zod.
 
-`FollowEvent` in `src/shared/domain.ts`: a `type`-keyed union in the wire's key order, its JSON
+`FollowEvent` in `packages/shared/src/domain.ts`: a `type`-keyed union in the wire's key order, its JSON
 codec bound beside it.
 
 ```ts
@@ -663,7 +680,10 @@ NodeRuntime.runMain(main, { disableErrorReporting: true });
 
 - The contract lives in three files, the `@oligarchy/routes` package: `packages/routes/src/api.ts`
   (middleware tags, `HttpApiEndpoint`s, the groups, the `HttpApi`s, `VERSION`), `contract.ts`
-  (`Schema.Class` DTOs, shared query field objects, and the closed vocabularies a body carries),
+  (`Schema.Class` DTOs, shared query field objects, and the closed vocabularies only the wire
+  carries, `MintedState` today; a vocabulary domain code also uses, `SessionMode`, `StopStatus`,
+  `ClickButton`, `ScrollDirection`, `MouseModifier`, `ScreenPoint`, `ServerUrl` and
+  `AutomationAction`, is `@oligarchy/shared/domain`'s and the contract imports it),
   `errors.ts` (the API errors and their wire codecs). No handler code lives there; `HttpApiEndpoint`,
   `HttpApiGroup.make`, `HttpApi.make` appear only in `api.ts` (the architecture test checks it).
 - A second `HttpApi` that must be reachable by the client generated from the first (the qemu reverse
@@ -1155,7 +1175,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Encode repository invariants oxlint cannot express as source-scanning tests in `test/repo/`: the
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
-  with `.ts`, the routes package importing only `effect` and itself, the main package reaching a
+  with `.ts`, the shared package importing only `effect` and itself and reading no `process.*`,
+  the routes package importing only `effect`, shared and itself, the main package reaching a
   workspace package only by an exported subpath, every package in the layer list and depending
   only on strictly lower layers, every package's lanes, deep-path Effect imports, no `as` but
   `as const`, `@oligarchy/` identifiers, no `Data.TaggedError`, `class Error` or re-export, the

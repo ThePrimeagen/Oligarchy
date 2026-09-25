@@ -10,10 +10,10 @@ import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Api from "@oligarchy/routes/api";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as DriverCommand from "../../src/driver/command.ts";
 import * as Loop from "../../src/driver/loop.ts";
 import * as HarnessConfig from "../../src/harness/config.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as Support from "../support/config.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
@@ -140,7 +140,9 @@ describe("driver command", () => {
       const failed: Seen = { input: undefined };
       const error = yield* Effect.flip(
         run(FLAGS, failed, {
-          outcome: Effect.fail(Errors.CommandError.make({ message: "step limit of 1 reached" })),
+          outcome: Effect.fail(
+            SharedErrors.CommandError.make({ message: "step limit of 1 reached" }),
+          ),
         }),
       );
       expect(error).toMatchObject({ _tag: "CommandError", message: "step limit of 1 reached" });

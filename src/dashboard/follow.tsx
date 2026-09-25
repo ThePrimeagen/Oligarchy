@@ -1,5 +1,5 @@
 import type { FC } from "hono/jsx";
-import { placeOf, stepsOf } from "../viz/steps.ts";
+import * as Steps from "@oligarchy/shared/steps";
 import { FOLLOW_POLL, feedHref, linearHref } from "./ticket.ts";
 import type { FollowEvent, SessionFollow } from "./query.ts";
 import { since } from "./servers.tsx";
@@ -42,13 +42,13 @@ const Heading: FC<{ follow: SessionFollow }> = ({ follow }) => (
 // copy still ahead. An earlier copy that has scrolled off the feed is not there to pass. An
 // open intent that is not one of those steps is a dash.
 const Step: FC<{ follow: SessionFollow }> = ({ follow }) => {
-  const steps = stepsOf(follow.instruction);
+  const steps = Steps.stepsOf(follow.instruction);
   const intents = follow.events.flatMap((event) => (event.kind === "intent" ? [event] : []));
   const openAt = intents.findLastIndex((event) => event.state === "running");
   if (steps.length === 0 || openAt === -1) {
     return null;
   }
-  const place = placeOf(
+  const place = Steps.placeOf(
     steps,
     intents.slice(0, openAt + 1).map((event) => event.text),
   );

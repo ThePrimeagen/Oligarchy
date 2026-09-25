@@ -5,6 +5,7 @@ import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Config from "../config.ts";
 import * as Errors from "../shared/errors.ts";
 
@@ -61,7 +62,7 @@ const makeClient = Effect.fn("makeClient")(function* (url: string) {
 export const reserve = Effect.fn("reserve")(function* (
   url: string,
   ticket: string,
-  action: Contract.AutomationAction,
+  action: Domain.AutomationAction,
   resume?: string,
   server?: string,
 ) {

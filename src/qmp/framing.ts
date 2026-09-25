@@ -1,5 +1,5 @@
 import { Cause, Exit, Result } from "effect";
-import * as Domain from "../shared/domain.ts";
+import * as Domain from "@oligarchy/shared/domain";
 import * as Errors from "../shared/errors.ts";
 
 export type Frame = Result.Result<Domain.QmpInbound, Errors.QmpProtocolError>;

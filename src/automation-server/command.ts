@@ -2,6 +2,7 @@ import { Deferred, Effect, Layer } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Client from "../db/client.ts";
 import * as EnvFile from "../env-file.ts";
 import * as ExternalFailure from "../external-failure.ts";
@@ -23,7 +24,7 @@ export type AutomationServer<RServe> = {
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
-type StartupError = Errors.DatabaseError | Errors.CommandError | HttpServerError.ServeError;
+type StartupError = Errors.DatabaseError | SharedErrors.CommandError | HttpServerError.ServeError;
 
 // A ServeError says nothing itself; the bind or accept error it wraps does.
 const detail = (error: StartupError): string =>
