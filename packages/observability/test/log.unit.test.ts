@@ -147,14 +147,15 @@ describe("LogLive", () => {
           timeline.push(`insert:${row.text}`);
           return Effect.void;
         });
+        // The ambient TestConsole with its `log` noted: prototype delegation, so every other method
+        // stays the TestConsole's own.
         const ambient = yield* Console.Console;
-        const noting: Console.Console = {
-          ...ambient,
-          log: (...parameters) => {
+        const noting: Console.Console = Object.assign(Object.create(ambient), {
+          log: (...parameters: ReadonlyArray<unknown>) => {
             timeline.push(`line:${plain(parameters[0])}`);
             ambient.log(...parameters);
           },
-        };
+        });
         const reporter = ErrorReporter.make(({ error }) => {
           timeline.push(`report:${error.message}`);
         });
