@@ -54,6 +54,27 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/routes": 5,
 };
 
+// A package's sources reach another package only through a dependency its package.json names,
+// and their own package by relative path: a bare `@oligarchy/<self>/...` resolves by walking up
+// to the root's install, the borrow the isolated linker is there to refuse, and tsc and Bun both
+// let it pass.
+const packageImportProblems = (
+  pkg: { readonly name: string; readonly dependsOn: ReadonlyArray<string> },
+  source: string,
+): ReadonlyArray<string> =>
+  importSpecifiers(source).flatMap((specifier) => {
+    if (!specifier.startsWith("@oligarchy/")) {
+      return [];
+    }
+    const imported = specifier.split("/").slice(0, 2).join("/");
+    if (imported === pkg.name) {
+      return [`"${specifier}" is its own package; import it by relative path`];
+    }
+    return pkg.dependsOn.includes(imported)
+      ? []
+      : [`"${specifier}" is not a dependency of ${pkg.name}`];
+  });
+
 // A package outside the list, and an edge that does not go strictly downward, each named.
 const layerProblems = (
   graph: PackageGraph,
@@ -450,6 +471,34 @@ describe("workspace packages", () => {
     expect(
       violationsIn([...filesUnder("src"), ...filesUnder("test")], workspaceImportProblems),
     ).toEqual([]);
+  });
+
+  it("every package's sources import only the packages it declares, and itself by relative path (happy)", () => {
+    expect(
+      workspacePackages.flatMap((pkg) =>
+        violationsIn(filesUnder(`${pkg.dir}/src`), (_, source) =>
+          packageImportProblems(pkg, source),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("names a package importing itself by name, and one importing a package it does not declare (unhappy)", () => {
+    expect(
+      packageImportProblems(
+        { name: "@oligarchy/db", dependsOn: ["@oligarchy/env", "@oligarchy/log"] },
+        [
+          'import { Effect } from "effect";',
+          'import * as Errors from "./errors.ts";',
+          'import * as Render from "@oligarchy/log/render";',
+          'import * as DbErrors from "@oligarchy/db/errors";',
+          'import * as Api from "@oligarchy/routes/api";',
+        ].join("\n"),
+      ),
+    ).toEqual([
+      '"@oligarchy/db/errors" is its own package; import it by relative path',
+      '"@oligarchy/routes/api" is not a dependency of @oligarchy/db',
+    ]);
   });
 
   it("every package is in the layer list and depends only on strictly lower layers (happy)", () => {

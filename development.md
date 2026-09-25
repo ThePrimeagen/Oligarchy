@@ -1186,7 +1186,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   it fails, so only a defect, which nothing logged, is printed. `Env.run` is the one
   `NodeRuntime.runMain` call, with error reporting off, the platform (`NodeServices.layer`)
   provided beneath, and the no-op `error` listeners on `process.stdout` and `process.stderr`
-  (Log, above). `db/migrate.ts` is not a `Command`, so it runs a bare effect through `Env.run`,
+  (Log, above). `packages/db/src/migrate.ts` is not a `Command`, so it runs a bare effect through
+  `Env.run`,
   guarded by `import.meta.main`. `src/session/main.ts` uses `Env.program` and its own
   `Runtime.makeRunMain`, because its REPL answers SIGTERM and SIGHUP itself.
   `test/repo/architecture.unit.test.ts` pins where each lives. Every other module returns an
@@ -1276,7 +1277,10 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
   with `.ts`, the shared package importing only `effect` and itself, the log and routes packages
-  only `effect`, shared and themselves, none of the three reading `process.*`, the main package
+  only `effect`, shared and themselves, none of the three reading `process.*`, every package's
+  sources importing only the packages its `package.json` declares and itself by relative path
+  (a bare `@oligarchy/<self>/…` resolves through the root's install, which tsc and Bun both
+  allow and the isolated linker means to refuse), the main package
   reaching a
   workspace package only by an exported subpath, every package in the layer list and depending
   only on strictly lower layers, every package's lanes, deep-path Effect imports, no `as` but
