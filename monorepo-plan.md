@@ -304,8 +304,8 @@ container and stay in the root's integration project until phase 12.
       fake. Happy: each row is inserted, then its line is written to stdout, in call order, and
       no line appears before its row has landed; `flush` waits for the last line. Unhappy: a
       refused row still writes its line, then `db: log insert failed: <detail>`, then reports the
-      failure to the reporters, in that order, and the rows behind it still land; an interrupt
-      mid-drain writes nothing more and is not reported.
+      failure to the reporters, in that order, and the rows behind it still land. (The interrupt
+      mid-drain case is not written; the decisions below say why.)
 - [x] TEST (move) `test/observability/sentry.unit.test.ts` to `packages/observability/test/`.
 - [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the instrumented processes preload the
       package's `instrument.ts`, in the package scripts and the wrappers.
@@ -716,6 +716,12 @@ Decided while working the phase:
   kept its: an identifier is a wire name, not a path.
 - linear declares `effect` and `@oligarchy/env` alone; the architecture test lets it take shared
   and log too (the layers below it), and names a store, a template or a test helper.
+- The architecture test's per-package check (a package imports only what its `package.json`
+  declares, and itself by relative path) stays, against the revision note above that such a list
+  duplicates the isolated linker: the root declares every workspace package, and resolution from
+  `packages/<name>/src` walks up to the root's `node_modules`, so an undeclared
+  `@oligarchy/db/tests` inside linear resolves (checked with `import.meta.resolve`). The linker
+  refuses only what the root does not declare.
 
 **Phase 8: `@oligarchy/jobs`**
 

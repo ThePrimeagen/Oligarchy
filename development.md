@@ -73,11 +73,15 @@ exist.
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
-  `@effect/vitest`, `typescript`, `vitest`, `@types/node`, `drizzle-orm`, `pg`, `@types/pg`) is
-  named once in the root's `workspaces.catalog` and each package says
-  `"catalog:"`. Why: two `effect`s would make two sets of Schema types that do not assign to each
-  other. `bunfig.toml` sets `linker = "isolated"`: a package sees only what its own `package.json`
-  declares, so an import it never named fails instead of borrowing the root's copy. Every
+  `@effect/vitest`, `typescript`, `vitest`, `@types/node`, `drizzle-orm`, `pg`, `@types/pg`,
+  `@sentry/bun`, `@sentry/effect`, `@sentry/cloudflare`) is named once in the root's
+  `workspaces.catalog` and each package says `"catalog:"`. Why: two `effect`s would make two
+  sets of Schema types that do not assign to each other. `bunfig.toml` sets `linker =
+  "isolated"`: a package's `node_modules` holds only what its own `package.json` declares, so an
+  import it never named fails instead of borrowing the root's copy, except for what the root
+  itself declares: resolution walks up to the root's `node_modules`, where every workspace
+  package is linked, so a package importing a workspace package it does not declare, or itself
+  by name, resolves all the same. `test/repo/architecture.unit.test.ts` names both. Every
   `tsconfig.json` extends `tsconfig.base.json`; the root adds only hono's JSX. `check:types` and
   `test:unit` run the root's lane, then `bun run --workspaces <lane>`, which runs that script in
   every package and fails when one does; every package has both scripts, on Bun. Lint and format
@@ -1086,8 +1090,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   hard-coded constant (public by design) and is shared with the dashboard.
 - `@sentry/bun` (Sentry's SDK for the runtime, `@sentry/node` underneath) and `@sentry/effect`
   are imported only in `packages/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
-  three are pinned to one version so `@sentry/core` is not duplicated (`SentryEffectTracer`
-  relies on one `getActiveSpan()`).
+  three are pinned to one version through the catalog so `@sentry/core` is not duplicated
+  (`SentryEffectTracer` relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
   (below); never call `captureException` elsewhere in Effect code. Tags are `location`/`agent_id`
   read from `fiber.getRef(References.CurrentLogAnnotations)` (the `Log` methods annotate them,
