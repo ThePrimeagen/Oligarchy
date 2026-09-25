@@ -1,13 +1,13 @@
 import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Cause, Context, Effect, Exit, Layer, Redacted, Scope } from "effect";
-import pg from "pg";
+import { Pool } from "pg";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 import * as DbSchema from "./schema.ts";
 
-export type Db = NodePgDatabase<typeof DbSchema> & { readonly $client: pg.Pool };
+export type Db = NodePgDatabase<typeof DbSchema> & { readonly $client: Pool };
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 // canParse instead of letting new URL throw: that TypeError carries the url — password
@@ -99,7 +99,7 @@ const makeDatabase = (
     // No connect at acquire: the first query connects, as today's connectDatabase.
     const pool = yield* Effect.acquireRelease(
       Effect.sync(() => {
-        const created = new pg.Pool({ connectionString });
+        const created = new Pool({ connectionString });
         created.on("error", (failure) => {
           Effect.runForkWith(context)(
             Effect.logError(`db: pool error: ${Render.errorDetail(failure)}`),

@@ -16,18 +16,59 @@ const filesUnder = (dir: string): ReadonlyArray<string> =>
 const PackageJson = Schema.Struct({
   name: Schema.String,
   exports: Schema.Record(Schema.String, Schema.String),
+  dependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 });
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 
-// Each workspace package with the specifiers its exports answer: `./api` is `@oligarchy/routes/api`.
+// Each workspace package with the specifiers its exports answer (`./api` is
+// `@oligarchy/routes/api`) and the workspace packages its dependencies name.
 const workspacePackages = readdirSync(join(root, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map(({ name: dir }) => {
-    const { name, exports } = decodePackageJson(read(`packages/${dir}/package.json`));
+    const { name, exports, dependencies } = decodePackageJson(read(`packages/${dir}/package.json`));
     return {
       dir: `packages/${dir}`,
+      name,
       modules: Object.keys(exports).map((key) => `${name}${key.slice(1)}`),
+      dependsOn: Object.keys(dependencies ?? {}).filter((dep) => dep.startsWith("@oligarchy/")),
     };
+  });
+
+// The package graph: each package and the workspace packages it depends on.
+type PackageGraph = ReadonlyMap<string, ReadonlyArray<string>>;
+const packageGraph: PackageGraph = new Map(
+  workspacePackages.map((pkg) => [pkg.name, pkg.dependsOn]),
+);
+
+// The layer each package sits on, numbered as in monorepo-plan.md's picture (shared 0, log 1,
+// env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6). A package's
+// dependencies name only packages on a strictly lower layer, so the graph reads one way and a
+// loop cannot hide in it. A package joins the list in the phase that creates it; routes holds
+// http's slot until it is renamed.
+const LAYERS: Readonly<Record<string, number>> = { "@oligarchy/routes": 5 };
+
+// A package outside the list, and an edge that does not go strictly downward, each named.
+const layerProblems = (
+  graph: PackageGraph,
+  layers: Readonly<Record<string, number>>,
+): ReadonlyArray<string> =>
+  [...graph].flatMap(([name, deps]) => {
+    const from = layers[name];
+    if (from === undefined) {
+      return [`${name} is not in the layer list`];
+    }
+    return deps.flatMap((dep) => {
+      const to = layers[dep];
+      if (to === undefined) {
+        return [`${name} -> ${dep}: ${dep} is not in the layer list`];
+      }
+      if (to === from) {
+        return [`${name} -> ${dep} is a same-layer edge (layer ${String(from)})`];
+      }
+      return to > from
+        ? [`${name} -> ${dep} is an upward edge (layer ${String(from)} -> ${String(to)})`]
+        : [];
+    });
   });
 
 // The viz's Solid components are `.tsx`; the same rules bind them, and every workspace package's.
@@ -293,6 +334,42 @@ describe("workspace packages", () => {
     expect(
       violationsIn([...filesUnder("src"), ...filesUnder("test")], workspaceImportProblems),
     ).toEqual([]);
+  });
+
+  it("every package is in the layer list and depends only on strictly lower layers (happy)", () => {
+    expect(packageGraph.size).toBeGreaterThan(0);
+    expect(layerProblems(packageGraph, LAYERS)).toEqual([]);
+  });
+
+  // A loop among listed packages is always an upward or a same-layer edge, so this one check
+  // names any loop too: the two-package loop below is named through both of its edges.
+  it("names an upward edge, a same-layer edge, a two-package loop and a package missing from the list (unhappy)", () => {
+    const layers = {
+      "@oligarchy/shared": 0,
+      "@oligarchy/log": 1,
+      "@oligarchy/env": 2,
+      "@oligarchy/db": 3,
+      "@oligarchy/linear": 3,
+    };
+    expect(
+      layerProblems(
+        new Map([
+          ["@oligarchy/shared", []],
+          ["@oligarchy/log", ["@oligarchy/shared", "@oligarchy/jobs"]],
+          ["@oligarchy/env", ["@oligarchy/log", "@oligarchy/db"]],
+          ["@oligarchy/db", ["@oligarchy/env", "@oligarchy/linear"]],
+          ["@oligarchy/linear", ["@oligarchy/db"]],
+          ["@oligarchy/jobs", []],
+        ]),
+        layers,
+      ),
+    ).toEqual([
+      "@oligarchy/log -> @oligarchy/jobs: @oligarchy/jobs is not in the layer list",
+      "@oligarchy/env -> @oligarchy/db is an upward edge (layer 2 -> 3)",
+      "@oligarchy/db -> @oligarchy/linear is a same-layer edge (layer 3)",
+      "@oligarchy/linear -> @oligarchy/db is a same-layer edge (layer 3)",
+      "@oligarchy/jobs is not in the layer list",
+    ]);
   });
 
   it("names a relative path into packages/, a named import and an unexported module (unhappy)", () => {

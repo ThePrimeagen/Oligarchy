@@ -75,6 +75,18 @@ exist.
   `test:unit` run the root's lane, then `bun run --workspaces <lane>`, which runs that script in
   every package and fails when one does; every package has both scripts, on Bun. Lint and format
   run once, at the root, over the whole tree.
+- Dependencies run one way. Two files never import each other: oxlint's `import/no-cycle` is on
+  as an error and follows package `exports`, so a loop through two packages is caught too. A
+  package depends only on packages on a strictly lower layer, never on one of its own layer:
+  `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
+  `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
+  picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/routes` alone, holding
+  `http`'s slot). A package missing from the list, an upward edge and a same-layer edge are each
+  named, and a loop among listed packages is always one of the last two, so the one check names
+  loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
+  loop (`a/one.ts` imports `b/one.ts`, `b/two.ts` imports `a/two.ts`), and Bun installs such a
+  pair without complaint. The root package is the top and appears in no layer: it depends on the
+  packages, and nothing depends on it.
 - A `.env` in the working directory fills missing variables only; an already-set variable always
   wins, and an empty value counts as unset. `--env-file <path>` on any process is a second file,
   read after the process environment and before `.env`.
@@ -1144,9 +1156,14 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
   with `.ts`, the routes package importing only `effect` and itself, the main package reaching a
-  workspace package only by an exported subpath, every package's lanes, deep-path Effect imports, no `as` but `as const`, `@oligarchy/` identifiers, no
-  `Data.TaggedError`, `class Error` or re-export, the script names (no `drizzle-kit push`), no
-  `"warn"`, `erasableSyntaxOnly` and the language-service plugin.
+  workspace package only by an exported subpath, every package in the layer list and depending
+  only on strictly lower layers, every package's lanes, deep-path Effect imports, no `as` but
+  `as const`, `@oligarchy/` identifiers, no `Data.TaggedError`, `class Error` or re-export, the
+  script names (no `drizzle-kit push`), no `"warn"`, `import/no-cycle` on as an error,
+  `erasableSyntaxOnly` and the language-service plugin.
+- Two standing decisions on what is never tested (both from PR #232): wrangler, so no test pins
+  `bun run dev` to it or reads `wrangler.jsonc`; and `oligarchy.json`, neither its contents nor
+  its loader.
 - Tests are behaviour across a boundary; do not test static constants, literal order, a table
   entry by entry, or config objects (the exact `check:fast` string). Delete obsolete tests with
   their feature, and never export a member for a test to read: assert the behaviour. Test vendor
@@ -1196,12 +1213,14 @@ overrides in `.oxlintrc.json`, and covered by a focused test each. `bun run chec
 format, types and unit tests in that order; run it plus the whole integration lane before a
 change ships (Tests, above).
 
-- oxlint with `typeAware: true`, plugins `effecttsgo` and `typescript`; categories `correctness`,
-  `suspicious`, `perf` as `error`, `nursery`, `pedantic`, `restriction`, `style` off;
-  `typescript/no-unnecessary-type-parameters: error`; `id-denylist: isRecord`;
+- oxlint with `typeAware: true`, plugins `effecttsgo`, `import` and `typescript`; categories
+  `correctness`, `suspicious`, `perf` as `error`, `nursery`, `pedantic`, `restriction`, `style`
+  off; `typescript/no-unnecessary-type-parameters: error`; `id-denylist: isRecord`;
   `no-underscore-dangle` allowing only `_tag`, `__dirname`, `__filename`; `no-nested-ternary:
   error` (a choice with more than two outcomes is `if` statements or a `switch`, never a ternary
-  inside a ternary); `no-await-in-loop` off;
+  inside a ternary); `no-await-in-loop` off; `import/no-cycle: error` (Layout, above);
+  `import/no-unassigned-import` off, because a side-effect import (`vitest.d.ts`'s module
+  augmentation, the viz preload) is exactly an unassigned one;
   the sixteen `effecttsgo/*` rules as `error` (`floating-effect`, `floating-effect-in-vitest`,
   `missing-effect-context`, `missing-effect-error`, `missing-layer-context`,
   `missing-star-in-yield-effect-gen`, `missing-return-yield-star`, `effect-fn-implicit-any`,

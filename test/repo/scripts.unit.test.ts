@@ -20,8 +20,35 @@ const TsConfig = Schema.Struct({
 });
 type TsConfig = typeof TsConfig.Type;
 
+// A rule is its level, or its level followed by its options.
+const OxlintConfig = Schema.Struct({
+  plugins: Schema.Array(Schema.String),
+  rules: Schema.Record(
+    Schema.String,
+    Schema.Union([
+      Schema.String,
+      Schema.TupleWithRest(Schema.Tuple([Schema.String]), [Schema.Json]),
+    ]),
+  ),
+});
+type OxlintConfig = typeof OxlintConfig.Type;
+
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 const decodeTsConfig = Schema.decodeUnknownSync(Schema.fromJsonString(TsConfig));
+const decodeOxlintConfig = Schema.decodeUnknownSync(Schema.fromJsonString(OxlintConfig));
+
+// Two files importing each other is the one dependency loop a linter can see file by file; the
+// package graph is a repo test (architecture.unit.test.ts). On as an error, so the loop fails
+// check:lint even when --deny-warnings is forgotten.
+const cycleRuleProblems = (config: OxlintConfig): ReadonlyArray<string> => {
+  const rule = config.rules["import/no-cycle"];
+  const level = typeof rule === "string" ? rule : rule?.[0];
+  return [
+    ...(config.plugins.includes("import") ? [] : ['plugins lacks "import"']),
+    ...(level === undefined ? ["import/no-cycle is not set"] : []),
+    ...(level !== undefined && level !== "error" ? [`import/no-cycle is ${level}`] : []),
+  ];
+};
 
 const WORKSPACES = readdirSync(join(root, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
@@ -242,6 +269,26 @@ describe("drizzle migrations", () => {
 describe(".oxlintrc.json", () => {
   it("never downgrades a rule to warn", () => {
     expect(readFileSync(join(root, ".oxlintrc.json"), "utf8")).not.toContain('"warn"');
+  });
+
+  it("turns import/no-cycle on as an error (happy)", () => {
+    expect(cycleRuleProblems(decodeOxlintConfig(read(".oxlintrc.json")))).toEqual([]);
+  });
+
+  it("names a config without the plugin, without the rule, or with it off (unhappy)", () => {
+    expect(cycleRuleProblems({ plugins: ["typescript"], rules: {} })).toEqual([
+      'plugins lacks "import"',
+      "import/no-cycle is not set",
+    ]);
+    expect(cycleRuleProblems({ plugins: ["import"], rules: { "import/no-cycle": "off" } })).toEqual(
+      ["import/no-cycle is off"],
+    );
+    expect(
+      cycleRuleProblems({
+        plugins: ["import"],
+        rules: { "import/no-cycle": ["warn", { ignoreTypes: true }] },
+      }),
+    ).toEqual(["import/no-cycle is warn"]);
   });
 });
 
