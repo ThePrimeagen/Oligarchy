@@ -1,18 +1,8 @@
-import {
-  Cause,
-  Context,
-  Effect,
-  Exit,
-  type FileSystem,
-  Layer,
-  Option,
-  Ref,
-  type Scope,
-} from "effect";
+import { Cause, Context, Effect, Exit, FileSystem, Layer, Option, Ref, type Scope } from "effect";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
-import type * as Tests from "@oligarchy/db/tests";
+import * as Tests from "@oligarchy/db/tests";
 import * as Open from "@oligarchy/jobs/open";
-import type * as Linear from "@oligarchy/linear/client";
+import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 
@@ -84,14 +74,11 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
   make: Effect.gen(function* () {
     const store = yield* SetupRequests.SetupRequestStore;
     const log = yield* Log.Log;
-    // What Jobs.openMint needs, captured once, so open asks nothing of the request that calls it.
-    const context = yield* Effect.context<
-      | SetupRequests.SetupRequestStore
-      | Tests.TestStore
-      | Linear.Linear
-      | Log.Log
-      | FileSystem.FileSystem
-    >();
+    // What Jobs.openMint needs beside those, captured once, so open asks nothing of the request
+    // that calls it.
+    const tests = yield* Tests.TestStore;
+    const linear = yield* Linear.Linear;
+    const fs = yield* FileSystem.FileSystem;
     // Filled by install, which runs in the server scope. A request's scope must not own the loop.
     let scope: Scope.Scope | null = null;
     const gate = yield* Ref.make<Gate>({ on: false, again: false });
@@ -167,7 +154,11 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
         // the server locked.
         const exit = yield* Effect.exit(
           Open.openMint({ iso, serverUrl: proxyUrl, pinned: serverUrl }).pipe(
-            Effect.provideContext(context),
+            Effect.provideService(SetupRequests.SetupRequestStore, store),
+            Effect.provideService(Tests.TestStore, tests),
+            Effect.provideService(Linear.Linear, linear),
+            Effect.provideService(Log.Log, log),
+            Effect.provideService(FileSystem.FileSystem, fs),
           ),
         );
         if (Exit.isFailure(exit)) {
