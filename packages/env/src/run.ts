@@ -57,11 +57,8 @@ export const run = <E>(
 ): void => {
   process.stdout.on("error", () => {});
   process.stderr.on("error", () => {});
-  NodeRuntime.runMain(
-    main.pipe(Effect.provide(NodeServices.layer)),
-    Object.assign(
-      { disableErrorReporting: true },
-      options.teardown === undefined ? undefined : { teardown: options.teardown },
-    ),
-  );
+  NodeRuntime.runMain(main.pipe(Effect.provide(NodeServices.layer)), {
+    disableErrorReporting: true,
+    ...options,
+  });
 };

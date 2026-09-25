@@ -18,14 +18,12 @@ export const program = Effect.gen(function* () {
 }).pipe(Effect.scoped);
 
 // Not a Command, so not Env.program: the one entry that is a bare effect, still run by the runner.
+// The print sits outside the environment, so an unreadable `.env` prints its cause too.
 if (import.meta.main) {
   Env.run(
     Effect.gen(function* () {
       const services = yield* Layer.build(Config.live);
-      yield* program.pipe(
-        Effect.tapCause((cause) => Console.error(Render.renderFailure(cause))),
-        Effect.provide(services),
-      );
-    }).pipe(Effect.scoped),
+      yield* program.pipe(Effect.provide(services));
+    }).pipe(Effect.scoped, Effect.tapCause(Render.reportFailure)),
   );
 }

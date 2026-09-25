@@ -2,26 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Redacted, Stdio } from "effect";
 import * as Config from "../src/config.ts";
-
-// The process environment the live chain reads, set for one body and put back after.
-const withProcessEnv = <A, E, R>(
-  values: Record<string, string>,
-  self: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.acquireUseRelease(
-    Effect.sync(() => {
-      for (const [key, value] of Object.entries(values)) {
-        process.env[key] = value;
-      }
-    }),
-    () => self,
-    () =>
-      Effect.sync(() => {
-        for (const key of Object.keys(values)) {
-          delete process.env[key];
-        }
-      }),
-  );
+import { withProcessEnv } from "./process-env.ts";
 
 const platform = Layer.mergeAll(FileSystem.layerNoop({}), Stdio.layerTest({}));
 
@@ -77,17 +58,20 @@ describe("Config.override", () => {
   it.effect(
     "a name neither the override nor the chain sets is still the chain's MissingVariable (unhappy)",
     () =>
-      Effect.gen(function* () {
-        const error = yield* Effect.flip(Config.linearTeam);
-        expect(error).toMatchObject({
-          _tag: "MissingVariable",
-          name: "LINEAR_TEAM",
-          message: "LINEAR_TEAM is not set",
-        });
-      }).pipe(
-        Effect.provide(
-          Config.override({ DATABASE_URL: "postgres://local/oligarchy" }).pipe(
-            Layer.provide(platform),
+      withProcessEnv(
+        { LINEAR_TEAM: undefined },
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(Config.linearTeam);
+          expect(error).toMatchObject({
+            _tag: "MissingVariable",
+            name: "LINEAR_TEAM",
+            message: "LINEAR_TEAM is not set",
+          });
+        }).pipe(
+          Effect.provide(
+            Config.override({ DATABASE_URL: "postgres://local/oligarchy" }).pipe(
+              Layer.provide(platform),
+            ),
           ),
         ),
       ),

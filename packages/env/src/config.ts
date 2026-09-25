@@ -121,14 +121,14 @@ export const override = (
     ),
   );
 
-const missing = (name: string) => () => Errors.MissingVariable.make({ name });
+const missing = (name: Variable) => () => Errors.MissingVariable.make({ name });
 
-export const required = (name: string): Effect.Effect<string, Errors.MissingVariable> =>
+export const required = (name: Variable): Effect.Effect<string, Errors.MissingVariable> =>
   EffectConfig.nonEmptyString(name).pipe(Effect.mapError(missing(name)));
 
 // An empty value counts as missing, as `fromEnv` drops empty strings before the schema sees them.
 export const requiredRedacted = (
-  name: string,
+  name: Variable,
 ): Effect.Effect<Redacted.Redacted, Errors.MissingVariable> =>
   EffectConfig.redacted(name).pipe(Effect.mapError(missing(name)));
 

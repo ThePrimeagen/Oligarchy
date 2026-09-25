@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Effect, Exit, FileSystem, Inspectable, Layer, Redacted, Stdio } from "effect";
 import * as Config from "../src/config.ts";
+import { withProcessEnv } from "./process-env.ts";
 
 const SENTINEL = "s3cr3t-sentinel-value";
 
@@ -93,25 +94,6 @@ describe("requiredRedacted", () => {
   );
 });
 
-const withProcessEnv = <A, E, R>(
-  values: Record<string, string>,
-  self: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.acquireUseRelease(
-    Effect.sync(() => {
-      for (const [key, value] of Object.entries(values)) {
-        process.env[key] = value;
-      }
-    }),
-    () => self,
-    () =>
-      Effect.sync(() => {
-        for (const key of Object.keys(values)) {
-          delete process.env[key];
-        }
-      }),
-  );
-
 const dotEnvFileSystem = (contents: string) =>
   Layer.mergeAll(
     FileSystem.layerNoop({
@@ -127,16 +109,14 @@ const dotEnvFileSystem = (contents: string) =>
 describe("live", () => {
   it.effect("fills missing variables from .env in the working directory", () =>
     withProcessEnv(
-      { OLIGARCHY_TEST_SET: "from-env" },
+      { SERVER_URL: "from-env", LINEAR_TEAM: undefined },
       Effect.gen(function* () {
-        expect(yield* Config.required("OLIGARCHY_TEST_SET")).toBe("from-env");
-        expect(yield* Config.required("OLIGARCHY_TEST_FILL")).toBe("from-dotenv");
+        expect(yield* Config.required("SERVER_URL")).toBe("from-env");
+        expect(yield* Config.required("LINEAR_TEAM")).toBe("from-dotenv");
       }).pipe(
         Effect.provide(
           Config.live.pipe(
-            Layer.provide(
-              dotEnvFileSystem("OLIGARCHY_TEST_SET=from-dotenv\nOLIGARCHY_TEST_FILL=from-dotenv\n"),
-            ),
+            Layer.provide(dotEnvFileSystem("SERVER_URL=from-dotenv\nLINEAR_TEAM=from-dotenv\n")),
           ),
         ),
       ),
@@ -145,11 +125,11 @@ describe("live", () => {
 
   it.effect("reads the environment alone when .env is absent", () =>
     withProcessEnv(
-      { OLIGARCHY_TEST_SET: "from-env" },
+      { SERVER_URL: "from-env", LINEAR_TEAM: undefined },
       Effect.gen(function* () {
-        expect(yield* Config.required("OLIGARCHY_TEST_SET")).toBe("from-env");
-        const error = yield* Effect.flip(Config.required("OLIGARCHY_TEST_FILL"));
-        expect(error.message).toBe("OLIGARCHY_TEST_FILL is not set");
+        expect(yield* Config.required("SERVER_URL")).toBe("from-env");
+        const error = yield* Effect.flip(Config.required("LINEAR_TEAM"));
+        expect(error.message).toBe("LINEAR_TEAM is not set");
       }).pipe(
         Effect.provide(
           Config.live.pipe(
@@ -161,11 +141,14 @@ describe("live", () => {
   );
 
   it.effect("still reports a variable neither source has", () =>
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(Config.required("OLIGARCHY_TEST_NOWHERE"));
-      expect(error.message).toBe("OLIGARCHY_TEST_NOWHERE is not set");
-    }).pipe(
-      Effect.provide(Config.live.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_TEST_OTHER=1\n")))),
+    withProcessEnv(
+      { AUTOMATION_SERVER_URL: undefined },
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(Config.required("AUTOMATION_SERVER_URL"));
+        expect(error.message).toBe("AUTOMATION_SERVER_URL is not set");
+      }).pipe(
+        Effect.provide(Config.live.pipe(Layer.provide(dotEnvFileSystem("OLIGARCHY_DATA_DIR=1\n")))),
+      ),
     ),
   );
 });
@@ -186,22 +169,27 @@ const provideProvider = (args: ReadonlyArray<string>, files: Record<string, stri
     Layer.provide(Layer.mergeAll(envFiles(files), Stdio.layerTest({ args: Effect.succeed(args) }))),
   );
 
-const readFill = Config.required("OLIGARCHY_TEST_FILL");
+const readFill = Config.required("LINEAR_TEAM");
 
 describe("live --env-file", () => {
-  const dot =
-    "OLIGARCHY_TEST_SET=from-dotenv\nOLIGARCHY_TEST_FILE=from-dotenv\nOLIGARCHY_TEST_DOT=from-dotenv\n";
-  const extra =
-    "OLIGARCHY_TEST_SET=from-file\nOLIGARCHY_TEST_FILE=from-file\nOLIGARCHY_TEST_LITERAL=to$ken\n";
+  // Read from the files under test, so the machine's own must not answer first.
+  const unset = {
+    LINEAR_TEAM: undefined,
+    SESSION_ID: undefined,
+    OLIGARCHY_DATA_DIR: undefined,
+    LINEAR_API_URL: undefined,
+  };
+  const dot = "SERVER_URL=from-dotenv\nSESSION_ID=from-dotenv\nOLIGARCHY_DATA_DIR=from-dotenv\n";
+  const extra = "SERVER_URL=from-file\nSESSION_ID=from-file\nLINEAR_API_URL=to$ken\n";
 
   it.effect("lets the process environment win, then --env-file, then .env (happy)", () =>
     withProcessEnv(
-      { OLIGARCHY_TEST_SET: "from-env" },
+      { ...unset, SERVER_URL: "from-env" },
       Effect.gen(function* () {
-        expect(yield* Config.required("OLIGARCHY_TEST_SET")).toBe("from-env");
-        expect(yield* Config.required("OLIGARCHY_TEST_FILE")).toBe("from-file");
-        expect(yield* Config.required("OLIGARCHY_TEST_DOT")).toBe("from-dotenv");
-        expect(yield* Config.required("OLIGARCHY_TEST_LITERAL")).toBe("to$ken");
+        expect(yield* Config.required("SERVER_URL")).toBe("from-env");
+        expect(yield* Config.required("SESSION_ID")).toBe("from-file");
+        expect(yield* Config.required("OLIGARCHY_DATA_DIR")).toBe("from-dotenv");
+        expect(yield* Config.required("LINEAR_API_URL")).toBe("to$ken");
       }).pipe(
         Effect.provide(
           provideProvider(["--env-file", ".prod-env"], { ".env": dot, ".prod-env": extra }),
@@ -211,39 +199,48 @@ describe("live --env-file", () => {
   );
 
   it.effect("reads --env-file=path the same way as the split flag (happy)", () =>
-    Effect.gen(function* () {
-      expect(yield* readFill).toBe("from-file");
-    }).pipe(
-      Effect.provide(
-        provideProvider(["--env-file=.prod-env"], {
-          ".prod-env": "OLIGARCHY_TEST_FILL=from-file\n",
-        }),
+    withProcessEnv(
+      unset,
+      Effect.gen(function* () {
+        expect(yield* readFill).toBe("from-file");
+      }).pipe(
+        Effect.provide(
+          provideProvider(["--env-file=.prod-env"], {
+            ".prod-env": "LINEAR_TEAM=from-file\n",
+          }),
+        ),
       ),
     ),
   );
 
   it.effect("uses the last --env-file when the flag is repeated (happy)", () =>
-    Effect.gen(function* () {
-      expect(yield* readFill).toBe("second");
-    }).pipe(
-      Effect.provide(
-        provideProvider(["--env-file", "first.env", "--env-file", "second.env"], {
-          "first.env": "OLIGARCHY_TEST_FILL=first\n",
-          "second.env": "OLIGARCHY_TEST_FILL=second\n",
-        }),
+    withProcessEnv(
+      unset,
+      Effect.gen(function* () {
+        expect(yield* readFill).toBe("second");
+      }).pipe(
+        Effect.provide(
+          provideProvider(["--env-file", "first.env", "--env-file", "second.env"], {
+            "first.env": "LINEAR_TEAM=first\n",
+            "second.env": "LINEAR_TEAM=second\n",
+          }),
+        ),
       ),
     ),
   );
 
   it.effect("does not read --env-file after -- (unhappy)", () =>
-    Effect.gen(function* () {
-      expect(yield* readFill).toBe("from-dotenv");
-    }).pipe(
-      Effect.provide(
-        provideProvider(["--", "--env-file", ".prod-env"], {
-          ".env": "OLIGARCHY_TEST_FILL=from-dotenv\n",
-          ".prod-env": "OLIGARCHY_TEST_FILL=from-file\n",
-        }),
+    withProcessEnv(
+      unset,
+      Effect.gen(function* () {
+        expect(yield* readFill).toBe("from-dotenv");
+      }).pipe(
+        Effect.provide(
+          provideProvider(["--", "--env-file", ".prod-env"], {
+            ".env": "LINEAR_TEAM=from-dotenv\n",
+            ".prod-env": "LINEAR_TEAM=from-file\n",
+          }),
+        ),
       ),
     ),
   );
@@ -253,7 +250,7 @@ describe("live --env-file", () => {
 
   it.effect("fails when --env-file is passed without a path (unhappy)", () =>
     Effect.gen(function* () {
-      const exit = yield* failedRead(["--env-file"], { ".env": "OLIGARCHY_TEST_FILL=1\n" });
+      const exit = yield* failedRead(["--env-file"], { ".env": "LINEAR_TEAM=1\n" });
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
         expect(Cause.pretty(exit.cause)).toContain("--env-file needs a path");

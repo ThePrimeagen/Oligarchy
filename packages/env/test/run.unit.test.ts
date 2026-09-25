@@ -1,7 +1,17 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import * as NodePath from "@effect/platform-node/NodePath";
-import { Cause, Console, Context, Effect, Exit, FileSystem, Layer, Stdio, Terminal } from "effect";
+import {
+  Cause,
+  Console,
+  Context,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Path,
+  Stdio,
+  Terminal,
+} from "effect";
 import { TestConsole } from "effect/testing";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
@@ -12,6 +22,7 @@ import * as Config from "../src/config.ts";
 import * as EnvFile from "../src/env-file.ts";
 import * as Errors from "../src/errors.ts";
 import * as Env from "../src/run.ts";
+import { withProcessEnv } from "./process-env.ts";
 
 // The platform the runner would get from Env.run, faked: arguments from the test, a file system
 // the test scripts, a terminal nothing may read. The CLI writes through Console, so TestConsole
@@ -23,7 +34,7 @@ const platform = (
   Layer.mergeAll(
     Stdio.layerTest({ args: Effect.succeed(args) }),
     files,
-    NodePath.layer,
+    Path.layer,
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
       ChildProcessSpawner.make(() => Effect.die("unexpected ChildProcessSpawner.spawn")),
     ),
@@ -119,7 +130,10 @@ describe("Env.program", () => {
         const broken = Layer.effect(Greeting)(
           Effect.map(Config.linearTeam, (word) => Greeting.of({ word })),
         );
-        const exit = yield* run(greet, [], { version: "1", layer: broken });
+        const exit = yield* withProcessEnv(
+          { LINEAR_TEAM: undefined },
+          run(greet, [], { version: "1", layer: broken }),
+        );
         expect(Exit.isFailure(exit)).toBe(true);
         expect(String((yield* TestConsole.errorLines)[0])).toContain("LINEAR_TEAM is not set");
         expect(yield* TestConsole.logLines).toEqual([]);
@@ -180,9 +194,12 @@ describe("Env.program", () => {
               ? Effect.succeed("LINEAR_TEAM=Prod Board\n")
               : Effect.die(`unexpected readFileString ${path}`),
         });
-        const exit = yield* Effect.exit(
-          Env.program(team, { version: "1", layer: Layer.empty }).pipe(
-            Effect.provide(platform(["--env-file", ".prod-env"], files)),
+        const exit = yield* withProcessEnv(
+          { LINEAR_TEAM: undefined },
+          Effect.exit(
+            Env.program(team, { version: "1", layer: Layer.empty }).pipe(
+              Effect.provide(platform(["--env-file", ".prod-env"], files)),
+            ),
           ),
         );
         expect(Exit.isSuccess(exit), (yield* TestConsole.logLines).join("\n")).toBe(true);

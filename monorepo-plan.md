@@ -252,18 +252,18 @@ Write each phase's tests before any of that phase's code, and see them fail.
 - [x] TEST (move) `test/config/config.unit.test.ts` to `packages/env/test/config.unit.test.ts`,
       with the same assertions: the provider order, `--env-file` last one wins, `--` stops the
       scan, `<NAME> is not set`, and `ProxyConfig`.
-- [x] TEST (new) `packages/env/test/environments.unit.test.ts`: `Env.fromValues({ DATABASE_URL:
+- [x] TEST (new) `packages/env/test/environments.unit.test.ts`: `Config.fromValues({ DATABASE_URL:
       url })` answers that variable and nothing else, so `Config.linearTeam` under it is
-      `MissingVariable("LINEAR_TEAM")`; `Env.override({ DATABASE_URL: url })` over a live chain
+      `MissingVariable("LINEAR_TEAM")`; `Config.override({ DATABASE_URL: url })` over a live chain
       answers the override for that name and the chain for every other; an empty string in
       either counts as absent, as `fromEnv` treats it. Unhappy: a misspelt name is a compile
       error (`@ts-expect-error` on `fromValues({ DATABSE_URL: url })`), and the override of an
       unset name still reports the chain's `MissingVariable`.
 - [x] TEST (alter) every test using `test/support/config.ts`'s `withEnv` (12 files): uses
-      `Env.fromValues`. The helper is deleted.
+      `Config.fromValues`. The helper is deleted.
 - [x] TEST (new) `packages/env/test/run.unit.test.ts`: `Env.program(command, { version })`
       returns the effect the entry runs: a successful command's exit is 0; a failing command's
-      exit prints one headline and the cause, with no stack; a `CliError` prints nothing more;
+      exit prints one headline, then the cause as `Cause.pretty`; a `CliError` prints nothing more;
       `--version` prints the version passed in; the Wizard is not offered; `Log.Colors` is
       provided from stdout, on for a TTY with 16 colours and off for a pipe. `Env.run` is the one
       `NodeRuntime.runMain` call and is not unit tested.
@@ -598,14 +598,14 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 4: `@oligarchy/env`**
 
-- [x] Create `packages/env` with `config.ts` (the one list, plus `Env.live`, `Env.fromValues`
-      and `Env.override`), `env-file.ts`, `oligarchy.ts` (from `src/harness/config.ts`),
+- [x] Create `packages/env` with `config.ts` (the one list, plus `Config.live`, `Config.fromValues`
+      and `Config.override`), `env-file.ts`, `oligarchy.ts` (from `src/harness/config.ts`),
       `colors.ts` (from `src/observability/colors.ts`) and `run.ts`:
       `Env.program(command, { version })`, the effect, and `Env.run(program, { teardown })`, the
       one `NodeRuntime.runMain` call.
-- [x] The dashboard's `suite.ts` builds its provider with `Env.fromValues` instead of a
+- [x] The dashboard's `suite.ts` builds its provider with `Config.fromValues` instead of a
       hand-written `ConfigProvider.fromEnv`; the in-process integration tests that set
-      `process.env.DATABASE_URL` for their own runtime use `Env.override` (the ones that spawn a
+      `process.env.DATABASE_URL` for their own runtime use `Config.override` (the ones that spawn a
       process keep setting the child's environment, which is the only way to reach a child).
 - [x] Switch eight entries to `Env.run` (`ctrl`, `driver`, `client`, `viz` and the four
       servers). `src/session/main.ts` uses `Env.program` and keeps its own runtime and signal
@@ -969,17 +969,17 @@ them.
   `yield* Config.databaseUrl` and `linear` writes `yield* Config.linearAccess`; `env` knows those
   names as strings, which costs no dependency, and a missing one is reported in a fixed order.
 - **Producing an environment.** Because the list is one, its names are a type
-  (`Env.Variable`), and `env` builds every environment the fleet runs under:
-  - `Env.live`: today's `providerLayer`. The process environment first, then `--env-file`, then
+  (`Config.Variable`), and `env` builds every environment the fleet runs under:
+  - `Config.live`: today's `providerLayer`. The process environment first, then `--env-file`, then
     `.env`; each fills only what the earlier ones left unset.
-  - `Env.fromValues(values)`: a provider over an explicit record and nothing else. This is
+  - `Config.fromValues(values)`: a provider over an explicit record and nothing else. This is
     `test/support/config.ts`'s `withEnv` today, and what the dashboard's `suite.ts` hand-builds
     with `ConfigProvider.fromEnv({ env })`. Unit tests use it.
-  - `Env.override(values)`: the record layered ahead of `Env.live`, so `DATABASE_URL` points at
+  - `Config.override(values)`: the record layered ahead of `Config.live`, so `DATABASE_URL` points at
     a local Postgres and everything else still comes from the process, the env file and `.env`.
     In-process integration tests and local tooling use it instead of assigning `process.env`.
 
-  `values` is `Partial<Record<Env.Variable, string>>`: a name not in the list does not compile.
+  `values` is `Partial<Record<Config.Variable, string>>`: a name not in the list does not compile.
   An empty string counts as absent, as `fromEnv` already treats it. A spawned process still gets
   its variables through its environment; these constructors are for the process that calls them.
 - **The `--env-file` global flag** and `withEnvFile`.
@@ -1017,7 +1017,8 @@ them.
 
 **Admission rule.** A value a process is given from outside (a variable, an env file, the
 settings file), and installing those before the command runs. Refused: a command's flags,
-anything a command does while running, anything that writes.
+anything a command does while running, anything that writes, except the runner's one print of
+a failure at the process boundary, which is how every entry reports.
 
 ### `@oligarchy/db` (layer 3, phase 5)
 
@@ -1432,7 +1433,7 @@ Counted on 2026-09-25 (unit test files using each):
 | `stores.ts` (1,055 lines) | every database store | 16 | Recording fakes (`fakeLogStore`, `fakeDebugLogStore`) go inline. Behaviour-imitating fakes go to `@oligarchy/testing` as each gets a second consumer: `fakeTestStore` and `fakeAutomationStore` in phase 8 (jobs), `fakeServerStore` and `fakeProcessStatsStore` in phase 9 (fleet), `fakeSessionStore` in phase 11 (the apps). One with a single consumer stays in that consumer's `test/`. |
 | `fake-http.ts` | the HTTP client | 16 | Decided in phase 10: inline `Layer.succeed(HttpClient.HttpClient)` where short; the scripted-response helper goes to `testing` if two packages keep it. |
 | `fake-spawner.ts` (235 lines) | child processes | 12 | Fleet narrows its seam. qemu-server and automation-client share the process choreography, so it goes to `testing` in phase 11. |
-| `config.ts` (5 lines) | configuration | 12 | Replaced by `Env.fromValues` from `@oligarchy/env`, typed over the one list; deleted in phase 4. |
+| `config.ts` (5 lines) | configuration | 12 | Replaced by `Config.fromValues` from `@oligarchy/env`, typed over the one list; deleted in phase 4. |
 | `fake-fs.ts` | the file system | 10 | Effect's `FileSystem.layerNoop`, inline. |
 | `reporter.ts` | Sentry's error reporter | 6 | Log's and observability's tests and the four servers' HTTP tests: inline, or an app-local helper. |
 | `tracer.ts` | a recording tracer | 1 | qemu-server's own `test/` (its sessions test). |

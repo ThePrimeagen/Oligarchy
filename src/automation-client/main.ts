@@ -1,16 +1,7 @@
 import { createServer } from "node:http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import {
-  Cause,
-  Config as EffectConfig,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  type Runtime,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
 import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
@@ -75,7 +66,7 @@ const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Opt
       Layer.unwrap(
         Effect.gen(function* () {
           const { token } = yield* Config.ProxyConfig;
-          const serverUrl = yield* EffectConfig.string("SERVER_URL").pipe(
+          const serverUrl = yield* Config.serverUrl.pipe(
             Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
           );
           const proxy = yield* ProxyClient.connect({ serverUrl, token });

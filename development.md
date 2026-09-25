@@ -172,7 +172,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `effect`, `@effect/platform-node`, `@oligarchy/log`, `@oligarchy/shared` and its own files. Its
   admission rule: a value a process is given from outside (a variable, an env file, the settings
   file) and installing those before the command runs; refused are a command's flags, anything a
-  command does while running, and anything that writes. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  command does while running, and anything that writes, except the runner's one print of a
+  failure at the process boundary. `packages/routes/src/` holds `api.ts`, `contract.ts` and
   `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the

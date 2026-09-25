@@ -265,26 +265,24 @@ describe("Effect.run placement", () => {
   });
 
   // Every entry runs through the one runner, `bun run db:migrate`'s included; the session REPL
-  // answers its own signals, so it is the one process with a runtime of its own.
-  it("NodeRuntime.runMain lives in env's runner, Runtime.makeRunMain in the session entry, and Env.run in the entries", () => {
-    expect(
-      violations((path, source) => {
-        const code = stripStringsAndComments(source);
-        return [
-          ...(path !== "packages/env/src/run.ts" && /\bNodeRuntime\.runMain\b/.test(code)
-            ? ["NodeRuntime.runMain"]
-            : []),
-          ...(path !== "src/session/main.ts" && /\bRuntime\.makeRunMain\b/.test(code)
-            ? ["Runtime.makeRunMain"]
-            : []),
-          ...(!/^src\/[^/]+\/main\.ts$/.test(path) &&
-          path !== "src/db/migrate.ts" &&
-          /\bEnv\.run\(/.test(code)
-            ? ["Env.run"]
-            : []),
-        ];
-      }),
-    ).toEqual([]);
+  // answers its own signals, so it is the one process with a runtime of its own. Exact lists, so
+  // an entry that stops using the runner, or a second runner, is named.
+  it("NodeRuntime.runMain lives in env's runner, Runtime.makeRunMain in the session entry, and Env.run in every other entry", () => {
+    const calling = (pattern: RegExp): ReadonlyArray<string> =>
+      sources().filter((path) => pattern.test(stripStringsAndComments(read(path))));
+    expect(calling(/\bNodeRuntime\.runMain\b/)).toEqual(["packages/env/src/run.ts"]);
+    expect(calling(/\bRuntime\.makeRunMain\b/)).toEqual(["src/session/main.ts"]);
+    expect(calling(/\bEnv\.run\(/)).toEqual([
+      "src/automation-client/main.ts",
+      "src/automation-server/main.ts",
+      "src/client/main.ts",
+      "src/ctrl/main.ts",
+      "src/db/migrate.ts",
+      "src/driver/main.ts",
+      "src/qemu-reverse-proxy/main.ts",
+      "src/qemu-server/main.ts",
+      "src/viz/main.ts",
+    ]);
   });
 
   it("never runs an effect through ManagedRuntime or runSync outside main", () => {

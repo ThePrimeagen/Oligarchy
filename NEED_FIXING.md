@@ -31,7 +31,7 @@ Three decisions, each defended on its own, together make the queue fragile.
   A client started without it silently reserves guests at `http://127.0.0.1:42069`; every drive
   `/reserve` becomes `ProxyUnreachable → Internal (500)`, which the worker treats as a hard
   failure, so one misconfigured client burns every drive dispatched to it. This is also the one
-  process that reads a variable outside `src/config.ts` (`Config.serverUrl` already exists), and
+  process that reads a variable outside `packages/env/src/config.ts` (`Config.serverUrl` already exists), and
   `development.md` says configuration is never a silent optional. Make it a required
   `--server-url` flag with `Flag.withFallbackConfig(Config.serverUrl)` and no default, reported at
   startup like `--max-jobs` and `--name`.
@@ -84,7 +84,7 @@ passes. The other one-shot names `0012_adorable_deathbird.sql`, `0013_odd_slipst
 ## 6. `src/db/migrate.ts` prints nothing for a layer failure
 
 Every other entry applies `Render.reportFailure` outside `Effect.provide(MainLive)` so a layer
-failure (an unreadable `.env`, a defect from `providerLayer`) prints its cause. Here
+failure (an unreadable `.env`, a defect from `Config.live`) prints its cause. Here
 `Layer.build(MainLive)` is unwrapped and `Console.error(Render.renderFailure(cause))` sits inside
 the provided program, so `npm run db:migrate` with an unreadable `.env` exits 1 with nothing on
 stderr under `disableErrorReporting`. It also prints an empty line on interrupt, where
@@ -125,7 +125,7 @@ logic in files that change independently:
 - The `DatabaseError`-unwrapping `detail` helper is copied verbatim in `src/qemu-server/sessions.ts`,
   `src/qemu-server/heartbeat.ts`, `src/automation-client/heartbeat.ts`, `src/shared/stale-servers.ts`
   and `src/automation-server/worker.ts`; `describeThrowable(causeOf(e), errorDetail(e))` in
-  `src/cli.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/run.ts`. Both belong in
+  `src/automation-client/child.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/run.ts`. Both belong in
   `packages/log/src/external-failure.ts` beside `causeOf`.
 - `src/qemu-server/heartbeat.ts` and `src/automation-client/heartbeat.ts` differ only in the
   `type`, the location and how `jobs`/`stats` are read; one `announce` taking those would keep a fix
