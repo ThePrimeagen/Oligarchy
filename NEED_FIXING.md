@@ -4,7 +4,7 @@ Findings from a full read of `src/` (every file), the tooling, the wrappers, CI 
 against the conventions in `development.md`. Nothing here is a test failure: `npm run check:fast` is
 green under Node 26.8.2 (lint, format, types, 1334 unit tests), `npm run test:integration` passes
 what runs without Docker and QEMU (134 passed, 182 skipped), and `drizzle-kit check` plus a dry
-`db:generate` show `src/db/schema.ts` in sync with `drizzle/`. Each item names the files, what is
+`db:generate` show `packages/db/src/schema.ts` in sync with `packages/db/drizzle/`. Each item names the files, what is
 wrong, and the fix; the order is by impact. Every item is a tests-first change, as `development.md`
 asks: the failing unit test comes before the code.
 
@@ -18,7 +18,7 @@ Three decisions, each defended on its own, together make the queue fragile.
   ("an unreachable client marks the job failed"). The reverse proxy's `reserve` skips a server
   whose probe fails and asks the next; the worker should do the same for a client that is
   unreachable or answers 5xx, and close the job `failed` only when every client refused.
-- `src/db/schema.ts` `automation_jobs` has `uniqueIndex(result_id, action)`, and
+- `packages/db/src/schema.ts` `automation_jobs` has `uniqueIndex(result_id, action)`, and
   `src/automation-server/handlers.ts` turns the duplicate-key `DatabaseError` into
   `linear webhook ignored; drive already queued`. Moving a ticket back into *Automation Needed*
   after a failed drive therefore logs "already queued" for a job that is terminal and never
@@ -78,7 +78,7 @@ Fixed in the monorepo's phase 5: the workflow diffs `packages/db/drizzle/` witho
 detection and both one-shot skip paths are gone; `test/repo/scripts.unit.test.ts` pins that no
 `append-only skipped` path remains.
 
-## 6. `src/db/migrate.ts` prints nothing for a layer failure
+## 6. `packages/db/src/migrate.ts` prints nothing for a layer failure
 
 Fixed in the monorepo's phase 4: the entry runs through `Env.run`, with `Render.reportFailure`
 outside `Layer.build(Config.live)`, so an unreadable `.env` prints its cause and an interrupt
@@ -98,12 +98,12 @@ probe on the cause (the same shape `packages/log/src/external-failure.ts` uses) 
   (`tag`) and `src/ctrl/linear.ts` (`variables`).
 - `src/shared/process-usage.ts` wraps `collect` in `Effect.withSpan`; every other service method is
   `Effect.fn("Service.method")`.
-- `src/db/logs.ts` `listLogs` orders by `created_at, id`; `development.md` says `id`, not
+- `packages/db/src/logs.ts` `listLogs` orders by `created_at, id`; `development.md` says `id`, not
   `created_at`, orders rows.
 - `src/qemu-server/handlers.ts` marks `serial` and `image` uninterruptible; `development.md` says
   reads and streams are interruptible and only handlers that drive a resource are not. `serial` is
   a file read.
-- `src/db/schema.ts` `SessionConfig` has no `readonly` fields, and the `logs` table comment omits
+- `packages/db/src/schema.ts` `SessionConfig` has no `readonly` fields, and the `logs` table comment omits
   the `automation-client` location bucket `packages/log/src/log.ts` added.
 - `MAX_CLICKS = 100` in `src/qemu-server/sessions.ts` is repeated as the literal `100` in
   `src/client/flags.ts` (`clicks`), so the flag and the server can drift.

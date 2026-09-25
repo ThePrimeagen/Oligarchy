@@ -395,7 +395,7 @@ describe("workspace packages", () => {
           'import * as ExternalFailure from "./external-failure.ts";',
           'import { WriteStream } from "node:tty";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
-          'import * as Logs from "../../../src/db/logs.ts";',
+          'import * as Logs from "@oligarchy/db/logs";',
           'import * as RowLog from "../../../src/observability/log.ts";',
           'import * as Sentry from "@sentry/bun";',
           "export const stdoutColors = wantsColor(process.stdout, process.env);",
@@ -404,7 +404,7 @@ describe("workspace packages", () => {
     ).toEqual([
       "node:tty",
       "@effect/platform-node/NodeServices",
-      "../../../src/db/logs.ts",
+      "@oligarchy/db/logs",
       "../../../src/observability/log.ts",
       "@sentry/bun",
       "process.stdout",

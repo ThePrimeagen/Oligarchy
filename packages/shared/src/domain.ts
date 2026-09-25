@@ -211,7 +211,7 @@ export const ServerUrl = Schema.String.check(
 export type ServerUrl = typeof ServerUrl.Type;
 
 // The automation steps for a test result, the twin of the automation_action pgEnum in
-// src/db/schema.ts, maintained by hand together. A mint and a drive both boot a guest and so
+// packages/db/src/schema.ts, maintained by hand together. A mint and a drive both boot a guest and so
 // reserve one; a mint does not resume, it installs. A diagnose reads the session back and
 // reserves a client only.
 export const AutomationAction = Schema.Literals(["drive", "diagnose", "mint"]).annotate({

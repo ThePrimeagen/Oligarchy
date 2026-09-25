@@ -70,8 +70,9 @@ exist.
   the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
-  it as `"workspace:*"`. A version two packages share (`effect`, `typescript`, `vitest`,
-  `@types/node`) is named once in the root's `workspaces.catalog` and each package says
+  it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
+  `@effect/vitest`, `typescript`, `vitest`, `@types/node`, `drizzle-orm`, `pg`, `@types/pg`) is
+  named once in the root's `workspaces.catalog` and each package says
   `"catalog:"`. Why: two `effect`s would make two sets of Schema types that do not assign to each
   other. `bunfig.toml` sets `linker = "isolated"`: a package sees only what its own `package.json`
   declares, so an import it never named fails instead of borrowing the root's copy. Every
@@ -957,11 +958,11 @@ export const runInTransaction = <TX, A, E, R>(
   operation: string,
   begin: (body: (tx: TX) => Promise<A>) => Promise<A>,
   body: (tx: TX) => Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | Errors.DatabaseError, R> =>
+): Effect.Effect<A, E | DbErrors.DatabaseError, R> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<R>();
     const rolledBack: { cause: Cause.Cause<E> | undefined } = { cause: undefined };
-    const attempted: Effect.Effect<A, Cause.Cause<E> | Errors.DatabaseError> = Effect.tryPromise({
+    const attempted: Effect.Effect<A, Cause.Cause<E> | DbErrors.DatabaseError> = Effect.tryPromise({
       try: () =>
         begin(async (tx) => {
           const exit = await Effect.runPromiseExitWith(context)(body(tx));
@@ -975,7 +976,7 @@ export const runInTransaction = <TX, A, E, R>(
     });
     return yield* Effect.catch(
       attempted,
-      (failure): Effect.Effect<never, E | Errors.DatabaseError> =>
+      (failure): Effect.Effect<never, E | DbErrors.DatabaseError> =>
         Cause.isCause(failure) ? Effect.failCause(failure) : Effect.fail(failure),
     );
   });

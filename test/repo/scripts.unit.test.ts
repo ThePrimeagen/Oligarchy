@@ -332,6 +332,7 @@ describe(".github/workflows/migrations.yml", () => {
   // skipped the check for a past reshuffle are gone with it.
   it("keeps migrations append-only under packages/db/drizzle with no skip path (unhappy)", () => {
     expect(workflow).toContain("--no-renames");
+    expect(workflow).toContain("--diff-filter=MDT");
     expect(workflow).not.toContain("append-only skipped");
     expect(workflow).not.toMatch(/-- 'drizzle\/'|-- drizzle\b/);
   });
