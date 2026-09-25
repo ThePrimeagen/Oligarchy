@@ -74,6 +74,13 @@ Then two independent reviews of that revision (2026-09-25), which changed:
   used. It held the repo's only file cycle, so phase 1's `import/no-cycle` now finds none to
   break. The scripts test gained the rule that every `bin`, entry script and root wrapper is a
   registered process, so a leftover names itself.
+- **Variables: one list, and `env` produces environments.** `env`'s `config.ts` stays the one
+  file naming every variable the fleet reads. Because it is one list, its names are a type, and
+  `env` gains two constructors over them: `Env.fromValues({ DATABASE_URL: url })`, a provider
+  over an explicit record (today's `test/support/config.ts`, promoted and typed), and
+  `Env.override({ DATABASE_URL: url })`, the same record layered ahead of the live chain so one
+  variable points at a local Postgres and everything else still comes from the process. A name
+  not in the list does not compile.
 - **Three open decisions closed.** `drizzle/` and `drizzle.config.ts` move into `packages/db`
   (the generated migrations and drizzle-kit's pointer were the only database things not already
   there). A behaviour-imitating fake lives with the one package or app that uses it, and moves to
@@ -229,6 +236,15 @@ Write each phase's tests before any of that phase's code, and see them fail.
 - [ ] TEST (move) `test/config/config.unit.test.ts` to `packages/env/test/config.unit.test.ts`,
       with the same assertions: the provider order, `--env-file` last one wins, `--` stops the
       scan, `<NAME> is not set`, and `ProxyConfig`.
+- [ ] TEST (new) `packages/env/test/environments.unit.test.ts`: `Env.fromValues({ DATABASE_URL:
+      url })` answers that variable and nothing else, so `Config.linearTeam` under it is
+      `MissingVariable("LINEAR_TEAM")`; `Env.override({ DATABASE_URL: url })` over a live chain
+      answers the override for that name and the chain for every other; an empty string in
+      either counts as absent, as `fromEnv` treats it. Unhappy: a misspelt name is a compile
+      error (`@ts-expect-error` on `fromValues({ DATABSE_URL: url })`), and the override of an
+      unset name still reports the chain's `MissingVariable`.
+- [ ] TEST (alter) every test using `test/support/config.ts`'s `withEnv` (12 files): uses
+      `Env.fromValues`. The helper is deleted.
 - [ ] TEST (new) `packages/env/test/run.unit.test.ts`: `Env.program(command, { version })`
       returns the effect the entry runs: a successful command's exit is 0; a failing command's
       exit prints one headline and the cause, with no stack; a `CliError` prints nothing more;
@@ -484,10 +500,15 @@ container and stay in the root's integration project until phase 11.
 
 **Phase 4: `@oligarchy/env`**
 
-- [ ] Create `packages/env` with `config.ts`, `env-file.ts`, `oligarchy.ts` (from
-      `src/harness/config.ts`), `colors.ts` (from `src/observability/colors.ts`) and `run.ts`:
+- [ ] Create `packages/env` with `config.ts` (the one list, plus `Env.live`, `Env.fromValues`
+      and `Env.override`), `env-file.ts`, `oligarchy.ts` (from `src/harness/config.ts`),
+      `colors.ts` (from `src/observability/colors.ts`) and `run.ts`:
       `Env.program(command, { version })`, the effect, and `Env.run(program, { teardown })`, the
       one `NodeRuntime.runMain` call.
+- [ ] The dashboard's `suite.ts` builds its provider with `Env.fromValues` instead of a
+      hand-written `ConfigProvider.fromEnv`; the in-process integration tests that set
+      `process.env.DATABASE_URL` for their own runtime use `Env.override` (the ones that spawn a
+      process keep setting the child's environment, which is the only way to reach a child).
 - [ ] Switch eight entries to `Env.run` (`ctrl`, `driver`, `client`, `viz` and the four
       servers). `src/session/main.ts` uses `Env.program` and keeps its own runtime and signal
       handling.
@@ -789,9 +810,28 @@ them.
 
 **Holds:**
 
-- **Environment variables:** the lookup order (process environment, then the `--env-file` file,
-  then `.env`), `required`, `requiredRedacted`, `MissingVariable`, the named accessors,
-  `ProxyConfig`, `DEFAULT_SERVER_URL` and `DEFAULT_LINEAR_API_URL`.
+- **Environment variables, one list.** `config.ts` names every variable the fleet reads
+  (`OLIGARCHY_TOKEN`, `OPENROUTER_API_KEY`, `DATABASE_URL`, `DATABASE_MIGRATION_URL`,
+  `AUTOMATION_SERVER_URL`, `LINEAR_API_TOKEN`, `LINEAR_TEAM`, `LINEAR_API_URL`,
+  `LINEAR_WEBHOOK_SECRET`, `SERVER_URL`, `OLIGARCHY_DATA_DIR`, `SESSION_ID`), as
+  `development.md` requires today, with `required`, `requiredRedacted`, `MissingVariable`, the
+  named accessors, `ProxyConfig`, `DEFAULT_SERVER_URL` and `DEFAULT_LINEAR_API_URL`. `db` writes
+  `yield* Config.databaseUrl` and `linear` writes `yield* Config.linearAccess`; `env` knows those
+  names as strings, which costs no dependency, and a missing one is reported in a fixed order.
+- **Producing an environment.** Because the list is one, its names are a type
+  (`Env.Variable`), and `env` builds every environment the fleet runs under:
+  - `Env.live`: today's `providerLayer`. The process environment first, then `--env-file`, then
+    `.env`; each fills only what the earlier ones left unset.
+  - `Env.fromValues(values)`: a provider over an explicit record and nothing else. This is
+    `test/support/config.ts`'s `withEnv` today, and what the dashboard's `suite.ts` hand-builds
+    with `ConfigProvider.fromEnv({ env })`. Unit tests use it.
+  - `Env.override(values)`: the record layered ahead of `Env.live`, so `DATABASE_URL` points at
+    a local Postgres and everything else still comes from the process, the env file and `.env`.
+    In-process integration tests and local tooling use it instead of assigning `process.env`.
+
+  `values` is `Partial<Record<Env.Variable, string>>`: a name not in the list does not compile.
+  An empty string counts as absent, as `fromEnv` already treats it. A spawned process still gets
+  its variables through its environment; these constructors are for the process that calls them.
 - **The `--env-file` global flag** and `withEnvFile`.
 - **The settings file, `oligarchy.json`:** the schema (models, reasoning effort, timeouts, step
   limit, run ceiling) and the loader. It is configuration the process is given, read by
@@ -800,7 +840,7 @@ them.
   `../../../oligarchy.json`, and the driver wrapper's `--define` for `import.meta.url` must point
   at the new file. It is read during a job as well as at startup; that is the app's business, not
   the loader's. The alternative home, a `harness` package, is the scripts plan's call (open
-  decision 3).
+  decision 2).
 - **The entry runner.** `Env.program(command, { version })` is the effect: install the config
   lookup, set up CLI output and CLI config without the Wizard, provide `Log.Colors` from
   `wantsColor(process.stdout, process.env)`, `Command.run` with the version, `reportFailure` on
@@ -874,7 +914,7 @@ The Linear API client, the ticket templates, and filing a run's tickets.
   filing a ticket is its purpose and the rows it writes are the run that ticket is about. Refused:
   a workflow whose purpose is a row or a session that happens to mention a ticket; those belong
   to the app that owns them (`automation-server/prompts.ts`, the drive and diagnose prompt
-  filler, is such a case and stays in its app). Open decision 2 says when to revisit.
+  filler, is such a case and stays in its app). Open decision 1 says when to revisit.
 
 ### `@oligarchy/observability` (layer 4, phase 6)
 
@@ -1105,7 +1145,7 @@ fleet starters point at `apps/<name>/src/main.ts`.
 The scripts use packages the way the apps do. The root keeps one edge of its old tangle (`driver`
 imports `client/actions.ts`; it goes when `client` is removed), which is out of scope here: this
 plan is the fleet's libraries and apps. The scripts are a second plan; the harness's home (open
-decision 3) is decided there.
+decision 2) is decided there.
 
 ## Testing
 
@@ -1170,7 +1210,7 @@ Counted on 2026-09-25 (unit test files using each):
 | `stores.ts` (1,055 lines) | every database store | 16 | Recording fakes (`fakeLogStore`, `fakeDebugLogStore`) go inline. Behaviour-imitating fakes go to `@oligarchy/testing` as each gets a second consumer: `fakeServerStore` and `fakeProcessStatsStore` in phase 8, `fakeAutomationStore` and `fakeSessionStore` in phase 10. One with a single consumer stays in that consumer's `test/`. |
 | `fake-http.ts` | the HTTP client | 16 | Decided in phase 9: inline `Layer.succeed(HttpClient.HttpClient)` where short; the scripted-response helper goes to `testing` if two packages keep it. |
 | `fake-spawner.ts` (235 lines) | child processes | 12 | Fleet narrows its seam. qemu-server and automation-client share the process choreography, so it goes to `testing` in phase 10. |
-| `config.ts` (5 lines) | configuration | 12 | Inline. |
+| `config.ts` (5 lines) | configuration | 12 | Replaced by `Env.fromValues` from `@oligarchy/env`, typed over the one list; deleted in phase 4. |
 | `fake-fs.ts` | the file system | 10 | Effect's `FileSystem.layerNoop`, inline. |
 | `reporter.ts` | Sentry's error reporter | 6 | Log's and observability's tests and the four servers' HTTP tests: inline, or an app-local helper. |
 | `tracer.ts` | a recording tracer | 1 | qemu-server's own `test/` (its sessions test). |
@@ -1194,42 +1234,17 @@ Counted on 2026-09-25 (unit test files using each):
 Each has a recommendation. None blocks phases 1 to 3. Decisions already taken in a design above
 are not repeated here.
 
-1. **Where variables are declared.** Today `src/config.ts` names every variable the fleet reads
-   in one file, and `development.md` requires that:
-
-   ```ts
-   export const oligarchyToken       = requiredRedacted("OLIGARCHY_TOKEN");
-   export const databaseUrl          = requiredRedacted("DATABASE_URL");
-   export const databaseMigrationUrl = requiredRedacted("DATABASE_MIGRATION_URL");
-   export const automationServerUrl  = required("AUTOMATION_SERVER_URL");
-   export const linearApiToken       = requiredRedacted("LINEAR_API_TOKEN");
-   export const linearTeam           = required("LINEAR_TEAM");
-   export const linearWebhookSecret  = requiredRedacted("LINEAR_WEBHOOK_SECRET");
-   export const serverUrl            = EffectConfig.string("SERVER_URL");
-   export const dataDir              = EffectConfig.string("OLIGARCHY_DATA_DIR");
-   export const sessionId            = EffectConfig.string("SESSION_ID");
-   ```
-
-   **One list (recommended):** that file is `env`'s `config.ts`. `db` writes
-   `yield* Config.databaseUrl`, `linear` writes `yield* Config.linearAccess`, automation-server
-   writes `yield* Config.linearWebhookSecret`. `env` knows `DATABASE_URL` and `LINEAR_TEAM` as
-   strings, which costs no dependency; every variable and secret is one screen, and a missing
-   one is reported in a fixed order.
-   **Per package:** `packages/db/src/config.ts` declares `DATABASE_URL` and
-   `DATABASE_MIGRATION_URL`; `packages/linear/src/config.ts` declares `LINEAR_API_TOKEN`,
-   `LINEAR_TEAM`, `LINEAR_API_URL`; automation-server declares `LINEAR_WEBHOOK_SECRET`; `env`
-   keeps only `required`, `requiredRedacted`, the provider order and `--env-file`. Each package
-   is self-describing; the inventory is spread over five files and `development.md`'s rule goes.
-2. **`linear` on layer 4 for `openRun`.** Recommended: yes; the alternative is a `runs` package
+1. **`linear` on layer 4 for `openRun`.** Recommended: yes; the alternative is a `runs` package
    of one function, which is the too-small pattern. If a second workflow that writes rows asks to
    enter linear, that is the signal to make the `runs` package instead.
-3. **The settings loader's home.** Recommended for this plan: env, as configuration with three
+2. **The settings loader's home.** Recommended for this plan: env, as configuration with three
    consumers in three places. If the scripts plan makes `src/harness/` a package, the loader goes
    with it and env keeps only the variables the harness reads.
 
-Closed on 2026-09-25: the migrations move into `packages/db`; a behaviour-imitating fake is its
-one consumer's until a second needs it, then `@oligarchy/testing`'s; the dashboard exports its
-Worker entry. Each is written into its design above.
+Closed on 2026-09-25: variables stay one list in `env`, which also produces environments
+(`fromValues`, `override`); the migrations move into `packages/db`; a behaviour-imitating fake is
+its one consumer's until a second needs it, then `@oligarchy/testing`'s; the dashboard exports
+its Worker entry. Each is written into its design above.
 
 ## Phase 0 (done)
 
