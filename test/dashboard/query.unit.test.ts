@@ -8,6 +8,7 @@ import {
   recentDefinitionRuns,
   resultDurationMs,
   suiteStatusOf,
+  suiteTallyOf,
   runningForDefinition,
   currentVersionTally,
   durationChart,
@@ -24,6 +25,7 @@ import {
   type FollowLog,
   type ProcessStat,
   type Session,
+  type SuiteResultGroup,
   type SuiteTally,
   type TestDefinition,
   type TestResultOutcome,
@@ -915,5 +917,55 @@ describe("suiteStatusOf unhappy path", () => {
   it("calls a closed suite aborted, not completed, when a result was aborted or timed out", () => {
     expect(suiteStatusOf(tally({ stopped: 2 }))).toBe("aborted");
     expect(suiteStatusOf(tally({ passed: 1, failed: 1, stopped: 1 }))).toBe("aborted");
+  });
+});
+
+const group = (
+  status: SuiteResultGroup["status"],
+  drive: SuiteResultGroup["drive"],
+  total: number,
+): SuiteResultGroup => ({ status, drive, total });
+
+describe("suiteTallyOf happy path", () => {
+  it("counts each result by its own status when no drive job is waiting or running for it", () => {
+    expect(
+      suiteTallyOf([
+        group("passed", "completed", 3),
+        group("failed", "completed", 2),
+        group("pending", null, 4),
+        group("running", null, 1),
+        group("aborted", "aborted", 1),
+        group("timed_out", null, 1),
+      ]),
+    ).toEqual(tally({ passed: 3, failed: 2, pending: 4, running: 1, stopped: 2 }));
+  });
+
+  it("counts a result closed failed while its ticket's drive job still waits or runs as pending or running", () => {
+    const counted = suiteTallyOf([
+      group("passed", "completed", 37),
+      group("failed", "pending", 361),
+      group("failed", "running", 5),
+    ]);
+    expect(counted).toEqual(tally({ passed: 37, pending: 361, running: 5 }));
+    expect(suiteStatusOf(counted)).toBe("running");
+  });
+});
+
+describe("suiteTallyOf unhappy path", () => {
+  it("keeps a failed result failed when its drive job errored or it never got one", () => {
+    expect(suiteTallyOf([group("failed", "errored", 5), group("failed", null, 16)])).toEqual(
+      tally({ failed: 21 }),
+    );
+  });
+
+  it("counts a closed result's queued drive job as pending even when the result was aborted", () => {
+    const counted = suiteTallyOf([group("aborted", "pending", 2), group("aborted", null, 468)]);
+    expect(counted).toEqual(tally({ pending: 2, stopped: 468 }));
+    expect(suiteStatusOf(counted)).toBe("pending");
+  });
+
+  it("adds nothing for an empty suite or for a result that has no verdict bucket", () => {
+    expect(suiteTallyOf([])).toEqual(tally());
+    expect(suiteTallyOf([group("errored", "errored", 46)])).toEqual(tally());
   });
 });
