@@ -372,7 +372,6 @@ describe("start", () => {
           expect(h.sessions.sessions).toMatchObject([
             { status: "errored", reason: "qemu-img create exited 1" },
           ]);
-          expect(h.log.released).toEqual([AGENT]);
           // The registration was never spent and the failed start kept the reservation: the
           // same agent boots on its next try without reserving again.
           const id = yield* sessions.start(startBody(), "none", false);
@@ -412,7 +411,6 @@ describe("start", () => {
             ]);
             expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
             expect(spanNamed(h, AGENT)?.attributes.get("session_status")).toBe("errored");
-            expect(h.log.released).toEqual([AGENT]);
             expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
               _tag: "UnknownSession",
               id,
@@ -1628,8 +1626,8 @@ describe("intents", () => {
 // stop
 // ---------------------------------------------------------------------------
 
-// One Log fake whose lines and colour releases share a single ordered record; `record` lets a
-// test's own scripts write into the same order.
+// One Log fake whose lines share a single ordered record; `record` lets a test's own scripts
+// write into the same order.
 const orderedLog = () => {
   const order: Array<string> = [];
   const record = (text: string) =>
@@ -1641,8 +1639,6 @@ const orderedLog = () => {
     warning: record,
     error: record,
     fatal: record,
-    acquireColor: (agentId) => record(`acquireColor ${agentId}`),
-    releaseColor: (agentId) => record(`releaseColor ${agentId}`),
     flush: Effect.void,
   };
   return { order, record, layer: Layer.succeed(Log.Log)(service) };
@@ -1672,7 +1668,7 @@ describe("stop", () => {
           expect(h.sessions.sessions[0]).toMatchObject({ id, status: "aborted", reason: null });
           expect(h.sessions.sessions[0]?.endedAt).not.toBeNull();
           expect(h.sessions.agentRuns[0]?.endedAt).not.toBeNull();
-          expect(ordered.order.slice(-2)).toEqual(["stopped; aborted", `releaseColor ${AGENT}`]);
+          expect(ordered.order.at(-1)).toBe("stopped; aborted");
           expect(yield* Stream.runCollect(events)).toEqual([
             { type: "session", status: "running" },
             { type: "intent", state: "started", message: "shut the lid" },
@@ -1843,8 +1839,6 @@ describe("stop", () => {
             warning: record,
             error: record,
             fatal: record,
-            acquireColor: () => Effect.void,
-            releaseColor: () => Effect.void,
             flush: record("flush"),
           }),
         });
@@ -1927,8 +1921,6 @@ describe("stop", () => {
             warning: record,
             error: record,
             fatal: record,
-            acquireColor: () => Effect.void,
-            releaseColor: () => Effect.void,
             flush: record("flush"),
           }),
         });
@@ -2096,7 +2088,6 @@ describe("save", () => {
               "minted",
               "kill",
               `saved; minted ${ISO}`,
-              `releaseColor ${AGENT}`,
             ]);
             expect(yield* Stream.runCollect(events)).toEqual([
               { type: "session", status: "running" },
@@ -2599,7 +2590,6 @@ describe("timeouts", () => {
             { type: "session", status: "running" },
             { type: "session", status: "timed_out" },
           ]);
-          expect(h.log.released).toEqual([AGENT]);
         }),
       );
     }),
@@ -2779,7 +2769,6 @@ describe("drain", () => {
         [AGENT, "aborted"],
         [OTHER_AGENT, "aborted"],
       ]);
-      expect(h.log.released.sort()).toEqual([AGENT, OTHER_AGENT]);
       expect(MutableRef.get(shutdown.failed)).toBe(false);
     }),
   );
@@ -2867,7 +2856,6 @@ describe("drain", () => {
         [OTHER_AGENT, ids[1], "internal_error"],
         ["OLI-63", ids[2], "aborted"],
       ]);
-      expect(h.log.released.sort()).toEqual([AGENT, OTHER_AGENT, "OLI-63"]);
     }),
   );
 
@@ -3126,7 +3114,6 @@ describe("capacity", () => {
           expect(h.iso.calls).toHaveLength(0);
           expect(h.qemu.calls).toEqual([]);
           expect(spanNamed(h, OTHER_AGENT)).toBeUndefined();
-          expect(h.log.acquired).toEqual([]);
           expect(texts(h)).toEqual([]);
           expect(yield* qemus(sessions)).toBe(0);
         }),
@@ -3187,7 +3174,6 @@ describe("capacity", () => {
             expect(h.iso.calls).toHaveLength(0);
             expect(h.qemu.calls).toEqual([]);
             expect(spanNamed(h, AGENT)).toBeUndefined();
-            expect(h.log.acquired).toEqual([]);
             expect(texts(h)).toEqual([]);
             expect(yield* qemus(sessions)).toBe(0);
           }),
@@ -3367,7 +3353,6 @@ describe("capacity", () => {
             expect(h.sessions.sessions[0]?.endedAt).not.toBeNull();
             expect(h.debugLogs.saves.map((save) => save.sessionId)).toEqual([id]);
             expect(texts(h).at(-1)).toBe("stopped; aborted; relinquished");
-            expect(h.log.released).toEqual([AGENT]);
             expect(yield* Stream.runCollect(events)).toEqual([
               { type: "session", status: "running" },
               { type: "session", status: "aborted" },
@@ -3528,8 +3513,6 @@ describe("failed start", () => {
             expect(yield* sessions.jobs).toBe(1);
             expect(yield* qemus(sessions)).toBe(1);
             expect(h.sessions.agentRuns).toMatchObject([{ agentId: AGENT, sessionId: id }]);
-            expect(h.log.acquired).toEqual([AGENT, AGENT]);
-            expect(h.log.released).toEqual([AGENT]);
             expect(texts(h)).toEqual([`starting; iso ${ISO}`, "running; started in 0ms"]);
           }),
         );

@@ -727,8 +727,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       onNone: () => "",
       onSome: (text) => `; ${text}`,
     });
-    // The agent has no live session on this process, so its colour is taken here for the line.
-    yield* log.acquireColor(input.agentId);
     return yield* log.info(
       `test result ${input.id}: ${input.status}${reason}`,
       Object.assign(

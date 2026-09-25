@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import type * as Domain from "../shared/domain.ts";
 import * as Client from "./client.ts";
@@ -89,7 +89,30 @@ export class ActionStore extends Context.Service<ActionStore>()("@oligarchy/db/A
       );
     });
 
-    return { startAction, finishAction, getImage, listActions, listImages };
+    // The session's newest `limit` actions, oldest first, without their responses: what a watcher
+    // polling the session needs, every second.
+    const listRecentActions = Effect.fn("db.listRecentActions")(function* (
+      sessionId: string,
+      limit: number,
+    ) {
+      const rows = yield* database.run("listRecentActions", (db) =>
+        db
+          .select({
+            id: DbSchema.actions.id,
+            request: DbSchema.actions.request,
+            state: DbSchema.actions.state,
+            createdAt: DbSchema.actions.createdAt,
+            finishedAt: DbSchema.actions.finishedAt,
+          })
+          .from(DbSchema.actions)
+          .where(eq(DbSchema.actions.sessionId, sessionId))
+          .orderBy(desc(DbSchema.actions.id))
+          .limit(limit),
+      );
+      return rows.reverse();
+    });
+
+    return { startAction, finishAction, getImage, listActions, listImages, listRecentActions };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

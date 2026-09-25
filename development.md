@@ -889,7 +889,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 ## Log
 
 - Application code logs through the `Log` service (`src/observability/log.ts`): `info`, `warning`,
-  `error`, `fatal`, `acquireColor`, `releaseColor`, `flush`. Messages are fixed sentences; every
+  `error`, `fatal`, `flush`. Messages are fixed sentences; every
   variable is in the attribution (`location`, `agentId`) or in the text after the `;`, as in
   `log.info(\`running; started in ${String(ms)}ms\`, { location: sessionId, agentId })`.
   `location` is a text bucket: a session UUID, `Locations.server` (qemu-server-wide lines with no
@@ -905,10 +905,14 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
 - stdout is the convenience copy; the rows and Sentry are the record. A process's `main.ts`
   attaches a no-op `error` listener to `process.stdout` and `process.stderr`, so a write refused by
   a full filesystem (`ENOSPC`) drops that line instead of raising an uncaught exception per line.
-- The stdout line carries the attribution as a coloured prefix and non-info lines a `<level>: `
-  prefix; a colour is taken by `acquireColor` when an agent's work starts and released by
-  `releaseColor` when it ends, and `emit` only looks it up, so an unknown agent stays gray and a
-  failed request cannot grow the palette. Colour is the `Log.Colors` `Context.Reference`,
+- The stdout line is `[LEVEL] [<agent>] <location>: <text>`: the level in capitals (`INFO`,
+  `WARN`, `ERROR`, `FATAL`), `global` for a line with no agent, the location only when there is
+  one. `Render.logPieces` is the one description of that line as coloured runs; stdout paints
+  them and `./viz`'s log pane draws them, so both read alike. An agent's colour comes from
+  `src/observability/palette.ts`: its first line takes the next Rosé Pine colour in turn that no
+  active agent holds, and it keeps it; once an hour the palette drops agents with no line in the
+  last hour, so the map stays bounded. Each process holds one palette, and the viz holds its own
+  fed by the rows it pulls. Colour is the `Log.Colors` `Context.Reference`,
   defaulting to `Render.stdoutColors` (a TTY or `FORCE_COLOR`, and `hasColors(16)`); tests
   override it. The row is the original text, level and attribution; prefix and colour are stdout
   only.

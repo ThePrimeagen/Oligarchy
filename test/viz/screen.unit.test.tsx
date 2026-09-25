@@ -9,6 +9,7 @@ import type * as Servers from "../../src/db/servers.ts";
 import * as Follow from "../../src/viz/follow.ts";
 import * as Placeholder from "../../src/viz/placeholder.ts";
 import * as Screen from "../../src/viz/screen.tsx";
+import type * as Trail from "../../src/viz/trail.ts";
 import * as View from "../../src/viz/view.ts";
 import * as FakeRenderer from "../support/fake-renderer.ts";
 import {
@@ -37,6 +38,7 @@ import {
   GOLD,
   GRAPH,
   header,
+  IMAGE_ID,
   IRIS,
   job,
   JOB_HEADER,
@@ -1008,9 +1010,9 @@ describe("screen follow", () => {
     SESSION_ID,
     garage.url,
     [
-      { request: sendKey, createdAt: ago(20) },
-      { request: mouse, createdAt: ago(8) },
-      { request: screendump, createdAt: ago(2) },
+      { request: sendKey, createdAt: ago(20), finishedAt: null },
+      { request: mouse, createdAt: ago(8), finishedAt: null },
+      { request: screendump, createdAt: ago(2), finishedAt: null },
     ],
     Option.some(TINY_PNG),
   );
@@ -1223,8 +1225,13 @@ describe("screen follow", () => {
     () =>
       Effect.gen(function* () {
         const full = Follow.apply(
-          Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+          Follow.apply(
+            Follow.expand(peek, garage.url),
+            { type: "session", status: "running" },
+            READ_AT,
+          ),
           { type: "action", id: 9, name: "mouse-click", state: "running" },
+          READ_AT,
         );
         const rows = yield* draw(peeking(full));
         expect(rows).toHaveLength(ROWS);
@@ -1253,7 +1260,7 @@ describe("screen follow", () => {
         const later = yield* draw(peeking(Follow.tick(full)));
         expect(later[4]?.startsWith(` ${Follow.SPINNER[1]} mouse-click`)).toBe(true);
         const failedRows = yield* styled(
-          peeking(Follow.apply(full, { type: "action", id: 9, state: "failed" })),
+          peeking(Follow.apply(full, { type: "action", id: 9, state: "failed" }, READ_AT)),
         );
         expect(styleOf(failedRows[4], "✗")).toEqual([LOVE, PLAIN]);
       }),
@@ -1262,8 +1269,13 @@ describe("screen follow", () => {
   it.effect("a kitty host pins the full follow's screenshot to the right of the entries", () =>
     Effect.gen(function* () {
       const full = Follow.apply(
-        Follow.apply(Follow.expand(peek, garage.url), { type: "session", status: "running" }),
+        Follow.apply(
+          Follow.expand(peek, garage.url),
+          { type: "session", status: "running" },
+          READ_AT,
+        ),
         { type: "action", id: 9, name: "mouse-click", state: "running" },
+        READ_AT,
       );
       const placed: Array<string> = [];
       const kitty = yield* Effect.promise(() =>
@@ -1307,9 +1319,13 @@ describe("screen follow", () => {
           Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
           garage.url,
         );
-        let busy = Follow.apply(bare, { type: "session", status: "running" });
+        let busy = Follow.apply(bare, { type: "session", status: "running" }, READ_AT);
         for (let id = 0; id < 50; id += 1) {
-          busy = Follow.apply(busy, { type: "action", id, name: "send-keys", state: "running" });
+          busy = Follow.apply(
+            busy,
+            { type: "action", id, name: "send-keys", state: "running" },
+            READ_AT,
+          );
         }
         const rows = yield* draw(
           peeking(busy, { notice: Option.some("dropped from x: this follower fell behind") }),
@@ -1322,11 +1338,15 @@ describe("screen follow", () => {
         expect(rows[ROWS - 1]).toBe(pad(" dropped from x: this follower fell behind", COLUMNS));
         expect(rows.some((row) => BLOCKS.test(row))).toBe(false);
         // A dirty intent is drawn as one clean row.
-        const dirty = Follow.apply(bare, {
-          type: "intent",
-          state: "started",
-          message: "wait\nfor\x1b[31mthe boot",
-        });
+        const dirty = Follow.apply(
+          bare,
+          {
+            type: "intent",
+            state: "started",
+            message: "wait\nfor\x1b[31mthe boot",
+          },
+          READ_AT,
+        );
         const cleaned = yield* draw(peeking(dirty));
         expect(cleaned).toHaveLength(ROWS);
         expect(cleaned[1]?.startsWith(` ${Follow.SPINNER[0]} wait for [31mthe boot`)).toBe(true);
@@ -1385,6 +1405,7 @@ describe("screen pop-up", () => {
           garage.url,
         ),
         { type: "session", status: "running" },
+        READ_AT,
       );
       const rows = yield* draw(shown(SNAPSHOT, { follow: Option.some(full), popup }));
       expect(rows[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
@@ -1611,27 +1632,38 @@ describe("running job rows", () => {
 
 describe("session pane", () => {
   const sessionOf = (
-    follow: Follow.Follow,
+    trail: Trail.Trail,
     note: Option.Option<string> = Option.none(),
   ): View.View => ({
-    ...shown(SNAPSHOT, { tab: "automation" }),
-    session: Option.some(follow),
+    ...shown(SNAPSHOT, { tab: "automation", cursor: { servers: 0, clients: 1, queue: 0 } }),
+    trail: Option.some(trail),
     sessionNote: note,
+  });
+  // The selected session as the database has it: the steps said, the commands sent, the last
+  // screenshot.
+  const trailOf = (
+    intents: ReadonlyArray<string>,
+    actions: Trail.Trail["actions"] = [],
+    image: Trail.Trail["image"] = Option.none(),
+  ): Trail.Trail => ({
+    sessionId: SESSION_ID,
+    intents: intents.map((text, index) => ({ text, createdAt: ago(60 - index) })),
+    actions,
+    image,
+  });
+  const sent = (id: number, request: unknown, seconds: number): Trail.Trail["actions"][number] => ({
+    id,
+    request,
+    state: null,
+    createdAt: ago(seconds),
+    finishedAt: null,
   });
 
   it.effect("the lower half shows every stored log line, oldest first", () =>
     Effect.gen(function* () {
-      const full = Follow.expand(
-        Follow.peekFromActions(
-          "OLI-61",
-          SESSION_ID,
-          garage.url,
-          [{ request: sendKey, createdAt: ago(2) }],
-          Option.some(TINY_PNG),
-        ),
-        garage.url,
+      const view = sessionOf(
+        trailOf([], [sent(1, sendKey, 2)], Option.some({ id: IMAGE_ID, png: TINY_PNG })),
       );
-      const view = sessionOf(full);
       const withLogs: View.View = {
         ...view,
         logs: [
@@ -1660,7 +1692,7 @@ describe("session pane", () => {
       };
       const rows = yield* draw(withLogs);
       const body = rows.join("\n");
-      const downloading = body.indexOf("iso: downloading");
+      const downloading = body.indexOf("downloading");
       const heartbeat = body.indexOf("heartbeat failed");
       const amount = body.indexOf("1.50 GB");
       expect(downloading).toBeGreaterThan(-1);
@@ -1742,27 +1774,13 @@ describe("session pane", () => {
 * any crashes or erroneous behavior must be reported.
 * always take a screen shot of every step
 </ActionList>`;
-      const full = Follow.apply(
-        Follow.apply(
-          Follow.expand(
-            Follow.peekFromActions(
-              "OLI-61",
-              SESSION_ID,
-              garage.url,
-              [{ request: sendKey, createdAt: ago(2) }],
-              Option.some(TINY_PNG),
-            ),
-            garage.url,
-          ),
-          {
-            type: "intent",
-            state: "started",
-            message: "Click Lock. Use the mouse only. The screen locks.",
-          },
+      const view = sessionOf(
+        trailOf(
+          ["intent start; Click Lock. Use the mouse only. The screen locks."],
+          [sent(10, sendKey, 2)],
+          Option.some({ id: IMAGE_ID, png: TINY_PNG }),
         ),
-        { type: "action", id: 10, name: "send-keys", state: "running" },
       );
-      const view = sessionOf(full, Option.none());
       const onTicket = {
         ...view,
         snapshot: Option.some({
@@ -1787,12 +1805,12 @@ describe("session pane", () => {
         ],
       });
       const body = rows.join("\n");
-      expect(body).toContain("iso: downloading");
+      expect(body).toContain("downloading");
       expect(body).toContain("2/2");
       expect(body).toContain("Click Lock");
-      expect(body).toContain("send-keys");
+      expect(body).toContain("send-key");
       const intentAt = body.indexOf("Click Lock");
-      expect(body.indexOf("send-keys")).toBeGreaterThan(intentAt);
+      expect(body.indexOf("send-key")).toBeGreaterThan(intentAt);
     }),
   );
 
@@ -1834,7 +1852,7 @@ describe("session pane", () => {
     }),
   );
 
-  it.effect("an open follow places a repeated step at the copy already reached", () =>
+  it.effect("the session's steps place a repeated step at the copy already reached", () =>
     Effect.gen(function* () {
       const instruction = `<ActionList>
 * Click Style.
@@ -1844,28 +1862,17 @@ describe("session pane", () => {
 * always take a screen shot of every step
 </ActionList>`;
       const stepped = { ...running, instruction, intent: "Click Style." };
-      const full = Follow.apply(
-        Follow.apply(
-          Follow.apply(
-            Follow.apply(
-              Follow.expand(
-                Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
-                garage.url,
-              ),
-              { type: "session", status: "running" },
-            ),
-            { type: "intent", state: "started", message: "Click Theme." },
-          ),
-          { type: "intent", state: "completed" },
-        ),
-        { type: "intent", state: "started", message: "Click Style." },
-      );
+      const trail = trailOf([
+        "intent start; Click Theme.",
+        "intent end",
+        "intent start; Click Style.",
+      ]);
       const drawn = yield* draw(
         shown(
           { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } },
           {
             tab: "automation",
-            session: Option.some(full),
+            trail: Option.some(trail),
             cursor: { servers: 0, clients: 1, queue: 0 },
           },
         ),
@@ -1876,7 +1883,7 @@ describe("session pane", () => {
     }),
   );
 
-  it.effect("a finished newest intent does not revive an older one still marked running", () =>
+  it.effect("an ended newest step does not revive an older one", () =>
     Effect.gen(function* () {
       const instruction = `<ActionList>
 * Click Style.
@@ -1886,28 +1893,17 @@ describe("session pane", () => {
 * always take a screen shot of every step
 </ActionList>`;
       const stepped = { ...running, instruction, intent: "Click Style." };
-      const full = Follow.apply(
-        Follow.apply(
-          Follow.apply(
-            Follow.apply(
-              Follow.expand(
-                Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
-                garage.url,
-              ),
-              { type: "session", status: "running" },
-            ),
-            { type: "intent", state: "started", message: "Click Theme." },
-          ),
-          { type: "intent", state: "started", message: "Click Style." },
-        ),
-        { type: "intent", state: "completed" },
-      );
+      const trail = trailOf([
+        "intent start; Click Theme.",
+        "intent start; Click Style.",
+        "intent end",
+      ]);
       const drawn = yield* draw(
         shown(
           { ...SNAPSHOT, queue: { ...EMPTY_QUEUE, running: [stepped] } },
           {
             tab: "automation",
-            session: Option.some(full),
+            trail: Option.some(trail),
             cursor: { servers: 0, clients: 1, queue: 0 },
           },
         ),
@@ -1918,7 +1914,7 @@ describe("session pane", () => {
     }),
   );
 
-  it.effect("a paraphrase or a closed stream keeps the elapsed time (unhappy)", () =>
+  it.effect("a paraphrase or an ended step keeps the elapsed time (unhappy)", () =>
     Effect.gen(function* () {
       const instruction = `<ActionList>
 * Press Super+Escape. The System menu opens.
@@ -1935,16 +1931,10 @@ describe("session pane", () => {
       const side = (row: string | undefined): string => (row ?? "").slice(2, 28);
       expect(side(clients[6])).toContain("45s");
       expect(side(clients[6])).not.toContain("1/1");
-      const done = Follow.apply(
-        Follow.apply(
-          Follow.expand(
-            Follow.peekFromActions("OLI-61", SESSION_ID, garage.url, [], Option.none()),
-            garage.url,
-          ),
-          { type: "session", status: "running" },
-        ),
-        { type: "intent", state: "completed" },
-      );
+      const done = trailOf([
+        "intent start; Press Super+Escape. The System menu opens.",
+        "intent end",
+      ]);
       const selected = yield* draw(
         shown(
           {
@@ -1956,7 +1946,7 @@ describe("session pane", () => {
           },
           {
             tab: "automation",
-            session: Option.some(done),
+            trail: Option.some(done),
             cursor: { servers: 0, clients: 1, queue: 0 },
           },
         ),

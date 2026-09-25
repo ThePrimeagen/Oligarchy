@@ -1,5 +1,4 @@
 import { WriteStream } from "node:tty";
-import { styleText } from "node:util";
 import { Cause, Console, Effect, Option } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
 import * as ExternalFailure from "../external-failure.ts";
@@ -70,9 +69,6 @@ export const foreground = (hex: string): string => {
 export const paint = (hex: string, text: string, colors: boolean): string =>
   colors ? `${foreground(hex)}${text}\x1b[39m` : text;
 
-const style = (format: "gray" | "white", text: string, colors: boolean): string =>
-  colors ? styleText(format, text, { validateStream: false }) : text;
-
 export type LogLine = {
   readonly text: string;
   readonly level: Domain.LogLevel;
@@ -81,17 +77,42 @@ export type LogLine = {
   readonly color?: string;
 };
 
-export const renderLogLine = (entry: LogLine, colors: boolean): string => {
-  const tag = entry.agentId ?? "global";
-  const text = entry.level === "info" ? entry.text : `${entry.level}: ${entry.text}`;
-  const ticket =
-    entry.color === undefined ? style("gray", tag, colors) : paint(entry.color, tag, colors);
-  const rest =
-    entry.location === undefined
-      ? style("white", `] ${text}`, colors)
-      : `${style("white", "] ", colors)}${style("gray", entry.location, colors)}${style("white", `: ${text}`, colors)}`;
-  return `${style("white", "[", colors)}${ticket}${rest}`;
+// The bracketed label a line opens with, and the colour of the label and of the words after it:
+// an error's words are as red as its label, a warning keeps its words white.
+const LEVELS: Readonly<
+  Record<Domain.LogLevel, { readonly label: string; readonly color: string; readonly text: string }>
+> = {
+  info: { label: "[INFO]", color: ROSE_PINE_MAIN.text, text: ROSE_PINE_MAIN.text },
+  warning: { label: "[WARN]", color: ROSE_PINE_MAIN.gold, text: ROSE_PINE_MAIN.text },
+  error: { label: "[ERROR]", color: ROSE_PINE_MAIN.love, text: ROSE_PINE_MAIN.love },
+  fatal: { label: "[FATAL]", color: ROSE_PINE_MAIN.love, text: ROSE_PINE_MAIN.love },
 };
+
+// One line as coloured runs: stdout paints them, the viz's log pane draws them as they are.
+// A ticket without a colour of its own is muted, like the location.
+export const logPieces = (
+  entry: LogLine,
+): ReadonlyArray<{ readonly text: string; readonly color: string }> => {
+  const level = LEVELS[entry.level];
+  return [
+    { text: level.label, color: level.color },
+    { text: " [", color: ROSE_PINE_MAIN.text },
+    { text: entry.agentId ?? "global", color: entry.color ?? ROSE_PINE_MAIN.muted },
+    { text: "] ", color: ROSE_PINE_MAIN.text },
+    ...(entry.location === undefined
+      ? []
+      : [
+          { text: entry.location, color: ROSE_PINE_MAIN.muted },
+          { text: ": ", color: ROSE_PINE_MAIN.text },
+        ]),
+    { text: entry.text, color: level.text },
+  ];
+};
+
+export const renderLogLine = (entry: LogLine, colors: boolean): string =>
+  logPieces(entry)
+    .map((piece) => paint(piece.color, piece.text, colors))
+    .join("");
 
 export type ColorStream = {
   readonly isTTY?: boolean | undefined;

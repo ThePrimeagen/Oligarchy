@@ -76,46 +76,10 @@ describe("renderFailure", () => {
 });
 
 describe("renderLogLine", () => {
-  it("colors only the ticket and renders the bare location in gray", () => {
-    expect(
-      Render.renderLogLine(
-        {
-          text: "sent 9 chords in 1546ms",
-          level: "info",
-          location: SESSION_ID,
-          agentId: AGENT_ID,
-          color: LOVE,
-        },
-        true,
-      ),
-    ).toBe(
-      [
-        "\x1b[37m[\x1b[39m",
-        "\x1b[38;2;235;111;146mOLI-61\x1b[39m",
-        "\x1b[37m] \x1b[39m",
-        `\x1b[90m${SESSION_ID}\x1b[39m`,
-        "\x1b[37m: sent 9 chords in 1546ms\x1b[39m",
-      ].join(""),
-    );
-  });
+  const ESC = String.fromCharCode(27);
+  const sgr = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
 
-  it("keeps an unattributed error readable without a ticket color or session", () => {
-    expect(Render.renderLogLine({ text: "database unavailable", level: "error" }, true)).toBe(
-      [
-        "\x1b[37m[\x1b[39m",
-        "\x1b[90mglobal\x1b[39m",
-        "\x1b[37m] error: database unavailable\x1b[39m",
-      ].join(""),
-    );
-  });
-
-  it("paints an agent without a colour gray", () => {
-    expect(Render.renderLogLine({ text: "hello", level: "warning", agentId: AGENT_ID }, true)).toBe(
-      ["\x1b[37m[\x1b[39m", "\x1b[90mOLI-61\x1b[39m", "\x1b[37m] warning: hello\x1b[39m"].join(""),
-    );
-  });
-
-  it("writes plain text without colours", () => {
+  it("opens every line with its level in capitals and brackets, then the ticket and the location", () => {
     expect(
       Render.renderLogLine(
         {
@@ -127,12 +91,36 @@ describe("renderLogLine", () => {
         },
         false,
       ),
-    ).toBe(`[OLI-61] ${SESSION_ID}: sent 9 chords in 1546ms`);
+    ).toBe(`[INFO] [OLI-61] ${SESSION_ID}: sent 9 chords in 1546ms`);
+    expect(
+      Render.renderLogLine({ text: "hello", level: "warning", agentId: AGENT_ID }, false),
+    ).toBe("[WARN] [OLI-61] hello");
+    expect(
+      Render.renderLogLine({ text: "stop failed", level: "error", agentId: AGENT_ID }, false),
+    ).toBe("[ERROR] [OLI-61] stop failed");
     expect(Render.renderLogLine({ text: "proxy: boom", level: "fatal" }, false)).toBe(
-      "[global] fatal: proxy: boom",
+      "[FATAL] [global] proxy: boom",
     );
+  });
+
+  it("writes the same words in colour as without", () => {
+    const entry = {
+      text: "sent 9 chords in 1546ms",
+      level: "warning",
+      location: SESSION_ID,
+      agentId: AGENT_ID,
+      color: LOVE,
+    } as const;
+    const colored = Render.renderLogLine(entry, true);
+    expect(colored).toContain(ESC);
+    expect(colored.replace(sgr, "")).toBe(Render.renderLogLine(entry, false));
+  });
+
+  it("keeps an unattributed line readable without a ticket colour or location (unhappy)", () => {
+    const colored = Render.renderLogLine({ text: "database unavailable", level: "error" }, true);
+    expect(colored.replace(sgr, "")).toBe("[ERROR] [global] database unavailable");
     expect(Render.renderLogLine({ text: "listening", level: "info" }, false)).toBe(
-      "[global] listening",
+      "[INFO] [global] listening",
     );
   });
 });

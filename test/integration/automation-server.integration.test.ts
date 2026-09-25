@@ -347,7 +347,7 @@ describe("automation server startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[automation] automation: fatal: automation server: "),
+        line.startsWith("[FATAL] [automation] automation: automation server: "),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("database unreachable");
@@ -367,7 +367,7 @@ describeWithDatabase("automation server startup refusals with a database", () =>
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[automation] automation: fatal: automation server: "),
+          line.startsWith("[FATAL] [automation] automation: automation server: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);
@@ -391,7 +391,7 @@ describeServing("automation server serving", () => {
     try {
       await process.waitFor(/automation server listening/);
       expect(lines(process.stdout())).toContain(
-        `[automation] automation: automation server listening on 127.0.0.1:${String(port)}; drive meta/muse-spark-1.3-contributor; diagnose meta/muse-spark-1.3-contributor; mint meta/muse-spark-1.3-contributor`,
+        `[INFO] [automation] automation: automation server listening on 127.0.0.1:${String(port)}; drive meta/muse-spark-1.3-contributor; diagnose meta/muse-spark-1.3-contributor; mint meta/muse-spark-1.3-contributor`,
       );
       expect(existsSync(record)).toBe(false);
 
@@ -506,13 +506,13 @@ describeServing("automation server serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    expect(output).toContain("[automation] automation: error: POST /linear failed: unauthorized");
-    expect(output).toContain("[automation] automation: linear webhook recorded");
+    expect(output).toContain("[ERROR] [automation] automation: POST /linear failed: unauthorized");
+    expect(output).toContain("[INFO] [automation] automation: linear webhook recorded");
     expect(output).toContain(
-      `[${linearId}] automation: linear webhook queued drive; Automation Needed`,
+      `[INFO] [${linearId}] automation: linear webhook queued drive; Automation Needed`,
     );
     expect(output).toContain(
-      `[${linearId}] automation: linear webhook queued diagnose; Needs Review`,
+      `[INFO] [${linearId}] automation: linear webhook queued diagnose; Needs Review`,
     );
     expect(output.some((line) => line.includes("/automate"))).toBe(false);
     expect(output.some((line) => line.includes("/start"))).toBe(false);
@@ -553,7 +553,7 @@ describeServing("automation server serving", () => {
           expect(left).toEqual([QUIET_CLIENT, DEAD_QEMU].sort());
           const output = lines(process.stdout());
           expect(output.filter((line) => line.includes("server forgotten"))).toEqual([
-            `[automation] automation: server forgotten; ${DEAD_CLIENT} silent for 10 minutes`,
+            `[INFO] [automation] automation: server forgotten; ${DEAD_CLIENT} silent for 10 minutes`,
           ]);
           expect(process.stderr()).toBe("");
         } finally {
@@ -1065,7 +1065,7 @@ describeServing("automation server abort", () => {
         expect(job.startedAt).toBeNull();
         await process.waitFor(/aborted pending drive/);
         expect(lines(process.stdout())).toContain(
-          `[${linearId}] automation: aborted pending drive`,
+          `[INFO] [${linearId}] automation: aborted pending drive`,
         );
       } finally {
         process.child.kill("SIGTERM");
@@ -1135,7 +1135,7 @@ describeServing("automation server abort", () => {
           expect(job).toMatchObject({ status: "aborted", reason: "aborted" });
           await process.waitFor(/JobNotFound: Job had "running" status but 404'd\./);
           expect(lines(process.stdout())).toContain(
-            `[${linearId}] automation: error: JobNotFound: Job had "running" status but 404'd.`,
+            `[ERROR] [${linearId}] automation: JobNotFound: Job had "running" status but 404'd.`,
           );
         } finally {
           process.child.kill("SIGTERM");
@@ -1219,7 +1219,7 @@ describeServing("automation server restart", () => {
           expect(aborts.map(ticketOf).filter((ticket) => ticket === linearId)).toEqual([linearId]);
           await second.waitFor(new RegExp(`drive errored; ${RESTARTED}`));
           expect(lines(second.stdout()), second.stdout()).toContain(
-            `[global] automation: error: drive errored; ${RESTARTED}`,
+            `[ERROR] [global] automation: drive errored; ${RESTARTED}`,
           );
         } finally {
           await stop(first);
@@ -1572,7 +1572,7 @@ describeServing("automation server restart", () => {
             new RegExp(`inherited abort failed; ${url.replaceAll(".", "\\.")}`),
           );
           expect(lines(process.stdout()), process.stdout()).toContain(
-            `[${linearId}] automation: error: inherited abort failed; ${url}`,
+            `[ERROR] [${linearId}] automation: inherited abort failed; ${url}`,
           );
           await process.waitFor(/automation server listening/);
           const response = await request(port, "GET", "/linear");

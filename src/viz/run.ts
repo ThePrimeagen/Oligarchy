@@ -42,6 +42,7 @@ import * as Follow from "./follow.ts";
 import * as Read from "./read.ts";
 import * as Screen from "./screen.tsx";
 import * as Settings from "./settings.ts";
+import * as Trail from "./trail.ts";
 import * as View from "./view.ts";
 
 // Linear resolves a ticket by its identifier alone and redirects into the workspace.
@@ -314,16 +315,20 @@ export const run: Effect.Effect<
   // database outage on the footer.
   const pullLogs = Effect.gen(function* () {
     const rows = yield* logStore.listRecent(View.LOG_TAIL);
-    yield* update((current) => ({
-      ...current,
-      logs: rows.map((row) => ({
-        id: row.id,
-        level: row.level,
-        text: row.text,
-        location: row.location,
-        agentId: row.agentId,
-      })),
-    }));
+    const pulledAt = yield* Clock.currentTimeMillis;
+    yield* update((current) =>
+      View.withLogs(
+        current,
+        rows.map((row) => ({
+          id: row.id,
+          level: row.level,
+          text: row.text,
+          location: row.location,
+          agentId: row.agentId,
+        })),
+        pulledAt,
+      ),
+    );
   }).pipe(
     Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.void)),
   );
@@ -360,13 +365,6 @@ export const run: Effect.Effect<
       }
       return { ...current, follow: Option.some(change(current.follow.value)) };
     });
-  const withSession = (change: (follow: Follow.Full) => Follow.Full) =>
-    update((current) => {
-      if (Option.isNone(current.session) || current.session.value._tag !== "full") {
-        return current;
-      }
-      return { ...current, session: Option.some(change(current.session.value)) };
-    });
   // Ages stay on the one-second tick: an 80ms step lands short of the second, so "1 s ago"
   // would still read "0 s ago". The braille spinner needs the finer clock, and only while a
   // row is actually turning.
@@ -379,7 +377,6 @@ export const run: Effect.Effect<
       yield* tick;
     }
     yield* withFull(Follow.tick);
-    yield* withSession(Follow.tick);
   });
   yield* Effect.scoped(
     Effect.gen(function* () {
@@ -483,9 +480,11 @@ export const run: Effect.Effect<
             yield* Stream.splitLines(Stream.decodeText(bytes)).pipe(
               Stream.filter((line) => line !== ""),
               Stream.runForEach((line) =>
-                Effect.andThen(Domain.decodeFollowLine(line).pipe(Effect.orDie), (event) =>
-                  withFull((follow) => Follow.apply(follow, event)),
-                ),
+                Effect.gen(function* () {
+                  const event = yield* Domain.decodeFollowLine(line).pipe(Effect.orDie);
+                  const at = yield* Clock.currentTimeMillis;
+                  yield* withFull((follow) => Follow.apply(follow, event, at));
+                }),
               ),
             );
             const latest = view();
@@ -592,9 +591,10 @@ export const run: Effect.Effect<
         }
         yield* startFollow(peekWork(Option.getOrThrow(job)));
       });
-      // The selected ticket's session, in the main area. One follower: while F holds the stream
-      // this one steps aside, and a read starts it again once F has closed. A failure stays in
-      // the pane; the footer is for keys.
+      // The selected ticket's session, in the main area, read from the database every LOG_PULL:
+      // the qemu server a guest runs on need not be reachable from here. While F is up this
+      // steps aside, and a read starts it again once F has closed. A failure stays in the pane;
+      // the footer is for keys.
       const sessionFiber = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
       const attached = yield* Ref.make<Option.Option<string>>(Option.none());
       const stopSession = Effect.gen(function* () {
@@ -612,7 +612,7 @@ export const run: Effect.Effect<
       const note = (text: string) =>
         update((current) => ({
           ...current,
-          session: Option.none(),
+          trail: Option.none(),
           sessionNote: Option.some(text),
         }));
       const sessionWork = (job: Automation.AutomationJobListRow) =>
@@ -670,33 +670,44 @@ export const run: Effect.Effect<
             yield* note("no session");
             return;
           }
-          const { sessionId, serverUrl } = settled;
-          const peek = yield* loadPeek(job.ticket ?? "—", sessionId, serverUrl);
-          yield* update((latest) => ({
-            ...latest,
-            session: Option.some(peek),
-            sessionNote: Option.none(),
-          }));
-          if (serverUrl === null || job.status !== "running") {
-            return;
-          }
-          const liveUrl = serverUrl;
-          const token = yield* Config.oligarchyToken;
-          const proxy = yield* ProxyClient.connect({ serverUrl: liveUrl, token });
-          const bytes = yield* proxy.follow(sessionId);
-          yield* update((current) => ({
-            ...current,
-            session: Option.some(Follow.expand(peek, liveUrl)),
-            sessionNote: Option.none(),
-          }));
-          yield* Stream.splitLines(Stream.decodeText(bytes)).pipe(
-            Stream.filter((line) => line !== ""),
-            Stream.runForEach((line) =>
-              Effect.andThen(Domain.decodeFollowLine(line).pipe(Effect.orDie), (event) =>
-                withSession((follow) => Follow.apply(follow, event)),
-              ),
+          const { sessionId } = settled;
+          const actionStore = yield* Actions.ActionStore;
+          // The screenshot's bytes are read only when a newer one than the one shown lands.
+          const pull = Effect.gen(function* () {
+            const intents = yield* logStore.listIntents(sessionId);
+            const actions = yield* actionStore.listRecentActions(sessionId, Trail.ACTIONS);
+            const newest = (yield* actionStore.listImages(sessionId)).at(-1);
+            const shown = Option.flatMap(view().trail, (trail) =>
+              trail.sessionId === sessionId ? trail.image : Option.none(),
+            );
+            const image =
+              newest === undefined || Option.exists(shown, (held) => held.id === newest.id)
+                ? shown
+                : Option.map(yield* actionStore.getImage(newest.id), (png) => ({
+                    id: newest.id,
+                    png,
+                  }));
+            yield* update((current) => ({
+              ...current,
+              trail: Option.some({ sessionId, intents, actions, image }),
+              sessionNote: Option.none(),
+            }));
+          }).pipe(
+            // A failed read keeps what the last one drew; the next second tries again.
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : update((current) => ({
+                    ...current,
+                    sessionNote: Option.some(Render.headline(Cause.squash(cause))),
+                  })),
             ),
           );
+          // A session that is over is read once; a live one every LOG_PULL until the selection
+          // moves.
+          yield* job.status === "running"
+            ? Effect.repeat(pull, Schedule.spaced(View.LOG_PULL))
+            : pull;
         }).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)

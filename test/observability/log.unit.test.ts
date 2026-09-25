@@ -1,7 +1,7 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
-import { TestConsole } from "effect/testing";
+import { TestClock, TestConsole } from "effect/testing";
 import * as Log from "../../src/observability/log.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Reporter from "../support/reporter.ts";
@@ -12,7 +12,6 @@ const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 
 const ESC = String.fromCharCode(27);
 const sgr = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
-const ticketStart = new RegExp(`^${ESC}\\[37m\\[${ESC}\\[39m(${ESC}\\[[0-9;]+m)`);
 
 const plain = (line: unknown): string => String(line).replace(sgr, "");
 
@@ -68,7 +67,7 @@ describe("Log rows", () => {
           agentId: null,
         },
       ]);
-      expect(yield* consoleLines).toEqual(["[global] warning: follower dropped; 64 events behind"]);
+      expect(yield* consoleLines).toEqual(["[WARN] [global] follower dropped; 64 events behind"]);
     }),
   );
 
@@ -100,10 +99,10 @@ describe("Log rows", () => {
       );
       expect(store.rows.map((row) => row.text)).toEqual(["good 1", "good 2"]);
       expect(yield* consoleLines).toEqual([
-        "[global] good 1",
-        "[global] bad",
-        "[global] good 2",
-        "[global] error: db: log insert failed: connect ECONNREFUSED 127.0.0.1:5432",
+        "[INFO] [global] good 1",
+        "[INFO] [global] bad",
+        "[INFO] [global] good 2",
+        "[ERROR] [global] db: log insert failed: connect ECONNREFUSED 127.0.0.1:5432",
       ]);
       expect(reporter.reported).toHaveLength(1);
       expect(reporter.reported[0]?.error.message).toBe("Failed query: insert into logs");
@@ -122,8 +121,8 @@ describe("Log rows", () => {
         yield* log.flush;
       }).pipe(Effect.provide(Log.Log.layer.pipe(Layer.provide(store.layer))));
       expect(yield* consoleLines).toEqual([
-        "[global] x",
-        "[global] error: db: log insert failed: pool ended",
+        "[INFO] [global] x",
+        "[ERROR] [global] db: log insert failed: pool ended",
       ]);
     }),
   );
@@ -163,7 +162,7 @@ describe("Log rows", () => {
       const log = yield* Log.Log;
       yield* log.info("hello", { agentId: AGENT_ID });
       yield* log.flush;
-      expect(yield* consoleLines).toEqual(["[OLI-61] hello"]);
+      expect(yield* consoleLines).toEqual(["[INFO] [OLI-61] hello"]);
     }).pipe(Effect.provide(Log.Log.layerStdout)),
   );
 });
@@ -193,7 +192,7 @@ describe("Log Sentry policy", () => {
         log: "stop cleanup failed: connect ECONNREFUSED",
       });
       expect(yield* consoleLines).toEqual([
-        `[OLI-61] ${SESSION_ID}: error: stop cleanup failed: connect ECONNREFUSED`,
+        `[ERROR] [OLI-61] ${SESSION_ID}: stop cleanup failed: connect ECONNREFUSED`,
       ]);
     }),
   );
@@ -223,7 +222,7 @@ describe("Log Sentry policy", () => {
         message: "database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
       });
       expect(yield* consoleLines).toEqual([
-        "[global] fatal: proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
+        "[FATAL] [global] proxy: database unreachable: connect ECONNREFUSED 127.0.0.1:5432",
       ]);
     }),
   );
@@ -236,7 +235,7 @@ describe("Log Sentry policy", () => {
         yield* log.error("POST /stop failed: unauthorized", { skipSentry: true });
       }).pipe(Effect.provide(Log.Log.layerStdout.pipe(Layer.provide(reporter.layer))));
       expect(reporter.reported).toHaveLength(0);
-      expect(yield* consoleLines).toEqual(["[global] error: POST /stop failed: unauthorized"]);
+      expect(yield* consoleLines).toEqual(["[ERROR] [global] POST /stop failed: unauthorized"]);
     }),
   );
 
@@ -292,59 +291,59 @@ describe("Log Sentry policy", () => {
 describe("Log colours", () => {
   const colored = Log.Log.layerStdout.pipe(Layer.provide(Layer.succeed(Log.Colors)(true)));
 
-  const ticket = (line: string): string => ticketStart.exec(line)?.[1] ?? "";
+  // The colour sequence written right before the ticket.
+  const ticket = (line: string | undefined, agent: string): string =>
+    new RegExp(`(${ESC}\\[[0-9;]+m)${agent}${ESC}`).exec(line ?? "")?.[1] ?? "";
+  const printed = Effect.map(TestConsole.logLines, (lines) => lines.map(String));
 
-  it.effect("gives two agents different colours and the first agent Rose Pine love", () =>
+  it.effect("a ticket takes a colour on its first line and keeps it, with nothing to acquire", () =>
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.acquireColor("A");
-      yield* log.acquireColor("B");
-      yield* log.info("a", { agentId: "A" });
-      yield* log.info("b", { agentId: "B" });
-      yield* log.info("a again", { agentId: "A" });
-      const lines = (yield* TestConsole.logLines).map(String);
-      expect(ticket(lines[0] ?? "")).toBe("\x1b[38;2;235;111;146m");
-      expect(ticket(lines[1] ?? "")).toBe("\x1b[38;2;246;193;119m");
-      expect(ticket(lines[2] ?? "")).toBe("\x1b[38;2;235;111;146m");
+      yield* log.info("a", { agentId: "OLI-1" });
+      yield* log.error("b", { agentId: "OLI-2", skipSentry: true });
+      yield* log.info("a again", { agentId: "OLI-1" });
+      const lines = yield* printed;
+      expect(ticket(lines[0], "OLI-1")).not.toBe("");
+      expect(ticket(lines[2], "OLI-1")).toBe(ticket(lines[0], "OLI-1"));
+      expect(ticket(lines[1], "OLI-2")).not.toBe(ticket(lines[0], "OLI-1"));
     }).pipe(Effect.provide(colored)),
   );
 
-  it.effect("releaseColor frees a colour for reuse once the palette is exhausted", () =>
+  it.effect("a ticket idle for an hour gives its colour up at the hourly trim", () =>
     Effect.gen(function* () {
       const log = yield* Log.Log;
       const agents = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
       for (const agent of agents) {
-        yield* log.acquireColor(agent);
         yield* log.info("x", { agentId: agent });
       }
-      const lines = (yield* TestConsole.logLines).map(String);
-      expect(new Set(lines.map(ticket)).size).toBe(10);
-      yield* log.releaseColor("C");
-      yield* log.acquireColor("K");
-      yield* log.info("y", { agentId: "K" });
-      const after = (yield* TestConsole.logLines).map(String);
-      expect(ticket(after[10] ?? "")).toBe(ticket(lines[2] ?? ""));
+      const first = yield* printed;
+      expect(new Set(agents.map((agent, index) => ticket(first[index], agent))).size).toBe(10);
+      yield* TestClock.adjust("30 minutes");
+      for (const agent of agents.filter((other) => other !== "C")) {
+        yield* log.info("y", { agentId: agent });
+      }
+      yield* TestClock.adjust("31 minutes");
+      yield* log.info("z", { agentId: "K" });
+      const lines = yield* printed;
+      expect(ticket(lines.at(-1), "K")).toBe(ticket(first[2], "C"));
     }).pipe(Effect.provide(colored)),
   );
 
-  it.effect("an agent without a session renders gray global-style brackets", () =>
-    Effect.gen(function* () {
-      const log = yield* Log.Log;
-      yield* log.info("hello");
-      const lines = (yield* TestConsole.logLines).map(String);
-      expect(lines[0]).toBe("\x1b[37m[\x1b[39m\x1b[90mglobal\x1b[39m\x1b[37m] hello\x1b[39m");
-    }).pipe(Effect.provide(colored)),
-  );
-
-  it.effect("an agent id that never acquired a colour stays gray and takes no palette slot", () =>
-    Effect.gen(function* () {
-      const log = yield* Log.Log;
-      yield* log.error("POST /start failed: nope", { agentId: "OLI-999", skipSentry: true });
-      yield* log.acquireColor("A");
-      yield* log.info("a", { agentId: "A" });
-      const lines = (yield* TestConsole.logLines).map(String);
-      expect(ticket(lines[0] ?? "")).toBe("\x1b[90m");
-      expect(ticket(lines[1] ?? "")).toBe("\x1b[38;2;235;111;146m");
-    }).pipe(Effect.provide(colored)),
+  it.effect(
+    "a ticket back after an idle hour takes a new colour; one seen within the hour keeps its own (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const log = yield* Log.Log;
+        yield* log.info("a", { agentId: "A" });
+        yield* log.info("b", { agentId: "B" });
+        yield* TestClock.adjust("50 minutes");
+        yield* log.info("a", { agentId: "A" });
+        yield* TestClock.adjust("11 minutes");
+        yield* log.info("b", { agentId: "B" });
+        yield* log.info("a", { agentId: "A" });
+        const lines = yield* printed;
+        expect(ticket(lines[4], "A")).toBe(ticket(lines[0], "A"));
+        expect(ticket(lines[3], "B")).not.toBe(ticket(lines[1], "B"));
+      }).pipe(Effect.provide(colored)),
   );
 });

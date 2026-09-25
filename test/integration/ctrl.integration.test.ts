@@ -1112,7 +1112,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     expect(created.stderr).toBe("");
     expect(created.code).toBe(0);
     // The Log service's stdout copy of the logs row; no agent, so [global].
-    expect(created.stdout).toBe(`[global] error type created; ${key}\n`);
+    expect(created.stdout).toBe(`[INFO] [global] error type created; ${key}\n`);
 
     const listed = await runCtrl(["error-type", "list"]);
     expect(listed.stderr).toBe("");
@@ -1199,7 +1199,7 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     ]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe(`[global] ${sessionId}: diagnosed; passed; composer-2.5\n`);
+    expect(result.stdout).toBe(`[INFO] [global] ${sessionId}: diagnosed; passed; composer-2.5\n`);
 
     const printed = await runCtrl(["session", "--session-id", sessionId, "--diagnosis"]);
     expect(printed.code).toBe(0);
@@ -1252,7 +1252,9 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     const first = await diagnose(key, "serial stops after the partition step");
     expect(first.stderr).toBe("");
     expect(first.code).toBe(0);
-    expect(first.stdout).toBe(`[global] ${sessionId}: diagnosed; failed; ${key}; composer-2.5\n`);
+    expect(first.stdout).toBe(
+      `[INFO] [global] ${sessionId}: diagnosed; failed; ${key}; composer-2.5\n`,
+    );
 
     const second = await diagnose(key, "on reflection");
     expect(second.code).toBe(1);
@@ -1321,7 +1323,9 @@ Postgres.describeWithDatabase("./ctrl against the seeded database", () => {
     );
     expect(diagnosed.stderr).toBe("");
     expect(diagnosed.code).toBe(0);
-    expect(diagnosed.stdout).toBe(`[global] ${startSession}: diagnosed; passed; composer-2.5\n`);
+    expect(diagnosed.stdout).toBe(
+      `[INFO] [global] ${startSession}: diagnosed; passed; composer-2.5\n`,
+    );
   });
 
   it("session --search refuses a result nobody has and one no session has run yet", async () => {

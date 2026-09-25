@@ -521,6 +521,67 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
+    scoped.effect(
+      "LogStore lists a session's intent starts and ends in order, not its other lines or another session's",
+      () =>
+        Effect.gen(function* () {
+          const logs = yield* Logs.LogStore;
+          const sessionId = uuid();
+          const line = (text: string, location: string) =>
+            logs.insertLog({ text, level: "info", location, agentId: "OLI-9" });
+          yield* line("intent start; Click Lock.", sessionId);
+          yield* line("mouse move 0.4 0.4 in 130ms", sessionId);
+          yield* line("intent end", sessionId);
+          yield* line("intent start; somewhere else", uuid());
+          yield* line("intent start; Press Super+Escape.", sessionId);
+          const intents = yield* logs.listIntents(sessionId);
+          expect(intents.map((row) => row.text)).toEqual([
+            "intent start; Click Lock.",
+            "intent end",
+            "intent start; Press Super+Escape.",
+          ]);
+          expect(intents[0]?.createdAt).toBeInstanceOf(Date);
+          expect(yield* logs.listIntents(uuid())).toEqual([]);
+        }),
+    );
+
+    scoped.effect(
+      "ActionStore lists a session's newest actions oldest first, and none of another session's",
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions.SessionStore;
+          const actions = yield* Actions.ActionStore;
+          const sessionId = uuid();
+          const otherId = uuid();
+          yield* sessions.insertSession(sessionId, { iso: "x" }, "running");
+          yield* sessions.insertSession(otherId, { iso: "x" }, "running");
+          yield* sessions.registerAgent(`agent-${sessionId}`, sessionId);
+          yield* sessions.registerAgent(`agent-${otherId}`, otherId);
+          const send = (id: number, session: string) =>
+            actions.startAction({
+              sessionId: session,
+              agentId: `agent-${session}`,
+              request: { execute: "screendump", arguments: { filename: "x", format: "png" }, id },
+            });
+          const first = yield* send(1, sessionId);
+          yield* send(2, otherId);
+          const second = yield* send(3, sessionId);
+          const third = yield* send(4, sessionId);
+          yield* actions.finishAction(first, {
+            state: "completed",
+            response: { return: {}, id: 1 },
+          });
+          const recent = yield* actions.listRecentActions(sessionId, 2);
+          expect(recent.map((row) => row.id)).toEqual([second, third]);
+          expect(recent[0]).toMatchObject({ state: null, finishedAt: null });
+          const all = yield* actions.listRecentActions(sessionId, 10);
+          expect(all.map((row) => row.id)).toEqual([first, second, third]);
+          expect(all[0]?.state).toBe("completed");
+          expect(all[0]?.finishedAt).toBeInstanceOf(Date);
+          expect(yield* actions.listRecentActions(uuid(), 10)).toEqual([]);
+        }),
+    );
+
     scoped.effect("DebugLogStore snapshots each origin into sources", () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions.SessionStore;

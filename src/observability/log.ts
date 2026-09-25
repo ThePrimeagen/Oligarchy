@@ -1,5 +1,6 @@
 import {
   Cause,
+  Clock,
   Console,
   Context,
   Deferred,
@@ -13,6 +14,7 @@ import * as Logs from "../db/logs.ts";
 import * as ExternalFailure from "../external-failure.ts";
 import * as Errors from "../shared/errors.ts";
 import type * as Domain from "../shared/domain.ts";
+import * as Palette from "./palette.ts";
 import * as Render from "./render.ts";
 
 // location is a text bucket: a session UUID, Locations.server, Locations.automation, or
@@ -57,8 +59,6 @@ export type LogService = {
   readonly warning: (text: string, attribution?: Attribution) => Effect.Effect<void>;
   readonly error: (text: string, report?: Report) => Effect.Effect<void>;
   readonly fatal: (text: string, report?: Report) => Effect.Effect<void>;
-  readonly acquireColor: (agentId: string) => Effect.Effect<void>;
-  readonly releaseColor: (agentId: string) => Effect.Effect<void>;
   // Resolves when every offered row has been inserted or its failure reported.
   readonly flush: Effect.Effect<void>;
 };
@@ -150,27 +150,7 @@ const makeLog = (
       ErrorReporter.report(cause).pipe(
         Effect.provideService(ErrorReporter.CurrentErrorReporters, reporters),
       );
-    const palette = new Map<string, string>();
-    let next = 0;
-
-    // A colour belongs to a live session: acquired when it is created, released when it ends. A
-    // line for any other agent id (a refused start, a ctrl read) stays gray, as it always has.
-    const acquireColor = (agentId: string): void => {
-      if (palette.has(agentId)) {
-        return;
-      }
-      const taken = new Set(palette.values());
-      let pick = next;
-      for (let offset = 0; offset < Render.AGENT_COLORS.length; offset++) {
-        const index = (next + offset) % Render.AGENT_COLORS.length;
-        if (!taken.has(Render.AGENT_COLORS[index])) {
-          pick = index;
-          break;
-        }
-      }
-      palette.set(agentId, Render.AGENT_COLORS[pick]);
-      next = (pick + 1) % Render.AGENT_COLORS.length;
-    };
+    let palette = Palette.empty;
 
     const write = (line: Render.LogLine) => Console.log(Render.renderLogLine(line, colors));
 
@@ -182,8 +162,16 @@ const makeLog = (
       attribution: Attribution,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const color =
-          attribution.agentId === undefined ? undefined : palette.get(attribution.agentId);
+        let color: string | undefined;
+        if (attribution.agentId !== undefined) {
+          const touched = Palette.touch(
+            palette,
+            attribution.agentId,
+            yield* Clock.currentTimeMillis,
+          );
+          palette = touched.palette;
+          color = touched.color;
+        }
         yield* write(
           Object.assign(
             { text, level },
@@ -221,14 +209,6 @@ const makeLog = (
       warning: (text, attribution = {}) => emit("warning", text, attribution),
       error: reported("error"),
       fatal: reported("fatal"),
-      acquireColor: (agentId) =>
-        Effect.sync(() => {
-          acquireColor(agentId);
-        }),
-      releaseColor: (agentId) =>
-        Effect.sync(() => {
-          palette.delete(agentId);
-        }),
       flush,
     } satisfies LogService;
   });

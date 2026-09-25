@@ -308,7 +308,7 @@ describe("automation client startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[automation-client] automation-client: fatal: automation client: "),
+        line.startsWith("[FATAL] [automation-client] automation-client: automation client: "),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("database unreachable");
@@ -330,7 +330,7 @@ describeWithDatabase("automation client startup refusals with a database", () =>
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[automation-client] automation-client: fatal: automation client: "),
+          line.startsWith("[FATAL] [automation-client] automation-client: automation client: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);

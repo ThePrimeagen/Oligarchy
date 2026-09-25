@@ -56,7 +56,6 @@ const ServerLive = (port: number, models: { drive: string; diagnose: string; min
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.acquireColor(Log.AutomationAgentId);
       yield* log.info(
         `automation server listening on ${HOST}:${String(port)}; drive ${models.drive}; diagnose ${models.diagnose}; mint ${models.mint}`,
         automationAttr,

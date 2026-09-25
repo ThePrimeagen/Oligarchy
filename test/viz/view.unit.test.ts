@@ -1,23 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { Option } from "effect";
 import * as Follow from "../../src/viz/follow.ts";
+import type * as Text from "../../src/viz/text.ts";
+import type * as Trail from "../../src/viz/trail.ts";
 import * as View from "../../src/viz/view.ts";
 import {
   at,
+  COLUMNS,
   diagnosing,
   EMPTY_QUEUE,
   failed,
   garage,
   key,
+  mouse,
   pending,
   QUEUE,
+  QUERIED_AT,
+  ROWS,
   running,
   runner,
   READ_AT,
+  sendKey,
   SESSION_ID,
   shown,
   SNAPSHOT,
 } from "../support/viz.ts";
+
+const textOf = (row: Text.Row): string => row.map((piece) => piece.text).join("");
 
 const fleet = Array.from({ length: 6 }, (_, index) => ({
   ...garage,
@@ -487,5 +496,130 @@ describe("sheets", () => {
     expect(pressed.confirm).toEqual(Option.some(asked));
     expect(View.press(both, key("escape")).confirm).toEqual(Option.none());
     expect(View.press(both, key("escape")).sheet).toEqual(Option.some(sheet));
+  });
+});
+
+describe("log pane", () => {
+  const MINUTE = 60_000;
+  const line = (
+    id: number,
+    agentId: string | null,
+    level: View.StoredLog["level"] = "info",
+  ): View.StoredLog => ({ id, level, text: `line ${String(id)}`, location: null, agentId });
+  const board = shown(SNAPSHOT, { tab: "automation" });
+  const body = (view: View.View): ReadonlyArray<Text.Row> =>
+    View.screen(view, READ_AT, COLUMNS, ROWS).body;
+  // The colour the pane paints a ticket in.
+  const colorIn = (view: View.View, ticket: string): string | undefined =>
+    body(view)
+      .flat()
+      .find((piece) => piece.text === ticket)?.color;
+  const tickets = Array.from({ length: 10 }, (_, index) => `OLI-${String(61 + index)}`);
+
+  it("a ticket keeps its colour from one pull to the next, and a new ticket takes the next one", () => {
+    const first = View.withLogs(board, [line(1, "OLI-61"), line(2, "OLI-62")], READ_AT);
+    const second = View.withLogs(first, [line(3, "OLI-63"), line(4, "OLI-61")], READ_AT + 1_000);
+    expect(colorIn(first, "OLI-61")).not.toBe(colorIn(first, "OLI-62"));
+    expect(colorIn(second, "OLI-61")).toBe(colorIn(first, "OLI-61"));
+    expect(colorIn(second, "OLI-63")).not.toBe(colorIn(second, "OLI-61"));
+    expect(colorIn(second, "OLI-63")).not.toBe(colorIn(first, "OLI-62"));
+  });
+
+  it("opens each line with its level in capitals and brackets", () => {
+    const view = View.withLogs(
+      board,
+      [line(1, "OLI-61", "warning"), line(2, null, "error"), line(3, "OLI-62")],
+      READ_AT,
+    );
+    const text = body(view).map(textOf).join("\n");
+    expect(text).toContain("[WARN] [OLI-61] line 1");
+    expect(text).toContain("[ERROR] [global] line 2");
+    expect(text).toContain("[INFO] [OLI-62] line 3");
+  });
+
+  it("a ticket gone from the tail for an hour gives its colour to the next new one (unhappy)", () => {
+    const first = View.withLogs(
+      board,
+      tickets.map((ticket, index) => line(index + 1, ticket)),
+      READ_AT,
+    );
+    const stillHere = tickets.filter((ticket) => ticket !== "OLI-63");
+    const second = View.withLogs(
+      first,
+      stillHere.map((ticket, index) => line(20 + index, ticket)),
+      READ_AT + 30 * MINUTE,
+    );
+    const third = View.withLogs(
+      second,
+      [line(40, "OLI-71"), ...stillHere.map((ticket, index) => line(41 + index, ticket))],
+      READ_AT + 61 * MINUTE,
+    );
+    expect(colorIn(third, "OLI-71")).toBe(colorIn(first, "OLI-63"));
+    expect(colorIn(third, "OLI-61")).toBe(colorIn(first, "OLI-61"));
+  });
+
+  it("a line with no ticket takes no colour from the ones that follow (unhappy)", () => {
+    const alone = View.withLogs(board, [line(1, "OLI-61")], READ_AT);
+    const after = View.withLogs(board, [line(1, null), line(2, "OLI-61")], READ_AT);
+    expect(colorIn(after, "OLI-61")).toBe(colorIn(alone, "OLI-61"));
+  });
+});
+
+describe("intent pane", () => {
+  const PANE = Math.floor((COLUMNS - 4 - 30 - 3) / 2);
+  const timed = (left: string, took: string): string => `${left.padEnd(PANE - took.length)}${took}`;
+  // The lower half of the automation body, the pane beside the client column.
+  const pane = (view: View.View, now: number): ReadonlyArray<string> =>
+    View.screen(view, now, COLUMNS, ROWS)
+      .body.slice(15)
+      .map((row) =>
+        textOf(row)
+          .slice(30, 30 + PANE)
+          .trimEnd(),
+      )
+      .filter((row) => row !== "");
+  // The running drive under the runner, selected.
+  const board = shown(SNAPSHOT, {
+    tab: "automation",
+    cursor: { servers: 0, clients: 1, queue: 0 },
+  });
+  const stamped = (ms: number): Date => new Date(QUERIED_AT.getTime() + ms);
+
+  it("lists the selected ticket's session newest first, timed on the database's clock", () => {
+    const trail: Trail.Trail = {
+      sessionId: SESSION_ID,
+      intents: [{ text: "intent start; Click Lock.", createdAt: stamped(0) }],
+      actions: [
+        {
+          id: 1,
+          request: mouse,
+          state: "completed",
+          createdAt: stamped(100),
+          finishedAt: stamped(400),
+        },
+        { id: 2, request: sendKey, state: null, createdAt: stamped(4_000), finishedAt: null },
+      ],
+      image: Option.none(),
+    };
+    // Five seconds after the board was read is five seconds after the database's now.
+    const rows = pane({ ...board, trail: Option.some(trail) }, READ_AT + 5_000);
+    expect(rows).toEqual([
+      `${View.spinnerAt(READ_AT + 5_000)} Click Lock.`,
+      timed(`  ${View.spinnerAt(READ_AT + 5_000)} send-key`, "1.0s"),
+      timed("  · processing", "3.6s"),
+      timed("  ✓ input-send-event", "0.3s"),
+    ]);
+  });
+
+  it("before the first read the pane shows the job's open step, and with none says so (unhappy)", () => {
+    const stepped = {
+      ...board,
+      snapshot: Option.some({
+        ...SNAPSHOT,
+        queue: { ...SNAPSHOT.queue, running: [{ ...running, intent: "Click Lock." }] },
+      }),
+    };
+    expect(pane(stepped, READ_AT)).toEqual(["Click Lock."]);
+    expect(pane(board, READ_AT)).toEqual(["no intent"]);
   });
 });

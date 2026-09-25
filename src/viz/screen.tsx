@@ -200,6 +200,7 @@ const Peek = (props: {
 // rest, and the last row for the way out or a notice.
 const FullFollow = (props: {
   readonly follow: Follow.Full;
+  readonly now: number;
   readonly notice: Option.Option<string>;
   readonly columns: number;
   readonly rows: number;
@@ -210,7 +211,7 @@ const FullFollow = (props: {
     <Line row={Follow.fullHeader(props.follow)} />
     <box flexDirection="row" flexGrow={1} minHeight={0}>
       <box width={Follow.LEFT_COLS - 1} flexShrink={0} flexDirection="column">
-        <Index each={Follow.fullEntries(props.follow, props.rows - 2)}>
+        <Index each={Follow.fullEntries(props.follow, props.rows - 2, props.now)}>
           {(row) => <Line row={row()} />}
         </Index>
       </box>
@@ -474,6 +475,7 @@ export const App = (props: Props) => {
         {(found: Accessor<Follow.Full>) => (
           <FullFollow
             follow={found()}
+            now={props.now()}
             notice={props.view().notice}
             columns={dimensions().width}
             rows={dimensions().height}

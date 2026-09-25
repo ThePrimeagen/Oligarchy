@@ -58,7 +58,6 @@ const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Opt
   Layer.effectDiscard(
     Effect.gen(function* () {
       const log = yield* Log.Log;
-      yield* log.acquireColor(Log.AutomationClientAgentId);
       yield* log.info(
         `automation client listening on ${HOST}:${String(port)}; name ${name}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
         automationClientAttr,

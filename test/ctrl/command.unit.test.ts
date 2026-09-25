@@ -1935,7 +1935,6 @@ describe("test start", () => {
         sessionId: SESSION_ID,
         model: MODEL,
       });
-      // The line belongs to the session alone: no agent, so no palette colour is taken.
       expect(h.log.lines).toEqual([
         {
           level: "info",
@@ -1946,7 +1945,6 @@ describe("test start", () => {
           cause: undefined,
         },
       ]);
-      expect(h.log.acquired).toEqual([]);
       expect(yield* stdout).toEqual([]);
     }),
   );
@@ -2096,8 +2094,6 @@ describe("test-results", () => {
           cause: undefined,
         },
       ]);
-      // v1 took the agent's palette colour before its line, so the line renders in colour.
-      expect(h.log.acquired).toEqual(["agent-1"]);
     }),
   );
 
@@ -2153,7 +2149,6 @@ describe("test-results", () => {
         expect(h.log.lines.map((line) => [line.text, line.location, line.agentId])).toEqual([
           [`test result ${RESULT_ID}: failed; installer hung`, undefined, "agent-1"],
         ]);
-        expect(h.log.acquired).toEqual(["agent-1"]);
       }),
   );
 
@@ -2176,7 +2171,6 @@ describe("test-results", () => {
         message: `test-results: result ${RESULT_ID} not found`,
       });
       expect(h.log.lines).toEqual([]);
-      expect(h.log.acquired).toEqual([]);
     }),
   );
 
@@ -2201,7 +2195,6 @@ describe("test-results", () => {
       });
       expect(h.stores.tests.results[0]?.status).toBe("aborted");
       expect(h.log.lines).toEqual([]);
-      expect(h.log.acquired).toEqual([]);
     }),
   );
 
@@ -2690,7 +2683,6 @@ describe("diagnose", () => {
       });
       expect(h.stores.diagnosis.diagnoses[0]?.createdAt).toBeInstanceOf(Date);
       expect(h.log.lines).toEqual([diagnoseLine(`diagnosed; failed; ${bootHang.key}; ${MODEL}`)]);
-      expect(h.log.acquired).toEqual([]);
       expect(yield* stdout).toEqual([]);
       expect(h.touched).toEqual(["database"]);
     }),

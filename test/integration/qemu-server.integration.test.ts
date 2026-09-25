@@ -298,7 +298,7 @@ describe("qemu server startup refusals", () => {
         expect(code).toBe(1);
         const output = lines(server.stdout());
         const fatal = output.findIndex(
-          (line) => line === "[global] server: fatal: qemu server: missing host requirements:",
+          (line) => line === "[FATAL] [global] server: qemu server: missing host requirements:",
         );
         expect(fatal, server.stdout()).toBeGreaterThanOrEqual(0);
         expect(output.slice(fatal + 1).length).toBeGreaterThan(0);
@@ -314,7 +314,7 @@ describe("qemu server startup refusals", () => {
       const { code } = await server.exited;
       expect(code).toBe(1);
       const fatal = lines(server.stdout()).find((line) =>
-        line.startsWith("[global] server: fatal: qemu server: database unreachable:"),
+        line.startsWith("[FATAL] [global] server: qemu server: database unreachable:"),
       );
       expect(fatal, server.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
@@ -332,7 +332,7 @@ describe("qemu server startup refusals", () => {
         const { code } = await server.exited;
         expect(code).toBe(1);
         const fatal = lines(server.stdout()).find((line) =>
-          line.startsWith("[global] server: fatal: qemu server: "),
+          line.startsWith("[FATAL] [global] server: qemu server: "),
         );
         expect(fatal, server.stdout()).toBeDefined();
         expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);
@@ -398,9 +398,11 @@ describe("qemu server serving", () => {
       const { code } = await server.exited;
       expect(code, server.stdout()).toBe(0);
       const output = lines(server.stdout());
-      expect(output).toContain("[global] server: qemu server: shutting down; stopping 0 sessions");
-      expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
-      expect(output).toContain("[global] server: error: GET /stats failed: unauthorized");
+      expect(output).toContain(
+        "[INFO] [global] server: qemu server: shutting down; stopping 0 sessions",
+      );
+      expect(output).toContain("[ERROR] [global] server: POST /send-keys failed: unauthorized");
+      expect(output).toContain("[ERROR] [global] server: GET /stats failed: unauthorized");
       expect(output.some((line) => line.includes("GET /nope"))).toBe(false);
       expect(server.stderr()).toBe("");
 
@@ -463,7 +465,7 @@ describe("qemu server serving", () => {
       serving(
         [],
         (port, dataDir) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; max jobs 1; data ${dataDir}`,
+          `[INFO] [global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; max jobs 1; data ${dataDir}`,
         "SIGINT",
       ),
     120_000,
@@ -475,7 +477,7 @@ describe("qemu server serving", () => {
       serving(
         ["--automation", "--data-dir", "/tmp/oligarchy-data-flag-test"],
         (port) =>
-          `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; automation; max jobs 1; data /tmp/oligarchy-data-flag-test`,
+          `[INFO] [global] server: qemu server listening on 127.0.0.1:${String(port)}; name garage; display none; automation; max jobs 1; data /tmp/oligarchy-data-flag-test`,
         "SIGTERM",
       ),
     120_000,
@@ -521,7 +523,7 @@ describe("qemu server serving", () => {
         const { row, reading } = yield* Effect.gen(function* () {
           yield* Effect.promise(() => server.waitFor(/qemu server listening/));
           expect(lines(server.stdout())).toContain(
-            `[global] server: qemu server listening on 127.0.0.1:${String(port)}; name ${name}; display none; automation; max jobs 1; announcing ${url}; data ${server.dataDir}`,
+            `[INFO] [global] server: qemu server listening on 127.0.0.1:${String(port)}; name ${name}; display none; automation; max jobs 1; announcing ${url}; data ${server.dataDir}`,
           );
           // The first heartbeat is written right after the listen line; the insert takes a moment.
           // process_stats is the second write, so waiting for it means the servers row is there.

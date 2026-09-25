@@ -424,7 +424,6 @@ const make = (maxJobs: number, selfUrl?: string) =>
       Effect.gen(function* () {
         yield* Ref.update(openSessions, (map) => mapWithout(map, [live.id]));
         yield* Ref.update(slots, (held) => ({ ...held, count: held.count - 1 }));
-        yield* log.releaseColor(live.agent);
         for (const span of yield* Ref.get(live.actionSpans)) {
           yield* settleActionSpan(live, span, "failed");
         }
@@ -669,7 +668,6 @@ const make = (maxJobs: number, selfUrl?: string) =>
         actionSpans: yield* Ref.make<ReadonlySet<Tracer.Span>>(new Set()),
       };
       yield* Ref.update(openSessions, (map) => mapWith(map, id, live));
-      yield* log.acquireColor(agent);
       // A minted disk boots itself: nothing to download, so the row is running from the start.
       yield* sessionStore
         .insertSession(

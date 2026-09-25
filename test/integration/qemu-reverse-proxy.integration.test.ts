@@ -197,7 +197,7 @@ describe("qemu reverse proxy startup refusals", () => {
       const { code } = await process.exited;
       expect(code).toBe(1);
       const fatal = lines(process.stdout()).find((line) =>
-        line.startsWith("[global] server: fatal: qemu reverse proxy: database unreachable:"),
+        line.startsWith("[FATAL] [global] server: qemu reverse proxy: database unreachable:"),
       );
       expect(fatal, process.stdout()).toBeDefined();
       expect(fatal).toContain("ECONNREFUSED");
@@ -215,7 +215,7 @@ describe("qemu reverse proxy startup refusals", () => {
         const { code } = await process.exited;
         expect(code).toBe(1);
         const fatal = lines(process.stdout()).find((line) =>
-          line.startsWith("[global] server: fatal: qemu reverse proxy: "),
+          line.startsWith("[FATAL] [global] server: qemu reverse proxy: "),
         );
         expect(fatal, process.stdout()).toBeDefined();
         expect(fatal).toContain(`Failed to start server. Is port ${String(port)} in use?`);
@@ -244,7 +244,7 @@ describe("qemu reverse proxy serving", () => {
     try {
       await process.waitFor(/qemu reverse proxy listening/);
       expect(lines(process.stdout())).toContain(
-        `[global] server: qemu reverse proxy listening on 127.0.0.1:${String(port)}`,
+        `[INFO] [global] server: qemu reverse proxy listening on 127.0.0.1:${String(port)}`,
       );
 
       const servers = await request(port, "GET", "/servers", {
@@ -305,13 +305,13 @@ describe("qemu reverse proxy serving", () => {
     const { code } = await process.exited;
     expect(code, process.stdout()).toBe(0);
     const output = lines(process.stdout());
-    expect(output).toContain("[global] server: error: POST /send-keys failed: unauthorized");
-    expect(output).toContain("[OLI-1] server: error: POST /reserve failed: no server registered");
-    expect(output).toContain("[OLI-1] server: error: POST /start failed: no reservation");
+    expect(output).toContain("[ERROR] [global] server: POST /send-keys failed: unauthorized");
+    expect(output).toContain("[ERROR] [OLI-1] server: POST /reserve failed: no server registered");
+    expect(output).toContain("[ERROR] [OLI-1] server: POST /start failed: no reservation");
     expect(
       output.some((line) =>
         line.startsWith(
-          "[global] server: error: POST /servers failed: server http://127.0.0.1:1 unreachable:",
+          "[ERROR] [global] server: POST /servers failed: server http://127.0.0.1:1 unreachable:",
         ),
       ),
     ).toBe(true);
@@ -378,7 +378,7 @@ describe("qemu reverse proxy serving", () => {
         expect(yield* fleet).toEqual([LIVE, DEAD_CLIENT].sort());
         const output = lines(process.stdout());
         expect(output.filter((line) => line.includes("server forgotten"))).toEqual([
-          "[global] server: server forgotten; http://10.0.0.40:1 silent for 10 minutes",
+          "[INFO] [global] server: server forgotten; http://10.0.0.40:1 silent for 10 minutes",
         ]);
         expect(process.stderr()).toBe("");
       }).pipe(Effect.provide(Postgres.DatabaseLive(dbUrl))),

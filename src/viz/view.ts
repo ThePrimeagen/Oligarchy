@@ -2,11 +2,13 @@ import { Duration, Option } from "effect";
 import type * as Automation from "../db/automation.ts";
 import type * as ProcessStats from "../db/process-stats.ts";
 import type * as Servers from "../db/servers.ts";
+import * as Palette from "../observability/palette.ts";
 import * as Render from "../observability/render.ts";
 import type * as Domain from "../shared/domain.ts";
 import * as Follow from "./follow.ts";
 import * as Steps from "./steps.ts";
 import * as Text from "./text.ts";
+import * as Trail from "./trail.ts";
 
 // The terminal this view is laid out for: a card's header fits its host numbers beside a name
 // and a url across 135 columns, with 33 columns left to each of its three graphs, and 37 rows
@@ -141,22 +143,38 @@ export type StoredLog = {
   readonly agentId: string | null;
 };
 
-export const logText = (row: StoredLog): string =>
-  Render.renderLogLine(
-    {
-      text: row.text,
-      level: row.level,
-      ...(row.location === null ? {} : { location: row.location }),
-      ...(row.agentId === null ? {} : { agentId: row.agentId }),
-    },
-    false,
+// A pull's rows, oldest first, through the palette the way stdout's lines go through the
+// process's: each ticket keeps the colour it first took, and one gone from the tail for an hour
+// gives it back.
+export const withLogs = (view: View, rows: ReadonlyArray<StoredLog>, now: number): View => ({
+  ...view,
+  logs: rows,
+  palette: rows.reduce(
+    (held, row) => (row.agentId === null ? held : Palette.touch(held, row.agentId, now).palette),
+    view.palette,
+  ),
+});
+
+const logRow = (row: StoredLog, palette: Palette.Palette): Text.Row => {
+  const { agentId, location } = row;
+  const color =
+    agentId === null ? undefined : Option.getOrUndefined(Palette.colorOf(palette, agentId));
+  return Render.logPieces(
+    Object.assign(
+      { text: row.text, level: row.level },
+      location === null ? undefined : { location },
+      agentId === null ? undefined : { agentId },
+      color === undefined ? undefined : { color },
+    ),
   );
+};
 
 // snapshot is absent until the first read lands; failure is the last read's reason, cleared by
 // the next good read, so a database outage leaves the last picture up with the reason under it.
 // notice is what the last key had to say (the ticket L opened, or why it could not), retired by
 // the next key. follow is the job F is looking at: a peek over the board, or the whole screen.
-// session is that job's calls and image. logs is every stored log line, oldest first, drawn in
+// trail is the selected ticket's session as the database has it: its steps, actions and last
+// image. logs is every stored log line, oldest first, drawn in
 // the main area; sessionNote is why that pane is empty when no line has landed. confirm is a's
 // question while it is up; popup is what a had to say about a job that could not be aborted, up
 // until its time is over. sheet is
@@ -169,9 +187,10 @@ export type View = {
   readonly failure: Option.Option<string>;
   readonly notice: Option.Option<string>;
   readonly follow: Option.Option<Follow.Follow>;
-  readonly session: Option.Option<Follow.Follow>;
+  readonly trail: Option.Option<Trail.Trail>;
   readonly sessionNote: Option.Option<string>;
   readonly logs: ReadonlyArray<StoredLog>;
+  readonly palette: Palette.Palette;
   readonly confirm: Option.Option<Confirm>;
   readonly popup: Option.Option<Popup>;
   readonly sheet: Option.Option<Sheet>;
@@ -185,9 +204,10 @@ export const initialView: View = {
   failure: Option.none(),
   notice: Option.none(),
   follow: Option.none(),
-  session: Option.none(),
+  trail: Option.none(),
   sessionNote: Option.none(),
   logs: [],
+  palette: Palette.empty,
   confirm: Option.none(),
   popup: Option.none(),
   sheet: Option.none(),
@@ -1278,32 +1298,14 @@ const automationRows = (
     const job = jobsOn(snapshot, entry.machine)[entry.job.value];
     // Twenty-seven columns: the indent, the marker, the ticket, then the spinner, the step
     // (n/total) when there is one, and how long it has run. "1/2 10m 31s" fills what is left;
-    // clip bounds the line. The selected client's open follow wins over the polled intent, and
-    // a follow with nothing still open shows no step rather than a stale poll.
+    // clip bounds the line. The selected ticket's session, read every second, wins over the
+    // board's polled intent: it has every step said, so a repeated line is the copy already
+    // reached, and once the newest step has ended it shows no step rather than a stale poll.
     const color = ACTION_COLOR[job.action];
-    const follow = Option.getOrNull(view.session);
-    // The open follow has every intent still on screen, so a repeated line is the copy
-    // those intents have reached. Only a newest intent that is still open counts: the
-    // server refuses a second start, and an older one left marked running is not the step.
-    // A follow with nothing still open shows no step.
+    const trail = Option.getOrNull(view.trail);
     let messages: ReadonlyArray<string> = job.intent === null ? [] : [job.intent];
-    if (
-      on &&
-      job.ticket !== null &&
-      follow !== null &&
-      follow._tag === "full" &&
-      follow.ticket === job.ticket
-    ) {
-      const said: Array<string> = [];
-      let open = false;
-      for (const found of follow.entries) {
-        if (found.id !== "intent") {
-          continue;
-        }
-        said.push(found.name);
-        open = found.state === "running";
-      }
-      messages = open ? said : [];
+    if (on && trail !== null && trail.sessionId === job.sessionId) {
+      messages = Trail.steps(trail, job.status === "running");
     }
     const place = stepPlace(job, messages);
     const counted = count(job.startedAt, job.queriedAt, drift);
@@ -1324,8 +1326,14 @@ const automationRows = (
     (found) => found.type === "automation-client" && found.name === entries[cursor]?.machine.name,
   );
   // Top half: the log tail on the left of the graph, the same number of rows.
-  // Bottom half: the open intent on the left of the guest image.
-  const png = Option.flatMap(view.session, (follow) => follow.png);
+  // Bottom half: the selected ticket's steps and actions on the left of the guest image.
+  // The last read may still be the ticket the marker just left.
+  const selected = Option.getOrNull(selectedJob(view));
+  const png = Option.flatMap(view.trail, (trail) =>
+    selected !== null && trail.sessionId === selected.sessionId
+      ? Option.map(trail.image, (shown) => shown.png)
+      : Option.none(),
+  );
   const top = Math.floor(height / 2);
   const bottom = height - top;
   const afterClient = inner - 30;
@@ -1333,7 +1341,7 @@ const automationRows = (
   const graphWidth = afterClient - 3 - logWidth;
   const plotted = usage(series?.samples ?? [], graphWidth, top);
   const logs = sessionPane(view, top, logWidth);
-  const intent = intentPane(view, bottom, logWidth);
+  const intent = intentPane(view, bottom, logWidth, now, drift);
   const rows = Array.from({ length: height }, (_, row) => {
     const line = left[from + row] ?? [Text.SPACE];
     const client = clip(line, 27);
@@ -1360,130 +1368,105 @@ const automationRows = (
   };
 };
 
-// Breaks on a space when one fits, otherwise mid-word, and never drops a character.
-const wrapLog = (text: string, width: number): ReadonlyArray<string> => {
-  const plain = Text.clean(text);
-  if (plain.length === 0 || width < 1) {
-    return [plain];
+// The characters from..to of a row, each keeping its colour.
+const sliceRow = (row: Text.Row, from: number, to: number): Text.Row => {
+  const kept: Array<Text.Piece> = [];
+  let at = 0;
+  for (const piece of row) {
+    const end = at + piece.text.length;
+    const start = Math.max(from, at);
+    const stop = Math.min(to, end);
+    if (start < stop) {
+      kept.push({ ...piece, text: piece.text.slice(start - at, stop - at) });
+    }
+    at = end;
   }
-  const lines: Array<string> = [];
-  let rest = plain;
-  while (rest.length > width) {
-    const at = rest.lastIndexOf(" ", width);
-    const cut = at > 0 ? at : width;
-    lines.push(rest.slice(0, cut));
-    rest = rest.slice(at > 0 ? cut + 1 : cut);
-  }
-  if (rest.length > 0) {
-    lines.push(rest);
-  }
-  return lines;
+  return kept;
 };
 
-// The tail of every log row. Stdout prints the same text, so a download's lines show up here
-// as they are stored, newest on the last row. The step stays on the running row and in the
-// full follow.
-const openIntent = (view: View): string | undefined => {
-  const follow = Option.getOrNull(view.session);
-  if (follow !== null && follow._tag === "full") {
-    const running = follow.entries.findLast(
-      (entry) => entry.id === "intent" && entry.state === "running",
-    );
-    if (running !== undefined) {
-      return running.name;
-    }
+// Breaks on a space when one fits, otherwise mid-word, and never drops a character; a colour
+// carries across the break.
+const wrapRow = (row: Text.Row, width: number): ReadonlyArray<Text.Row> => {
+  const cleaned = row.map((piece) => ({ ...piece, text: Text.clean(piece.text) }));
+  const plain = cleaned.map((piece) => piece.text).join("");
+  if (plain.length === 0 || width < 1) {
+    return [cleaned];
   }
-  const job = Option.getOrNull(selectedJob(view));
-  if (job !== null && job.intent !== null) {
-    return job.intent;
+  const lines: Array<Text.Row> = [];
+  let start = 0;
+  while (plain.length - start > width) {
+    const at = plain.lastIndexOf(" ", start + width);
+    const cut = at > start ? at : start + width;
+    lines.push(sliceRow(cleaned, start, cut));
+    start = at > start ? cut + 1 : cut;
   }
-  if (follow !== null && follow._tag === "full") {
-    return follow.entries.findLast((entry) => entry.id === "intent")?.name;
+  if (start < plain.length) {
+    lines.push(sliceRow(cleaned, start, plain.length));
   }
-  return undefined;
+  return lines;
 };
 
 const filled = (
   height: number,
   width: number,
-  lines: ReadonlyArray<string>,
+  rows: ReadonlyArray<Text.Row>,
   empty: string,
   newestLast: boolean,
 ): ReadonlyArray<Text.Row> => {
   const blank = (): Text.Row => [Text.value(Text.fit("", width))];
-  const cell = (text: string, muted = false): Text.Row => [
-    muted ? Text.muted(Text.fit(text, width)) : Text.value(Text.fit(text, width)),
-  ];
-  if (lines.length === 0) {
-    return Array.from({ length: height }, (_, row) => (row === 0 ? cell(empty, true) : blank()));
+  if (rows.length === 0) {
+    return Array.from({ length: height }, (_, row) =>
+      row === 0 ? [Text.muted(Text.fit(empty, width))] : blank(),
+    );
   }
-  const fitted = lines.slice(-height);
+  const fitted = rows.slice(-height);
   const pad = newestLast ? height - fitted.length : 0;
   return Array.from({ length: height }, (_, row) => {
     const line = fitted[row - pad];
-    return line === undefined ? blank() : cell(line);
+    return line === undefined ? blank() : clip(line, width);
   });
 };
 
+// Each line coloured as stdout colours it, the ticket in its colour from the palette.
 const sessionPane = (view: View, height: number, width: number): ReadonlyArray<Text.Row> => {
   const note = view.logs.length === 0 ? Option.getOrElse(view.sessionNote, () => "no logs") : "";
-  const lines =
-    view.logs.length === 0 ? [] : view.logs.flatMap((row) => wrapLog(logText(row), width));
-  return filled(height, width, lines, note, true);
+  const rows = view.logs.flatMap((row) => wrapRow(logRow(row, view.palette), width));
+  return filled(height, width, rows, note, true);
 };
 
-const markOf = (state: Follow.Entry["state"], glyph: string): string => {
-  if (state === "completed") {
-    return "✓";
-  }
-  if (state === "failed") {
-    return "✗";
-  }
-  return glyph;
-};
-
-// The open intent, then the actions recorded under it. A peek that has not streamed yet
-// shows the commands it already has.
-const intentLines = (view: View, width: number): ReadonlyArray<string> => {
-  const follow = Option.getOrNull(view.session);
-  if (follow !== null && follow._tag === "full") {
-    const glyph = Follow.SPINNER[follow.frame % Follow.SPINNER.length] ?? "⠋";
-    const at = follow.entries.findLastIndex((entry) => entry.id === "intent");
-    const intent = at === -1 ? undefined : follow.entries[at];
-    const actions =
-      at === -1
-        ? follow.entries.filter((entry) => entry.id !== "intent")
-        : follow.entries.slice(at + 1);
-    const lines: Array<string> = [];
-    if (intent !== undefined) {
-      lines.push(...wrapLog(`${markOf(intent.state, glyph)} ${intent.name}`, width));
-    }
-    for (const action of actions) {
-      if (action.id === "intent") {
-        continue;
-      }
-      lines.push(...wrapLog(`  ${markOf(action.state, glyph)} ${action.name}`, width));
-    }
-    if (lines.length > 0) {
-      return lines;
+// The selected ticket's session, newest step first, timed on the database's clock (the board's
+// read plus the time since). Before the first read, or with nothing in it yet, the job's own
+// open step from the board.
+const intentPane = (
+  view: View,
+  height: number,
+  width: number,
+  now: number,
+  drift: number,
+): ReadonlyArray<Text.Row> => {
+  const job = Option.getOrNull(selectedJob(view));
+  const trail = Option.getOrNull(view.trail);
+  if (job !== null && trail !== null && trail.sessionId === job.sessionId) {
+    const rows = Trail.rows(
+      trail,
+      job.queriedAt.getTime() + drift,
+      job.status === "running",
+      spinnerAt(now),
+      width,
+      height,
+    );
+    if (rows.length > 0) {
+      return filled(height, width, rows, "", false);
     }
   }
-  if (follow !== null && follow._tag === "peek" && follow.commands.length > 0) {
-    return follow.commands.flatMap((command) => wrapLog(`  ✓ ${command.name}`, width));
-  }
-  const said = openIntent(view);
-  return said === undefined ? [] : wrapLog(said, width);
-};
-
-const intentPane = (view: View, height: number, width: number): ReadonlyArray<Text.Row> => {
-  const lines = intentLines(view, width);
-  const intentCount = lines.findIndex((line) => line.startsWith("  "));
-  const head = intentCount === -1 ? lines : lines.slice(0, intentCount);
-  const actions = intentCount === -1 ? [] : lines.slice(intentCount);
-  const keptHead = head.slice(0, height);
-  const actionRoom = height - keptHead.length;
-  const kept = [...keptHead, ...actions.slice(-Math.max(0, actionRoom))];
-  return filled(height, width, kept, "no intent", false);
+  const open = job?.intent ?? null;
+  return filled(
+    height,
+    width,
+    open === null ? [] : wrapRow([Text.value(open)], width),
+    "no intent",
+    false,
+  );
 };
 
 const ticketRows = (

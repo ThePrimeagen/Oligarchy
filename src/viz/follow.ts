@@ -41,6 +41,7 @@ export const commandName = (request: unknown): string =>
 export type Command = {
   readonly name: string;
   readonly at: Date;
+  readonly finishedAt: Option.Option<Date>;
 };
 
 // What F shows first: the selected job's last three commands and its last screenshot, read
@@ -55,12 +56,16 @@ export type Peek = {
 };
 
 // One row of the live follow: an intent the agent announced, or an action it sent, indented
-// under the intent it belongs to. The peek's commands come first with negative ids.
+// under the intent it belongs to. The peek's commands come first with negative ids. The stamps
+// are the viz's clock when the start and the verdict arrived (the stream carries no times, and
+// it sends each event as it happens); a peek's commands carry the database's.
 export type Entry = {
   readonly id: number | "intent";
   readonly indent: 0 | 2;
   readonly name: string;
   readonly state: "running" | "completed" | "failed";
+  readonly startedAt: number;
+  readonly finishedAt: Option.Option<number>;
 };
 
 // The whole screen following one session as the qemu server streams it; frame turns the
@@ -82,7 +87,11 @@ export const peekFromActions = (
   ticket: string,
   sessionId: string,
   serverUrl: string | null,
-  actions: ReadonlyArray<{ readonly request: unknown; readonly createdAt: Date }>,
+  actions: ReadonlyArray<{
+    readonly request: unknown;
+    readonly createdAt: Date;
+    readonly finishedAt: Date | null;
+  }>,
   png: Option.Option<Uint8Array>,
 ): Peek => ({
   _tag: "peek",
@@ -92,9 +101,20 @@ export const peekFromActions = (
   commands: actions.slice(-3).map((action) => ({
     name: commandName(action.request),
     at: action.createdAt,
+    finishedAt: Option.fromNullishOr(action.finishedAt),
   })),
   png,
 });
+
+const peekEntries = (peek: Peek): ReadonlyArray<Entry> =>
+  peek.commands.map((command, index) => ({
+    id: -(index + 1),
+    indent: 0,
+    name: command.name,
+    state: "completed",
+    startedAt: command.at.getTime(),
+    finishedAt: Option.map(command.finishedAt, (at) => at.getTime()),
+  }));
 
 export const expand = (peek: Peek, serverUrl: string): Full => ({
   _tag: "full",
@@ -102,12 +122,7 @@ export const expand = (peek: Peek, serverUrl: string): Full => ({
   sessionId: peek.sessionId,
   serverUrl,
   status: "pending",
-  entries: peek.commands.map((command, index) => ({
-    id: -(index + 1),
-    indent: 0,
-    name: command.name,
-    state: "completed",
-  })),
+  entries: peekEntries(peek),
   png: peek.png,
   frame: 0,
 });
@@ -115,14 +130,24 @@ export const expand = (peek: Peek, serverUrl: string): Full => ({
 const bounded = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> =>
   entries.length > MAX_ENTRIES ? entries.slice(entries.length - MAX_ENTRIES) : entries;
 
+// What comes next sits under the newest intent while that intent is open.
+const underIntent = (entries: ReadonlyArray<Entry>): Entry["indent"] =>
+  entries.findLast((entry) => entry.id === "intent")?.state === "running" ? 2 : 0;
+
 const withState = (
   entries: ReadonlyArray<Entry>,
   index: number,
   state: Entry["state"],
+  at: number,
 ): ReadonlyArray<Entry> =>
-  index === -1 ? entries : entries.map((entry, at) => (at === index ? { ...entry, state } : entry));
+  index === -1
+    ? entries
+    : entries.map((entry, position) =>
+        position === index ? { ...entry, state, finishedAt: Option.some(at) } : entry,
+      );
 
-export const apply = (view: Full, event: Domain.FollowEvent): Full => {
+// `at` is the viz's clock when the event arrived.
+export const apply = (view: Full, event: Domain.FollowEvent, at: number): Full => {
   switch (event.type) {
     case "session":
       return { ...view, status: event.status };
@@ -132,7 +157,14 @@ export const apply = (view: Full, event: Domain.FollowEvent): Full => {
           ...view,
           entries: bounded([
             ...view.entries,
-            { id: "intent", indent: 0, name: event.message, state: "running" },
+            {
+              id: "intent",
+              indent: 0,
+              name: event.message,
+              state: "running",
+              startedAt: at,
+              finishedAt: Option.none(),
+            },
           ]),
         };
       }
@@ -142,20 +174,22 @@ export const apply = (view: Full, event: Domain.FollowEvent): Full => {
           view.entries,
           view.entries.findLastIndex((entry) => entry.id === "intent" && entry.state === "running"),
           event.state === "completed" ? "completed" : "failed",
+          at,
         ),
       };
     case "action":
       if (event.state === "running") {
-        const intent = view.entries.findLast((entry) => entry.id === "intent");
         return {
           ...view,
           entries: bounded([
             ...view.entries,
             {
               id: event.id,
-              indent: intent?.state === "running" ? 2 : 0,
+              indent: underIntent(view.entries),
               name: event.name,
               state: "running",
+              startedAt: at,
+              finishedAt: Option.none(),
             },
           ]),
         };
@@ -166,6 +200,7 @@ export const apply = (view: Full, event: Domain.FollowEvent): Full => {
           view.entries,
           view.entries.findIndex((entry) => entry.id === event.id),
           event.state,
+          at,
         ),
       };
     case "image":
@@ -206,7 +241,7 @@ export const fullHeader = (view: Full): Text.Row => [
 ];
 
 // A running entry turns the spinner, a completed one is a pine tick, a failed one a red cross.
-const mark = (state: Entry["state"], glyph: string): Text.Piece => {
+export const mark = (state: Entry["state"], glyph: string): Text.Piece => {
   if (state === "running") {
     return Text.muted(glyph);
   }
@@ -216,7 +251,7 @@ const mark = (state: Entry["state"], glyph: string): Text.Piece => {
   return Text.paint(Text.PALETTE.love, "✗");
 };
 
-const wrap = (text: string, width: number): ReadonlyArray<string> => {
+export const wrap = (text: string, width: number): ReadonlyArray<string> => {
   const plain = Text.clean(text).trim();
   if (plain.length === 0) {
     return [];
@@ -303,15 +338,98 @@ export const ticketRows = (
   ].slice(0, Math.max(0, height));
 };
 
-// The newest entries that fit in `height` rows, each its mark and its name cut to the column.
-export const fullEntries = (view: Full, height: number): ReadonlyArray<Text.Row> => {
-  const glyph = SPINNER[view.frame % SPINNER.length];
-  return view.entries
-    .slice(-height)
-    .map((entry): Text.Row => [
-      { text: " ".repeat(entry.indent) },
+// A row of the timeline: an entry with how long it took (an action that finished, or one still
+// running, up to now), or processing: the time from one action's end to the next one's start,
+// which the harness and its model spent deciding what to send.
+export type Line =
+  | { readonly _tag: "entry"; readonly entry: Entry; readonly took: Option.Option<number> }
+  | { readonly _tag: "processing"; readonly indent: Entry["indent"]; readonly took: number };
+
+// Processing sits just before the action it led to, so a gap that crosses into a new step is
+// under that step. An action without an end (a command the peek read mid-flight) starts no
+// processing. While the session runs, the time since the last action ended counts up at the end.
+export const timeline = (
+  entries: ReadonlyArray<Entry>,
+  now: number,
+  live: boolean,
+): ReadonlyArray<Line> => {
+  const lines: Array<Line> = [];
+  let last: Entry | undefined;
+  for (const entry of entries) {
+    if (entry.id === "intent") {
+      lines.push({ _tag: "entry", entry, took: Option.none() });
+      continue;
+    }
+    if (last !== undefined && Option.isSome(last.finishedAt)) {
+      lines.push({
+        _tag: "processing",
+        indent: entry.indent,
+        took: entry.startedAt - last.finishedAt.value,
+      });
+    }
+    const started = entry.startedAt;
+    lines.push({
+      _tag: "entry",
+      entry,
+      took:
+        entry.state === "running"
+          ? Option.some(now - started)
+          : Option.map(entry.finishedAt, (end) => end - started),
+    });
+    last = entry;
+  }
+  if (live && last !== undefined && Option.isSome(last.finishedAt)) {
+    lines.push({
+      _tag: "processing",
+      indent: underIntent(entries),
+      took: now - last.finishedAt.value,
+    });
+  }
+  return lines;
+};
+
+export const indentOf = (line: Line): number =>
+  line._tag === "processing" ? line.indent : line.entry.indent;
+
+// One timeline row after `indent` spaces: the mark and the name, and the time at the right edge
+// of `width` columns when there is one, gold while the action runs and muted once it is done.
+// Processing is muted from end to end.
+export const timelineRow = (line: Line, glyph: string, width: number, indent: number): Text.Row => {
+  const lead: Text.Piece = { text: " ".repeat(indent) };
+  if (line._tag === "processing") {
+    const took = Text.elapsed(line.took);
+    return [
+      lead,
+      Text.muted(`· ${Text.fit("processing", width - indent - 3 - took.length)} ${took}`),
+    ];
+  }
+  const { entry } = line;
+  const room = width - indent - 2;
+  return Option.match(line.took, {
+    onNone: (): Text.Row => [
+      lead,
       mark(entry.state, glyph),
       Text.SPACE,
-      Text.value(Text.cut(entry.name, LEFT_COLS - 3 - entry.indent)),
-    ]);
+      Text.value(Text.cut(entry.name, room)),
+    ],
+    onSome: (ms): Text.Row => {
+      const took = Text.elapsed(ms);
+      return [
+        lead,
+        mark(entry.state, glyph),
+        Text.SPACE,
+        Text.value(Text.fit(entry.name, room - took.length - 1)),
+        Text.SPACE,
+        entry.state === "running" ? Text.paint(Text.PALETTE.gold, took) : Text.muted(took),
+      ];
+    },
+  });
+};
+
+// The newest timeline rows that fit in `height`, each cut to the column.
+export const fullEntries = (view: Full, height: number, now: number): ReadonlyArray<Text.Row> => {
+  const glyph = SPINNER[view.frame % SPINNER.length];
+  return timeline(view.entries, now, view.status === "running")
+    .slice(-height)
+    .map((line) => timelineRow(line, glyph, LEFT_COLS - 1, indentOf(line)));
 };

@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import type * as Domain from "../shared/domain.ts";
 import * as Client from "./client.ts";
@@ -38,7 +38,24 @@ export class LogStore extends Context.Service<LogStore>()("@oligarchy/db/LogStor
       return rows.reverse();
     });
 
-    return { insertLog, listLogs, listRecent };
+    // A session's `intent start; <message>` and `intent end` lines, oldest first: the steps the
+    // agent said, which are recorded nowhere else.
+    const listIntents = Effect.fn("db.listIntents")(function* (sessionId: string) {
+      return yield* database.run("listIntents", (db) =>
+        db
+          .select({ text: DbSchema.logs.text, createdAt: DbSchema.logs.createdAt })
+          .from(DbSchema.logs)
+          .where(
+            and(
+              eq(DbSchema.logs.location, sessionId),
+              or(like(DbSchema.logs.text, "intent start; %"), eq(DbSchema.logs.text, "intent end")),
+            ),
+          )
+          .orderBy(DbSchema.logs.id),
+      );
+    });
+
+    return { insertLog, listLogs, listRecent, listIntents };
   }),
 }) {
   static readonly layer = Layer.effect(this)(this.make);

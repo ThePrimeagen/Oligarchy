@@ -70,3 +70,10 @@ export const count = (ms: number): string => {
   }
   return `${String(seconds)}s`;
 };
+
+// How long an action or the gap between two took: tenths of a second under a minute, where
+// most of them fall, then the countup's minutes and seconds.
+export const elapsed = (ms: number): string => {
+  const clamped = Math.max(0, ms);
+  return clamped < 60_000 ? `${(Math.floor(clamped / 100) / 10).toFixed(1)}s` : count(clamped);
+};

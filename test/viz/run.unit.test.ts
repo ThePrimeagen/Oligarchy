@@ -19,6 +19,7 @@ import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawne
 import * as Stores from "../support/stores.ts";
 import {
   ABORT_ENV,
+  ago,
   AUTOMATION_SERVER_URL,
   BLOCKS,
   bottom,
@@ -38,6 +39,7 @@ import {
   OPENED,
   pad,
   PLAIN,
+  power,
   QUEUE,
   running,
   runner,
@@ -247,7 +249,7 @@ describe("run happy path", () => {
         });
         const { fiber, setup } = yield* started(screen, {}, { logs });
         const first = yield* until(setup, (drawn) =>
-          drawn.some((row) => row.includes("iso: downloading")),
+          drawn.some((row) => row.includes("downloading")),
         );
         expect(first.some((row) => row.includes("[OLI-61]"))).toBe(true);
         expect(first.some((row) => row.includes(SESSION_ID))).toBe(true);
@@ -261,10 +263,8 @@ describe("run happy path", () => {
         });
         yield* TestClock.adjust(View.LOG_PULL);
         yield* settle;
-        const second = yield* until(setup, (drawn) =>
-          drawn.some((row) => row.includes("iso: downloaded 1.50 GB")),
-        );
-        expect(second.some((row) => row.includes("iso: downloading"))).toBe(true);
+        const second = yield* until(setup, (drawn) => drawn.some((row) => row.includes("1.50 GB")));
+        expect(second.some((row) => row.includes("downloading"))).toBe(true);
         fail = true;
         stored.push({
           id: 3,
@@ -277,8 +277,8 @@ describe("run happy path", () => {
         yield* TestClock.adjust(View.LOG_PULL);
         yield* settle;
         const kept = yield* rows(setup);
-        expect(kept.some((row) => row.includes("iso: downloaded 1.50 GB"))).toBe(true);
-        expect(kept.some((row) => row.includes("iso: should not appear"))).toBe(false);
+        expect(kept.some((row) => row.includes("1.50 GB"))).toBe(true);
+        expect(kept.some((row) => row.includes("should not appear"))).toBe(false);
         expect(kept[36]).toBe(FOOTER);
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
@@ -825,14 +825,17 @@ describe("run follow happy path", () => {
         const full = yield* until(setup, shows("mouse-click"));
         expect(full[0]).toBe(pad(" following OLI-61 · 7a2d0000 running", COLUMNS));
         expect(full[1]?.startsWith(" ✓ send-key")).toBe(true);
-        expect(full[4]?.includes(" mouse-click")).toBe(true);
+        // The seeded commands finished, so the time between them is drawn as processing.
+        expect(full[2]?.startsWith(" · processing")).toBe(true);
+        const clicking = full.findIndex((row) => row.includes(" mouse-click"));
+        expect(full[clicking - 1]?.startsWith(" · processing")).toBe(true);
         expect(full.some((row) => BLOCKS.test(row))).toBe(true);
         expect(full.join("\n")).not.toContain("qemu servers");
         // The spinner turns every 80 milliseconds while the follow is up.
-        const before = full[4]?.slice(1, 2);
+        const before = full[clicking]?.slice(1, 2);
         yield* TestClock.adjust("80 millis");
         yield* settle;
-        const after = (yield* rows(setup))[4]?.slice(1, 2);
+        const after = (yield* rows(setup))[clicking]?.slice(1, 2);
         expect(after).not.toBe(before);
         setup.mockInput.pressEscape();
         yield* settle;
@@ -1147,20 +1150,20 @@ describe("run follow unhappy path", () => {
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("f");
         yield* settle;
-        // k interrupts the in-flight F. The session pane may still read the same ticket.
+        // k interrupts the in-flight F, so its read never answers.
         setup.mockInput.pressKey("k");
         yield* settle;
         yield* Deferred.succeed(gate, undefined);
         yield* settle;
         const moved = yield* rows(setup);
         expect(moved.some((row) => row.includes(OVERLAY))).toBe(false);
-        expect(answered.count).toBe(1);
+        expect(answered.count).toBe(0);
         // Asked again with the database answering at once, the peek shows.
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("f");
         const shownNow = yield* until(setup, shows(OVERLAY));
         expect(shownNow.some((row) => row.includes("no commands yet"))).toBe(true);
-        expect(answered.count).toBe(2);
+        expect(answered.count).toBe(1);
         setup.mockInput.pressKey("q");
         yield* Fiber.join(fiber);
       }),
@@ -1777,9 +1780,9 @@ describe("selected session", () => {
           ]),
       });
       const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), logs });
-      const drawn = yield* until(setup, shows("iso: downloading"));
+      const drawn = yield* until(setup, shows("downloading"));
       expect(drawn.join("\n")).toContain("[OLI-61]");
-      expect(drawn.join("\n")).toContain("iso: downloading");
+      expect(drawn.join("\n")).toContain("downloading");
       expect(drawn.some((row) => BLOCKS.test(row))).toBe(true);
       expect(drawn[36]).toBe(FOOTER);
       expect(drawn[36]).not.toContain("error:");
@@ -1788,16 +1791,64 @@ describe("selected session", () => {
     }),
   );
 
-  it.effect("a refused session stream does not put the refusal on the footer (unhappy)", () =>
-    Effect.gen(function* () {
-      const screen = fakeRenderer();
-      const { fiber, setup } = yield* started(screen);
-      yield* settle;
-      const drawn = yield* rows(setup);
-      expect(drawn[36]).toBe(FOOTER);
-      expect(drawn[36]).not.toContain("error:");
-      setup.mockInput.pressKey("q");
-      yield* Fiber.join(fiber);
-    }),
+  it.effect(
+    "the selected ticket's pane follows its session from the database: a new action shows on the next pull, with no stream",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        const actions = seeded();
+        const logs = Stores.fakeLogStore({
+          listIntents: () =>
+            Effect.succeed([{ text: "intent start; Click Lock.", createdAt: ago(30) }]),
+        });
+        const http = FakeHttp.recordRequests(() => new Response(null, { status: 404 }));
+        const { fiber, setup } = yield* started(screen, {}, { actions, logs, http: http.layer });
+        const first = yield* until(setup, shows("Click Lock."));
+        expect(first.some((row) => row.includes("screendump"))).toBe(true);
+        expect(first.join("\n")).not.toContain("system_powerdown");
+        actions.actions.push({
+          id: 4,
+          sessionId: SESSION_ID,
+          agentId: "OLI-61",
+          request: power,
+          state: null,
+          response: null,
+          createdAt: ago(1),
+          finishedAt: null,
+        });
+        yield* TestClock.adjust(View.LOG_PULL);
+        const next = yield* until(setup, shows("system_powerdown"));
+        expect(next.some((row) => row.includes("system_powerdown"))).toBe(true);
+        expect(http.requests.filter((request) => request.url.includes("/follow"))).toEqual([]);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+      }),
+  );
+
+  it.effect(
+    "a failed read keeps the session already drawn and leaves the footer alone (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const screen = fakeRenderer();
+        let fail = false;
+        const logs = Stores.fakeLogStore({
+          listIntents: () =>
+            fail
+              ? Effect.fail(
+                  Errors.DatabaseError.make({ operation: "listIntents", message: "gone" }),
+                )
+              : Effect.succeed([{ text: "intent start; Click Lock.", createdAt: ago(30) }]),
+        });
+        const { fiber, setup } = yield* started(screen, {}, { actions: seeded(), logs });
+        yield* until(setup, shows("Click Lock."));
+        fail = true;
+        yield* TestClock.adjust(View.LOG_PULL);
+        yield* settle;
+        const kept = yield* rows(setup);
+        expect(kept.some((row) => row.includes("Click Lock."))).toBe(true);
+        expect(kept[36]).toBe(FOOTER);
+        setup.mockInput.pressKey("q");
+        yield* Fiber.join(fiber);
+      }),
   );
 });

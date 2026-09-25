@@ -227,6 +227,20 @@ export const fakeActionStore = (
               left.actionId - right.actionId,
           ),
       ),
+    listRecentActions: (sessionId, limit) =>
+      Effect.sync(() =>
+        actions
+          .filter((row) => sameId(row.sessionId, sessionId))
+          .sort((left, right) => left.id - right.id)
+          .slice(-limit)
+          .map(({ id, request, state, createdAt, finishedAt }) => ({
+            id,
+            request,
+            state,
+            createdAt,
+            finishedAt,
+          })),
+      ),
     ...overrides,
   });
   return { actions, images, layer: Layer.succeed(Actions.ActionStore)(service) };
@@ -256,6 +270,7 @@ export const fakeLogStore = (
     readonly insertLog?: (row: LogRow) => Effect.Effect<void, Errors.DatabaseError>;
     readonly listLogs?: typeof Logs.LogStore.Service.listLogs;
     readonly listRecent?: typeof Logs.LogStore.Service.listRecent;
+    readonly listIntents?: typeof Logs.LogStore.Service.listIntents;
   } = {},
 ): FakeLogStore => {
   const rows: Array<LogRow> = [];
@@ -284,6 +299,18 @@ export const fakeLogStore = (
           rows
             .slice(Math.max(0, rows.length - limit))
             .map((row, index) => recorded(row, index + 1)),
+        )),
+    listIntents:
+      options.listIntents ??
+      ((sessionId) =>
+        Effect.sync(() =>
+          rows
+            .filter(
+              (row) =>
+                row.location === sessionId &&
+                (row.text.startsWith("intent start; ") || row.text === "intent end"),
+            )
+            .map((row) => ({ text: row.text, createdAt: new Date() })),
         )),
   });
   return { rows, layer: Layer.succeed(Logs.LogStore)(service) };
