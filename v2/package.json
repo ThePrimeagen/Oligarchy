@@ -1,0 +1,22 @@
+{
+  "name": "oligarchy-v2",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "packages/*"
+    ],
+    "catalog": {
+      "@types/node": "^26.4.0",
+      "jarl": "github:ThePrimeagen/jarl",
+      "typescript": "7.0.2",
+      "vitest": "^4.1.11",
+      "zod": "^4.1.12"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "driver": "bun --no-env-file packages/driver/src/main.ts",
+    "check:types": "bun run --workspaces check:types",
+    "test:unit": "bun run --workspaces test:unit"
+  }
+}
