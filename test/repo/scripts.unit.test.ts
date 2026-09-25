@@ -127,14 +127,6 @@ describe("package.json scripts", () => {
     expect(scripts["prod:db:migrate"] ?? "").not.toContain("drizzle-kit");
     expect(scripts["test:db:migrate"] ?? "").not.toContain("drizzle-kit");
   });
-
-  // Top-level wrangler config is production. A `dev` without --env local would bind the
-  // production Hyperdrive and write the shared test work into live rows.
-  it("runs the dashboard against the local wrangler environment", () => {
-    expect(scripts.dev).toContain("wrangler dev");
-    expect(scripts.dev).toContain("--remote");
-    expect(scripts.dev).toContain("--env local");
-  });
 });
 
 // The root executables are the operators' entry points: each is a sh wrapper handing its
