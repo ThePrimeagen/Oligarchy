@@ -24,7 +24,7 @@ export const mark = Effect.fn("Ready.mark")(function* (ticket: string) {
           message: `linear: labeling ${ticket} ready failed: no answer within ${MARK_BUDGET}`,
         }),
     }),
-    Effect.catch((error) =>
+    Effect.catchTag("LinearError", (error) =>
       log.error(`ready label add failed: ${Errors.detail(error)}`, {
         location: Log.Locations.automation,
         agentId: ticket,
@@ -41,7 +41,7 @@ export const release = Effect.fn("Ready.release")(function* (ticket: string) {
   const log = yield* Log.Log;
   yield* linear.clearReady(ticket).pipe(
     Effect.retry(Schedule.recurs(2)),
-    Effect.catch((error) =>
+    Effect.catchTag("LinearError", (error) =>
       log.error(`ready label clear failed: ${Errors.detail(error)}`, {
         location: Log.Locations.automation,
         agentId: ticket,

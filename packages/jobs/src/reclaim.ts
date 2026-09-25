@@ -15,24 +15,23 @@ const restarted: Close.Outcome = { status: "errored", reason: "automation server
 // `stop`, which reports its own failures), then errored and its ticket moved to Errored. No
 // ticket, no client recorded, or that client's row gone: nothing to stop. The close is
 // uninterruptible, so the row and the ticket finish together even when a shutdown lands.
-export const reclaim = <R>(
+export const reclaim = Effect.fn("Reclaim.reclaim")(function* <R>(
   action: Automation.AutomationJobRow,
   stop: (url: string, ticket: string) => Effect.Effect<void, never, R>,
-) =>
-  Effect.gen(function* () {
-    const servers = yield* Servers.ServerStore;
-    const job = yield* Find.ofAction(action);
-    if (action.action !== "diagnose" && Option.isSome(job) && !Find.isOpen(job.value)) {
-      const outcome = yield* Close.judge(action);
-      yield* Effect.uninterruptible(Close.close(action, outcome));
-      return;
+) {
+  const servers = yield* Servers.ServerStore;
+  const job = yield* Find.ofAction(action);
+  if (action.action !== "diagnose" && Option.isSome(job) && !Find.isOpen(job.value)) {
+    const outcome = yield* Close.judge(action);
+    yield* Effect.uninterruptible(Close.close(action, outcome));
+    return;
+  }
+  const ticket = Option.isSome(job) ? job.value.linearId : null;
+  if (ticket !== null && action.serverId !== null) {
+    const client = yield* servers.findServer(action.serverId);
+    if (Option.isSome(client)) {
+      yield* stop(client.value.url, ticket);
     }
-    const ticket = Option.isSome(job) ? job.value.linearId : null;
-    if (ticket !== null && action.serverId !== null) {
-      const client = yield* servers.findServer(action.serverId);
-      if (Option.isSome(client)) {
-        yield* stop(client.value.url, ticket);
-      }
-    }
-    yield* Effect.uninterruptible(Close.close(action, restarted));
-  }).pipe(Effect.withSpan("Reclaim.reclaim"));
+  }
+  yield* Effect.uninterruptible(Close.close(action, restarted));
+});
