@@ -107,11 +107,12 @@ describe("Log.layer(sink)", () => {
         yield* Effect.gen(function* () {
           yield* Log.Log;
           const [handles] = sink.built;
-          if (handles === undefined) {
-            return;
-          }
-          yield* handles.write({ text: "db: log insert failed: pool ended", level: "error" });
-          yield* handles.report(Cause.die(new Error("pool ended")));
+          expect(handles).toBeDefined();
+          yield* (
+            handles?.write({ text: "db: log insert failed: pool ended", level: "error" }) ??
+              Effect.void
+          );
+          yield* handles?.report(Cause.die(new Error("pool ended"))) ?? Effect.void;
         }).pipe(Effect.provide(sink.layer.pipe(Layer.provide(reporter.layer))));
         expect(yield* consoleLines).toEqual(["[ERROR] [global] db: log insert failed: pool ended"]);
         expect(reporter.reported).toHaveLength(1);

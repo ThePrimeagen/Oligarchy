@@ -267,7 +267,8 @@ Write each phase's tests before any of that phase's code, and see them fail.
       `--version` prints the version passed in; the Wizard is not offered; `Log.Colors` is
       provided from stdout, on for a TTY with 16 colours and off for a pipe. `Env.run` is the one
       `NodeRuntime.runMain` call and is not unit tested.
-- [x] TEST (move) the `wantsColor` describe from the render test to
+- [x] TEST (move) the `wantsColor` describe (in `test/observability/colors.unit.test.ts` since
+      phase 3) to
       `packages/env/test/colors.unit.test.ts`.
 - [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the driver wrapper defines `import.meta.url`
       as the `oligarchy.json` loader's new path.
@@ -716,7 +717,7 @@ Decided while working the phase:
 - [ ] Add `fakeServerStore` and `fakeProcessStatsStore` to `@oligarchy/testing`; fleet
       dev-depends on it.
 - [ ] Add fleet's `test:integration` lane and the `--workspaces --if-present` fan-out.
-- [ ] Add `@effect/vitest` to the catalog.
+- [x] Add `@effect/vitest` to the catalog (done in phase 3, for log's `it.effect` tests).
 - [ ] Update the architecture boundary-file list for the new paths.
 - [ ] `development.md`: the unit-test rule, per-package integration lanes and the fleet template.
 
