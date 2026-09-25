@@ -74,6 +74,12 @@ Then two independent reviews of that revision (2026-09-25), which changed:
   used. It held the repo's only file cycle, so phase 1's `import/no-cycle` now finds none to
   break. The scripts test gained the rule that every `bin`, entry script and root wrapper is a
   registered process, so a leftover names itself.
+- **Three open decisions closed.** `drizzle/` and `drizzle.config.ts` move into `packages/db`
+  (the generated migrations and drizzle-kit's pointer were the only database things not already
+  there). A behaviour-imitating fake lives with the one package or app that uses it, and moves to
+  a dev-only `@oligarchy/testing` the moment a second one needs it; the old "never a shared
+  unit-testing package" rule is replaced by that. The dashboard exports its Worker entry for
+  `integration-testing`.
 
 How to work a phase:
 
@@ -87,7 +93,7 @@ How to work a phase:
 ## Target in one picture
 
 ```
-top     integration-testing (system tests, dev only)   scripts: driver, session, client (root package)
+top     integration-testing (system tests)  testing (shared fakes)  — both dev only    scripts: driver, session, client (root package)
 6       automation-server  automation-client  qemu-reverse-proxy  qemu-server  dashboard  viz  ctrl
 5       http            contract, API errors, middleware, serve, proxy client
 5       fleet           host and process stats, member announce loop, stale-server sweep
@@ -100,9 +106,9 @@ top     integration-testing (system tests, dev only)   scripts: driver, session,
 ```
 
 A package depends only on packages in a lower layer. Two packages on the same layer never depend
-on each other. Nothing depends on an app, with one dev-only exception (open decision 4). The
-scripts (`client`, `driver`, `session`) stay in the root package as one-off consumers on top.
-`client` will be removed later, outside this plan.
+on each other. Nothing depends on an app, with one dev-only exception: `integration-testing`
+imports the dashboard's Worker entry. The scripts (`client`, `driver`, `session`) stay in the
+root package as one-off consumers on top. `client` will be removed later, outside this plan.
 
 Declared dependencies, which is what the architecture test reads:
 
@@ -118,7 +124,12 @@ Declared dependencies, which is what the architecture test reads:
 | `http` | `effect`, `@effect/platform-node`, `env`, `log`, `shared` |
 | `routes` (phases 2 to 8, then renamed to `http`) | `effect`, `shared`; it sits in `http`'s slot of the layer list |
 | an app | any package; never another app, never the root's `src/` |
-| `integration-testing` | any package; the dashboard's Worker entry (open decision 4); dev only |
+| `testing` | the packages whose services it fakes (`db`, `log`, `linear`, `http`, `fleet` as fakes arrive); dev only; a `devDependency` of the packages and apps that use it |
+| `integration-testing` | any package; the dashboard's Worker entry; dev only |
+
+For `testing` and `integration-testing` the edge check reads `devDependencies` too: a package may
+dev-depend on `testing` only if `testing` does not depend on that package. So a fake of `fleet`'s
+`Host` in `testing` is usable by the apps and not by `fleet`, whose own fakes stay in its `test/`.
 
 ## Principles
 
@@ -144,10 +155,10 @@ Declared dependencies, which is what the architecture test reads:
 - **The right technology and nothing extra.** Phase 0 chose Bun workspaces, a catalog, the
   isolated linker and source-first packages. The list, and what was deliberately left out, is in
   "Phase 0 (done)".
-- **Tests live with the code they test.** Unit tests sit in their package and need nothing
-  outside their own file and package. A test that needs the real OS but no container or process
-  sits in its owner's own integration lane. System tests, with all their machinery, live in one
-  package.
+- **Tests live with the code they test.** Unit tests sit in their package. A fake lives with
+  the one package or app that uses it; the same fake needed by a second one moves to
+  `@oligarchy/testing`. A test that needs the real OS but no container or process sits in its
+  owner's own integration lane. System tests, with all their machinery, live in one package.
 - **Tests first, every time.** Each test has a happy and an unhappy path. No presentational
   tests (AGENTS.md).
 
@@ -243,8 +254,9 @@ No test covers the `oligarchy.json` loader or the file's contents (standing deci
       the entry.
 - [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: `db:migrate`, `prod:db:migrate` and
       `test:db:migrate` run the package's migrate entry, each still from its own env file.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the migrations workflow scans the
-      migrations where they live, if `drizzle/` moves (open decision 2).
+- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: `db:generate` runs drizzle-kit from
+      `packages/db`, and the migrations workflow diffs `packages/db/drizzle/*.sql`. The drizzle
+      journal case reads `packages/db/drizzle/meta/_journal.json`.
 - [ ] TEST (alter) `test/support/stores.ts` and every test importing a store type: import from
       `@oligarchy/db`.
 
@@ -301,8 +313,14 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (move) `test/integration/process-usage.integration.test.ts` to
       `packages/fleet/test/process.integration.test.ts`, under fleet's own `test:integration`
       lane, on the platform's child-process layer.
-- [ ] TEST (new) `packages/fleet/test/member.unit.test.ts`, on `TestClock` with inline store
-      fakes. Happy: the first tick writes the servers row with the member's type, name and
+- [ ] TEST (move) `fakeServerStore` and `fakeProcessStatsStore` from `test/support/stores.ts`
+      to `packages/testing/src/stores.ts`: fleet's member and sweep tests and the apps' heartbeat
+      tests all need them, which is the two-consumer trigger. Their own cases (a url registers
+      once; a second route is the primary key's `DatabaseError`; the heartbeat upsert registers)
+      move to `packages/testing/test/stores.unit.test.ts`.
+- [ ] TEST (new) `packages/fleet/test/member.unit.test.ts`, on `TestClock` with
+      `Testing.fakeServerStore` and `Testing.fakeProcessStatsStore`. Happy: the first tick writes
+      the servers row with the member's type, name and
       `qemus`, and the sampler's memory and cpu, then the process row with `jobs` and the
       reader's sample; a tick repeats every thirty seconds; closing the scope deletes the row;
       `onJoin` runs before the first heartbeat and, once it succeeds, never again. Unhappy: a
@@ -368,8 +386,9 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (move) `test/integration/qemu-process.integration.test.ts` and
       `qmp-socket.integration.test.ts` to `apps/qemu-server/test/`, under the app's own
       `test:integration` lane (they need the qemu binary and a socket, not a container).
-- [ ] TEST (alter) each moved test file: shared fakes become inline fakes of the methods it uses,
-      or a helper in its own app's `test/` folder (open decision 3).
+- [ ] TEST (alter) each moved test file: a fake only this app uses becomes an inline fake of the
+      methods it uses, or a helper in the app's own `test/`; a fake a second app also uses comes
+      from `@oligarchy/testing`, moved there with its cases in this phase.
 - [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: each server's package script and wrapper run
       `apps/<name>/src/main.ts` with exactly its preloads; `dev` runs wrangler from
       `apps/dashboard`; `check:types` reaches every app's tsconfig.
@@ -406,7 +425,7 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (alter) `automation-client.integration.test.ts`: spells the driver's arguments it
       starts the child with, instead of importing `Driver.args` from the app.
 - [ ] TEST (alter) `dashboard.integration.test.ts`: imports the Worker entry (`app`,
-      `scheduled`) from `@oligarchy/dashboard` (open decision 4).
+      `scheduled`) from `@oligarchy/dashboard`.
 - [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the integration package's lane runs one
       worker with the global setup, and the root `test:integration` reaches it.
 - [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no package or app depends on
@@ -480,8 +499,10 @@ container and stay in the root's integration project until phase 11.
 
 - [ ] Create `packages/db` from `src/db/*`, with `DatabaseError`. `migrate.ts` is an `Env.run`
       entry, so db imports no platform module.
-- [ ] Move `drizzle/` and `drizzle.config.ts`, and update the CI workflow paths in the same
-      change (if open decision 2 is accepted).
+- [ ] Move `drizzle/` (the generated migrations and `meta/_journal.json`) and
+      `drizzle.config.ts` into `packages/db`, and in the same change update the four pointers:
+      the config's `schema` and `out`, `migrate.ts`'s `migrationsFolder`, the global setup's, and
+      the paths in `.github/workflows/migrations.yml`.
 - [ ] Update the migrate scripts and the dashboard's schema import.
 
 **Phase 6: `@oligarchy/observability`**
@@ -522,6 +543,11 @@ container and stay in the root's integration project until phase 11.
 - [ ] qemu-server and automation-client each define their `Member` and call `Fleet.announce`;
       the proxy and automation-server call `Fleet.forget`. Delete both `heartbeat.ts` files and
       `stale-servers.ts`. The apps build `Contract.Stats` from the values plus the machine count.
+- [ ] Create `packages/testing` (`@oligarchy/testing`, `private`, dev only) with `stores.ts`
+      holding the two store fakes fleet and the apps share. It depends on `db`; fleet and the
+      root's tests dev-depend on it. It grows one fake at a time, each when a second consumer
+      appears (candidates: `fakeAutomationStore`, `fakeLinear`, the HTTP client fake, the process
+      spawner).
 - [ ] Add fleet's `test:integration` lane and the `--workspaces --if-present` fan-out.
 - [ ] Add `@effect/vitest` to the catalog.
 - [ ] Update the architecture boundary-file list for the new paths.
@@ -558,7 +584,7 @@ container and stay in the root's integration project until phase 11.
       preload from `@oligarchy/observability` in its script and wrapper. Its `bin` entry moves to
       the app's `package.json`. The agent docs it reads (`ctrl.md`, `ctrl-linear.md`,
       `ctrl-diagnose.md`) stay at the repo root; they are the driving agent's, not the app's.
-- [ ] Give the dashboard an `exports` entry for its Worker entry, if open decision 4 is accepted.
+- [ ] Give the dashboard an `exports` entry for its Worker entry (`app`, `scheduled`), the one app import `integration-testing` makes; the architecture test names it.
 - [ ] Delete the root `src/shared/errors.ts` once the last app error has moved.
 - [ ] Update the wrappers, package scripts and fleet starters.
 
@@ -647,6 +673,7 @@ was checked against the modules' imports as they are today.
 | `env` ↔ `shared` | env imports shared | a flag schema in shared | flags live in the apps; shared holds the vocabulary a flag decodes to |
 | app ↔ app | none | `ctrl/linear.ts` and `ctrl/prompts.ts` (proxy, automation-server), `qemu-server/middleware.ts` and `handlers.ts` (three apps), `client/proxy-client.ts` (three), `ctrl/command.ts` (dashboard); all imported across apps today | each is in linear or http before phase 10, `openRun` in linear |
 | `ctrl` ↔ root | none | `ctrl/command.ts` importing `client/proxy-client.ts` (it does today) | the proxy client is in http |
+| `testing` ↔ a package | testing imports the package (its service tag) | that package dev-depending on `testing` for a fake of its own service | the edge check reads `devDependencies` for `testing`; a package's fakes of its own services stay in its `test/` |
 | `dashboard` ↔ root | none | the dashboard importing `ctrl` or `viz` (it does today) | `steps` is in shared, `openRun` in linear; the dashboard imports packages only |
 | `viz` ↔ root | none | `viz/main.ts` importing `session/image.ts` for `speaksKitty` (it does today); `driver/loop.ts` importing `viz/steps.ts` (it does today) | viz keeps its own four-line `speaksKitty`; `steps` is in shared |
 
@@ -773,7 +800,7 @@ them.
   `../../../oligarchy.json`, and the driver wrapper's `--define` for `import.meta.url` must point
   at the new file. It is read during a job as well as at startup; that is the app's business, not
   the loader's. The alternative home, a `harness` package, is the scripts plan's call (open
-  decision 6).
+  decision 3).
 - **The entry runner.** `Env.program(command, { version })` is the effect: install the config
   lookup, set up CLI output and CLI config without the Wizard, provide `Log.Colors` from
   `wantsColor(process.stdout, process.env)`, `Command.run` with the version, `reportFailure` on
@@ -804,7 +831,10 @@ anything a command does while running, anything that writes.
 
 ### `@oligarchy/db` (layer 3, phase 5)
 
-- **Holds** `src/db/*`: the client, migrate, every store and the schema, plus `DatabaseError`.
+- **Holds** `src/db/*`: the client, migrate, every store and the schema, plus `DatabaseError`;
+  and the generated migrations (`drizzle/*.sql`, `drizzle/meta/_journal.json`) with
+  `drizzle.config.ts`, drizzle-kit's pointer from the schema to that folder. `db:generate` runs
+  drizzle-kit from the package. That is the whole database: nothing else about it lives outside.
 - **Depends on** env, log, shared, `drizzle-orm` and `pg`. `migrate.ts` is an `Env.run` entry,
   so the package imports no platform module.
 - **The old loop breaks here.** `db/client.ts` and `db/migrate.ts` used only the failure text from
@@ -844,7 +874,7 @@ The Linear API client, the ticket templates, and filing a run's tickets.
   filing a ticket is its purpose and the rows it writes are the run that ticket is about. Refused:
   a workflow whose purpose is a row or a session that happens to mention a ticket; those belong
   to the app that owns them (`automation-server/prompts.ts`, the drive and diagnose prompt
-  filler, is such a case and stays in its app). Open decision 5 says when to revisit.
+  filler, is such a case and stays in its app). Open decision 2 says when to revisit.
 
 ### `@oligarchy/observability` (layer 4, phase 6)
 
@@ -1075,7 +1105,7 @@ fleet starters point at `apps/<name>/src/main.ts`.
 The scripts use packages the way the apps do. The root keeps one edge of its old tangle (`driver`
 imports `client/actions.ts`; it goes when `client` is removed), which is out of scope here: this
 plan is the fleet's libraries and apps. The scripts are a second plan; the harness's home (open
-decision 6) is decided there.
+decision 3) is decided there.
 
 ## Testing
 
@@ -1095,10 +1125,17 @@ decision 6) is decided there.
   above everything it tests, is dev only, and nothing depends on it. It is created in phase 11,
   when the first such test can move; the first version of this plan created it in phase 2 to hold
   one `ps` test that belongs in fleet.
+- **Shared fakes live in `@oligarchy/testing`** (`packages/testing`), dev only. A fake enters it
+  the moment a second package or app needs it, with its own cases (a behaviour-imitating fake is
+  code, and is tested as code). Until then it is the one consumer's, in that consumer's `test/`.
+  `testing` depends on the packages whose services it fakes and is a `devDependency` of its
+  consumers; the edge check reads those `devDependencies`, so a package can never dev-depend on
+  a `testing` that depends on it. It is created in phase 8, when `fakeServerStore` gets its
+  second consumer.
 - **A system test drives a built process; it does not import the app's source.**
   `automation-client.integration.test.ts` imports `Driver.args` today to spell the child's
   arguments; it spells them itself. The one exception is the dashboard, which has no process to
-  spawn (open decision 4).
+  spawn.
 - **Fan-out.** The root `test:integration` runs the root's lane, then
   `bun run --workspaces --if-present test:integration`: `--workspaces` skips the root package and
   errors on a workspace without the script, so both halves are needed. `test:unit` and
@@ -1106,12 +1143,16 @@ decision 6) is decided there.
 
 ### The unit-test rule
 
-- A unit test file imports its own package, Effect (including `TestClock` and `TestConsole`) and
-  vitest. Never another package's tests, and never a shared unit-testing package.
+- A unit test file imports its own package, Effect (including `TestClock` and `TestConsole`),
+  vitest, and `@oligarchy/testing` for a fake that more than one package uses. Never another
+  package's tests.
 - If several test files in one package need the same helper, a helper file in that package's own
-  `test/` folder is allowed.
+  `test/` folder is allowed. The same helper wanted by a second package moves to `testing`.
 - When a test needs a big fake, first ask whether the code should take a value instead of a
-  service. Fleet's readings and its `ps` listing are the model.
+  service. Fleet's readings and its `ps` listing are the model. A recording fake (calls
+  remembered, answers scripted) is inlined; a behaviour-imitating fake (the store's uniqueness
+  and ordering rules reimplemented in memory, as `fakeAutomationStore` and `fakeServerStore` do
+  today) is a helper, in the consumer's `test/` or in `testing`.
 - A test that needs a `Log` and asserts no lines provides `Log.layerStdout`. A test that asserts
   lines provides an inline `Layer.succeed(Log.Log)(...)` recording them.
 - A fake of one of our services is `Layer.succeed(Tag)(Tag.of({ ... }))` inline, with only the
@@ -1126,16 +1167,16 @@ Counted on 2026-09-25 (unit test files using each):
 | Helper | Fakes | Users | Where it goes |
 |---|---|---|---|
 | `log.ts` | Log | 22 | `Log.layerStdout` from `@oligarchy/log` where a test asserts no lines; an inline recording `Log` where it asserts lines. |
-| `stores.ts` (1,055 lines) | every database store | 16 | Recording fakes go inline. Fakes that imitate store behaviour are decided one at a time (open decision 3). |
-| `fake-http.ts` | the HTTP client | 16 | Decided in phase 9: inline `Layer.succeed(HttpClient.HttpClient)` where short. |
-| `fake-spawner.ts` (235 lines) | child processes | 12 | Fleet narrows its seam. qemu-server and automation-client keep an app-local helper for process choreography. |
+| `stores.ts` (1,055 lines) | every database store | 16 | Recording fakes (`fakeLogStore`, `fakeDebugLogStore`) go inline. Behaviour-imitating fakes go to `@oligarchy/testing` as each gets a second consumer: `fakeServerStore` and `fakeProcessStatsStore` in phase 8, `fakeAutomationStore` and `fakeSessionStore` in phase 10. One with a single consumer stays in that consumer's `test/`. |
+| `fake-http.ts` | the HTTP client | 16 | Decided in phase 9: inline `Layer.succeed(HttpClient.HttpClient)` where short; the scripted-response helper goes to `testing` if two packages keep it. |
+| `fake-spawner.ts` (235 lines) | child processes | 12 | Fleet narrows its seam. qemu-server and automation-client share the process choreography, so it goes to `testing` in phase 10. |
 | `config.ts` (5 lines) | configuration | 12 | Inline. |
 | `fake-fs.ts` | the file system | 10 | Effect's `FileSystem.layerNoop`, inline. |
 | `reporter.ts` | Sentry's error reporter | 6 | Log's and observability's tests and the four servers' HTTP tests: inline, or an app-local helper. |
 | `tracer.ts` | a recording tracer | 1 | qemu-server's own `test/` (its sessions test). |
 | `stdio.ts` | process arguments | 5 | viz's command test takes its own copy into `apps/viz/test/`; the driver, client and session command tests in the root keep root's. |
 | `fake-qemu.ts`, `fake-minted.ts`, `fake-qmp-socket.ts`, `fake-sessions.ts` | QEMU pieces | 2–4 each | qemu-server's own `test/`. |
-| `fake-linear.ts` | Linear | 5 | automation-server, the proxy's setup, ctrl and the dashboard: inline, or an app-local helper. |
+| `fake-linear.ts` | Linear | 5 | Four apps use it (automation-server, the proxy's setup, ctrl, the dashboard): `testing`, in phase 10. |
 | `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts`, `fake-tty.ts` | the viz terminal | 1–5 each | viz's own `apps/viz/test/`. The session tests (root) keep what they use of them; `viz.integration.test.ts` takes `stripAnsi` into integration-testing. |
 | `fake-children.ts` | session children | 2 | Stays with the session script in the root. |
 | `postgres.ts`, `stub-proxy.ts` | integration only | 10, 3 | `@oligarchy/integration-testing`. |
@@ -1153,33 +1194,42 @@ Counted on 2026-09-25 (unit test files using each):
 Each has a recommendation. None blocks phases 1 to 3. Decisions already taken in a design above
 are not repeated here.
 
-1. **Where variables are declared.** Recommended: one list in env, so every variable and secret
-   the fleet reads stays in one file, as `development.md` requires today. It costs no
-   dependencies, since accessors are only names and strings. The alternative is each package
-   declaring its own (db declares `DATABASE_URL`, linear declares `LINEAR_*`). That is more
-   self-contained, but it loses the single list and makes "report the first missing variable, in
-   a fixed order" harder. Either way, one-command values (`dataDir`, `sessionId`,
-   `linearWebhookSecret`) sit beside the shared ones.
-2. **Migrations location.** Recommended: `drizzle/` and `drizzle.config.ts` move into
-   `packages/db`, with the CI workflow paths in the same change. Alternative: they stay at the
-   root.
-3. **Fakes that imitate behaviour.** For example, the automation store fake in `stores.ts` and the
-   process spawner for QEMU and opencode. Decided per package when it moves: inline, or a helper
-   in that package's own `test/`.
-4. **The dashboard's Worker entry as integration-testing's one app import.**
-   `dashboard.integration.test.ts` runs the Hono app in-process (`app`, `scheduled`) against the
-   container and a stub proxy. Recommended: the dashboard app declares an `exports` entry for its
-   Worker entry, and the architecture test names it as the one app import integration-testing may
-   make. A Worker's entry is its interface, the way a server's is its port. Alternatives: spawn
-   `wrangler dev` (refused: never test wrangler), or keep the test in the app with its own
-   container (duplicates the container machinery for one file). Decide before phase 10 creates
-   the app's `package.json`.
-5. **`linear` on layer 4 for `openRun`.** Recommended: yes; the alternative is a `runs` package
+1. **Where variables are declared.** Today `src/config.ts` names every variable the fleet reads
+   in one file, and `development.md` requires that:
+
+   ```ts
+   export const oligarchyToken       = requiredRedacted("OLIGARCHY_TOKEN");
+   export const databaseUrl          = requiredRedacted("DATABASE_URL");
+   export const databaseMigrationUrl = requiredRedacted("DATABASE_MIGRATION_URL");
+   export const automationServerUrl  = required("AUTOMATION_SERVER_URL");
+   export const linearApiToken       = requiredRedacted("LINEAR_API_TOKEN");
+   export const linearTeam           = required("LINEAR_TEAM");
+   export const linearWebhookSecret  = requiredRedacted("LINEAR_WEBHOOK_SECRET");
+   export const serverUrl            = EffectConfig.string("SERVER_URL");
+   export const dataDir              = EffectConfig.string("OLIGARCHY_DATA_DIR");
+   export const sessionId            = EffectConfig.string("SESSION_ID");
+   ```
+
+   **One list (recommended):** that file is `env`'s `config.ts`. `db` writes
+   `yield* Config.databaseUrl`, `linear` writes `yield* Config.linearAccess`, automation-server
+   writes `yield* Config.linearWebhookSecret`. `env` knows `DATABASE_URL` and `LINEAR_TEAM` as
+   strings, which costs no dependency; every variable and secret is one screen, and a missing
+   one is reported in a fixed order.
+   **Per package:** `packages/db/src/config.ts` declares `DATABASE_URL` and
+   `DATABASE_MIGRATION_URL`; `packages/linear/src/config.ts` declares `LINEAR_API_TOKEN`,
+   `LINEAR_TEAM`, `LINEAR_API_URL`; automation-server declares `LINEAR_WEBHOOK_SECRET`; `env`
+   keeps only `required`, `requiredRedacted`, the provider order and `--env-file`. Each package
+   is self-describing; the inventory is spread over five files and `development.md`'s rule goes.
+2. **`linear` on layer 4 for `openRun`.** Recommended: yes; the alternative is a `runs` package
    of one function, which is the too-small pattern. If a second workflow that writes rows asks to
    enter linear, that is the signal to make the `runs` package instead.
-6. **The settings loader's home.** Recommended for this plan: env, as configuration with three
+3. **The settings loader's home.** Recommended for this plan: env, as configuration with three
    consumers in three places. If the scripts plan makes `src/harness/` a package, the loader goes
    with it and env keeps only the variables the harness reads.
+
+Closed on 2026-09-25: the migrations move into `packages/db`; a behaviour-imitating fake is its
+one consumer's until a second needs it, then `@oligarchy/testing`'s; the dashboard exports its
+Worker entry. Each is written into its design above.
 
 ## Phase 0 (done)
 
