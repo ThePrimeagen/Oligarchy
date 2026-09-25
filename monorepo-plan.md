@@ -42,7 +42,7 @@ Then two independent reviews of that revision (2026-09-25), which changed:
 - **`Member` gets one requirement type per hook.** A single `R` does not infer across `report`
   and `onJoin` when they need different services.
 - **`serve` keeps qemu-server's first-error hook** (`shutdown.reason`).
-- **`Env.run` covers nine entries, not ten.** `session` deliberately does not use
+- **`Env.run` covers eight entries (nine before `dig` went), not ten.** `session` deliberately does not use
   `NodeRuntime.runMain`; its REPL answers SIGTERM and SIGHUP itself.
 - **`db/migrate.ts` runs through `Env.run`**, so `db` declares no platform dependency.
 - **`--workspaces` fan-out uses `--if-present`** and the root lane runs separately; Bun errors on
@@ -66,6 +66,14 @@ Then two independent reviews of that revision (2026-09-25), which changed:
   both apps, the root has no `.tsx` left: the root tsconfig drops its JSX settings, the root
   vitest config drops both JSX plugins, and the pragma rule in the architecture test is deleted
   rather than kept for an empty set.
+- **`ctrl` is the seventh app.** Once `linear.ts` and `prompts.ts` are in `linear` (phase 7),
+  what is left (`main.ts`, `command.ts`, `render.ts`) imports only packages. Its three dependents
+  today (the dashboard's in-process CLI run, and the proxy's and automation-server's `Linear`
+  imports) are all gone by phase 7.
+- **`dig` is deleted** (in this PR, not a phase): the game was a root script nothing else
+  used. It held the repo's only file cycle, so phase 1's `import/no-cycle` now finds none to
+  break. The scripts test gained the rule that every `bin`, entry script and root wrapper is a
+  registered process, so a leftover names itself.
 
 How to work a phase:
 
@@ -79,8 +87,8 @@ How to work a phase:
 ## Target in one picture
 
 ```
-top     integration-testing (system tests, dev only)   scripts: ctrl, dig, driver, session, client (root package)
-6       automation-server  automation-client  qemu-reverse-proxy  qemu-server  dashboard  viz
+top     integration-testing (system tests, dev only)   scripts: driver, session, client (root package)
+6       automation-server  automation-client  qemu-reverse-proxy  qemu-server  dashboard  viz  ctrl
 5       http            contract, API errors, middleware, serve, proxy client
 5       fleet           host and process stats, member announce loop, stale-server sweep
 4       observability   Sentry, instrument, dsn, the row-writing Log layer
@@ -93,8 +101,8 @@ top     integration-testing (system tests, dev only)   scripts: ctrl, dig, drive
 
 A package depends only on packages in a lower layer. Two packages on the same layer never depend
 on each other. Nothing depends on an app, with one dev-only exception (open decision 4). The
-scripts (`client`, `ctrl`, `dig`, `driver`, `session`) stay in the root package as one-off
-consumers on top. `client` will be removed later, outside this plan.
+scripts (`client`, `driver`, `session`) stay in the root package as one-off consumers on top.
+`client` will be removed later, outside this plan.
 
 Declared dependencies, which is what the architecture test reads:
 
@@ -127,8 +135,8 @@ Declared dependencies, which is what the architecture test reads:
   package's own holds list; a rule that a listed module fails is a wrong rule or a wrong list.
   `shared` has the strictest one, because a package called "shared" is the one that becomes
   "everything goes here".
-- **Six apps.** `automation-server`, `automation-client`, `qemu-reverse-proxy`, `qemu-server`,
-  `dashboard` and `viz`. Everything else is a script.
+- **Seven apps.** `automation-server`, `automation-client`, `qemu-reverse-proxy`, `qemu-server`,
+  `dashboard`, `viz` and `ctrl`. Everything else is a script.
 - **Prefer returning values; log where the decision is made.** The `Log` service is available
   from layer 1, so any package may take it. The default is still to return a typed error and let
   the caller decide. A module logs itself when the line is the decision, as the host sampler does
@@ -159,8 +167,6 @@ Write each phase's tests before any of that phase's code, and see them fail.
       graph (`routes` in `http`'s slot above `shared`). Unhappy: a made-up upward edge, a
       same-layer edge, a two-package loop and a package missing from the list are each named,
       the loop with both edges.
-- [ ] TEST (alter) `test/dig/lobby.unit.test.ts` and `test/dig/room.unit.test.ts`: take the
-      `Room` type from `dig/domain.ts` wherever they name it.
 
 **Phase 2: `@oligarchy/shared`**
 
@@ -225,7 +231,7 @@ Write each phase's tests before any of that phase's code, and see them fail.
 - [ ] TEST (move) `test/cli.unit.test.ts` to `test/automation-client/child.unit.test.ts`,
       following `src/cli.ts` to `src/automation-client/child.ts`.
 - [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the `Effect.run` placement rule allows
-      `Env.run` in env and the nine `main.ts` files that call it; `src/session/main.ts` keeps its
+      `Env.run` in env and the eight `main.ts` files that call it; `src/session/main.ts` keeps its
       own named exemption.
 
 No test covers the `oligarchy.json` loader or the file's contents (standing decision).
@@ -345,7 +351,7 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (alter) `test/integration/client.integration.test.ts`: the bundle rebuilds when an
       http-package source is newer.
 
-**Phase 10: the six apps**
+**Phase 10: the seven apps**
 
 - [ ] TEST (move) qemu-server's unit tests (`test/qemu-server/`, `test/qemu/`, `test/qmp/`) to
       `apps/qemu-server/test/`.
@@ -376,6 +382,13 @@ container and stay in the root's integration project until phase 11.
 - [ ] TEST (new) `apps/viz/test/terminal.unit.test.ts`: `speaksKitty` is true for a tmux client
       termtype naming ghostty or kitty in any case, false for anything else and for an empty
       string.
+- [ ] TEST (move) `test/ctrl/command.unit.test.ts` and `test/ctrl/render.unit.test.ts` to
+      `apps/ctrl/test/` (`linear.unit.test.ts` and `prompts.unit.test.ts` went to linear in
+      phase 7). The command test's Linear fake becomes an inline `Layer.succeed(Linear.Linear)`
+      of the methods it uses, or an app-local helper.
+- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the `ctrl` script, its `bin` entry and its
+      wrapper run `apps/ctrl/src/main.ts` with the instrument preload; PROCESSES maps each app to
+      `apps/<name>/src/main.ts` and each remaining script to `src/<name>/main.ts`.
 - [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the boundary-file list, the `main.ts`
       pattern and the `Effect.run` rules cover `apps/*/src/main.ts` and the dashboard's entry.
 - [ ] TEST (delete) the `.tsx` pragma case in `test/repo/architecture.unit.test.ts`: with viz and
@@ -404,9 +417,9 @@ container and stay in the root's integration project until phase 11.
 
 **Phase 1: cycle checks**
 
-- [ ] Add the `import` plugin and `"import/no-cycle": "error"` to `.oxlintrc.json`.
-- [ ] Break the one cycle it finds: move the `Room` type into `src/dig/domain.ts` and have
-      `lobby.ts` use `Domain.SLOT_COUNT`, so `lobby.ts` stops importing `room.ts`.
+- [ ] Add the `import` plugin and `"import/no-cycle": "error"` to `.oxlintrc.json`. It finds
+      nothing: the repo's one file cycle was `dig/lobby.ts` and `dig/room.ts`, deleted with the
+      game.
 - [ ] Add the layer list to `test/repo/architecture.unit.test.ts`, with `routes` in `http`'s
       slot. The list is the one in "Target in one picture"; a package is added to it in the phase
       that creates it.
@@ -444,7 +457,7 @@ container and stay in the root's integration project until phase 11.
   - `external-failure.ts` (from `src/external-failure.ts`).
   - `LogLine`, the Sentry wrapper, from `src/shared/errors.ts`, identifier unchanged.
 - [ ] `wantsColor` and the stdout probe move to `src/observability/colors.ts` for this phase
-      (env does not exist yet); the nine entries and `src/session/main.ts` provide
+      (env does not exist yet); the eight entries and `src/session/main.ts` provide
       `Layer.succeed(Log.Colors)(Colors.stdoutColors)`. Phase 4 moves that file into env.
 - [ ] Re-point every import of `observability/log.ts`, `render.ts`, `palette.ts` and
       `external-failure.ts` that is not the row-writing layer; `src/observability/sentry.ts`
@@ -456,7 +469,7 @@ container and stay in the root's integration project until phase 11.
       `src/harness/config.ts`), `colors.ts` (from `src/observability/colors.ts`) and `run.ts`:
       `Env.program(command, { version })`, the effect, and `Env.run(program, { teardown })`, the
       one `NodeRuntime.runMain` call.
-- [ ] Switch nine entries to `Env.run` (`ctrl`, `dig`, `driver`, `client`, `viz` and the four
+- [ ] Switch eight entries to `Env.run` (`ctrl`, `driver`, `client`, `viz` and the four
       servers). `src/session/main.ts` uses `Env.program` and keeps its own runtime and signal
       handling.
 - [ ] Update the driver wrapper's `--define` for the loader's new path.
@@ -477,7 +490,7 @@ container and stay in the root's integration project until phase 11.
       holding `LogLive`: `Log.layer((write, report) => makeSink(store.insertLog, write, report))`
       over `LogStore`. `makeSink`, its queue, and the `Row` alias derived from
       `LogStore.insertLog` stay here; `LogRow` is the type `offer` accepts.
-- [ ] The five `main.ts` files that build the row-writing log use `Observability.LogLive` where
+- [ ] The four servers' `main.ts` and `ctrl/command.ts`, which build the row-writing log, use `Observability.LogLive` where
       they used `Log.Log.layer`.
 - [ ] Update every `--preload` path and the dashboard's `dsn` import.
 
@@ -523,7 +536,7 @@ container and stay in the root's integration project until phase 11.
       `onError: (cause) => MutableRef.set(shutdown.reason, ...)`.
 - [ ] Run `wrangler deploy --dry-run` as a build check (not a test).
 
-**Phase 10: the six apps**
+**Phase 10: the seven apps**
 
 - [ ] Add `apps/*` to the root workspaces.
 - [ ] Move each server into `apps/<name>/`: qemu-server takes `src/qemu/` and `src/qmp/`,
@@ -541,6 +554,10 @@ container and stay in the root's integration project until phase 11.
       copy of the four-line predicate in `session/image.ts`; `image.ts` stays with `session`.
 - [ ] Drop `jsx` and `jsxImportSource` from the root tsconfig, and both JSX plugins from the root
       `vitest.config.ts`. Remove the moved dependencies from the root `package.json`.
+- [ ] Move ctrl into `apps/ctrl/` (`main.ts`, `command.ts`, `render.ts`), with the instrument
+      preload from `@oligarchy/observability` in its script and wrapper. Its `bin` entry moves to
+      the app's `package.json`. The agent docs it reads (`ctrl.md`, `ctrl-linear.md`,
+      `ctrl-diagnose.md`) stay at the repo root; they are the driving agent's, not the app's.
 - [ ] Give the dashboard an `exports` entry for its Worker entry, if open decision 4 is accepted.
 - [ ] Delete the root `src/shared/errors.ts` once the last app error has moved.
 - [ ] Update the wrappers, package scripts and fleet starters.
@@ -575,8 +592,8 @@ Checked on 2026-09-25 with oxlint 1.81.0:
 - The same loop across two workspace packages, through their `exports`: both reported. The rule
   follows package imports.
 - The whole repo with only this rule on: 0.24 seconds, and exactly one cycle,
-  `src/dig/lobby.ts` and `src/dig/room.ts`. `lobby.ts` only needs the `Room` type and
-  `SLOT_COUNT`, which is `Domain.SLOT_COUNT`, so moving the type into `dig/domain.ts` breaks it.
+  `src/dig/lobby.ts` and `src/dig/room.ts`. The `dig` game has since been deleted, so the rule
+  goes on with nothing to break.
 
 ### Package layers: a repo test
 
@@ -628,7 +645,8 @@ was checked against the modules' imports as they are today.
 | `http` ↔ automation-server | none | moving `automation-server/client.ts` to http while `AutomationClientError` and `OligarchyToken` stay in the app | the client stays in the app; it has one consumer |
 | `env` ↔ `http` | http imports env (`ProxyConfig`) | `Api.VERSION` in the runner | the version is passed to `Env.program` |
 | `env` ↔ `shared` | env imports shared | a flag schema in shared | flags live in the apps; shared holds the vocabulary a flag decodes to |
-| app ↔ app | none | `ctrl/linear.ts`, `qemu-server/middleware.ts`, `client/proxy-client.ts`, `ctrl/command.ts` (all imported across apps today) | each is in linear, http or linear (`openRun`) before phase 10 |
+| app ↔ app | none | `ctrl/linear.ts` and `ctrl/prompts.ts` (proxy, automation-server), `qemu-server/middleware.ts` and `handlers.ts` (three apps), `client/proxy-client.ts` (three), `ctrl/command.ts` (dashboard); all imported across apps today | each is in linear or http before phase 10, `openRun` in linear |
+| `ctrl` ↔ root | none | `ctrl/command.ts` importing `client/proxy-client.ts` (it does today) | the proxy client is in http |
 | `dashboard` ↔ root | none | the dashboard importing `ctrl` or `viz` (it does today) | `steps` is in shared, `openRun` in linear; the dashboard imports packages only |
 | `viz` ↔ root | none | `viz/main.ts` importing `session/image.ts` for `speaksKitty` (it does today); `driver/loop.ts` importing `viz/steps.ts` (it does today) | viz keeps its own four-line `speaksKitty`; `steps` is in shared |
 
@@ -760,7 +778,7 @@ them.
   lookup, set up CLI output and CLI config without the Wizard, provide `Log.Colors` from
   `wantsColor(process.stdout, process.env)`, `Command.run` with the version, `reportFailure` on
   the way out. `Env.run(program, { teardown })` is the one `NodeRuntime.runMain` call, with
-  error reporting off and the stdout/stderr error listeners. Nine entries use both; `session`
+  error reporting off and the stdout/stderr error listeners. Eight entries use both; `session`
   uses `Env.program` and keeps its own runtime, because its REPL answers SIGTERM and SIGHUP
   itself. The version is passed in, so env never reaches up to http's `Api.VERSION`. CLI help
   colour stays the CLI's own `isTTY` probe; `wantsColor` (which honours `FORCE_COLOR`) sets
@@ -840,7 +858,7 @@ Where lines and failures go once written.
   last line is out. The `Row` alias derived from `insertLog` stays with it.
 - **Depends on** db (the rows), log (the service), shared and Sentry.
 - **Paths follow it.** Every `--preload` of `instrument.ts` and the dashboard's `dsn` import.
-  The five `main.ts` files that build the row-writing log use `Observability.LogLive`.
+  The four servers' `main.ts` and `ctrl/command.ts`, which build the row-writing log, use `Observability.LogLive`.
 - **Admission rule.** A destination for lines, failures and spans. Refused: text formatting
   (log), and anything a package would need in order to log.
 
@@ -885,15 +903,15 @@ How a server measures itself, announces itself, and how the fleet forgets a dead
 
 Read from the four `main.ts` files. Three lifecycles stack:
 
-- **Process** (nine entries; `session` keeps its own runtime): stdout/stderr error listeners,
+- **Process** (eight entries; `session` keeps its own runtime): stdout/stderr error listeners,
   build the graph and print a failure before a `Log` exists, `Command.run`, defects to
-  `reportFailure`, `runMain` with a teardown. This is `Env.run`. Only the six non-server entries
-  (`ctrl`, `dig`, `driver`, `client`, `viz`, `session`) install CLI config without the Wizard
-  today; the runner does it for all nine.
-- **Server** (the four servers, and `dig` as a root script): `createServer`, the first-error
-  `Deferred`, listen with the logger and listen log off, `TracerDisabledWhen`, then in the same
-  scope log "listening" and start background work. This is http's `serve`. qemu-server also
-  writes the first error into `shutdown.reason`; `serve` takes that as `onError`.
+  `reportFailure`, `runMain` with a teardown. This is `Env.run`. Only the five non-server entries
+  (`ctrl`, `driver`, `client`, `viz`, `session`) install CLI config without the Wizard today; the
+  runner does it for all eight.
+- **Server** (the four servers): `createServer`, the first-error `Deferred`, listen with the
+  logger and listen log off, `TracerDisabledWhen`, then in the same scope log "listening" and
+  start background work. This is http's `serve`. qemu-server also writes the first error into
+  `shutdown.reason`; `serve` takes that as `onError`.
 - **Fleet:** qemu-server and automation-client are *members*; the proxy and automation-server
   are *readers*.
 
@@ -980,7 +998,7 @@ How we speak HTTP: one way to serve, one way to call the proxy, one set of API e
     server failing). It returns a `Layer`, built with `Layer.effectDiscard` and
     `Layer.provide(NodeHttpServer.layer(...))` the way the four mains do, and runs `onError` once
     on the first server error before the fatal line, which is how qemu-server sets
-    `shutdown.reason`. `dig` has the same loop and may adopt `serve` later; it is a root script.
+    `shutdown.reason`.
 - **It does not take** the announce loop or the stale-server sweep (fleet), or
   `automation-server/client.ts`. That client has one consumer, declares `OligarchyToken` under
   an automation-server service key and raises `AutomationClientError`, an app error. It stays in
@@ -996,7 +1014,7 @@ How we speak HTTP: one way to serve, one way to call the proxy, one set of API e
 - **Admission rule.** The contract, serving it, calling the proxy, guarding a route. Refused: a
   store, a loop, a client with one consumer. A request timeout is HTTP and is not a "clock".
 
-### The six apps (layer 6, phase 10)
+### The seven apps (layer 6, phase 10)
 
 Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` and
 `vitest.config.ts`. The root workspaces gain `apps/*`.
@@ -1031,24 +1049,33 @@ Each app moves to `apps/<name>/`, with its own `package.json`, `src/`, `test/` a
   app's own tsconfig, and its `vitest.config.ts` carries the Solid babel transform that the
   root's carries today. Nothing imports viz once `steps.ts` is in shared (phase 2);
   `dashboard/follow.tsx` and `driver/loop.ts` were its only dependents.
+- **ctrl** is the operator's and the driving agent's command line: `main.ts`, `command.ts` (the
+  command tree: tests, runs, results, servers, automation, diagnosis, mint) and `render.ts`
+  (its JSON and text output). It imports db (every store), env (`Config`, `EnvFile`), log
+  (`Log`, `Render`), observability (`SentryLive`, `LogLive`), shared, http (`Api.VERSION`, the
+  proxy client) and linear (the client, `prompts`, `openRun`). `linear.ts` and `prompts.ts` are
+  linear's by phase 7, which is also when its three dependents stop importing it: the dashboard
+  ran its command tree in-process, and the proxy and automation-server took `Linear` from it.
+  It is the one non-server app that builds the row-writing log (in `command.ts`) and preloads
+  Sentry.
 
 With viz and the dashboard both apps, the root package has no `.tsx`: the root tsconfig drops its
 JSX settings, the root `vitest.config.ts` drops both JSX plugins, and the pragma rule in the
 architecture test is deleted.
 
-The wrappers (`./qemu-server`, `./viz` and the others), the package scripts and the fleet
-starters point at `apps/<name>/src/main.ts`.
+The wrappers (`./qemu-server`, `./viz`, `./ctrl` and the others), the package scripts and the
+fleet starters point at `apps/<name>/src/main.ts`.
 
 ### What stays in the root package
 
-- **The scripts:** `client` (to be removed), `ctrl`, `dig`, `driver` (with `src/harness/`, except
-  the settings loader that moves to env) and `session` (with `image.ts`).
+- **The scripts:** `client` (to be removed), `driver` (with `src/harness/`, except the settings
+  loader that moves to env) and `session` (with `image.ts`).
 - **`test/repo/`,** the repo-wide checks, which read files and import no packages.
 
-The scripts use packages the way the apps do. The root keeps what is left of its tangle (`driver`
-imports `client`, `ctrl` imports `client`; both go when `client` is removed), which is out of
-scope here: this plan is the fleet's libraries and apps. The scripts are a second plan; the
-harness's home (open decision 6) is decided there.
+The scripts use packages the way the apps do. The root keeps one edge of its old tangle (`driver`
+imports `client/actions.ts`; it goes when `client` is removed), which is out of scope here: this
+plan is the fleet's libraries and apps. The scripts are a second plan; the harness's home (open
+decision 6) is decided there.
 
 ## Testing
 
@@ -1106,7 +1133,7 @@ Counted on 2026-09-25 (unit test files using each):
 | `fake-fs.ts` | the file system | 10 | Effect's `FileSystem.layerNoop`, inline. |
 | `reporter.ts` | Sentry's error reporter | 6 | Log's and observability's tests and the four servers' HTTP tests: inline, or an app-local helper. |
 | `tracer.ts` | a recording tracer | 1 | qemu-server's own `test/` (its sessions test). |
-| `stdio.ts` | process arguments | 5 | Stays with the scripts' command tests in the root. |
+| `stdio.ts` | process arguments | 5 | viz's command test takes its own copy into `apps/viz/test/`; the driver, client and session command tests in the root keep root's. |
 | `fake-qemu.ts`, `fake-minted.ts`, `fake-qmp-socket.ts`, `fake-sessions.ts` | QEMU pieces | 2–4 each | qemu-server's own `test/`. |
 | `fake-linear.ts` | Linear | 5 | automation-server, the proxy's setup, ctrl and the dashboard: inline, or an app-local helper. |
 | `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts`, `fake-tty.ts` | the viz terminal | 1–5 each | viz's own `apps/viz/test/`. The session tests (root) keep what they use of them; `viz.integration.test.ts` takes `stripAnsi` into integration-testing. |
