@@ -94,15 +94,6 @@ export class ProxyUnreachable extends Schema.TaggedError<ProxyUnreachable>(
   "@oligarchy/shared/errors/ProxyUnreachable",
 )("ProxyUnreachable", { message: Schema.String, cause: Schema.Defect() }) {}
 
-export class LinearError extends Schema.TaggedError<LinearError>(
-  "@oligarchy/shared/errors/LinearError",
-)("LinearError", {
-  operation: Schema.String,
-  message: Schema.String,
-  status: Schema.optionalKey(Schema.Int),
-  cause: Schema.optionalKey(Schema.Defect()),
-}) {}
-
 // POST /run to an automation-client: unreachable, or a non-2xx. Not an API error — the
 // automation server turns it into a failed job.
 export class AutomationClientError extends Schema.TaggedError<AutomationClientError>(

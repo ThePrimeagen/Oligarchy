@@ -188,7 +188,19 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Effect.logError` for pool errors on purpose, because a pool failure routed through the
   row-writing `Log` would try to insert a row through the failing pool. Its admission rule: a
   store reads and writes rows and returns them; refused are a loop, a clock, a call to another
-  system and a log line. `packages/observability/src/` is where lines, failures and spans go once
+  system and a log line. `packages/linear/src/` is the Linear API and nothing else: `client.ts`
+  (the `Linear` service, service key `@oligarchy/linear/Linear`: `teamId`, `labelIds`,
+  `assigneeId`, `stateIds`, `createIssue`, `describeIssue`, `moveIssue`, `markReady`,
+  `clearReady`, the `moveTo*` family, `listBacklog`, `listAutomationNeeded`, `listNeedsReview`;
+  the board vocabulary `BACKLOG_STATE` ... `ABORTED_STATE`, `READY_LABEL`, `AGENT_TEST_LABEL`;
+  `LinearTicket`, `LinearBacklogTicket`) and `errors.ts` (`LinearError`). It imports `effect`,
+  `@oligarchy/env` and its own files. Every `moveTo*` but one finds its state by name on the
+  configured team; `moveToAborted` finds it on the ticket's own team, because its caller (the
+  dashboard) knows the ticket and not the board, and a ticket Linear does not know is refused
+  before any update. Its admission rule: a call to the Linear API, or a name the board uses;
+  refused are a store (a Linear primitive knows a ticket identifier, never a result), a template,
+  a rule about what a column means for a job, and a retry policy: those are jobs'.
+  `packages/observability/src/` is where lines, failures and spans go once
   written: `log.ts` (`LogLive`, the row-writing `Log` layer: one drain fiber takes each line
   with its row in call order, inserts the row, then writes the line; a refused row writes the
   line, then `db: log insert failed: <detail>`, then reports the failure; a flush marker resolves
@@ -211,8 +223,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `wrangler.jsonc` it deletes every row older than seven days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
   fleet) alone; a row is history for a week and then gone. What it calls beyond Postgres is the
-  automation server's `/abort` and, in `linear.ts`, Linear's GraphQL to move an aborted job's
-  ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
+  automation server's `/abort` and, through `@oligarchy/linear`'s `moveToAborted` on a
+  `ManagedRuntime` built per call over `FetchHttpClient`, Linear's GraphQL to move an aborted
+  job's ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
   points them at stubs, and the tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
   secrets, as is `LINEAR_TEAM`: the team `POST /create-test-suite-run` files tickets on, with no
   default, so a local worker and production can name different teams. A dashboard var would be
@@ -239,9 +252,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `import * as EnvErrors from "@oligarchy/env/errors"`, `import * as Client from
   "@oligarchy/db/client"` and one namespace per store (`Logs`, `Servers`, `Tests`, ...),
   `import * as DbSchema from "@oligarchy/db/schema"`, `import * as DbErrors from
-  "@oligarchy/db/errors"`. The five errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`,
-  `EnvErrors` and `DbErrors` everywhere so none shadows the main package's staged `Errors`; when
-  that file is gone, `SharedErrors` becomes `Errors`. The observability package is `import * as
+  "@oligarchy/db/errors"`, `import * as Linear from "@oligarchy/linear/client"`, `import * as
+  LinearErrors from "@oligarchy/linear/errors"`. The six errors modules are `ApiErrors`,
+  `SharedErrors`, `LogErrors`, `EnvErrors`, `DbErrors` and `LinearErrors` everywhere so none
+  shadows the main package's staged `Errors`; when that file is gone, `SharedErrors` becomes
+  `Errors`. The observability package is `import * as
   Observability from "@oligarchy/observability/log"` (`Observability.LogLive`, the row-writing
   `Log` layer the five graphs build), `import * as Sentry from "@oligarchy/observability/sentry"`
   and `import * as Dsn from "@oligarchy/observability/dsn"`.

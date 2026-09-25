@@ -4,7 +4,7 @@ import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
-import * as Errors from "../../src/shared/errors.ts";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -353,7 +353,7 @@ describe("opening a setup", () => {
       overrides: {
         createIssue: () =>
           Effect.fail(
-            Errors.LinearError.make({
+            LinearErrors.LinearError.make({
               operation: "createIssue",
               message: "linear: request failed",
             }),
@@ -384,7 +384,7 @@ describe("opening a setup", () => {
             Effect.gen(function* () {
               created += 1;
               return yield* Effect.fail(
-                Errors.LinearError.make({
+                LinearErrors.LinearError.make({
                   operation: "createIssue",
                   message: "linear: request failed",
                 }),

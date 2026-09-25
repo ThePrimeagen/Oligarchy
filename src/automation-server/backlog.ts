@@ -3,10 +3,10 @@ import * as Automation from "@oligarchy/db/automation";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Servers from "@oligarchy/db/servers";
 import * as Tests from "@oligarchy/db/tests";
+import * as Linear from "@oligarchy/linear/client";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Linear from "../ctrl/linear.ts";
 import * as Enqueue from "./enqueue.ts";
 
 const POLL_INTERVAL = "30 seconds";

@@ -6,12 +6,12 @@ import { TestClock, TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Config from "@oligarchy/env/config";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -763,7 +763,7 @@ describe("test run", () => {
 
   it.effect("marks the run and results failed when Linear refuses the token (unhappy)", () =>
     Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "teamId",
         status: 401,
         message: "linear: request failed (401): unauthorized",
@@ -794,7 +794,7 @@ describe("test run", () => {
 
   it.effect("names every ticket created, including one whose description failed (unhappy)", () =>
     Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "describeIssue",
         status: 401,
         message: "linear: request failed (401): unauthorized",
@@ -917,7 +917,7 @@ describe("test run", () => {
     "the trapped line reaches the reporter installed at the root, through the real Log, with the failure as its cause (unhappy)",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "describeIssue",
           status: 401,
           message: "linear: request failed (401): unauthorized",
@@ -1261,7 +1261,7 @@ describe("test run testsuite", () => {
 
   it.effect("fails the run when Linear refuses, naming no ticket (unhappy)", () =>
     Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "teamId",
         status: 401,
         message: "linear: request failed (401): unauthorized",
@@ -1544,7 +1544,7 @@ describe("mint", () => {
     "a Linear failure on the second server fails that run, names the ticket already created, and leaves the first run standing (unhappy)",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "createIssue",
           status: 401,
           message: "linear: request failed (401): unauthorized",
@@ -1589,7 +1589,7 @@ describe("mint", () => {
     "a description that fails names the ticket it was describing, which stands in Linear (unhappy)",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "describeIssue",
           status: 401,
           message: "linear: request failed (401): unauthorized",
@@ -1865,7 +1865,7 @@ describe("test list", () => {
 
   it.effect("surfaces a Linear failure as its message (unhappy)", () =>
     Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "listBacklog",
         message: "linear: invalid response",
       });

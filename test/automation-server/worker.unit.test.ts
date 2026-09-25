@@ -18,6 +18,7 @@ import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLinear from "../support/fake-linear.ts";
@@ -874,7 +875,7 @@ describe("dispatch happy path", () => {
   );
 
   it.effect("a move to In Progress that fails twice then succeeds starts /run", () => {
-    const refused = Errors.LinearError.make({
+    const refused = LinearErrors.LinearError.make({
       operation: "moveToInProgress",
       message: `linear: moving ${TICKET} to In Progress failed`,
     });
@@ -940,7 +941,7 @@ describe("the harness closes the board", () => {
   it.effect(
     "a Needs Review move that fails three times leaves the job completed and reports the failure (unhappy)",
     () => {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "stateIds",
         message: "linear: no state named Needs Review",
       });
@@ -1104,7 +1105,7 @@ describe("the harness closes the board", () => {
   it.effect(
     "a move to Succeeded that fails three times leaves the job succeeded and reports the failure (unhappy)",
     () => {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "moveToSucceeded",
         message: `linear: moving ${TICKET} to Succeeded failed`,
       });
@@ -1443,7 +1444,7 @@ describe("dispatch unhappy path", () => {
   it.effect(
     "a move to In Progress that fails three times releases the reservation and errors the job",
     () => {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "moveToInProgress",
         message: `linear: moving ${TICKET} to In Progress failed`,
       });
@@ -1507,7 +1508,7 @@ describe("dispatch unhappy path", () => {
   it.effect(
     "a move to In Review that fails three times releases the reservation and errors the diagnose",
     () => {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "moveToInReview",
         message: `linear: moving ${TICKET} to In Review failed`,
       });
@@ -1794,7 +1795,7 @@ describe("dispatch unhappy path", () => {
     "a ready label that keeps failing is retried and then logged, and the job stays errored",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "clearReady",
           message: `linear: clearing ${TICKET} ready failed`,
         });
@@ -1835,7 +1836,7 @@ describe("dispatch unhappy path", () => {
 
   it.effect("a ready label that fails once is cleared on the retry, with no error line", () =>
     Effect.gen(function* () {
-      const refused = Errors.LinearError.make({
+      const refused = LinearErrors.LinearError.make({
         operation: "clearReady",
         message: `linear: clearing ${TICKET} ready failed`,
       });
@@ -3147,7 +3148,7 @@ describe("a running job left by the last automation server", () => {
     "a Linear move that keeps failing is tried three times, reported, and dispatch still starts",
     () =>
       Effect.gen(function* () {
-        const refused = Errors.LinearError.make({
+        const refused = LinearErrors.LinearError.make({
           operation: "stateIds",
           message: "linear: no state named Errored",
         });

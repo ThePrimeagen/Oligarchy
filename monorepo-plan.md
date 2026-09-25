@@ -4,7 +4,7 @@ Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pul
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
 (`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
-(`@oligarchy/db`) and phase 6 (`@oligarchy/observability`). The rest of
+(`@oligarchy/db`), phase 6 (`@oligarchy/observability`) and phase 7 (`@oligarchy/linear`). The rest of
 this file is the plan for the remaining phases and the reasoning behind each choice; a phase's
 checklist is ticked as it lands.
 
@@ -312,12 +312,12 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 7: `@oligarchy/linear`**
 
-- [ ] TEST (move) `test/ctrl/linear.unit.test.ts` to `packages/linear/test/client.unit.test.ts`.
-- [ ] TEST (move) the cases of `test/dashboard/dashboard.unit.test.ts` that exercise the
+- [x] TEST (move) `test/ctrl/linear.unit.test.ts` to `packages/linear/test/client.unit.test.ts`.
+- [x] TEST (move) the cases of `test/dashboard/dashboard.unit.test.ts` that exercise the
       dashboard's own Linear client to `packages/linear/test/client.unit.test.ts` as
       `moveToAborted`. Happy: the ticket moves to Aborted. Unhappy: an unknown ticket and an API
       refusal are each a `LinearError`.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no file in linear imports a store or
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: no file in linear imports a store or
       `@oligarchy/db`. Unhappy: a `TestStore` import inside linear is named.
 
 **Phase 8: `@oligarchy/jobs`**
@@ -690,12 +690,32 @@ Decided while working the phase:
 
 **Phase 7: `@oligarchy/linear`**
 
-- [ ] Create `packages/linear` from `src/ctrl/linear.ts`: the `Linear` service (service key
+- [x] Create `packages/linear` from `src/ctrl/linear.ts`: the `Linear` service (service key
       `@oligarchy/linear/Linear`), the state and label constants, `LinearTicket`,
       `LinearBacklogTicket`, `LinearError`, and `moveToAborted` with `ABORTED_STATE` folded in
       from `src/dashboard/linear.ts`. Delete `src/dashboard/linear.ts`; the dashboard's abort
       goes through automation-server in phase 8.
-- [ ] Re-point the proxy's, automation-server's and ctrl's `Linear` imports.
+- [x] Re-point the proxy's, automation-server's and ctrl's `Linear` imports.
+
+Decided while working the phase:
+
+- The dashboard's cases that exercised its Linear client were in the DB-gated integration lane
+  (`test/integration/dashboard.integration.test.ts`), not in `dashboard.unit.test.ts`; they stay
+  there, pinning `POST /abort`'s two requests as `Linear.moveToAborted` now makes them, and the
+  package's own tests cover `moveToAborted`.
+- `moveToAborted` keeps the hand-rolled client's shape rather than `moveByName`'s: the Aborted
+  state is looked up on the ticket's own team (`issue(id:) { team { states } }`), then the one
+  `ExperimentIssueUpdate` mutation moves the ticket by identifier. Its caller knows the ticket and
+  not the board, it is one request fewer, and a ticket Linear does not know is refused at the first
+  request; the plan's "an unknown ticket" case is that refusal. The update step every move ends
+  in is one `moveTo` helper, so `moveToInProgress` joins the `moveByName` family.
+- Until phase 8 forwards the dashboard's abort to automation-server, the dashboard moves the
+  ticket itself through the package: a `ManagedRuntime` per call over `FetchHttpClient`, the
+  shape `suite.ts` already uses, so the worker bundles one Linear client and no `Effect.provide`.
+- `LinearError` keeps its identifier `@oligarchy/shared/errors/LinearError`, as `DatabaseError`
+  kept its: an identifier is a wire name, not a path.
+- linear declares `effect` and `@oligarchy/env` alone; the architecture test lets it take shared
+  and log too (the layers below it), and names a store, a template or a test helper.
 
 **Phase 8: `@oligarchy/jobs`**
 

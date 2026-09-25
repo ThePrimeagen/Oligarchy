@@ -1,14 +1,11 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { NodeFileSystem } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Fiber, Layer, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
-import * as Render from "@oligarchy/log/render";
-import * as Linear from "../../src/ctrl/linear.ts";
-import * as Prompts from "../../src/ctrl/prompts.ts";
-import * as Errors from "../../src/shared/errors.ts";
-import * as FakeHttp from "../support/fake-http.ts";
+import * as Linear from "../src/client.ts";
+import * as Errors from "../src/errors.ts";
+import * as FakeHttp from "./fake-http.ts";
 
 const TOKEN = "linear-token-s3ntinel";
 const TEAM = "Fixture Team";
@@ -89,10 +86,21 @@ const existingLabel = (body: GraphQl): Response =>
 const userResponse = (): Response =>
   FakeHttp.json({ data: { users: { nodes: [{ id: "user-id" }] } } });
 
+// The ticket's own team's one state of the asked name, as `issue(id:) { team { states } }` answers.
+const ticketStateResponse = (body: GraphQl): Response =>
+  FakeHttp.json({
+    data: {
+      issue: { team: { states: { nodes: [{ id: stateId(String(body.variables?.state)) }] } } },
+    },
+  });
+
 // The scripted Linear used by the happy path: every query answered as v1's tests answered it.
 const happyLinear = (body: GraphQl): Response => {
   if (body.query.includes("teams(")) {
     return teamResponse();
+  }
+  if (body.query.includes("issue(id:")) {
+    return ticketStateResponse(body);
   }
   if (body.query.includes("issueLabels")) {
     return existingLabel(body);
@@ -117,20 +125,9 @@ const withHttp = (respond: (body: GraphQl) => Response) =>
 
 const linear = (token = TOKEN, team = TEAM) => Linear.Linear.layer(Redacted.make(token), team);
 
-// The ticket body is the prompt module's; a broken checkout is a defect here, not a Linear failure.
-const describedAs = (ticket: string) =>
-  Prompts.renderLinearIssue({
-    LINEAR_TICKET: ticket,
-    RUN_ID: experiment.id,
-    RESULT_ID: firstTest.id,
-    VERSION: experiment.version,
-    ISO_URL: experiment.iso,
-    SERVER_URL: experiment.serverUrl,
-    TEST_NAME: firstTest.name,
-    TEST_DESCRIPTION: firstTest.description,
-    TEST_INSTRUCTION: firstTest.instruction,
-    TEST_PROOF: firstTest.proof,
-  }).pipe(Effect.provide(NodeFileSystem.layer), Effect.orDie);
+// The ticket body is the caller's to render; the client carries it as it is.
+const describedAs = (ticket: string): string =>
+  `${ticket}: ${firstTest.name} on ${experiment.iso} (${experiment.version})\n\n${firstTest.instruction}`;
 
 // The whole ticket flow as `test run` runs it for one definition: the ticket is born in Backlog
 // and moves to Automation Needed with its body, in the one update.
@@ -147,11 +144,7 @@ const createTicket = Effect.gen(function* () {
     assigneeId,
     stateId: states.backlog,
   });
-  yield* client.describeIssue(
-    ticket,
-    yield* describedAs(ticket.identifier),
-    states.automationNeeded,
-  );
+  yield* client.describeIssue(ticket, describedAs(ticket.identifier), states.automationNeeded);
   return ticket;
 });
 
@@ -211,7 +204,7 @@ describe("Linear happy path", () => {
         expect(bodies[7]?.variables).toEqual({
           id: "issue-OLI-42",
           input: {
-            description: yield* describedAs("OLI-42"),
+            description: describedAs("OLI-42"),
             stateId: stateId("Automation Needed"),
           },
         });
@@ -609,6 +602,32 @@ describe("Linear happy path", () => {
         {
           query: expect.stringContaining("issueUpdate"),
           variables: { id: "OLI-45", input: { stateId: stateId("In Review") } },
+        },
+      ]);
+    }),
+  );
+
+  // The dashboard aborts by identifier from a worker that knows the ticket and not the board, so
+  // the Aborted state is looked up on the ticket's own team: two requests and no team lookup.
+  it.effect("moveToAborted finds the Aborted state on the ticket's team and moves the ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp(happyLinear);
+      yield* Effect.flatMap(Linear.Linear, (client) => client.moveToAborted("OLI-45")).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies).toEqual([
+        {
+          query: expect.stringMatching(
+            /issue\(id: \$ticket\) \{ team \{ states\(filter: \{ name: \{ eq: \$state \} \}, first: 1\)/,
+          ),
+          variables: { ticket: "OLI-45", state: Linear.ABORTED_STATE },
+        },
+        {
+          query: expect.stringContaining("issueUpdate"),
+          variables: { id: "OLI-45", input: { stateId: stateId("Aborted") } },
         },
       ]);
     }),
@@ -1123,6 +1142,80 @@ describe("Linear unhappy path", () => {
     }),
   );
 
+  // Linear's refusal of a ticket it does not know: a 200 with one error beside a null data.
+  it.effect("moveToAborted stops at the first request when Linear does not know the ticket", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() =>
+        FakeHttp.json({ errors: [{ message: "Entity not found: Issue" }], data: null }),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToAborted("OLI-404")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToAborted",
+        message: "linear: Entity not found: Issue",
+      });
+      expect(http.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect(
+    "moveToAborted refuses a ticket whose team has no Aborted state before any update",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp((body) =>
+          body.query.includes("issue(id:")
+            ? FakeHttp.json({ data: { issue: { team: { states: { nodes: [] } } } } })
+            : happyLinear(body),
+        );
+        const error = yield* failureOf(
+          Effect.flatMap(Linear.Linear, (client) => client.moveToAborted("OLI-45")),
+        ).pipe(Effect.provide(http.layer));
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "moveToAborted",
+          message: "linear: no state named Aborted",
+        });
+        expect(http.requests).toHaveLength(1);
+      }),
+  );
+
+  it.effect("moveToAborted reports an update that did not succeed by ticket (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ data: { issueUpdate: { success: false } } })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToAborted("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToAborted",
+        message: "linear: moving OLI-45 to Aborted failed",
+      });
+    }),
+  );
+
+  it.effect("moveToAborted reports a token Linear refuses with the status (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ errors: [{ message: "Authentication required" }] }, 401),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.moveToAborted("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "moveToAborted",
+        status: 401,
+      });
+      expect(http.requests).toHaveLength(1);
+    }),
+  );
+
   it.effect("reports a description failure by ticket", () =>
     Effect.gen(function* () {
       const http = withHttp((body) => {
@@ -1231,9 +1324,10 @@ describe("Linear unhappy path", () => {
       expect(error.operation).toBe("teamId");
       expect(error.status).toBeUndefined();
       expect(error.message).toBe("linear: request failed");
-      expect(Render.headline(error)).toBe(
-        "linear: request failed: Transport: connect ECONNREFUSED 127.0.0.1:1 (POST https://api.linear.app/graphql)",
-      );
+      expect(error.cause).toMatchObject({
+        message:
+          "Transport: connect ECONNREFUSED 127.0.0.1:1 (POST https://api.linear.app/graphql)",
+      });
     }),
   );
 

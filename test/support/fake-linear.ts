@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import * as Linear from "../../src/ctrl/linear.ts";
+import * as Linear from "@oligarchy/linear/client";
 
 export type LinearCall =
   | { readonly method: "teamId" }
@@ -26,6 +26,7 @@ export type LinearCall =
   | { readonly method: "moveToNeedsReview"; readonly identifier: string }
   | { readonly method: "moveToFailed"; readonly identifier: string }
   | { readonly method: "moveToSucceeded"; readonly identifier: string }
+  | { readonly method: "moveToAborted"; readonly identifier: string }
   | { readonly method: "listBacklog" }
   | { readonly method: "listAutomationNeeded" }
   | { readonly method: "listNeedsReview" };
@@ -102,6 +103,7 @@ export const fakeLinear = (
       record({ method: "moveToNeedsReview", identifier }, Effect.void),
     moveToFailed: (identifier) => record({ method: "moveToFailed", identifier }, Effect.void),
     moveToSucceeded: (identifier) => record({ method: "moveToSucceeded", identifier }, Effect.void),
+    moveToAborted: (identifier) => record({ method: "moveToAborted", identifier }, Effect.void),
     listBacklog: record({ method: "listBacklog" }, Effect.succeed(options.backlog ?? [])),
     listAutomationNeeded: record({ method: "listAutomationNeeded" }, Effect.succeed([])),
     listNeedsReview: record({ method: "listNeedsReview" }, Effect.succeed([])),
@@ -123,6 +125,7 @@ export const fakeLinear = (
     moveToNeedsReview: overrides.moveToNeedsReview ?? defaults.moveToNeedsReview,
     moveToFailed: overrides.moveToFailed ?? defaults.moveToFailed,
     moveToSucceeded: overrides.moveToSucceeded ?? defaults.moveToSucceeded,
+    moveToAborted: overrides.moveToAborted ?? defaults.moveToAborted,
     listBacklog: overrides.listBacklog ?? defaults.listBacklog,
     listAutomationNeeded: overrides.listAutomationNeeded ?? defaults.listAutomationNeeded,
     listNeedsReview: overrides.listNeedsReview ?? defaults.listNeedsReview,
