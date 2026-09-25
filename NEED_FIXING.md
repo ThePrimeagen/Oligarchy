@@ -94,7 +94,7 @@ probe on the cause (the same shape `packages/log/src/external-failure.ts` uses) 
 
 ## 8. Convention drifts, one line each
 
-- `Record<string, unknown>` (forbidden by `development.md`) in `src/observability/sentry.ts`
+- `Record<string, unknown>` (forbidden by `development.md`) in `packages/observability/src/sentry.ts`
   (`tag`) and `src/ctrl/linear.ts` (`variables`).
 - `src/shared/process-usage.ts` wraps `collect` in `Effect.withSpan`; every other service method is
   `Effect.fn("Service.method")`.

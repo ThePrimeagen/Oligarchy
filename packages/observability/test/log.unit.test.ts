@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, ErrorReporter, Fiber, Layer, type LogLevel } from "effect";
+import { Console, Deferred, Effect, ErrorReporter, Fiber, Layer, type LogLevel } from "effect";
 import { TestConsole } from "effect/testing";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Logs from "@oligarchy/db/logs";
@@ -132,21 +132,31 @@ describe("LogLive", () => {
     "a refused row still writes its line, then the failure, then reports it, and the rows behind it land (unhappy)",
     () =>
       Effect.gen(function* () {
-        const store = fakeLogStore((row) =>
-          row.text === "bad"
-            ? Effect.fail(
-                DbErrors.DatabaseError.make({
-                  operation: "insertLog",
-                  message: "Failed query: insert into logs",
-                  cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
-                }),
-              )
-            : Effect.void,
-        );
-        const reporter = collect();
-        const order: Array<string> = [];
-        const noting = ErrorReporter.make(({ error }) => {
-          order.push(`report:${error.message}`);
+        // One timeline for inserts, lines and reports, so the order between them is what is pinned.
+        const timeline: Array<string> = [];
+        const store = fakeLogStore((row) => {
+          if (row.text === "bad") {
+            return Effect.fail(
+              DbErrors.DatabaseError.make({
+                operation: "insertLog",
+                message: "Failed query: insert into logs",
+                cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+              }),
+            );
+          }
+          timeline.push(`insert:${row.text}`);
+          return Effect.void;
+        });
+        const ambient = yield* Console.Console;
+        const noting: Console.Console = {
+          ...ambient,
+          log: (...parameters) => {
+            timeline.push(`line:${plain(parameters[0])}`);
+            ambient.log(...parameters);
+          },
+        };
+        const reporter = ErrorReporter.make(({ error }) => {
+          timeline.push(`report:${error.message}`);
         });
         yield* Effect.gen(function* () {
           const log = yield* Log.Log;
@@ -158,19 +168,21 @@ describe("LogLive", () => {
           Effect.provide(
             Observability.LogLive.pipe(
               Layer.provide(store.layer),
-              Layer.provide(ErrorReporter.layer([noting])),
+              Layer.provide(ErrorReporter.layer([reporter])),
+              Layer.provide(Layer.succeed(Console.Console)(noting)),
             ),
           ),
         );
         expect(store.rows.map((row) => row.text)).toEqual(["good 1", "good 2"]);
-        expect(yield* consoleLines).toEqual([
-          "[INFO] [global] good 1",
-          "[INFO] [global] bad",
-          "[ERROR] [global] db: log insert failed: connect ECONNREFUSED 127.0.0.1:5432",
-          "[INFO] [global] good 2",
+        expect(timeline).toEqual([
+          "insert:good 1",
+          "line:[INFO] [global] good 1",
+          "line:[INFO] [global] bad",
+          "line:[ERROR] [global] db: log insert failed: connect ECONNREFUSED 127.0.0.1:5432",
+          "report:Failed query: insert into logs",
+          "insert:good 2",
+          "line:[INFO] [global] good 2",
         ]);
-        expect(order).toEqual(["report:Failed query: insert into logs"]);
-        expect(reporter.reported).toHaveLength(0);
       }),
   );
 

@@ -1070,7 +1070,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
   hard-coded constant (public by design) and is shared with the dashboard.
 - `@sentry/bun` (Sentry's SDK for the runtime, `@sentry/node` underneath) and `@sentry/effect`
-  are imported only in `packages/observability/src/`; `@sentry/cloudflare` only in `src/dashboard/`. All
+  are imported only in `packages/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
   three are pinned to one version so `@sentry/core` is not duplicated (`SentryEffectTracer`
   relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
