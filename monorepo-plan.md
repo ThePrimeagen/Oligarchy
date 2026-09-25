@@ -55,6 +55,11 @@ Then two independent reviews of that revision (2026-09-25), which changed:
 - **`openRun` is specified**: lifted out of `makeCtrlCommand`'s closure with its helpers, returns
   the value instead of printing, and the dashboard still builds its own runtime around it.
 - **`@oligarchy/routes` has a slot** in the layer list between phase 2 and its phase 9 rename.
+- **The row, then the line.** Today `emit` writes stdout first and queues the row after. The
+  sink now owns both destinations in order: insert the row, then write the line. A refused row
+  still writes the line, then `db: log insert failed: <detail>`, then reports the failure to
+  Sentry. So the sink is offered the line with its row, and the stdout layer's sink writes at
+  once.
 
 How to work a phase:
 
@@ -179,8 +184,9 @@ Write each phase's tests before any of that phase's code, and see them fail.
       cause to the current reporters. Unhappy: an unattributed line stays readable without a
       colour; `skipSentry` reports nothing.
 - [ ] TEST (new) `packages/log/test/log.unit.test.ts`: `Log.layer(sink)` builds the sink once
-      with `write` and `report`, hands every `LogRow` to it in call order, and `flush` waits for
-      the sink's flush. Unhappy: the stdout layer offers to no sink and its `flush` is immediate.
+      with `write` and `report`, hands every line with its `LogRow` to it in call order, writes
+      nothing itself, and `flush` waits for the sink's flush. Unhappy: the stdout layer's sink
+      writes each line at once, inserts nothing, and its `flush` is immediate.
 - [ ] TEST (move) `test/observability/render.unit.test.ts` to
       `packages/log/test/render.unit.test.ts`, all but the `wantsColor` describe (phase 4).
 - [ ] TEST (move) `test/observability/palette.unit.test.ts` to `packages/log/test/`.
@@ -237,9 +243,11 @@ container and stay in the root's integration project until phase 11.
 
 - [ ] TEST (move) the `Log rows` describe of `test/observability/log.unit.test.ts` to
       `packages/observability/test/log.unit.test.ts`, on `LogLive` with an inline `LogStore`
-      fake. Happy: rows land in call order and `flush` waits for every insert. Unhappy: a failed
-      insert writes `db: log insert failed: <detail>` and reports it, and the rows behind it still
-      land; an interrupt mid-drain is not reported.
+      fake. Happy: each row is inserted, then its line is written to stdout, in call order, and
+      no line appears before its row has landed; `flush` waits for the last line. Unhappy: a
+      refused row still writes its line, then `db: log insert failed: <detail>`, then reports the
+      failure to the reporters, in that order, and the rows behind it still land; an interrupt
+      mid-drain writes nothing more and is not reported.
 - [ ] TEST (move) `test/observability/sentry.unit.test.ts` to `packages/observability/test/`.
 - [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the instrumented processes preload the
       package's `instrument.ts`, in the package scripts and the wrappers.
@@ -409,10 +417,11 @@ container and stay in the root's integration project until phase 11.
 - [ ] Create `packages/log` with:
   - `log.ts`: the `Log` service, `Attribution`, `Report`, `Locations`, `ProcessAttribution`,
     `Colors` (default off), `LogRow` (`text`, `level`, `location`, `agentId`; the shape `offer`
-    builds today), the `Sink` type (`offer(row)`, `flush`), `static layer(sink)` where `sink` is
-    `(write, report) => Effect<Sink, never, Scope>` (today's `makeLog` argument), and
-    `static layerStdout`. The shape of the service is derived from `make`; the `LogService`
-    alias goes, as `development.md` requires.
+    builds today), the `Sink` type (`offer(line, row)`, `flush`), `static layer(sink)` where
+    `sink` is `(write, report) => Effect<Sink, never, Scope>` (today's `makeLog` argument), and
+    `static layerStdout`, whose sink writes each line at once. `emit` renders the line, builds
+    the row and offers both; it no longer writes stdout itself. The shape of the service is
+    derived from `make`; the `LogService` alias goes, as `development.md` requires.
   - `render.ts`: `errorDetail`, `headline`, `renderFailure`, `reportFailure`, the rendered-line
     type as `Line` (renamed from the text `LogLine`, so the error class keeps the name),
     `logPieces`, `renderLogLine`, `paint`, `foreground` and the Rose Pine constants.
@@ -586,7 +595,7 @@ was checked against the modules' imports as they are today.
 |---|---|---|---|
 | `shared` ↔ `http` | contract imports shared | `domain.ts` importing `Contract.SessionMode` (it does today) | every vocabulary domain code uses lives in shared; the contract imports it |
 | `log` ↔ `db` | db imports log (failure text) | `type Row = Parameters<typeof Logs.LogStore.Service.insertLog>[0]` in `log.ts` today | log declares `LogRow`; that alias and `makeSink` stay in observability; log never names a store |
-| `log` ↔ `log` (construction) | — | a prebuilt sink that needs the `Log` it is being built into, to report its own insert failures | the sink is a factory receiving `write` and `report`, today's `makeLog` shape |
+| `log` ↔ `log` (construction) | — | a prebuilt sink that needs the `Log` it is being built into, to write the line after its row and to report its own insert failures | the sink is a factory receiving `write` and `report`, today's `makeLog` shape, and is offered the line with the row |
 | `log` ↔ `env` | env imports log (`reportFailure`, `Colors`) | `WriteStream.prototype.getColorDepth` and `process.stdout` in `render.ts` | `wantsColor` and the probe live in env; `Colors` defaults to off |
 | `log` ↔ `observability` | observability imports log | Sentry reporting inside log | log reports through Effect's `ErrorReporter.CurrentErrorReporters`; Sentry installs a reporter, log never names Sentry |
 | `db` ↔ `observability` | observability imports db (rows) | `db/client.ts` importing `Render` from observability (it does today) | failure text is in log; `db/client.ts` keeps `Effect.logError`, because a pool error routed through the row-writing log would try to insert through the failing pool |
@@ -667,10 +676,21 @@ through. About 450 lines. Every package above it may take `Log`; none has to.
   `Line` type, `logPieces`, `renderLogLine`, `paint`, `foreground` and the Rose Pine constants.
   `palette.ts`: the agent colour palette. `external-failure.ts`: `causeOf`. `LogLine`: the
   Sentry wrapper error.
-- **The sink is a factory.** `Log.layer((write, report) => Effect<Sink, never, Scope>)`. The
-  sink gets the `write` that puts a line on stdout and the `report` that reaches the reporters,
-  so it can say `db: log insert failed` without depending on the `Log` it is part of. This is
-  exactly `makeLog`'s argument today; the plan names it rather than inventing a prebuilt sink.
+- **The sink is a factory and owns the destinations.**
+  `Log.layer((write, report) => Effect<Sink, never, Scope>)`, with
+  `Sink = { offer(line, row), flush }`. The service renders the `Line` (level, text,
+  attribution, palette colour) and builds the `LogRow`, then offers both; it writes nothing
+  itself. The sink gets the `write` that puts a line on stdout and the `report` that reaches
+  the reporters, so it can say `db: log insert failed` without depending on the `Log` it is part
+  of. `write` and `report` are exactly `makeLog`'s arguments today; what changes is that `emit`
+  stops calling `write` before `offer`.
+- **The row, then the line.** The row is the record and stdout is its convenience copy, so the
+  copy follows the record. The row-writing sink inserts, then writes the line. A refused row
+  still writes the line, then one more, `db: log insert failed: <detail>`, then reports the
+  failure to Sentry; the rows behind it still land. The stdout sink has no row and writes at
+  once. A consequence worth stating: with rows on, a stdout line trails its insert by the
+  insert's latency and appears in insert order, which is call order, because one fiber drains
+  the queue.
 - **`LogRow`** is `text`, `level`, `location`, `agentId`: what `offer` builds today. The
   `Parameters<typeof LogStore.insertLog>[0]` alias that ties the row to the store stays with
   `makeSink` in observability.
@@ -790,8 +810,10 @@ Where lines and failures go once written.
 
 - **Holds** `sentry.ts`, `instrument.ts`, `dsn.ts`, and `log.ts` holding `LogLive`:
   `Log.layer((write, report) => makeSink(store.insertLog, write, report))` over `LogStore`.
-  `makeSink` (one drain fiber, in-order inserts, a flush marker, `db: log insert failed` on a
-  refused row) and the `Row` alias derived from `insertLog` stay here.
+  `makeSink` stays here: one drain fiber takes `{ line, row }` in call order, inserts the row,
+  then writes the line; on a refused row it writes the line, then
+  `db: log insert failed: <detail>`, then reports the failure; a flush marker resolves when the
+  last line is out. The `Row` alias derived from `insertLog` stays with it.
 - **Depends on** db (the rows), log (the service), shared and Sentry.
 - **Paths follow it.** Every `--preload` of `instrument.ts` and the dashboard's `dsn` import.
   The five `main.ts` files that build the row-writing log use `Observability.LogLive`.
