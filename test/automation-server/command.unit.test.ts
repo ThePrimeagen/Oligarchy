@@ -12,6 +12,8 @@ import {
   Stdio,
   Terminal,
 } from "effect";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Api from "@oligarchy/routes/api";
 import { TestConsole } from "effect/testing";
@@ -19,8 +21,6 @@ import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as AutomationServerCommand from "../../src/automation-server/command.ts";
-import * as Client from "../../src/db/client.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
 const APP = JSON.stringify({
@@ -89,7 +89,7 @@ const fakeServer = () => {
   return { served, listening, serverFailed, server };
 };
 
-const DatabaseLive = (ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void) =>
+const DatabaseLive = (ping: Effect.Effect<void, DbErrors.DatabaseError> = Effect.void) =>
   Layer.succeed(Client.Database)(
     Client.Database.of({
       run: () => Effect.die("unused"),
@@ -204,7 +204,7 @@ describe("automation server command startup failures", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const unreachable = Errors.DatabaseError.make({
+      const unreachable = DbErrors.DatabaseError.make({
         operation: "ping",
         message: "database request failed",
         cause: new Error("connect ECONNREFUSED"),

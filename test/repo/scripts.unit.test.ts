@@ -155,7 +155,7 @@ describe("package.json scripts", () => {
       }
       expect(count(script, "--preload"), name).toBe(preloads.length);
     }
-    expect(scripts["db:migrate"]).toBe("bun --no-env-file src/db/migrate.ts");
+    expect(scripts["db:migrate"]).toBe("bun --no-env-file packages/db/src/migrate.ts");
   });
 
   // `bun run` hands a node-shebang bin to Node when one is installed; vitest and its forked
@@ -177,8 +177,8 @@ describe("package.json scripts", () => {
     }
   });
 
-  it("db:migrate runs the migration program and never a drizzle push", () => {
-    expect(scripts["db:migrate"]).toContain(" src/db/migrate.ts");
+  it("db:migrate runs the package's migration program and never a drizzle push", () => {
+    expect(scripts["db:migrate"]).toContain(" packages/db/src/migrate.ts");
     expect(Object.values(scripts).some((script) => script.includes("drizzle-kit push"))).toBe(
       false,
     );
@@ -186,12 +186,23 @@ describe("package.json scripts", () => {
 
   // The named file is the one that migrates: an already-exported DATABASE_MIGRATION_URL is
   // dropped, or a shell that sourced the other file would win and migrate the wrong database.
+  // drizzle-kit resolves its config's paths from the working directory, so the root script runs
+  // the package's own from packages/db, where the config, the schema and the migrations are.
+  it("db:generate runs drizzle-kit from the db package, which owns the whole database", () => {
+    expect(scripts["db:generate"]).toBe("bun run --cwd packages/db db:generate");
+    const db = decodePackageJson(read("packages/db/package.json")).scripts;
+    expect(db["db:generate"]).toBe("drizzle-kit generate");
+    expect(db["db:check"]).toBe("drizzle-kit check");
+    expect(existsSync(join(root, "packages/db/drizzle.config.ts"))).toBe(true);
+    expect(existsSync(join(root, "drizzle.config.ts"))).toBe(false);
+  });
+
   it("prod:db:migrate and test:db:migrate each migrate from their own env file (happy)", () => {
     expect(scripts["prod:db:migrate"]).toBe(
-      "env -u DATABASE_MIGRATION_URL bun --no-env-file src/db/migrate.ts --env-file .prod-env",
+      "env -u DATABASE_MIGRATION_URL bun --no-env-file packages/db/src/migrate.ts --env-file .prod-env",
     );
     expect(scripts["test:db:migrate"]).toBe(
-      "env -u DATABASE_MIGRATION_URL bun --no-env-file src/db/migrate.ts --env-file .env",
+      "env -u DATABASE_MIGRATION_URL bun --no-env-file packages/db/src/migrate.ts --env-file .env",
     );
   });
 
@@ -258,8 +269,8 @@ const decodeJournal = Schema.decodeUnknownSync(Schema.fromJsonString(Journal));
 
 describe("drizzle migrations", () => {
   it("journal tags match the sql files one-to-one, and idx matches the tag prefix", () => {
-    const journal = decodeJournal(read("drizzle/meta/_journal.json"));
-    const sqls = readdirSync(join(root, "drizzle"))
+    const journal = decodeJournal(read("packages/db/drizzle/meta/_journal.json"));
+    const sqls = readdirSync(join(root, "packages/db/drizzle"))
       .filter((name) => name.endsWith(".sql"))
       .sort();
     expect(sqls).toEqual(journal.entries.map((entry) => `${entry.tag}.sql`));
@@ -298,19 +309,31 @@ describe(".oxlintrc.json", () => {
 describe(".github/workflows/migrations.yml", () => {
   const workflow = read(".github/workflows/migrations.yml");
 
-  // The code lives at the root; a job that runs or scans a directory that is not there fails
-  // every pull request before its first step.
+  // The migrations live in the db package; a job that scans a directory that is not there fails
+  // every pull request before its first step, and one that scans the old root path sees nothing.
   it("runs every job where the code lives and scans the migrations that exist", () => {
     const scanned = [
       ...workflow.matchAll(/working-directory:\s*(\S+)/g),
+      ...workflow.matchAll(/--cwd (\S+)/g),
       ...workflow.matchAll(/find (\S+)/g),
       ...workflow.matchAll(/'(?::\(exclude\))?([^']*drizzle\/[^']*)'/g),
+      ...workflow.matchAll(/porcelain ([^\s)]+)/g),
     ].map(([, path]) => path);
     expect(scanned.length).toBeGreaterThan(0);
     for (const path of scanned) {
       expect(existsSync(join(root, path)), path).toBe(true);
+      expect(path.startsWith("packages/db/drizzle") || path === "packages/db", path).toBe(true);
     }
     expect(workflow.includes("v2/")).toBe(false);
+  });
+
+  // The moved migrations are not renamed migrations: the diff runs without rename detection,
+  // so a file added under the new path is an addition, and the one-shot escape hatches that
+  // skipped the check for a past reshuffle are gone with it.
+  it("keeps migrations append-only under packages/db/drizzle with no skip path (unhappy)", () => {
+    expect(workflow).toContain("--no-renames");
+    expect(workflow).not.toContain("append-only skipped");
+    expect(workflow).not.toMatch(/-- 'drizzle\/'|-- drizzle\b/);
   });
 
   // A job that installs with anything but bun from the committed lockfile runs a different

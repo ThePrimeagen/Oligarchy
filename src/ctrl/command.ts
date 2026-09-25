@@ -13,6 +13,16 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as Actions from "@oligarchy/db/actions";
+import * as Automation from "@oligarchy/db/automation";
+import * as Client from "@oligarchy/db/client";
+import * as DebugLogs from "@oligarchy/db/debug-logs";
+import * as Diagnosis from "@oligarchy/db/diagnosis";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Logs from "@oligarchy/db/logs";
+import * as Servers from "@oligarchy/db/servers";
+import * as Sessions from "@oligarchy/db/sessions";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as Log from "@oligarchy/log/log";
@@ -21,15 +31,6 @@ import * as Contract from "@oligarchy/routes/contract";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as Actions from "../db/actions.ts";
-import * as Automation from "../db/automation.ts";
-import * as DebugLogs from "../db/debug-logs.ts";
-import * as Client from "../db/client.ts";
-import * as Diagnosis from "../db/diagnosis.ts";
-import * as Logs from "../db/logs.ts";
-import * as Servers from "../db/servers.ts";
-import * as Sessions from "../db/sessions.ts";
-import * as Tests from "../db/tests.ts";
 import * as RowLog from "../observability/log.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Linear from "./linear.ts";
@@ -56,7 +57,7 @@ export type Stores =
 // that is ephemeral and machine-specific, stored nowhere but in the state of the machine itself,
 // is asked of the reverse proxy — today that is one call, `mint --unminted`'s GET /minted.
 export type Deps = {
-  readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
+  readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, DbErrors.DatabaseError>;
   readonly linear: (
     token: Redacted.Redacted,
     team: string,
@@ -64,7 +65,7 @@ export type Deps = {
 };
 
 // Log sits above the stores so its flush finalizer runs before the pool closes.
-const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.DatabaseError> =>
+const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, DbErrors.DatabaseError> =>
   Layer.mergeAll(
     Sessions.SessionStore.layer,
     Tests.TestStore.layer,
@@ -470,7 +471,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           ),
         DatabaseError: (error) =>
           failRunWith(error, (reason) =>
-            Errors.DatabaseError.make(
+            DbErrors.DatabaseError.make(
               Object.assign(
                 { operation: error.operation, message: reason },
                 error.cause === undefined ? undefined : { cause: error.cause },
@@ -651,7 +652,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
             ),
           DatabaseError: (error) =>
             failRunWith(created.runId, error, (reason) =>
-              Errors.DatabaseError.make(
+              DbErrors.DatabaseError.make(
                 Object.assign(
                   { operation: error.operation, message: reason },
                   error.cause === undefined ? undefined : { cause: error.cause },

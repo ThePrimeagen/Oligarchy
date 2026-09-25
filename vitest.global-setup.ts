@@ -44,7 +44,7 @@ export const setup = async (project: TestProject) => {
   template.pathname = `/${TEMPLATE}`;
   await withClient(admin, (client) => client.query(`create database ${TEMPLATE}`));
   await withClient(template.toString(), async (client) => {
-    await migrate(drizzle({ client }), { migrationsFolder: "drizzle" });
+    await migrate(drizzle({ client }), { migrationsFolder: "packages/db/drizzle" });
     await client.query(
       `insert into test_definitions (name, description, instruction, proof) values ('lock-screen', 'd', 'i', 'p')`,
     );

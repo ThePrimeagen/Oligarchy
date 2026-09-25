@@ -17,10 +17,10 @@ import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Api from "@oligarchy/routes/api";
 import * as AutomationClientCommand from "../../src/automation-client/command.ts";
-import * as Client from "../../src/db/client.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
 const CliTestLayer = Layer.mergeAll(
@@ -65,7 +65,7 @@ const fakeServer = () => {
   return { served, listening, serverFailed, server };
 };
 
-const DatabaseLive = (ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void) =>
+const DatabaseLive = (ping: Effect.Effect<void, DbErrors.DatabaseError> = Effect.void) =>
   Layer.succeed(Client.Database)(
     Client.Database.of({
       run: () => Effect.die("unused"),
@@ -181,7 +181,7 @@ describe("automation client command flags", () => {
           log,
           DatabaseLive(
             Effect.fail(
-              Errors.DatabaseError.make({
+              DbErrors.DatabaseError.make({
                 operation: "ping",
                 message: "database request failed",
                 cause: new Error("connect ECONNREFUSED"),
@@ -304,7 +304,7 @@ describe("automation client command startup failures", () => {
     Effect.gen(function* () {
       const fake = fakeServer();
       const log = FakeLog.fakeLog();
-      const unreachable = Errors.DatabaseError.make({
+      const unreachable = DbErrors.DatabaseError.make({
         operation: "ping",
         message: "database request failed",
         cause: new Error("connect ECONNREFUSED"),
@@ -334,7 +334,7 @@ describe("automation client command startup failures", () => {
           [...REQUIRED],
           log,
           DatabaseLive(
-            Effect.fail(Errors.DatabaseError.make({ operation: "ping", message: "pool ended" })),
+            Effect.fail(DbErrors.DatabaseError.make({ operation: "ping", message: "pool ended" })),
           ),
         ),
       );

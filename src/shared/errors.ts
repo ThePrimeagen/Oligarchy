@@ -30,14 +30,6 @@ export class OpenRouterUnreachable extends Schema.TaggedError<OpenRouterUnreacha
   "@oligarchy/shared/errors/OpenRouterUnreachable",
 )("OpenRouterUnreachable", { message: Schema.String, cause: Schema.Defect() }) {}
 
-export class DatabaseError extends Schema.TaggedError<DatabaseError>(
-  "@oligarchy/shared/errors/DatabaseError",
-)("DatabaseError", {
-  operation: Schema.String,
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Defect()),
-}) {}
-
 export class QmpError extends Schema.TaggedError<QmpError>("@oligarchy/shared/errors/QmpError")(
   "QmpError",
   {

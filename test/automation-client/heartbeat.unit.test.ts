@@ -2,6 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
 import { TestClock } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Contract from "@oligarchy/routes/contract";
 import * as Heartbeat from "../../src/automation-client/heartbeat.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
@@ -50,7 +51,7 @@ const fakeSessions = (jobs: Effect.Effect<number> = Effect.succeed(0)) =>
     }),
   );
 
-const refused = Errors.DatabaseError.make({
+const refused = DbErrors.DatabaseError.make({
   operation: "heartbeat",
   message: "Failed query: insert into servers",
   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -300,7 +301,7 @@ describe("automation-client heartbeat unhappy path", () => {
     "a refused delete is one error line with the driver's reason, and the scope still closes",
     () =>
       Effect.gen(function* () {
-        const refusedDelete = Errors.DatabaseError.make({
+        const refusedDelete = DbErrors.DatabaseError.make({
           operation: "removeServer",
           message: "Failed query: delete from servers",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -329,7 +330,7 @@ describe("automation-client heartbeat unhappy path", () => {
     "a refused process write is its own error line, and the servers heartbeat still writes",
     () =>
       Effect.gen(function* () {
-        const refusedProcess = Errors.DatabaseError.make({
+        const refusedProcess = DbErrors.DatabaseError.make({
           operation: "reportProcess",
           message: "Failed query: insert into process_stats",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),

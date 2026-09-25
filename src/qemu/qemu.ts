@@ -2,6 +2,7 @@ import { homedir, tmpdir } from "node:os";
 import { Array as Arr, Context, Effect, FileSystem, Layer, Path } from "effect";
 import type { PlatformError, Scope } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Log from "@oligarchy/log/log";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Client from "../qmp/client.ts";
@@ -135,7 +136,7 @@ export type QemuService = {
   readonly start: (
     prepared: Prepared,
     input: StartInput,
-  ) => Effect.Effect<QemuHandle, Errors.QemuStartError | Errors.DatabaseError, Scope.Scope>;
+  ) => Effect.Effect<QemuHandle, Errors.QemuStartError | DbErrors.DatabaseError, Scope.Scope>;
 };
 
 const startError = (error: unknown): Errors.QemuStartError =>

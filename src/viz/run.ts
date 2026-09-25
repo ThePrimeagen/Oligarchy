@@ -26,6 +26,13 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { createSignal } from "solid-js";
+import * as Actions from "@oligarchy/db/actions";
+import * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Logs from "@oligarchy/db/logs";
+import type * as ProcessStats from "@oligarchy/db/process-stats";
+import type * as Servers from "@oligarchy/db/servers";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvErrors from "@oligarchy/env/errors";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
@@ -33,13 +40,6 @@ import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as Actions from "../db/actions.ts";
-import * as Automation from "../db/automation.ts";
-import * as Logs from "../db/logs.ts";
-import * as Tests from "../db/tests.ts";
-import type * as ProcessStats from "../db/process-stats.ts";
-import type * as Servers from "../db/servers.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Follow from "./follow.ts";
 import * as Read from "./read.ts";
 import * as Screen from "./screen.tsx";
@@ -151,7 +151,7 @@ const loadPeek = (
   ticket: string,
   sessionId: string,
   serverUrl: string | null,
-): Effect.Effect<Follow.Peek, Errors.DatabaseError, Actions.ActionStore> =>
+): Effect.Effect<Follow.Peek, DbErrors.DatabaseError, Actions.ActionStore> =>
   Effect.gen(function* () {
     const actions = yield* Actions.ActionStore;
     const rows = yield* actions.listActions(sessionId);

@@ -1,15 +1,15 @@
 import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Servers from "@oligarchy/db/servers";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Servers from "../db/servers.ts";
-import * as Errors from "./errors.ts";
 
 // As often as a server writes its row, so a row is gone within one heartbeat of its tenth
 // silent minute.
 const SWEEP_INTERVAL = "30 seconds";
 
-const isDatabaseError = Schema.is(Errors.DatabaseError);
+const isDatabaseError = Schema.is(DbErrors.DatabaseError);
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>

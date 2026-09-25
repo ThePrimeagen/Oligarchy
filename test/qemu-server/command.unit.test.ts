@@ -18,13 +18,13 @@ import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import type * as Domain from "@oligarchy/shared/domain";
-import * as Client from "../../src/db/client.ts";
 import * as QemuServerCommand from "../../src/qemu-server/command.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 
 const CliTestLayer = Layer.mergeAll(
@@ -48,7 +48,7 @@ const CliTestLayer = Layer.mergeAll(
 const UNREACHABLE = "postgres://user:pw@127.0.0.1:1/oligarchy";
 
 // A Database whose ping is scripted; the pool never connects, so nothing touches the network.
-const fakeDatabase = (ping: Effect.Effect<void, Errors.DatabaseError>) =>
+const fakeDatabase = (ping: Effect.Effect<void, DbErrors.DatabaseError>) =>
   Layer.effect(Client.Database)(
     Effect.map(Client.Database.make(Redacted.make(UNREACHABLE)), (database) => ({
       ...database,
@@ -56,7 +56,7 @@ const fakeDatabase = (ping: Effect.Effect<void, Errors.DatabaseError>) =>
     })),
   );
 
-const refused = Errors.DatabaseError.make({
+const refused = DbErrors.DatabaseError.make({
   operation: "ping",
   message: "Failed query: select 1",
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
@@ -108,7 +108,7 @@ const run = (
   server: QemuServerCommand.QemuServer<never, never>,
   args: ReadonlyArray<string>,
   log: FakeLog.FakeLog,
-  ping: Effect.Effect<void, Errors.DatabaseError> = Effect.void,
+  ping: Effect.Effect<void, DbErrors.DatabaseError> = Effect.void,
   env: Config.Values = {},
 ) =>
   Command.runWith(QemuServerCommand.makeQemuServerCommand(server), { version: Api.VERSION })(
@@ -511,7 +511,7 @@ describe("qemu server command startup failures", () => {
           fake.server,
           [...REQUIRED],
           log,
-          Effect.fail(Errors.DatabaseError.make({ operation: "ping", message: "pool ended" })),
+          Effect.fail(DbErrors.DatabaseError.make({ operation: "ping", message: "pool ended" })),
         ),
       );
       expect(error).toMatchObject({ message: "database unreachable: pool ended" });
@@ -562,7 +562,7 @@ describe("qemu server command startup failures", () => {
 
   it.effect("a restart cleanup that cannot write is fatal with the database error's message", () =>
     Effect.gen(function* () {
-      const cleanup = Errors.DatabaseError.make({
+      const cleanup = DbErrors.DatabaseError.make({
         operation: "failRoutedSessions",
         message: "connect ECONNREFUSED 127.0.0.1:5432",
       });

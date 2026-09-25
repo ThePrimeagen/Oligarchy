@@ -3,7 +3,7 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
-import * as SetupRequests from "../../src/db/setup-requests.ts";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Errors from "../../src/shared/errors.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
 import * as FakeLog from "../support/log.ts";

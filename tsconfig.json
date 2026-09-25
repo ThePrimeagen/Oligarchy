@@ -12,7 +12,6 @@
     "test/**/*.tsx",
     "vitest.config.ts",
     "vitest.global-setup.ts",
-    "vitest.d.ts",
-    "drizzle.config.ts"
+    "vitest.d.ts"
   ]
 }

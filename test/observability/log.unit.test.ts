@@ -2,9 +2,9 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestConsole } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Log from "@oligarchy/log/log";
 import * as RowLog from "../../src/observability/log.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -100,7 +100,7 @@ describe("Log rows", () => {
           insertLog: (row) =>
             row.text === "bad"
               ? Effect.fail(
-                  Errors.DatabaseError.make({
+                  DbErrors.DatabaseError.make({
                     operation: "insertLog",
                     message: "Failed query: insert into logs",
                     cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -136,7 +136,9 @@ describe("Log rows", () => {
     Effect.gen(function* () {
       const store = Stores.fakeLogStore({
         insertLog: () =>
-          Effect.fail(Errors.DatabaseError.make({ operation: "insertLog", message: "pool ended" })),
+          Effect.fail(
+            DbErrors.DatabaseError.make({ operation: "insertLog", message: "pool ended" }),
+          ),
       });
       yield* Effect.gen(function* () {
         const log = yield* Log.Log;

@@ -1,12 +1,12 @@
 import { Cause, Effect, Option, Schedule, Schema } from "effect";
+import * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Servers from "@oligarchy/db/servers";
+import * as Tests from "@oligarchy/db/tests";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Linear from "../ctrl/linear.ts";
-import * as Automation from "../db/automation.ts";
-import * as Servers from "../db/servers.ts";
-import * as Tests from "../db/tests.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Enqueue from "./enqueue.ts";
 
 const POLL_INTERVAL = "30 seconds";
@@ -15,7 +15,7 @@ const POLL_INTERVAL = "30 seconds";
 // no edit; then the webhook is not coming. An edit or a departure starts over.
 const ROUNDS_BEFORE_MOVE = 3;
 
-const isDatabaseError = Schema.is(Errors.DatabaseError);
+const isDatabaseError = Schema.is(DbErrors.DatabaseError);
 
 // A pending row is the queue. Anything else the unique index kept is named by its status.
 const already = (

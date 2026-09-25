@@ -5,7 +5,7 @@ import { ImageRenderable, type Renderable } from "@opentui/core";
 import { testRender } from "@opentui/solid";
 import { Effect, Option } from "effect";
 import { createSignal } from "solid-js";
-import type * as Servers from "../../src/db/servers.ts";
+import type * as Servers from "@oligarchy/db/servers";
 import * as Follow from "../../src/viz/follow.ts";
 import * as Placeholder from "../../src/viz/placeholder.ts";
 import * as Screen from "../../src/viz/screen.tsx";

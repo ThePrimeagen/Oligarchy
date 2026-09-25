@@ -1,8 +1,8 @@
 import { Cause, Deferred, Effect, type Layer, Queue } from "effect";
+import * as Logs from "@oligarchy/db/logs";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Logs from "../db/logs.ts";
 
 type Row = Parameters<typeof Logs.LogStore.Service.insertLog>[0];
 

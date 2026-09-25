@@ -1,19 +1,19 @@
 import { Effect, FileSystem, Layer, Option, type Redacted, Schema, Stdio, Stream } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
+import * as Actions from "@oligarchy/db/actions";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Actions from "../db/actions.ts";
-import * as Client from "../db/client.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Repl from "./repl.ts";
 
 // The one store `image` reads, replaceable by a fake in tests.
 export type Deps = {
   readonly database: (
     url: Redacted.Redacted,
-  ) => Layer.Layer<Actions.ActionStore, Errors.DatabaseError>;
+  ) => Layer.Layer<Actions.ActionStore, DbErrors.DatabaseError>;
 };
 
 export const live: Deps = {

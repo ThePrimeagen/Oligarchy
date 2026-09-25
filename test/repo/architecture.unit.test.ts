@@ -49,6 +49,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
   "@oligarchy/log": 1,
   "@oligarchy/env": 2,
+  "@oligarchy/db": 3,
   "@oligarchy/routes": 5,
 };
 
@@ -157,7 +158,7 @@ const BOUNDARY_FILES = new Set([
   "packages/env/src/colors.ts",
   // The entry runner: the one NodeRuntime.runMain, the stdout and stderr error listeners.
   "packages/env/src/run.ts",
-  "src/db/client.ts",
+  "packages/db/src/client.ts",
 ]);
 
 const isBoundary = (path: string): boolean =>
@@ -179,7 +180,7 @@ const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
 
 // Files allowed to call `Effect.run*`, each with the calls it may make.
 const RUN_ALLOWED: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
-  ["src/db/client.ts", ["runForkWith", "runPromiseExitWith"]],
+  ["packages/db/src/client.ts", ["runForkWith", "runPromiseExitWith"]],
 ]);
 
 const stripStringsAndComments = (source: string): string =>
@@ -264,7 +265,7 @@ describe("Effect.run placement", () => {
     ).toEqual([]);
   });
 
-  // Every entry runs through the one runner, `bun run db:migrate`'s included; the session REPL
+  // Every entry runs through the one runner, `bun run db:migrate`'s (the db package's) included; the session REPL
   // answers its own signals, so it is the one process with a runtime of its own. Exact lists, so
   // an entry that stops using the runner, or a second runner, is named.
   it("NodeRuntime.runMain lives in env's runner, Runtime.makeRunMain in the session entry, and Env.run in every other entry", () => {
@@ -277,11 +278,11 @@ describe("Effect.run placement", () => {
       "src/automation-server/main.ts",
       "src/client/main.ts",
       "src/ctrl/main.ts",
-      "src/db/migrate.ts",
       "src/driver/main.ts",
       "src/qemu-reverse-proxy/main.ts",
       "src/qemu-server/main.ts",
       "src/viz/main.ts",
+      "packages/db/src/migrate.ts",
     ]);
   });
 

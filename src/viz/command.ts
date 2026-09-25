@@ -1,16 +1,16 @@
 import { Effect, Layer, type Redacted, Terminal } from "effect";
 import * as Command from "effect/unstable/cli/Command";
+import * as Actions from "@oligarchy/db/actions";
+import * as Automation from "@oligarchy/db/automation";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Logs from "@oligarchy/db/logs";
+import * as ProcessStats from "@oligarchy/db/process-stats";
+import * as Servers from "@oligarchy/db/servers";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Actions from "../db/actions.ts";
-import * as Automation from "../db/automation.ts";
-import * as Client from "../db/client.ts";
-import * as Logs from "../db/logs.ts";
-import * as ProcessStats from "../db/process-stats.ts";
-import * as Servers from "../db/servers.ts";
-import * as Tests from "../db/tests.ts";
-import * as Errors from "../shared/errors.ts";
 import * as Run from "./run.ts";
 import * as View from "./view.ts";
 
@@ -25,7 +25,7 @@ export type Stores =
 // viz reads the database alone: the machines, their readings and the queue. What it changes, an
 // abort, goes through the automation server.
 export type Deps = {
-  readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, Errors.DatabaseError>;
+  readonly database: (url: Redacted.Redacted) => Layer.Layer<Stores, DbErrors.DatabaseError>;
 };
 
 export const live: Deps = {

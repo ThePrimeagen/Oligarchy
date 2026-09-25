@@ -3,7 +3,8 @@
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
-(`@oligarchy/shared`), phase 3 (`@oligarchy/log`) and phase 4 (`@oligarchy/env`). The rest of
+(`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`) and phase 5
+(`@oligarchy/db`). The rest of
 this file is the plan for the remaining phases and the reasoning behind each choice; a phase's
 checklist is ticked as it lands.
 
@@ -282,15 +283,15 @@ No test covers the `oligarchy.json` loader or the file's contents (standing deci
 
 **Phase 5: `@oligarchy/db`**
 
-- [ ] TEST (move) `test/db/client.unit.test.ts` and `test/db/migrate.unit.test.ts` to
+- [x] TEST (move) `test/db/client.unit.test.ts` and `test/db/migrate.unit.test.ts` to
       `packages/db/test/`. The migrate test asserts the program, not the entry: `Env.run` is
       the entry.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: `db:migrate`, `prod:db:migrate` and
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: `db:migrate`, `prod:db:migrate` and
       `test:db:migrate` run the package's migrate entry, each still from its own env file.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: `db:generate` runs drizzle-kit from
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: `db:generate` runs drizzle-kit from
       `packages/db`, and the migrations workflow diffs `packages/db/drizzle/*.sql`. The drizzle
       journal case reads `packages/db/drizzle/meta/_journal.json`.
-- [ ] TEST (alter) `test/support/stores.ts` and every test importing a store type: import from
+- [x] TEST (alter) `test/support/stores.ts` and every test importing a store type: import from
       `@oligarchy/db`.
 
 `test/integration/db.integration.test.ts` and `test-database.integration.test.ts` need the
@@ -638,13 +639,30 @@ Decided while working the phase:
 
 **Phase 5: `@oligarchy/db`**
 
-- [ ] Create `packages/db` from `src/db/*`, with `DatabaseError`. `migrate.ts` is an `Env.run`
+- [x] Create `packages/db` from `src/db/*`, with `DatabaseError`. `migrate.ts` is an `Env.run`
       entry, so db imports no platform module.
-- [ ] Move `drizzle/` (the generated migrations and `meta/_journal.json`) and
+- [x] Move `drizzle/` (the generated migrations and `meta/_journal.json`) and
       `drizzle.config.ts` into `packages/db`, and in the same change update the four pointers:
       the config's `schema` and `out`, `migrate.ts`'s `migrationsFolder`, the global setup's, and
       the paths in `.github/workflows/migrations.yml`.
-- [ ] Update the migrate scripts and the dashboard's schema import.
+- [x] Update the migrate scripts and the dashboard's schema import.
+
+Decided while working the phase:
+
+- `DatabaseError` is `@oligarchy/db/errors`, imported as `DbErrors`; the stores keep their
+  aliases (`Client`, `Logs`, `Servers`, `Tests`, ...) and the schema is `DbSchema`, in the
+  dashboard too, which now imports it as a namespace like everything else.
+- `migrate.ts` resolves the migrations folder from its own URL, not the working directory, so
+  `bun run db:migrate` and the package's entry agree wherever the process started; the global
+  setup, which runs from the root, names `packages/db/drizzle`.
+- `db:generate` is the package's script, run from the package (`bun run --cwd packages/db`),
+  because drizzle-kit resolves the config's paths from the working directory; `db:check` is
+  the same for `drizzle-kit check`, and CI runs it that way. `drizzle-kit` is the package's
+  devDependency; the root has none. `drizzle-orm`, `pg` and `@types/pg` join the catalog,
+  since the dashboard still uses them from the root.
+- The append-only job diffs `packages/db/drizzle/` without rename detection, so the move
+  itself was an addition and did not trip it, and a later rename is a deletion; the two
+  one-shot skip paths for past reshuffles (NEED_FIXING item 5) went with the rewrite.
 
 **Phase 6: `@oligarchy/observability`**
 

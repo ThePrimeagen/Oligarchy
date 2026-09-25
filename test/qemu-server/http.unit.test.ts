@@ -21,6 +21,7 @@ import {
 } from "effect/unstable/http";
 import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
@@ -1446,7 +1447,7 @@ describe("Sessions failures", () => {
     "an Internal raised by Sessions is 500 internal error, logged with the driver's reason",
     () =>
       Effect.gen(function* () {
-        const failure = Errors.DatabaseError.make({
+        const failure = DbErrors.DatabaseError.make({
           operation: "endSession",
           message: "Failed query: update sessions",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -1528,7 +1529,7 @@ describe("Sessions failures", () => {
             Effect.fail(
               ApiErrors.Internal.make({
                 message: "internal error",
-                cause: Errors.DatabaseError.make({
+                cause: DbErrors.DatabaseError.make({
                   operation: "endSession",
                   message: "pool ended",
                 }),

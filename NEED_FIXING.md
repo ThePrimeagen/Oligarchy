@@ -74,12 +74,9 @@ defensible but should be decided once and written down.
 
 ## 5. The CI append-only guard has a live bypass
 
-`.github/workflows/migrations.yml`, job `append-only`: the one-shot for collapsing the chain to a
-single `0001_init` (`head_sql -eq 1 && base_sql -gt 1`) is still active although master has been
-at that baseline for twelve migrations, so a pull request that deletes `drizzle/` down to one file
-passes. The other one-shot names `0012_adorable_deathbird.sql`, `0013_odd_slipstream.sql` and
-`0014_flimsy_ironclad.sql`, files that no longer exist, and is dead. Remove both;
-`test/repo/scripts.unit.test.ts` can pin that the workflow contains no `append-only skipped` path.
+Fixed in the monorepo's phase 5: the workflow diffs `packages/db/drizzle/` without rename
+detection and both one-shot skip paths are gone; `test/repo/scripts.unit.test.ts` pins that no
+`append-only skipped` path remains.
 
 ## 6. `src/db/migrate.ts` prints nothing for a layer failure
 

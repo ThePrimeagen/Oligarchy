@@ -2,7 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Context, Effect, Exit, Redacted } from "effect";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Client from "../../src/db/client.ts";
+import * as Client from "../src/client.ts";
 
 const PASSWORD = "pa55w0rd-sentinel";
 

@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect";
-import type * as Automation from "../db/automation.ts";
+import type * as Automation from "@oligarchy/db/automation";
 
 export const IssueState = Schema.Struct({
   id: Schema.String,

@@ -3,13 +3,14 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Domain from "@oligarchy/shared/domain";
-import * as Client from "../db/client.ts";
 import * as Args from "../qemu/args.ts";
 import * as Qemu from "../qemu/qemu.ts";
 import * as Errors from "../shared/errors.ts";
@@ -32,13 +33,13 @@ export type QemuServer<RHost, RServe> = {
     port: number,
     url: Option.Option<string>,
     dataDir: string,
-  ) => Layer.Layer<never, HttpServerError.ServeError | Errors.DatabaseError, RServe>;
+  ) => Layer.Layer<never, HttpServerError.ServeError | DbErrors.DatabaseError, RServe>;
   readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
 };
 
 type StartupError =
   | Errors.HostRequirementsMissing
-  | Errors.DatabaseError
+  | DbErrors.DatabaseError
   | HttpServerError.ServeError;
 
 // A ServeError says nothing itself; the bind or accept error it wraps does.
@@ -117,7 +118,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
           // Fail at startup, not on the first request, if the control-plane DB is unreachable.
           yield* database.ping.pipe(
             Effect.mapError((error) =>
-              Errors.DatabaseError.make({
+              DbErrors.DatabaseError.make({
                 operation: "ping",
                 message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
                 cause: error,

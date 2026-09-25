@@ -5,13 +5,13 @@ import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import type * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import type * as ProcessStats from "@oligarchy/db/process-stats";
+import type * as Servers from "@oligarchy/db/servers";
 import * as Config from "@oligarchy/env/config";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import type * as Automation from "../../src/db/automation.ts";
-import type * as ProcessStats from "../../src/db/process-stats.ts";
-import type * as Servers from "../../src/db/servers.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as Run from "../../src/viz/run.ts";
 import * as View from "../../src/viz/view.ts";
 import * as FakeHttp from "../support/fake-http.ts";
@@ -57,11 +57,11 @@ const settle: Effect.Effect<void> = Effect.gen(function* () {
 });
 
 type Scripted = {
-  readonly machines?: () => Effect.Effect<ReadonlyArray<Servers.Machine>, Errors.DatabaseError>;
-  readonly series?: () => Effect.Effect<ReadonlyArray<ProcessStats.Series>, Errors.DatabaseError>;
+  readonly machines?: () => Effect.Effect<ReadonlyArray<Servers.Machine>, DbErrors.DatabaseError>;
+  readonly series?: () => Effect.Effect<ReadonlyArray<ProcessStats.Series>, DbErrors.DatabaseError>;
   readonly jobs?: (
     count: number,
-  ) => Effect.Effect<Automation.AutomationQueue, Errors.DatabaseError>;
+  ) => Effect.Effect<Automation.AutomationQueue, DbErrors.DatabaseError>;
 };
 
 const storesLayer = (
@@ -156,7 +156,7 @@ const following = (events: ReadonlyArray<Domain.FollowEvent>): Layer.Layer<HttpC
 const footer = (setup: TestRendererSetup): Effect.Effect<string> =>
   Effect.map(rows(setup), (drawn) => drawn[36] ?? "");
 
-const refused = Errors.DatabaseError.make({
+const refused = DbErrors.DatabaseError.make({
   operation: "listMachines",
   message: "Failed query: select 1",
   cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
@@ -545,7 +545,10 @@ describe("run unhappy path", () => {
           calls.count += 1;
           return calls.count === 1
             ? Effect.fail(
-                Errors.DatabaseError.make({ operation: "listAutomationJobs", message: "timeout" }),
+                DbErrors.DatabaseError.make({
+                  operation: "listAutomationJobs",
+                  message: "timeout",
+                }),
               )
             : Effect.succeed(QUEUE);
         });
@@ -1695,7 +1698,7 @@ describe("definition and ticket information", () => {
               {
                 findTestDefinition: () =>
                   Effect.fail(
-                    Errors.DatabaseError.make({
+                    DbErrors.DatabaseError.make({
                       operation: "findTestDefinition",
                       message: "timeout",
                       cause: new Error("boom"),
@@ -1836,7 +1839,7 @@ describe("selected session", () => {
           listIntents: () =>
             fail
               ? Effect.fail(
-                  Errors.DatabaseError.make({ operation: "listIntents", message: "gone" }),
+                  DbErrors.DatabaseError.make({ operation: "listIntents", message: "gone" }),
                 )
               : Effect.succeed([{ text: "intent start; Click Lock.", createdAt: ago(30) }]),
         });

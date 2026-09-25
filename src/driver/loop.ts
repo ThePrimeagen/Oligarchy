@@ -14,6 +14,8 @@ import {
 } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvErrors from "@oligarchy/env/errors";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
@@ -23,7 +25,6 @@ import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Steps from "@oligarchy/shared/steps";
 import * as Actions from "../client/actions.ts";
 import type * as ProxyClient from "../client/proxy-client.ts";
-import * as Tests from "../db/tests.ts";
 import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
 import * as Pointer from "../harness/pointer.ts";
@@ -187,7 +188,7 @@ type Loaded = {
 };
 
 const stored = <A>(
-  effect: Effect.Effect<A, Errors.DatabaseError>,
+  effect: Effect.Effect<A, DbErrors.DatabaseError>,
 ): Effect.Effect<A, SharedErrors.CommandError> =>
   effect.pipe(Effect.mapError((error) => commandError(error.message)));
 

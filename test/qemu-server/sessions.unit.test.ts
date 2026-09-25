@@ -18,6 +18,7 @@ import {
   Tracer,
 } from "effect";
 import { TestClock } from "effect/testing";
+import * as DbErrors from "@oligarchy/db/errors";
 import * as Log from "@oligarchy/log/log";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
@@ -146,7 +147,7 @@ const harness = (options: Options = {}) => {
   // whichever fiber calls a method.
   const run = <A, E>(
     body: Effect.Effect<A, E, Sessions.Sessions>,
-  ): Effect.Effect<A, E | Errors.DatabaseError> =>
+  ): Effect.Effect<A, E | DbErrors.DatabaseError> =>
     body.pipe(Effect.provide(layer.pipe(Layer.provideMerge(tracer.layer))));
   return { sessions, actions, debugLogs, log, tracer, qemu, iso, minted, files, fsCalls, run };
 };
@@ -202,8 +203,8 @@ const collect = (stream: Stream.Stream<Domain.FollowEvent>, n: number) =>
 const qemus = (sessions: { readonly stats: Effect.Effect<Contract.Stats> }) =>
   Effect.map(sessions.stats, (stats) => stats.qemus);
 
-const failure = (operation: string, detail: string): Errors.DatabaseError =>
-  Errors.DatabaseError.make({
+const failure = (operation: string, detail: string): DbErrors.DatabaseError =>
+  DbErrors.DatabaseError.make({
     operation,
     message: `Failed query: ${operation}`,
     cause: new Error(detail),
@@ -437,7 +438,7 @@ describe("start", () => {
           sessionStore: {
             endSession: () =>
               Effect.fail(
-                Errors.DatabaseError.make({
+                DbErrors.DatabaseError.make({
                   operation: "endSession",
                   message: "Failed query: update sessions",
                 }),
@@ -3409,7 +3410,7 @@ describe("capacity", () => {
           sessionStore: {
             endSession: () =>
               Effect.fail(
-                Errors.DatabaseError.make({
+                DbErrors.DatabaseError.make({
                   operation: "endSession",
                   message: "Failed query: update sessions",
                 }),
