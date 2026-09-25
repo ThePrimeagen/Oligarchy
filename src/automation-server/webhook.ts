@@ -1,5 +1,4 @@
-import { Option, Schema } from "effect";
-import type * as Automation from "@oligarchy/db/automation";
+import { type Option, Schema } from "effect";
 
 export const IssueState = Schema.Struct({
   id: Schema.String,
@@ -49,17 +48,3 @@ export const work = (event: IssueWebhook): Work => ({
   action: event.action,
   stateChanged: event.action === "create" || event.updatedFrom?.stateId !== undefined,
 });
-
-// Status names on the team's board: Automation Needed starts a drive, Needs Review a diagnose.
-export const queuedAction = (event: Work): Option.Option<Automation.AutomationAction> => {
-  if (!event.stateChanged) {
-    return Option.none();
-  }
-  if (event.state === "Automation Needed") {
-    return Option.some("drive");
-  }
-  if (event.state === "Needs Review") {
-    return Option.some("diagnose");
-  }
-  return Option.none();
-};

@@ -1,13 +1,11 @@
-import { Cause, Effect, Option, Schedule, Schema } from "effect";
-import * as Automation from "@oligarchy/db/automation";
-import * as DbErrors from "@oligarchy/db/errors";
+import { Cause, Effect, Option, Schedule } from "effect";
+import type * as Automation from "@oligarchy/db/automation";
 import * as Servers from "@oligarchy/db/servers";
-import * as Tests from "@oligarchy/db/tests";
+import * as Board from "@oligarchy/jobs/board";
+import * as JobsErrors from "@oligarchy/jobs/errors";
+import * as Find from "@oligarchy/jobs/find";
 import * as Linear from "@oligarchy/linear/client";
-import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
-import * as Render from "@oligarchy/log/render";
-import * as Enqueue from "./enqueue.ts";
 
 const POLL_INTERVAL = "30 seconds";
 // The first poll only saves the ticket. Each later poll that finds the same
@@ -15,19 +13,11 @@ const POLL_INTERVAL = "30 seconds";
 // no edit; then the webhook is not coming. An edit or a departure starts over.
 const ROUNDS_BEFORE_MOVE = 3;
 
-const isDatabaseError = Schema.is(DbErrors.DatabaseError);
-
 // A pending row is the queue. Anything else the unique index kept is named by its status.
 const already = (
   action: Automation.AutomationAction,
   status: Automation.AutomationJobRow["status"],
 ): string => `${action} already ${status === "pending" ? "queued" : status}`;
-
-// Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
-const detail = (error: unknown): string =>
-  isDatabaseError(error)
-    ? Render.errorDetail(ExternalFailure.causeOf(error))
-    : Render.errorDetail(error);
 
 type Sighting = {
   readonly rounds: number;
@@ -68,9 +58,7 @@ const processBacklog = Effect.fn("processBacklog")(function* (
 ) {
   const log = yield* Log.Log;
   const linear = yield* Linear.Linear;
-  const tests = yield* Tests.TestStore;
-  const automation = yield* Automation.AutomationStore;
-  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  const found = yield* Find.byTicket(ticket.identifier);
   if (Option.isNone(found)) {
     if (rounds === ROUNDS_BEFORE_MOVE) {
       yield* log.info("backlog watch left the ticket in Backlog; no result", {
@@ -80,17 +68,17 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     }
     return "missing";
   }
-  const definition = yield* tests.definitionName(found.value.definitionId);
-  const action = Enqueue.queuedAction("drive", definition);
+  const action = yield* Board.driveOrMint(found.value);
   yield* log.info(
     `backlog watch processing out of bounds ticket; ${pings(rounds)}; queueing ${action} and moving it to Automation Needed`,
     { location: Log.Locations.automation, agentId: ticket.identifier },
   );
-  const placed = yield* Enqueue.enqueueResult(found.value.id, action);
+  const placed = yield* Board.enqueue(found.value, action);
   const adopted = placed.result;
   return yield* Effect.gen(function* () {
-    // Label before the move. A miss leaves the ticket in Backlog; the next poll tries again.
-    if (yield* automation.hasPending(found.value.id, placed.action)) {
+    // Label before the move. A miss leaves the ticket in Backlog; the next poll tries again, so
+    // the label is this watch's own call, not Ready.mark, which swallows a miss.
+    if (yield* Find.hasPending(found.value, placed.action)) {
       yield* linear.markReady(ticket.identifier);
     }
     const team = yield* linear.teamId;
@@ -109,7 +97,7 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     // Keep the landed enqueue when the label or the move fails, so a new job still spends the check.
     Effect.catch((error) =>
       log
-        .error(`backlog watch failed: ${detail(error)}`, {
+        .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
           location: Log.Locations.automation,
           agentId: ticket.identifier,
           cause: error,
@@ -131,9 +119,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
 ) {
   const log = yield* Log.Log;
   const linear = yield* Linear.Linear;
-  const tests = yield* Tests.TestStore;
-  const automation = yield* Automation.AutomationStore;
-  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  const found = yield* Find.byTicket(ticket.identifier);
   if (Option.isNone(found)) {
     if (rounds === ROUNDS_BEFORE_MOVE) {
       yield* log.info("automation needed watch left the ticket in Automation Needed; no result", {
@@ -143,10 +129,9 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
     }
     return "missing";
   }
-  const definition = yield* tests.definitionName(found.value.definitionId);
-  // Same action enqueue would insert. A pending diagnose is a different job.
-  const action = Enqueue.queuedAction("drive", definition);
-  const status = yield* automation.jobStatus(found.value.id, action);
+  // Same action enqueue would insert. A pending diagnose is a different action.
+  const action = yield* Board.driveOrMint(found.value);
+  const status = yield* Find.status(found.value, action);
   if (Option.isSome(status)) {
     if (status.value === "pending") {
       yield* log.info(
@@ -162,7 +147,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
     `automation needed watch processing out of bounds ticket; ${pings(rounds)}; queueing ${action}`,
     { location: Log.Locations.automation, agentId: ticket.identifier },
   );
-  const placed = yield* Enqueue.enqueueResult(found.value.id, action);
+  const placed = yield* Board.enqueue(found.value, action);
   const line =
     placed.result === "queued"
       ? `automation needed watch queued ${placed.action}`
@@ -188,9 +173,7 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
   rounds: number,
 ) {
   const log = yield* Log.Log;
-  const tests = yield* Tests.TestStore;
-  const automation = yield* Automation.AutomationStore;
-  const found = yield* tests.findResultByLinearId(ticket.identifier);
+  const found = yield* Find.byTicket(ticket.identifier);
   if (Option.isNone(found)) {
     if (rounds === ROUNDS_BEFORE_MOVE) {
       yield* log.info("needs review watch left the ticket in Needs Review; no result", {
@@ -200,14 +183,14 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
     }
     return "missing";
   }
-  if (Option.isSome(yield* automation.jobStatus(found.value.id, "diagnose"))) {
+  if (Option.isSome(yield* Find.status(found.value, "diagnose"))) {
     return "duplicate";
   }
   yield* log.info(
     `needs review watch processing out of bounds ticket; ${pings(rounds)}; queueing diagnose`,
     { location: Log.Locations.automation, agentId: ticket.identifier },
   );
-  const placed = yield* Enqueue.enqueueResult(found.value.id, "diagnose");
+  const placed = yield* Board.enqueue(found.value, "diagnose");
   const line =
     placed.result === "queued"
       ? `needs review watch queued ${placed.action}`
@@ -230,7 +213,7 @@ const guard = <E, R>(label: string, tick: Effect.Effect<void, E, R>) =>
       const error = Cause.squash(cause);
       return Effect.gen(function* () {
         const log = yield* Log.Log;
-        yield* log.error(`${label} watch failed: ${detail(error)}`, {
+        yield* log.error(`${label} watch failed: ${JobsErrors.detail(error)}`, {
           location: Log.Locations.automation,
           agentId: Log.AutomationAgentId,
           cause: error,
@@ -253,7 +236,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
     const listed = yield* servers.listLiveServers("automation-client").pipe(
       Effect.catch((error) =>
         log
-          .error(`board watch failed: ${detail(error)}`, {
+          .error(`board watch failed: ${JobsErrors.detail(error)}`, {
             location: Log.Locations.automation,
             agentId: Log.AutomationAgentId,
             cause: error,
@@ -270,7 +253,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
         const tickets = yield* linear.listBacklog.pipe(
           Effect.catch((error) =>
             log
-              .error(`backlog watch failed: ${detail(error)}`, {
+              .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
                 location: Log.Locations.automation,
                 agentId: Log.AutomationAgentId,
                 cause: error,
@@ -308,7 +291,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           const outcome = yield* processBacklog(ticket, rounds).pipe(
             Effect.catch((error) =>
               log
-                .error(`backlog watch failed: ${detail(error)}`, {
+                .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
                   location: Log.Locations.automation,
                   agentId: ticket.identifier,
                   cause: error,
@@ -334,7 +317,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
         const tickets = yield* linear.listAutomationNeeded.pipe(
           Effect.catch((error) =>
             log
-              .error(`automation needed watch failed: ${detail(error)}`, {
+              .error(`automation needed watch failed: ${JobsErrors.detail(error)}`, {
                 location: Log.Locations.automation,
                 agentId: Log.AutomationAgentId,
                 cause: error,
@@ -369,7 +352,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           const outcome = yield* processAutomationNeeded(ticket, rounds).pipe(
             Effect.catch((error) =>
               log
-                .error(`automation needed watch failed: ${detail(error)}`, {
+                .error(`automation needed watch failed: ${JobsErrors.detail(error)}`, {
                   location: Log.Locations.automation,
                   agentId: ticket.identifier,
                   cause: error,
@@ -402,7 +385,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
         const tickets = yield* linear.listNeedsReview.pipe(
           Effect.catch((error) =>
             log
-              .error(`needs review watch failed: ${detail(error)}`, {
+              .error(`needs review watch failed: ${JobsErrors.detail(error)}`, {
                 location: Log.Locations.automation,
                 agentId: Log.AutomationAgentId,
                 cause: error,
@@ -437,7 +420,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           const outcome = yield* processNeedsReview(ticket, rounds).pipe(
             Effect.catch((error) =>
               log
-                .error(`needs review watch failed: ${detail(error)}`, {
+                .error(`needs review watch failed: ${JobsErrors.detail(error)}`, {
                   location: Log.Locations.automation,
                   agentId: ticket.identifier,
                   cause: error,

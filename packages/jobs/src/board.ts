@@ -21,6 +21,10 @@ export const driveOrMint = Effect.fn("Board.driveOrMint")(function* (job: Find.J
   return action;
 });
 
+// Whether a ticket moving into the column asks anything of its job, before the job is looked up.
+export const asks = (column: string): boolean =>
+  column === Linear.AUTOMATION_NEEDED_STATE || column === Linear.NEEDS_REVIEW_STATE;
+
 // The action a column asks of the job whose ticket moved into it: Automation Needed a drive or a
 // mint, Needs Review a diagnose (the mint's too), any other column none.
 export const actionFor = Effect.fn("Board.actionFor")(function* (column: string, job: Find.Job) {
