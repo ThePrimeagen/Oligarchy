@@ -16,19 +16,83 @@ const filesUnder = (dir: string): ReadonlyArray<string> =>
 const PackageJson = Schema.Struct({
   name: Schema.String,
   exports: Schema.Record(Schema.String, Schema.String),
+  dependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 });
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson));
 
-// Each workspace package with the specifiers its exports answer: `./api` is `@oligarchy/routes/api`.
+// Each workspace package with the specifiers its exports answer (`./api` is
+// `@oligarchy/routes/api`) and the workspace packages its dependencies name.
 const workspacePackages = readdirSync(join(root, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map(({ name: dir }) => {
-    const { name, exports } = decodePackageJson(read(`packages/${dir}/package.json`));
+    const { name, exports, dependencies } = decodePackageJson(read(`packages/${dir}/package.json`));
     return {
       dir: `packages/${dir}`,
+      name,
       modules: Object.keys(exports).map((key) => `${name}${key.slice(1)}`),
+      dependsOn: Object.keys(dependencies ?? {}).filter((dep) => dep.startsWith("@oligarchy/")),
     };
   });
+
+// The package graph: each package and the workspace packages it depends on.
+type PackageGraph = ReadonlyMap<string, ReadonlyArray<string>>;
+const packageGraph: PackageGraph = new Map(
+  workspacePackages.map((pkg) => [pkg.name, pkg.dependsOn]),
+);
+
+// Bottom up: a package's dependencies name only packages in a lower layer, so the graph reads
+// one way and nothing below knows what sits above it. Every package must appear here.
+const LAYERS: ReadonlyArray<ReadonlyArray<string>> = [["@oligarchy/routes"]];
+
+// Every dependency loop in the graph, each written out once as the path that closes it.
+const packageCycles = (graph: PackageGraph): ReadonlyArray<string> => {
+  const cycles: Array<string> = [];
+  const done = new Set<string>();
+  const visit = (name: string, path: ReadonlyArray<string>) => {
+    const at = path.indexOf(name);
+    if (at !== -1) {
+      cycles.push([...path.slice(at), name].join(" -> "));
+      return;
+    }
+    if (done.has(name)) {
+      return;
+    }
+    for (const dep of graph.get(name) ?? []) {
+      visit(dep, [...path, name]);
+    }
+    done.add(name);
+  };
+  for (const name of graph.keys()) {
+    visit(name, []);
+  }
+  return cycles;
+};
+
+// A package outside the list, and an edge that does not go strictly downward, each named.
+const layerProblems = (
+  graph: PackageGraph,
+  layers: ReadonlyArray<ReadonlyArray<string>>,
+): ReadonlyArray<string> => {
+  const layerOf = new Map(layers.flatMap((names, layer) => names.map((name) => [name, layer])));
+  return [...graph].flatMap(([name, deps]) => {
+    const from = layerOf.get(name);
+    if (from === undefined) {
+      return [`${name} is not in the layer list`];
+    }
+    return deps.flatMap((dep) => {
+      const to = layerOf.get(dep);
+      if (to === undefined) {
+        return [`${name} -> ${dep}: ${dep} is not in the layer list`];
+      }
+      if (to === from) {
+        return [`${name} -> ${dep} is a same-layer edge (layer ${String(from)})`];
+      }
+      return to > from
+        ? [`${name} -> ${dep} is an upward edge (layer ${String(from)} -> ${String(to)})`]
+        : [];
+    });
+  });
+};
 
 // The viz's Solid components are `.tsx`; the same rules bind them, and every workspace package's.
 const sources = (): ReadonlyArray<string> =>
@@ -293,6 +357,56 @@ describe("workspace packages", () => {
     expect(
       violationsIn([...filesUnder("src"), ...filesUnder("test")], workspaceImportProblems),
     ).toEqual([]);
+  });
+
+  it("the package graph has no dependency cycle (happy)", () => {
+    expect(packageGraph.size).toBeGreaterThan(0);
+    expect(packageCycles(packageGraph)).toEqual([]);
+  });
+
+  it("names the loop when two packages depend on each other (unhappy)", () => {
+    expect(
+      packageCycles(
+        new Map([
+          ["@oligarchy/a", ["@oligarchy/b"]],
+          ["@oligarchy/b", ["@oligarchy/a"]],
+          ["@oligarchy/c", ["@oligarchy/a"]],
+        ]),
+      ),
+    ).toEqual(["@oligarchy/a -> @oligarchy/b -> @oligarchy/a"]);
+    expect(
+      packageCycles(
+        new Map([
+          ["@oligarchy/a", ["@oligarchy/b"]],
+          ["@oligarchy/b", ["@oligarchy/c"]],
+          ["@oligarchy/c", ["@oligarchy/b"]],
+        ]),
+      ),
+    ).toEqual(["@oligarchy/b -> @oligarchy/c -> @oligarchy/b"]);
+  });
+
+  it("every package is in the layer list and depends only on lower layers (happy)", () => {
+    expect(layerProblems(packageGraph, LAYERS)).toEqual([]);
+  });
+
+  it("names an upward edge, a same-layer edge and a package missing from the list (unhappy)", () => {
+    const layers = [["@oligarchy/shared"], ["@oligarchy/env", "@oligarchy/stats"]];
+    expect(
+      layerProblems(
+        new Map([
+          ["@oligarchy/shared", ["@oligarchy/env"]],
+          ["@oligarchy/env", ["@oligarchy/stats", "@oligarchy/shared"]],
+          ["@oligarchy/stats", ["@oligarchy/db"]],
+          ["@oligarchy/db", []],
+        ]),
+        layers,
+      ),
+    ).toEqual([
+      "@oligarchy/shared -> @oligarchy/env is an upward edge (layer 0 -> 1)",
+      "@oligarchy/env -> @oligarchy/stats is a same-layer edge (layer 1)",
+      "@oligarchy/stats -> @oligarchy/db: @oligarchy/db is not in the layer list",
+      "@oligarchy/db is not in the layer list",
+    ]);
   });
 
   it("names a relative path into packages/, a named import and an unexported module (unhappy)", () => {

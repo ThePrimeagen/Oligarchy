@@ -1,8 +1,9 @@
 # Monorepo plan
 
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
-workspace and `@oligarchy/routes`). Nothing else in this file is implemented yet. It is the plan
-for the rest of the split and the reasoning behind each choice.
+workspace and `@oligarchy/routes`). Phase 1 is done (the cycle checks; `dig` removed). The rest
+of this file is the plan for the remaining phases and the reasoning behind each choice; a phase's
+checklist is ticked as it lands.
 
 How to work a phase:
 
@@ -28,8 +29,9 @@ top     integration-testing (dev only)   scripts + dashboard (root package)
 ```
 
 A package depends only on packages in a lower layer. Nothing depends on an app. The scripts
-(`client`, `ctrl`, `dig`, `driver`, `session`, `viz`) and the dashboard stay in the root package
-as one-off consumers on top. `client` will be removed later, outside this plan.
+(`client`, `ctrl`, `driver`, `session`, `viz`) and the dashboard stay in the root package
+as one-off consumers on top. `client` will be removed later, outside this plan. `dig` was removed
+in phase 1.
 
 ## Principles
 
@@ -67,8 +69,8 @@ Write each phase's tests before any of that phase's code, and see them fail.
 - [ ] TEST (new) `test/repo/architecture.unit.test.ts`: every package depends only on packages
       in a lower layer of the declared layer list. Happy: the real graph. Unhappy: a made-up
       upward edge, a same-layer edge and a package missing from the list are each named.
-- [ ] TEST (alter) `test/dig/lobby.unit.test.ts` and `test/dig/room.unit.test.ts`: take the
-      `Room` type from `dig/domain.ts` wherever they name it.
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: `dig` is no longer a process. Its tests
+      (`test/dig/`, `test/integration/dig.integration.test.ts`) go with it.
 
 **Phase 2: `@oligarchy/stats`**
 
@@ -234,11 +236,14 @@ No test covers the `oligarchy.json` loader or the file's contents (standing deci
 
 **Phase 1: cycle checks**
 
-- [ ] Add the `import` plugin and `"import/no-cycle": "error"` to `.oxlintrc.json`.
-- [ ] Break the one cycle it finds: move the `Room` type into `src/dig/domain.ts` and have
-      `lobby.ts` use `Domain.SLOT_COUNT`, so `lobby.ts` stops importing `room.ts`.
-- [ ] Add the layer list to `test/repo/architecture.unit.test.ts`, starting with `routes`.
-- [ ] `development.md`: document the no-cycle rule and the layer list.
+- [x] Add the `import` plugin and `"import/no-cycle": "error"` to `.oxlintrc.json`. The plugin
+      brings two more rules from the enabled categories: `import/no-named-as-default-member`
+      (fixed at the source, `import { Pool } from "pg"`) and `import/no-unassigned-import`,
+      turned off because a side-effect import is exactly an unassigned one.
+- [x] Break the one cycle it finds. Decided while working the phase: `dig` (the game script)
+      is removed entirely, wrapper, sources and tests, rather than refactored.
+- [x] Add the layer list to `test/repo/architecture.unit.test.ts`, starting with `routes`.
+- [x] `development.md`: document the no-cycle rule and the layer list.
 
 **Phase 2: `@oligarchy/stats`**
 
@@ -333,8 +338,7 @@ Checked on 2026-09-25 with oxlint 1.81.0:
 - The same loop across two workspace packages, through their `exports`: both reported. The rule
   follows package imports.
 - The whole repo with only this rule on: 0.24 seconds, and exactly one cycle,
-  `src/dig/lobby.ts` and `src/dig/room.ts`. `lobby.ts` only needs the `Room` type and
-  `SLOT_COUNT`, which is `Domain.SLOT_COUNT`, so moving the type into `dig/domain.ts` breaks it.
+  `src/dig/lobby.ts` and `src/dig/room.ts`. Phase 1 removed `dig` altogether.
 
 ### Package cycles and layer order: a repo test
 
@@ -548,7 +552,7 @@ at `apps/<name>/src/main.ts`.
 
 ### What stays in the root package
 
-- **The scripts:** `client` (to be removed), `ctrl`, `dig`, `driver` (with `src/harness/`, except
+- **The scripts:** `client` (to be removed), `ctrl`, `driver` (with `src/harness/`, except
   the config that moves to env), `session` and `viz`.
 - **The dashboard Worker.** It imports `ctrl/command.ts`, so it stays where ctrl is.
 - **`test/repo/`,** the repo-wide checks, which read files and import no packages.

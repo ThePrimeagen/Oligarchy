@@ -4,7 +4,6 @@
   "bin": {
     "client": "src/client/main.ts",
     "ctrl": "src/ctrl/main.ts",
-    "dig": "src/dig/main.ts",
     "driver": "src/driver/main.ts",
     "session": "src/session/main.ts",
     "viz": "src/viz/main.ts"
@@ -27,7 +26,6 @@
     "ctrl": "bun --no-env-file --preload ./src/observability/instrument.ts src/ctrl/main.ts",
     "session": "bun --no-env-file src/session/main.ts",
     "viz": "bun --no-env-file --preload ./src/viz/preload.ts src/viz/main.ts",
-    "dig": "bun --no-env-file src/dig/main.ts",
     "qemu-server": "bun --no-env-file --preload ./src/observability/instrument.ts src/qemu-server/main.ts",
     "qemu-reverse-proxy": "bun --no-env-file --preload ./src/observability/instrument.ts src/qemu-reverse-proxy/main.ts",
     "automation-server": "bun --no-env-file --preload ./src/observability/instrument.ts src/automation-server/main.ts",
