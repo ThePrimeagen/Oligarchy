@@ -47,6 +47,7 @@ const packageGraph: PackageGraph = new Map(
 // http's slot until it is renamed.
 const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
+  "@oligarchy/log": 1,
   "@oligarchy/routes": 5,
 };
 
@@ -81,36 +82,40 @@ const sources = (): ReadonlyArray<string> =>
     .filter((path) => !path.startsWith("src/dashboard/"));
 
 const SHARED_SOURCES = "packages/shared/src/";
+const LOG_SOURCES = "packages/log/src/";
 const ROUTES_SOURCES = "packages/routes/src/";
 
 const importSpecifiers = (source: string): ReadonlyArray<string> =>
   [...source.matchAll(/^import\s(?:[^;]*?\sfrom\s+)?"([^"]+)";?$/gm)].map((m) => m[1] ?? "");
 
-// A package that is vocabulary or contract alone imports Effect, the packages it is allowed and
-// its own modules: nothing of the processes, no platform and no Node.
+// A low package imports Effect, the packages it is allowed and its own modules, and reads no
+// process.*: nothing of the processes, no platform, no Node, no terminal. The boundary rule
+// below says the same of process.* for every non-boundary file; here it is named per package.
 const confinedImportProblems =
   (dir: string, allowed: RegExp) =>
-  (path: string, source: string): ReadonlyArray<string> =>
-    importSpecifiers(source).filter((specifier) =>
+  (path: string, source: string): ReadonlyArray<string> => [
+    ...importSpecifiers(source).filter((specifier) =>
       specifier.startsWith(".")
         ? !join(dirname(path), specifier).startsWith(dir)
         : !allowed.test(specifier),
-    );
+    ),
+    ...[...stripStringsAndComments(source).matchAll(/\bprocess\.\w+/g)].map((m) => m[0]),
+  ];
 
-// shared is the vocabulary every process speaks, so it knows no other package; and it reads no
-// process.*, which the boundary rule below also says of every non-boundary file.
-const sharedConfined = confinedImportProblems(SHARED_SOURCES, /^effect(?:\/|$)/);
-const sharedImportProblems = (path: string, source: string): ReadonlyArray<string> => [
-  ...sharedConfined(path, source),
-  ...[...stripStringsAndComments(source).matchAll(/\bprocess\.\w+/g)].map((m) => m[0]),
-];
+const EFFECT_ONLY = /^effect(?:\/|$)/;
+const EFFECT_AND_SHARED = /^(?:effect(?:\/|$)|@oligarchy\/shared\/)/;
+
+// shared is the vocabulary every process speaks, so it knows no other package.
+const sharedImportProblems = confinedImportProblems(SHARED_SOURCES, EFFECT_ONLY);
+
+// log is how a failure and a line read as text and the service that writes a line to the console:
+// it knows shared's vocabulary and nothing of the terminal (node:tty), the database, the
+// row-writing layer or Sentry, so every package above it may take it.
+const logImportProblems = confinedImportProblems(LOG_SOURCES, EFFECT_AND_SHARED);
 
 // The routes package is the HTTP contract alone: Effect's schemas, the shared vocabularies its
 // bodies carry, and its own modules.
-const routesImportProblems = confinedImportProblems(
-  ROUTES_SOURCES,
-  /^(?:effect(?:\/|$)|@oligarchy\/shared\/)/,
-);
+const routesImportProblems = confinedImportProblems(ROUTES_SOURCES, EFFECT_AND_SHARED);
 
 // The main package imports a workspace package the way it imports its own modules, as a
 // namespace, and only by a specifier the package exports: a relative path into packages/ would
@@ -147,7 +152,8 @@ const BOUNDARY_FILES = new Set([
   // This process's own cpu and pid, and which host it is on: macOS has no /proc to read them.
   "src/shared/process-usage.ts",
   "src/observability/instrument.ts",
-  "src/observability/render.ts",
+  // Whether stdout takes colour: the tty's depth and FORCE_COLOR, decided once for the process.
+  "src/observability/colors.ts",
   "src/db/client.ts",
 ]);
 
@@ -344,6 +350,39 @@ describe("workspace packages", () => {
       "@effect/platform-node/NodeServices",
       "@oligarchy/routes/contract",
       "../../../src/observability/log.ts",
+      "process.env",
+    ]);
+  });
+
+  it("the log package imports only effect, shared and its own modules, and reads no process.* (happy)", () => {
+    expect(filesUnder(LOG_SOURCES).length).toBeGreaterThan(0);
+    expect(violationsIn(filesUnder(LOG_SOURCES), logImportProblems)).toEqual([]);
+  });
+
+  it("names a log import of node:tty, a platform, the database, the row-writing layer or Sentry, and a process.* read (unhappy)", () => {
+    expect(
+      logImportProblems(
+        `${LOG_SOURCES}render.ts`,
+        [
+          'import { Cause, Console, Effect } from "effect";',
+          'import * as CliError from "effect/unstable/cli/CliError";',
+          'import type * as Domain from "@oligarchy/shared/domain";',
+          'import * as ExternalFailure from "./external-failure.ts";',
+          'import { WriteStream } from "node:tty";',
+          'import * as NodeServices from "@effect/platform-node/NodeServices";',
+          'import * as Logs from "../../../src/db/logs.ts";',
+          'import * as RowLog from "../../../src/observability/log.ts";',
+          'import * as Sentry from "@sentry/bun";',
+          "export const stdoutColors = wantsColor(process.stdout, process.env);",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "node:tty",
+      "@effect/platform-node/NodeServices",
+      "../../../src/db/logs.ts",
+      "../../../src/observability/log.ts",
+      "@sentry/bun",
+      "process.stdout",
       "process.env",
     ]);
   });

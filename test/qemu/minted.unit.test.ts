@@ -2,13 +2,13 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { NodePath } from "@effect/platform-node";
 import { Effect, Fiber, Layer, Option } from "effect";
+import * as Log from "@oligarchy/log/log";
 import * as Args from "../../src/qemu/args.ts";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Minted from "../../src/qemu/minted.ts";
 import * as FakeFs from "../support/fake-fs.ts";
 import * as FakeQemu from "../support/fake-qemu.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
-import * as FakeLog from "../support/log.ts";
 
 const URL_ISO = "https://iso.example.com/omarchy/omarchy-3.0.iso";
 const CACHED = "/home/u/.oligarchy/isos/https___iso.example.com_omarchy_omarchy-3.0.iso";
@@ -43,7 +43,6 @@ const fixture = (options: Fixture = {}) =>
       },
     });
     const iso = FakeQemu.fakeIso(undefined, (name) => (name === URL_ISO ? CACHED : name));
-    const log = FakeLog.fakeLog();
     const layer = Minted.Minted.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
@@ -51,13 +50,13 @@ const fixture = (options: Fixture = {}) =>
           NodePath.layer,
           spawner.layer,
           iso.layer,
-          log.layer,
+          Log.Log.layerStdout,
           Layer.succeed(Iso.Host)({ dataDir: "/home/u/.oligarchy", pid: PID }),
         ),
       ),
     );
     const minted = yield* Effect.provide(Minted.Minted, layer);
-    return { spawner, fs, log, minted };
+    return { spawner, fs, minted };
   });
 
 // Lets forked saves run through their file calls without advancing the clock.

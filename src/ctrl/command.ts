@@ -13,6 +13,8 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as Log from "@oligarchy/log/log";
+import * as Failure from "@oligarchy/log/render";
 import * as Contract from "@oligarchy/routes/contract";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
@@ -28,8 +30,7 @@ import * as Logs from "../db/logs.ts";
 import * as Servers from "../db/servers.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as Tests from "../db/tests.ts";
-import * as Log from "../observability/log.ts";
-import * as Failure from "../observability/render.ts";
+import * as RowLog from "../observability/log.ts";
 import * as Errors from "../shared/errors.ts";
 import * as Linear from "./linear.ts";
 import * as Prompts from "./prompts.ts";
@@ -71,7 +72,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, Errors.Data
     DebugLogs.DebugLogStore.layer,
     Diagnosis.DiagnosisStore.layer,
     Servers.ServerStore.layer,
-    Log.Log.layer,
+    RowLog.layer,
   ).pipe(
     Layer.provideMerge(Actions.ActionStore.layer),
     Layer.provideMerge(Logs.LogStore.layer),

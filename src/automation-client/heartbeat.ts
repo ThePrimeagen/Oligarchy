@@ -1,9 +1,9 @@
 import { Cause, Effect, Schedule, type Scope, Schema } from "effect";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as ProcessStats from "../db/process-stats.ts";
 import * as Servers from "../db/servers.ts";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 import * as Stats from "../qemu/stats.ts";
 import * as Errors from "../shared/errors.ts";
 import * as ProcessUsage from "../shared/process-usage.ts";

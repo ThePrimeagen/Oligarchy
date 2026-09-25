@@ -3,7 +3,7 @@ import { it } from "@effect/vitest";
 import { Cause, Effect } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliError } from "effect/unstable/cli";
-import * as Render from "../../src/observability/render.ts";
+import * as Render from "@oligarchy/log/render";
 import * as Errors from "../../src/shared/errors.ts";
 
 const stderr = Effect.map(TestConsole.errorLines, (lines) => lines.map(String));

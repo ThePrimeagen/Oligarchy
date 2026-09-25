@@ -42,12 +42,13 @@
         "src/**/main.ts",
         "src/observability/instrument.ts",
         "test/**/*.ts",
+        "packages/*/test/**/*.ts",
         "vitest.global-setup.ts"
       ],
       "rules": { "effecttsgo/strict-effect-provide": "off" }
     },
     {
-      "files": ["test/**/*.ts", "vitest.global-setup.ts"],
+      "files": ["test/**/*.ts", "packages/*/test/**/*.ts", "vitest.global-setup.ts"],
       "rules": { "typescript/no-floating-promises": "off" }
     }
   ],

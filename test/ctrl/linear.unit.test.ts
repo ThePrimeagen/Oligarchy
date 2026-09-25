@@ -4,9 +4,9 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Fiber, Layer, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
+import * as Render from "@oligarchy/log/render";
 import * as Linear from "../../src/ctrl/linear.ts";
 import * as Prompts from "../../src/ctrl/prompts.ts";
-import * as Render from "../../src/observability/render.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 

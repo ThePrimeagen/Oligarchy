@@ -3,9 +3,9 @@ import { it } from "@effect/vitest";
 import { Cause, Effect, Fiber, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError } from "effect/unstable/http";
+import * as Render from "@oligarchy/log/render";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ProxyClient from "../../src/client/proxy-client.ts";
-import * as Render from "../../src/observability/render.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 
 const SERVER = "http://127.0.0.1:42069";

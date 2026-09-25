@@ -6,12 +6,12 @@ import * as CliConfig from "effect/unstable/cli/CliConfig";
 import * as CliOutput from "effect/unstable/cli/CliOutput";
 import * as Command from "effect/unstable/cli/Command";
 import * as GlobalFlag from "effect/unstable/cli/GlobalFlag";
+import * as Render from "@oligarchy/log/render";
 import * as Api from "@oligarchy/routes/api";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Config from "../config.ts";
 import * as Client from "../db/client.ts";
 import * as Tests from "../db/tests.ts";
-import * as Render from "../observability/render.ts";
 import * as DriverCommand from "./command.ts";
 import * as Loop from "./loop.ts";
 

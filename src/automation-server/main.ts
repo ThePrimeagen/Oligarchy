@@ -8,8 +8,11 @@ import * as Command from "effect/unstable/cli/Command";
 import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Api from "@oligarchy/routes/api";
 import * as Config from "../config.ts";
+import * as Colors from "../observability/colors.ts";
 import * as Linear from "../ctrl/linear.ts";
 import * as Automation from "../db/automation.ts";
 import * as Client from "../db/client.ts";
@@ -19,8 +22,7 @@ import * as Servers from "../db/servers.ts";
 import * as Sessions from "../db/sessions.ts";
 import * as SetupRequests from "../db/setup-requests.ts";
 import * as Tests from "../db/tests.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
+import * as RowLog from "../observability/log.ts";
 import * as Sentry from "../observability/sentry.ts";
 import * as StaleServers from "../shared/stale-servers.ts";
 import * as Backlog from "./backlog.ts";
@@ -91,7 +93,7 @@ const LinearLive = Layer.unwrap(
 // live-server list and the logs rows. Sentry sits beneath Log so Log captures the reporter.
 // Lines land in logs with location/agentId "automation"; durable jobs remain automation_jobs.
 const MainLive = Layer.mergeAll(
-  Log.Log.layer,
+  RowLog.layer,
   Handlers.LinearWebhookSecret.layer,
   AutomationClient.OligarchyToken.layer,
   Tests.TestStore.layer,
@@ -103,6 +105,7 @@ const MainLive = Layer.mergeAll(
   LinearLive,
 ).pipe(
   Layer.provideMerge(Logs.LogStore.layer),
+  Layer.provideMerge(Layer.succeed(Log.Colors)(Colors.stdoutColors)),
   Layer.provideMerge(DatabaseLive),
   Layer.provideMerge(Sentry.SentryLive),
   Layer.provideMerge(Layer.succeed(Log.ProcessAttribution)(Log.AutomationProcessAttribution)),

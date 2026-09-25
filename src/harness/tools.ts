@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Cause, Exit, Result, Schema } from "effect";
-import * as Render from "../observability/render.ts";
+import * as Render from "@oligarchy/log/render";
 import * as Errors from "../shared/errors.ts";
 
 // The model drives the guest through ./client. client.md is that tool's

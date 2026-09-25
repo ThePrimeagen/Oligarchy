@@ -1,8 +1,7 @@
-import { WriteStream } from "node:tty";
 import { Cause, Console, Effect, Option } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
 import type * as Domain from "@oligarchy/shared/domain";
-import * as ExternalFailure from "../external-failure.ts";
+import * as ExternalFailure from "./external-failure.ts";
 
 // ---------------------------------------------------------------------------
 // Failures
@@ -69,7 +68,8 @@ export const foreground = (hex: string): string => {
 export const paint = (hex: string, text: string, colors: boolean): string =>
   colors ? `${foreground(hex)}${text}\x1b[39m` : text;
 
-export type LogLine = {
+// One rendered line: the error class of the same name is ./errors.ts.
+export type Line = {
   readonly text: string;
   readonly level: Domain.LogLevel;
   readonly location?: string;
@@ -91,7 +91,7 @@ const LEVELS: Readonly<
 // One line as coloured runs: stdout paints them, the viz's log pane draws them as they are.
 // A ticket without a colour of its own is muted, like the location.
 export const logPieces = (
-  entry: LogLine,
+  entry: Line,
 ): ReadonlyArray<{ readonly text: string; readonly color: string }> => {
   const level = LEVELS[entry.level];
   return [
@@ -109,30 +109,7 @@ export const logPieces = (
   ];
 };
 
-export const renderLogLine = (entry: LogLine, colors: boolean): string =>
+export const renderLogLine = (entry: Line, colors: boolean): string =>
   logPieces(entry)
     .map((piece) => paint(piece.color, piece.text, colors))
     .join("");
-
-export type ColorStream = {
-  readonly isTTY?: boolean | undefined;
-  readonly hasColors?: ((count: number, env?: object) => boolean) | undefined;
-};
-
-export const wantsColor = (
-  stream: ColorStream,
-  env: { readonly FORCE_COLOR?: string | undefined },
-): boolean => {
-  if (stream.isTTY !== true && env.FORCE_COLOR === undefined) {
-    return false;
-  }
-  // 16 colours, not 24-bit: tmux and FORCE_COLOR=1 report 256/16 and still render 38;2. A piped
-  // stdout has no hasColors, so the runtime's depth is asked directly (16 colours is 4 bits);
-  // Bun's hasColors would reach for this.getColorDepth on whatever it is called on.
-  return stream.hasColors === undefined
-    ? WriteStream.prototype.getColorDepth.call(stream, env) >= 4
-    : stream.hasColors(16, env);
-};
-
-// Decided once for the process; the Log service reads it through `Log.Colors`.
-export const stdoutColors: boolean = wantsColor(process.stdout, process.env);

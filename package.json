@@ -13,6 +13,7 @@
       "packages/*"
     ],
     "catalog": {
+      "@effect/vitest": "4.0.0-rc.112",
       "@types/node": "^26.4.0",
       "effect": "4.0.0-rc.112",
       "typescript": "7.0.2",
@@ -46,6 +47,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
+    "@oligarchy/log": "workspace:*",
     "@oligarchy/routes": "workspace:*",
     "@oligarchy/shared": "workspace:*",
     "@opentui/core": "0.5.11",
@@ -63,7 +65,7 @@
     "@babel/core": "7.28.0",
     "@babel/preset-typescript": "7.27.1",
     "@effect/tsgo": "0.41.0",
-    "@effect/vitest": "4.0.0-rc.112",
+    "@effect/vitest": "catalog:",
     "@testcontainers/postgresql": "^11.14.0",
     "@types/babel__core": "7.20.5",
     "@types/node": "catalog:",

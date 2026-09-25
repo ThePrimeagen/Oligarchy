@@ -12,12 +12,12 @@ import {
   Semaphore,
 } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Cli from "../cli.ts";
 import * as HarnessConfig from "../harness/config.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 import * as Driver from "./driver.ts";
 import * as OpenCode from "./opencode.ts";
 

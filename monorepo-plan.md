@@ -2,9 +2,9 @@
 
 Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pull/232): the Bun
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
-#236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so is phase 2
-(`@oligarchy/shared`). The rest of this file is the plan for the remaining phases and the
-reasoning behind each choice; a phase's checklist is ticked as it lands.
+#236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
+(`@oligarchy/shared`) and phase 3 (`@oligarchy/log`). The rest of this file is the plan for the
+remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it lands.
 
 Revised 2026-09-25 after review. What changed from the first version, and why:
 
@@ -222,27 +222,27 @@ Write each phase's tests before any of that phase's code, and see them fail.
 
 **Phase 3: `@oligarchy/log`**
 
-- [ ] TEST (move) the `Log Sentry policy` and `Log colours` describes of
+- [x] TEST (move) the `Log Sentry policy` and `Log colours` describes of
       `test/observability/log.unit.test.ts` to `packages/log/test/log.unit.test.ts`, on
       `Log.layerStdout` and an inline recording sink. Happy: `info` and `warning` write one line
       with level, location and ticket colour; `error` and `fatal` also report a `LogLine` with the
       cause to the current reporters. Unhappy: an unattributed line stays readable without a
       colour; `skipSentry` reports nothing.
-- [ ] TEST (new) `packages/log/test/log.unit.test.ts`: `Log.layer(sink)` builds the sink once
+- [x] TEST (new) `packages/log/test/log.unit.test.ts`: `Log.layer(sink)` builds the sink once
       with `write` and `report`, hands every line with its `LogRow` to it in call order, writes
       nothing itself, and `flush` waits for the sink's flush. Unhappy: the stdout layer's sink
       writes each line at once, inserts nothing, and its `flush` is immediate.
-- [ ] TEST (move) `test/observability/render.unit.test.ts` to
+- [x] TEST (move) `test/observability/render.unit.test.ts` to
       `packages/log/test/render.unit.test.ts`, all but the `wantsColor` describe (phase 4).
-- [ ] TEST (move) `test/observability/palette.unit.test.ts` to `packages/log/test/`.
-- [ ] TEST (move) `test/external-failure.unit.test.ts` to `packages/log/test/`.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no file in log imports `node:tty`, reads
+- [x] TEST (move) `test/observability/palette.unit.test.ts` to `packages/log/test/`.
+- [x] TEST (move) `test/external-failure.unit.test.ts` to `packages/log/test/`.
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: no file in log imports `node:tty`, reads
       `process.*`, or imports a platform, `db`, `observability` or a Sentry module. Unhappy: each
       is named.
-- [ ] TEST (alter) `test/support/log.ts` and every test that fakes `Log`: import from
+- [x] TEST (alter) `test/support/log.ts` and every test that fakes `Log`: import from
       `@oligarchy/log`. A test that only needs a logger and asserts no lines provides
       `Log.layerStdout` instead of a fake.
-- [ ] TEST (alter) `test/observability/sentry.unit.test.ts`: `LogLine` comes from
+- [x] TEST (alter) `test/observability/sentry.unit.test.ts`: `LogLine` comes from
       `@oligarchy/log` (`sentry.ts` compares `LogLine.identifier`; it stays in `src/` until
       phase 6).
 
@@ -563,7 +563,7 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 3: `@oligarchy/log`**
 
-- [ ] Create `packages/log` with:
+- [x] Create `packages/log` with:
   - `log.ts`: the `Log` service, `Attribution`, `Report`, `Locations`, `ProcessAttribution`,
     `Colors` (default off), `LogRow` (`text`, `level`, `location`, `agentId`; the shape `offer`
     builds today), the `Sink` type (`offer(line, row)`, `flush`), `static layer(sink)` where
@@ -577,12 +577,22 @@ container and stay in the root's integration project until phase 12.
   - `palette.ts`.
   - `external-failure.ts` (from `src/external-failure.ts`).
   - `LogLine`, the Sentry wrapper, from `src/shared/errors.ts`, identifier unchanged.
-- [ ] `wantsColor` and the stdout probe move to `src/observability/colors.ts` for this phase
+- [x] `wantsColor` and the stdout probe move to `src/observability/colors.ts` for this phase
       (env does not exist yet); the eight entries and `src/session/main.ts` provide
       `Layer.succeed(Log.Colors)(Colors.stdoutColors)`. Phase 4 moves that file into env.
-- [ ] Re-point every import of `observability/log.ts`, `render.ts`, `palette.ts` and
+      Done as: the five graphs that build a `Log` (the four servers' `main.ts` and `ctrl/main.ts`,
+      whose commands build theirs in context) provide it; `client`, `driver`, `session` and
+      `viz` build no `Log` and read no `Colors`, so they provide nothing. Phase 4's runner
+      provides it for every entry.
+- [x] Re-point every import of `observability/log.ts`, `render.ts`, `palette.ts` and
       `external-failure.ts` that is not the row-writing layer; `src/observability/sentry.ts`
-      takes `LogLine` from `@oligarchy/log`.
+      takes `LogLine` from `@oligarchy/log`. Decided while working the phase: `LogLine` is
+      `@oligarchy/log/errors` (imported as `LogErrors`, beside `ApiErrors` and `SharedErrors`);
+      the row-writing layer is `src/observability/log.ts`'s `layer`, imported as `RowLog`;
+      `Sink.offer` returns an `Effect`, so the stdout sink writes through the `write` it was
+      handed; `@effect/vitest` joins the catalog for the package's `it.effect` tests, and the
+      lint overrides for tests cover `packages/*/test/**`; `test/qemu/qemu.unit.test.ts` and
+      `minted.unit.test.ts` asserted no lines and now provide `Log.layerStdout`.
 
 **Phase 4: `@oligarchy/env`**
 

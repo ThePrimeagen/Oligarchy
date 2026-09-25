@@ -1,4 +1,4 @@
-import * as Render from "../observability/render.ts";
+import * as Render from "@oligarchy/log/render";
 
 // Rosé Pine, as the log's agent colours.
 export const PALETTE = Render.ROSE_PINE_MAIN;

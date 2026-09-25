@@ -18,12 +18,12 @@ import {
   Tracer,
 } from "effect";
 import { TestClock } from "effect/testing";
+import * as Log from "@oligarchy/log/log";
 import * as Contract from "@oligarchy/routes/contract";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
 import type * as Qemu from "../../src/qemu/qemu.ts";
-import * as Log from "../../src/observability/log.ts";
 import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeMinted from "../support/fake-minted.ts";
@@ -1634,13 +1634,13 @@ const orderedLog = () => {
     Effect.sync(() => {
       order.push(text);
     });
-  const service: Log.LogService = {
+  const service = Log.Log.of({
     info: record,
     warning: record,
     error: record,
     fatal: record,
     flush: Effect.void,
-  };
+  });
   return { order, record, layer: Layer.succeed(Log.Log)(service) };
 };
 

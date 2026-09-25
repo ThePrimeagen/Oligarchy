@@ -2,13 +2,13 @@ import { Cause, Effect, Layer, Redacted, Schema, type Types } from "effect";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiError from "effect/unstable/httpapi/HttpApiError";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Api from "@oligarchy/routes/api";
 import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Config from "../config.ts";
-import * as ExternalFailure from "../external-failure.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 
 // Every qemu server, qemu reverse proxy, automation-client, and automation-server /abort
 // route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is exact, as it

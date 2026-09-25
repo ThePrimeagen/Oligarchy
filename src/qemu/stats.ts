@@ -1,9 +1,9 @@
 import { cpus, freemem, totalmem } from "node:os";
 import { Context, Effect, Layer } from "effect";
 import type { Scope } from "effect";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as Contract from "@oligarchy/routes/contract";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 
 export const SAMPLE_INTERVAL_MS = 5_000;
 // 60 samples x 5s ticks = a 5 minute window.

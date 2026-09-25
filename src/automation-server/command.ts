@@ -2,13 +2,13 @@ import { Deferred, Effect, Layer } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Client from "../db/client.ts";
 import * as EnvFile from "../env-file.ts";
-import * as ExternalFailure from "../external-failure.ts";
 import * as HarnessConfig from "../harness/config.ts";
-import * as Log from "../observability/log.ts";
-import * as Render from "../observability/render.ts";
 import * as Errors from "../shared/errors.ts";
 
 // The port the operator's tunnel points at; nothing else of ours is near it.

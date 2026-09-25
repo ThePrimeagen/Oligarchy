@@ -1,4 +1,4 @@
-import { Effect, ErrorReporter, type LogLevel, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import * as Domain from "@oligarchy/shared/domain";
 
 // Each error here is waiting for the package that raises it (monorepo-plan.md's error table)
@@ -161,21 +161,3 @@ export class CliFailed extends Schema.TaggedError<CliFailed>("@oligarchy/shared/
 export class PngDecodeError extends Schema.TaggedError<PngDecodeError>(
   "@oligarchy/shared/errors/PngDecodeError",
 )("PngDecodeError", { message: Schema.String }) {}
-
-// An error or fatal log line as the reporter receives it: the text is its message, the level its
-// severity, and the cause (when the line has one) is what Sentry is handed.
-export class LogLine extends Schema.TaggedError<LogLine>("@oligarchy/observability/log/LogLine")(
-  "LogLine",
-  {
-    text: Schema.String,
-    level: Schema.Literals(["error", "fatal"]),
-    cause: Schema.optionalKey(Schema.Defect()),
-  },
-) {
-  override get message(): string {
-    return this.text;
-  }
-  override get [ErrorReporter.severity](): LogLevel.Severity {
-    return this.level === "fatal" ? "Fatal" : "Error";
-  }
-}
