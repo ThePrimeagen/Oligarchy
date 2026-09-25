@@ -80,7 +80,7 @@ const place = Effect.fn("place")(function* (
   const tests = yield* Tests.TestStore;
   const setups = yield* SetupRequests.SetupRequestStore;
   const log = yield* Log.Log;
-  const result = yield* tests.findResult(job.resultId);
+  const result = yield* Find.ofAction(job);
   // A diagnose judges a drive or mint that ran to its end. One still pending holds it; one that
   // ended any other way, or none at all, closes it aborted with nothing spawned.
   if (job.action === "diagnose" && Option.isSome(result)) {

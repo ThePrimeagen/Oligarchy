@@ -15,6 +15,12 @@ export const byTicket = Effect.fn("Find.byTicket")(function* (ticket: string) {
   return yield* tests.findResultByLinearId(ticket);
 });
 
+// The job an action belongs to, or none: retention may have swept it.
+export const ofAction = Effect.fn("Find.ofAction")(function* (action: Automation.AutomationJobRow) {
+  const tests = yield* Tests.TestStore;
+  return yield* tests.findResult(action.resultId);
+});
+
 // The next action to dispatch, in queue order, whose job has no action running; the skipped ids
 // are the ones this tick already could not place.
 export const nextPending = Effect.fn("Find.nextPending")(function* (skip: ReadonlyArray<string>) {

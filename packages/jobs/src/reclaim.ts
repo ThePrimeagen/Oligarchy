@@ -1,7 +1,6 @@
 import { Effect, Option } from "effect";
 import type * as Automation from "@oligarchy/db/automation";
 import * as Servers from "@oligarchy/db/servers";
-import * as Tests from "@oligarchy/db/tests";
 import * as Close from "./close.ts";
 import * as Find from "./find.ts";
 
@@ -21,9 +20,8 @@ export const reclaim = <R>(
   stop: (url: string, ticket: string) => Effect.Effect<void, never, R>,
 ) =>
   Effect.gen(function* () {
-    const tests = yield* Tests.TestStore;
     const servers = yield* Servers.ServerStore;
-    const job = yield* tests.findResult(action.resultId);
+    const job = yield* Find.ofAction(action);
     if (action.action !== "diagnose" && Option.isSome(job) && !Find.isOpen(job.value)) {
       const outcome = yield* Close.judge(action);
       yield* Effect.uninterruptible(Close.close(action, outcome));

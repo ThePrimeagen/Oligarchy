@@ -33,11 +33,10 @@ export const judge = Effect.fn("Close.judge")(function* (action: Action) {
   if (action.action === "diagnose") {
     return finished(action);
   }
-  const tests = yield* Tests.TestStore;
   const sessions = yield* Sessions.SessionStore;
   // The driver exiting 0 with the job still open is an agent that quit early, and the action
   // says so rather than reading as a run. The harness closes the job on stop or save.
-  const job = yield* tests.findResult(action.resultId);
+  const job = yield* Find.ofAction(action);
   if (Option.isNone(job)) {
     return yield* Effect.die(
       new Error(`judge: result ${action.resultId} vanished during the drive`),
@@ -173,7 +172,6 @@ const logOutcome = Effect.fn("Close.logOutcome")(function* (action: Action, outc
 // Failed by its verdict; aborted stays where it was.
 export const close = Effect.fn("Close.close")(function* (action: Action, outcome: Outcome) {
   const automation = yield* Automation.AutomationStore;
-  const tests = yield* Tests.TestStore;
   const linear = yield* Linear.Linear;
   const log = yield* Log.Log;
   const written = yield* automation
@@ -191,7 +189,7 @@ export const close = Effect.fn("Close.close")(function* (action: Action, outcome
     return false;
   }
   yield* logOutcome(action, outcome);
-  const job = yield* tests.findResult(action.resultId);
+  const job = yield* Find.ofAction(action);
   const ticket = Option.isSome(job) ? job.value.linearId : null;
   if (action.action !== "diagnose" && ticket !== null) {
     yield* Ready.release(ticket);
