@@ -13,7 +13,7 @@ asks: the failing unit test comes before the code.
 
 Three decisions, each defended on its own, together make the queue fragile.
 
-- `src/automation-server/worker.ts`, `place`: iterating the live clients, a `/reserve` answer other
+- `apps/automation-server/src/worker.ts`, `place`: iterating the live clients, a `/reserve` answer other
   than 503 does `return yield* Effect.fail(reserved.failure)`, so the job closes `failed` without
   the remaining clients being asked. Pinned by `test/automation-server/worker.unit.test.ts`
   ("an unreachable client marks the job failed"). The reverse proxy's `reserve` skips a server
@@ -23,11 +23,11 @@ Three decisions, each defended on its own, together make the queue fragile.
   `packages/jobs/src/board.ts` (`Board.enqueue`) turns the duplicate-key `DatabaseError` into a
   duplicate named by the status of the row the index kept, in `Board.already`'s words. Moving a
   ticket back into *Automation Needed* after a failed drive therefore logs
-  `linear webhook ignored; drive already failed` (`src/automation-server/handlers.ts`) for a job
+  `linear webhook ignored; drive already failed` (`apps/automation-server/src/handlers.ts`) for a job
   that is terminal and never enqueues another. A failed drive cannot be rerun from the
   board. Allow a new row when the existing one is terminal (drop the unique index in favour of
   "one non-terminal job per (result, action)", enforced in `Board.enqueue`).
-- `src/automation-client/main.ts` reads `SERVER_URL` with
+- `apps/automation-client/src/main.ts` reads `SERVER_URL` with
   `EffectConfig.string("SERVER_URL").pipe(Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL))`.
   A client started without it silently reserves guests at `http://127.0.0.1:42069`; every drive
   `/reserve` becomes `ProxyUnreachable → Internal (500)`, which the worker treats as a hard
@@ -39,9 +39,9 @@ Three decisions, each defended on its own, together make the queue fragile.
 
 ## 2. Automation server shutdown records `aborted` for jobs the client keeps running
 
-`src/automation-server/worker.ts` on interrupt writes `status: "aborted"`, reason
+`apps/automation-server/src/worker.ts` on interrupt writes `status: "aborted"`, reason
 `automation server shutting down` (pinned by "closing the scope mid-request aborts the job"),
-while `src/automation-client/handlers.ts` marks `/run` uninterruptible and its test pins
+while `apps/automation-client/src/handlers.ts` marks `/run` uninterruptible and its test pins
 "a dropped POST /run leaves the driver running until POST /abort stops it". After a server restart
 the row says aborted, ./driver keeps driving, the client's `--max-jobs` slot stays held, and the
 driver may still close the result. The worker comment "the HTTP wait is restored so SIGTERM
@@ -49,7 +49,7 @@ aborts an in-flight job" describes the wait being aborted, not the job. Either P
 the client before closing the row (best effort, one log line when it fails), or record a distinct
 reason (`orphaned by shutdown`) so the queue does not claim the run was stopped.
 
-## 3. `src/automation-client/qemu.ts` discards the real cause
+## 3. `apps/automation-client/src/qemu.ts` discards the real cause
 
 `Errors.Internal.make({ cause: new Error(error.message), agentId })` wraps a proper
 `ProxyRefusal`/`ProxyUnreachable` in a bare `Error`, dropping its own `cause` (the
@@ -60,7 +60,7 @@ typed error with the message. These are two of the ten `new Error(` sites outsid
 are `Effect.die` payloads for invariants and the `cause` of a `CliError.UserError`, which are
 defensible but should be decided once and written down.
 
-## 4. Two adjacent gaps in `src/qemu-reverse-proxy/router.ts`
+## 4. Two adjacent gaps in `apps/qemu-reverse-proxy/src/router.ts`
 
 - `reserve`: a server whose probe fails is skipped with a warning, but a server that dies between
   the probe and `askToReserve` fails the whole reserve with 502 instead of the next ranked server
@@ -103,12 +103,12 @@ on the cause (the same shape `packages/log/src/external-failure.ts` uses) and up
   `Effect.fn` would change their callers.
 - `packages/db/src/logs.ts` `listLogs` orders by `created_at, id`; `development.md` says `id`, not
   `created_at`, orders rows.
-- `src/qemu-server/handlers.ts` marks `serial` and `image` uninterruptible; `development.md` says
+- `apps/qemu-server/src/handlers.ts` marks `serial` and `image` uninterruptible; `development.md` says
   reads and streams are interruptible and only handlers that drive a resource are not. `serial` is
   a file read.
 - `packages/db/src/schema.ts` `SessionConfig` has no `readonly` fields, and the `logs` table comment omits
   the `automation-client` location bucket `packages/log/src/log.ts` added.
-- `MAX_CLICKS = 100` in `src/qemu-server/sessions.ts` is repeated as the literal `100` in
+- `MAX_CLICKS = 100` in `apps/qemu-server/src/sessions.ts` is repeated as the literal `100` in
   `src/client/flags.ts` (`clicks`), so the flag and the server can drift.
 - `packages/http/src/api.ts` `unregister` declares `Errors.NotFoundWire` on the endpoint while its group's
   `RouteBoundary` already declares it; one of the two is redundant.
@@ -118,14 +118,14 @@ on the cause (the same shape `packages/log/src/external-failure.ts` uses) and up
 `development.md` resists abstraction bought early, but these are copies of the same non-trivial
 logic in files that change independently:
 
-- The `DatabaseError`-unwrapping `detail` helper is copied verbatim in `src/qemu-server/sessions.ts`,
+- The `DatabaseError`-unwrapping `detail` helper is copied verbatim in `apps/qemu-server/src/sessions.ts`,
   `packages/jobs/src/errors.ts` (automation-server's copy, since phase 8) and
   `packages/fleet/src/member.ts` (the two heartbeats' and the sweep's, since phase 9); `describeThrowable(causeOf(e), errorDetail(e))` in
-  `src/automation-client/child.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/run.ts`. Both belong in
+  `apps/automation-client/src/child.ts`, `apps/qemu-server/src/qemu/process.ts`, `apps/qemu-server/src/qemu/iso.ts` and `apps/viz/src/run.ts`. Both belong in
   `packages/log/src/external-failure.ts` beside `causeOf`.
 - `packages/jobs/src/templates.ts` (`src/ctrl/prompts.ts` until phase 8) and
-  `src/automation-server/prompts.ts` repeat `read`, `fill` and `render`.
-- `src/automation-server/client.ts` repeats the same twelve-line `HttpClientError` catch in
+  `apps/automation-server/src/prompts.ts` repeat `read`, `fill` and `render`.
+- `apps/automation-server/src/client.ts` repeats the same twelve-line `HttpClientError` catch in
   `reserve`, `run` and `abort`; one `run(label, effect)` as `packages/http/src/proxy-client.ts` has is
   what `development.md` prescribes for a client.
 
@@ -141,14 +141,14 @@ this item is what is left outside it, and what that package should grow into.
   `openMints`), `close.ts` (`close`, `fail`, `judge`, `moveTicket`, one "three attempts, then a
   line" policy), `ready.ts` (`mark`, `release`), `board.ts` (`asks`, `actionFor`, `enqueue`,
   `already`), `abort.ts` and `reclaim.ts`. What is still outside: the dashboard's
-  `POST /suites/abort` (`src/dashboard/dashboard.tsx`) aborts a suite's pending rows through
-  `src/dashboard/query.ts` and moves their tickets to Aborted with its own `Linear` layer,
+  `POST /suites/abort` (`apps/dashboard/src/dashboard.tsx`) aborts a suite's pending rows through
+  `apps/dashboard/src/query.ts` and moves their tickets to Aborted with its own `Linear` layer,
   instead of asking the automation server to call `Abort.abort` per job; only a running job's
   ticket, when automation-server answered its forward with 200, is left to that server's
   `Abort.running`. The dashboard's `POST /abort` only forwards since phase 8.
 - **Where the searches are.** `packages/jobs/src/find.ts` (`byTicket`, `ofAction`,
   `nextPending`, `running`, `inherited`, `status`, `hasPending`, `diagnosable`, `isOpen`).
-  `src/dashboard/query.ts` keeps its own read model over the same tables, and its suite abort
+  `apps/dashboard/src/query.ts` keeps its own read model over the same tables, and its suite abort
   decides for itself which rows are still open.
 - **What drifts, and nobody looks.** `moveTicket` gives a ticket three attempts and then one log
   line: the row is closed, the ticket stays in the wrong column for good, and no later pass
@@ -204,7 +204,7 @@ Recorded so the next reviewer does not redo them.
   `ctrl test run` builds one pool.
 - The `Sessions` slot accounting (`reserve`, `failStart`, `finishLiveSession`, `relinquish`, the
   sweep) balances on every path; `finishLiveSession` runs exactly once per admitted session.
-- `src/qemu-server/main.ts` binds the port before `Sessions` exists, as its comment says; the
+- `apps/qemu-server/src/main.ts` binds the port before `Sessions` exists, as its comment says; the
   automation server and client override `ProcessAttribution`; `Log` sits above `Database` in every
   graph so the flush precedes the pool close.
 - The dashboard's `deleteOldRows` deletes in an order that respects every foreign key.

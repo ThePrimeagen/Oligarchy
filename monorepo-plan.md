@@ -6,7 +6,7 @@ workspace and `@oligarchy/routes`), so is phase 1 ([PR
 (`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
 (`@oligarchy/db`), phase 6 (`@oligarchy/observability`), phase 7 (`@oligarchy/linear`), phase 8
 (`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`), phase 9 (`@oligarchy/fleet`) and
-phase 10 (`@oligarchy/http`). The rest of this file is the plan for
+phase 10 (`@oligarchy/http`) and phase 11 (the seven apps under `apps/`). The rest of this file is the plan for
 the remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it
 lands.
 
@@ -476,51 +476,51 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 11: the seven apps**
 
-- [ ] TEST (move) qemu-server's unit tests (`test/qemu-server/`, `test/qemu/`, `test/qmp/`) to
+- [x] TEST (move) qemu-server's unit tests (`test/qemu-server/`, `test/qemu/`, `test/qmp/`) to
       `apps/qemu-server/test/`.
-- [ ] TEST (move) automation-client's unit tests to `apps/automation-client/test/`.
-- [ ] TEST (move) automation-server's unit tests, `test/automation-server/client.unit.test.ts`
+- [x] TEST (move) automation-client's unit tests to `apps/automation-client/test/`.
+- [x] TEST (move) automation-server's unit tests, `test/automation-server/client.unit.test.ts`
       included, to `apps/automation-server/test/`.
-- [ ] TEST (move) qemu-reverse-proxy's unit tests to `apps/qemu-reverse-proxy/test/`.
-- [ ] TEST (move) `test/dashboard/*.unit.test.ts` to `apps/dashboard/test/`.
-- [ ] TEST (alter) `apps/dashboard/test/follow.unit.test.ts`: takes `stepsOf` and `placeOf` from
+- [x] TEST (move) qemu-reverse-proxy's unit tests to `apps/qemu-reverse-proxy/test/`.
+- [x] TEST (move) `test/dashboard/*.unit.test.ts` to `apps/dashboard/test/`.
+- [x] TEST (alter) `apps/dashboard/test/follow.unit.test.ts`: takes `stepsOf` and `placeOf` from
       `@oligarchy/shared/steps`.
-- [ ] TEST (alter) `apps/dashboard/test/suite.unit.test.ts`: `SuiteRequestError` is a
+- [x] TEST (alter) `apps/dashboard/test/suite.unit.test.ts`: `SuiteRequestError` is a
       `Schema.TaggedError` with an `@oligarchy/dashboard/...` identifier; a bad body fails with
       it, and the response text is unchanged.
-- [ ] TEST (move) `test/integration/qemu-process.integration.test.ts` and
+- [x] TEST (move) `test/integration/qemu-process.integration.test.ts` and
       `qmp-socket.integration.test.ts` to `apps/qemu-server/test/`, under the app's own
       `test:integration` lane (they need the qemu binary and a socket, not a container).
-- [ ] TEST (alter) each moved test file: a fake only this app uses becomes an inline fake of the
+- [x] TEST (alter) each moved test file: a fake only this app uses becomes an inline fake of the
       methods it uses, or a helper in the app's own `test/`; a fake a second app also uses comes
       from `@oligarchy/testing`, moved there with its cases in this phase.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: each server's package script and wrapper run
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: each server's package script and wrapper run
       `apps/<name>/src/main.ts` with exactly its preloads; `dev` runs wrangler from
       `apps/dashboard`; `check:types` reaches every app's tsconfig.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: an app imports packages only, never
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: an app imports packages only, never
       another app and never the root's `src/`. Unhappy: an app-to-app import is named.
-- [ ] TEST (move) `test/viz/*.unit.test.ts` (eleven files, `screen.unit.test.tsx` included) to
+- [x] TEST (move) `test/viz/*.unit.test.ts` (eleven files, `screen.unit.test.tsx` included) to
       `apps/viz/test/`, with `viz.ts`, `fake-renderer.ts`, `fake-terminal.ts` and `fake-tty.ts`
       as the app's own helpers. The session tests in the root keep what they use of those four
       under `test/support/`.
-- [ ] TEST (new) `apps/viz/test/terminal.unit.test.ts`: `speaksKitty` is true for a tmux client
+- [x] TEST (new) `apps/viz/test/terminal.unit.test.ts`: `speaksKitty` is true for a tmux client
       termtype naming ghostty or kitty in any case, false for anything else and for an empty
       string.
-- [ ] TEST (move) `test/ctrl/command.unit.test.ts` and `test/ctrl/render.unit.test.ts` to
+- [x] TEST (move) `test/ctrl/command.unit.test.ts` and `test/ctrl/render.unit.test.ts` to
       `apps/ctrl/test/` (`linear.unit.test.ts` and `prompts.unit.test.ts` went to linear in
       phase 7). The command test's Linear fake becomes an inline `Layer.succeed(Linear.Linear)`
       of the methods it uses, or an app-local helper.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the `ctrl` script, its `bin` entry and its
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the `ctrl` script, its `bin` entry and its
       wrapper run `apps/ctrl/src/main.ts` with the instrument preload; PROCESSES maps each app to
       `apps/<name>/src/main.ts` and each remaining script to `src/<name>/main.ts`.
-- [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the boundary-file list, the `main.ts`
+- [x] TEST (alter) `test/repo/architecture.unit.test.ts`: the boundary-file list, the `main.ts`
       pattern and the `Effect.run` rules cover `apps/*/src/main.ts` and the dashboard's entry.
-- [ ] TEST (delete) the `.tsx` pragma case in `test/repo/architecture.unit.test.ts`: with viz and
+- [x] TEST (delete) the `.tsx` pragma case in `test/repo/architecture.unit.test.ts`: with viz and
       the dashboard both apps, the root has no `.tsx`; each app's tsconfig names its own JSX
       runtime and the rule has nothing left to check.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the `viz` script and wrapper run
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the `viz` script and wrapper run
       `apps/viz/src/main.ts` with exactly its preload.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the fleet starters start the apps from
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the fleet starters start the apps from
       their new entries, and a second signal still kills both children.
 
 **Phase 12: finish integration testing**
@@ -960,29 +960,73 @@ What phase 10 decided that the checklist left open, and what it found:
 
 **Phase 11: the seven apps**
 
-- [ ] Add `apps/*` to the root workspaces.
-- [ ] Move each server into `apps/<name>/`: qemu-server takes `src/qemu/` and `src/qmp/`,
+- [x] Add `apps/*` to the root workspaces.
+- [x] Move each server into `apps/<name>/`: qemu-server takes `src/qemu/` and `src/qmp/`,
       automation-client takes `child.ts`, automation-server keeps `client.ts`.
-- [ ] Move the dashboard into `apps/dashboard/` with `wrangler.jsonc`, the `dev` script, the text
+- [x] Move the dashboard into `apps/dashboard/` with `wrangler.jsonc`, the `dev` script, the text
       module rules (paths to `client.md`, `ctrl-linear.md` and `prompts/*.html` become
       `../../../`), its own tsconfig with `jsxImportSource: hono/jsx`, the `textModules` vitest
       plugin, and `query.ts` as its read model. `SuiteRequestError` becomes a
       `Schema.TaggedError`.
-- [ ] Move viz into `apps/viz/` with `preload.ts`, its own tsconfig with
+- [x] Move viz into `apps/viz/` with `preload.ts`, its own tsconfig with
       `jsxImportSource: @opentui/solid`, the `opentuiSolid` babel plugin in its `vitest.config.ts`
       (applied to every `.tsx` there, no pragma sniff), and `@opentui/core`, `@opentui/solid`,
       `solid-js`, `@babel/core`, `@babel/preset-typescript`, `babel-preset-solid` and
       `@types/babel__core` in its `package.json`. Add `terminal.ts` with `speaksKitty`, viz's own
       copy of the four-line predicate in `session/image.ts`; `image.ts` stays with `session`.
-- [ ] Drop `jsx` and `jsxImportSource` from the root tsconfig, and both JSX plugins from the root
+- [x] Drop `jsx` and `jsxImportSource` from the root tsconfig, and both JSX plugins from the root
       `vitest.config.ts`. Remove the moved dependencies from the root `package.json`.
-- [ ] Move ctrl into `apps/ctrl/` (`main.ts`, `command.ts`, `render.ts`), with the instrument
+- [x] Move ctrl into `apps/ctrl/` (`main.ts`, `command.ts`, `render.ts`), with the instrument
       preload from `@oligarchy/observability` in its script and wrapper. Its `bin` entry moves to
       the app's `package.json`. The agent docs it reads (`ctrl.md`, `ctrl-linear.md`,
       `ctrl-diagnose.md`) stay at the repo root; they are the driving agent's, not the app's.
-- [ ] Give the dashboard an `exports` entry for its Worker entry (`app`, `scheduled`), the one app import `integration-testing` makes; the architecture test names it.
-- [ ] Delete the root `src/shared/errors.ts` once the last app error has moved.
-- [ ] Update the wrappers, package scripts and fleet starters.
+- [x] Give the dashboard an `exports` entry for its Worker entry (`app`, `scheduled`), the one app import `integration-testing` makes; the architecture test names it.
+- [x] Delete the root `src/shared/errors.ts` once the last app error has moved.
+- [x] Update the wrappers, package scripts and fleet starters.
+
+What phase 11 decided that the checklist left open, and what it found:
+
+- Every app's `package.json` names only what its sources and tests import. The root drops what
+  only the apps used (the OpenTUI and Solid packages, the babel presets, hono,
+  `@sentry/cloudflare`, wrangler, `@oligarchy/fleet`, `@oligarchy/jobs`) and dev-depends on
+  `@oligarchy/dashboard` for the one system test that imports the Worker entry, until phase 12
+  moves that test.
+- The root tsconfig keeps hono's JSX settings and names `apps/dashboard/src/text-modules.d.ts`,
+  for the same reason: `dashboard.integration.test.ts` imports `@oligarchy/dashboard/worker`, and
+  the root type-checks it until phase 12. Both JSX plugins left the root vitest config.
+- qemu-server keeps `src/qemu/` and `src/qmp/` as directories inside the app, so their tests
+  keep `test/qemu/` and `test/qmp/` and their relative imports.
+- Each app declares its own errors in `src/errors.ts` (qemu-server the QMP and QEMU errors,
+  automation-server `AutomationClientError` and `JobNotFound`, automation-client `CliFailed`),
+  and so do the scripts (`src/harness/errors.ts`, `src/session/errors.ts`); the identifiers are
+  unchanged. `SharedErrors` stays `SharedErrors`, so it never shadows an app's own `Errors`.
+- The helpers a second consumer uses moved to `@oligarchy/testing` with their own cases:
+  `fakeLog` (`TestingLog`), the reporter collector (`TestingReporter`), the spawner
+  (`TestingSpawner`), the recording file system (`TestingFs`), captured stdio (`TestingStdio`)
+  and the rest of the stores (`fakeSessionStore` and the recording stores, and `fakeStores`).
+  The table below proposed rewriting the 22 `fakeLog` users to inline logs; one shared fake with
+  its own tests was the smaller change and is what the checklist's rule asks for. The QEMU fakes
+  and the tracer are qemu-server's `test/support/`, viz's renderer, terminal and screen helpers
+  viz's; the root keeps the session REPL's (`fake-children`, `fake-tty`) and the system tests'.
+- The architecture rule is "an app imports no code outside itself and names no other app": the
+  dashboard bundles `client.md`, `ctrl-linear.md` and the ticket template from the repo root,
+  which are the driving agent's documents, so a relative import of a `.md` or `.html` is allowed.
+  The apps sit on layer 6 in the layer list, so an app depending on another is a same-layer
+  edge, and a root file reaching into `apps/` by path is named as a reach into `packages/` is.
+- Two app tests reached into another app. The abort-wait test compared its spinner with viz's,
+  a constant against a constant, and that case went. The automation server's two six-job restart
+  cases ran automation-client's real routes and `Sessions` in-process; they now meet an HTTP fake
+  of the client inside the test (six slots, a `/run` that holds its slot, an `/abort` that frees
+  it, answers 404 or fails), which is what the worker sees. What went with the real client is the
+  check that it signalled its drivers, which automation-client's own tests pin.
+- The dashboard's two browser-script tests read `public/dashboard.js` from the working directory,
+  and the automation server's prompts resolved `../../prompts` from the module; both follow the
+  new depth (the second was a runtime path, caught by its unit test).
+- `automation-client.integration.test.ts` spells the driver's arguments now (phase 12's item),
+  so the root imports nothing from an app's sources.
+- `follow.tsx` already took `stepsOf` and `placeOf` from `@oligarchy/shared/steps` (phase 2); the
+  follow test needed no change. The ctrl command test keeps `TestingLinear`, the shared fake four
+  apps and jobs use.
 
 **Phase 12: finish integration testing**
 

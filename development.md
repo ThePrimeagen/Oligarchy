@@ -35,16 +35,15 @@ exist.
   remain plain JavaScript once the annotations go: no enums, namespaces or parameter properties.
 - `./viz` draws with OpenTUI (`@opentui/core`, cells rendered by a native core behind a
   TypeScript API) through its Solid reconciler (`@opentui/solid`; `solid-js` is pinned to the one
-  version it accepts). Its components are `.tsx` files opening with
-  `/** @jsxImportSource @opentui/solid */`, which is how tsc checks them against that runtime
-  while the dashboard's `.tsx` stays hono/jsx (`test/repo/architecture.unit.test.ts` checks the
-  pragma). Bun cannot compile Solid's JSX itself, so the wrapper and the `viz` script preload
-  `src/viz/preload.ts` (`@opentui/solid/preload`: babel-preset-solid, and solid-js's client build
-  in place of the server build Bun would resolve). Vitest compiles the same files with the same
-  presets in `vitest.config.ts`, for the files carrying the pragma, aliases `solid-js` to that
-  client build and compiles `@opentui/solid` itself, so the tests' `CliRenderer` is the one
-  `render` tells apart from a config with `instanceof`. Tests run the in-memory renderer from
-  `@opentui/core/testing` (`test/support/fake-renderer.ts`) and read frames back as rows and
+  version it accepts). Its components are `.tsx` files, checked against that runtime by the viz
+  app's own tsconfig (`jsxImportSource: @opentui/solid`), while the dashboard app's names
+  hono/jsx. Bun cannot compile Solid's JSX itself, so the wrapper and the `viz` script preload
+  `apps/viz/src/preload.ts` (`@opentui/solid/preload`: babel-preset-solid, and solid-js's client
+  build in place of the server build Bun would resolve). Vitest compiles every `.tsx` in the app
+  with the same presets in `apps/viz/vitest.config.ts`, aliases `solid-js` to that client build
+  and compiles `@opentui/solid` itself, so the tests' `CliRenderer` is the one `render` tells
+  apart from a config with `instanceof`. Tests run the in-memory renderer from
+  `@opentui/core/testing` (`apps/viz/test/support/fake-renderer.ts`) and read frames back as rows and
   styled spans; `screen.tsx` mounts on whatever renderer it is handed, so the same components
   draw the terminal and the tests.
   The Node-compatible platform is what the code targets (`@effect/platform-node`, `node:*` in
@@ -62,8 +61,9 @@ exist.
   `check`, `test` or `lint` script; `test/repo/scripts.unit.test.ts` keeps it that way, and pins
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
-- The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today ten: `@oligarchy/shared`, the
+- The repo is a Bun workspace. The root `package.json` is the main package (the scripts
+  `client`, `driver` and `session`, the repo tests and, until they move, the system tests);
+  `apps/*` are the seven apps (Layout, below), and `packages/*` are the libraries, today ten: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
   from outside and the runner that installs it (Config and Runtime entry, below),
@@ -98,13 +98,14 @@ exist.
 - Dependencies run one way. Two files never import each other: oxlint's `import/no-cycle` is on
   as an error and follows package `exports`, so a loop through two packages is caught too. A
   package depends only on packages on a strictly lower layer, never on one of its own layer:
-  `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
+  `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and
+  `apps/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
   `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` and `@oligarchy/linear` at 3,
   `@oligarchy/jobs` and `@oligarchy/observability` at 4, `@oligarchy/fleet` and
-  `@oligarchy/http` at 5, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
-  it). A package missing from the list, an upward
+  `@oligarchy/http` at 5, the seven apps at 6, so an app depending on another is a same-layer
+  edge, and `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach it). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
@@ -161,10 +162,23 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   server; `./start-automation-server-client <max-jobs>` runs the automation server on
   `:54321` and one automation client; each pair in the foreground, one exiting stops the
   other), the tooling files,
-  `public/` and `prompts/`, the operator documents, this document, `src/`, `test/` and
+  `public/` and `prompts/`, the operator documents, this document, `src/`, `test/`, `apps/` and
   `packages/`.
-- `src/` is one directory per process plus what is left of the shared kernel (`src/shared/`:
-  the staged errors); `main.ts` files are the entries.
+- `src/` holds the scripts, one directory each (`client`, `driver`, `session`) and the harness
+  the driver runs (`src/harness/`); `main.ts` files are the entries.
+- `apps/<name>/` is an app, a workspace package like a library (`package.json`, `tsconfig.json`,
+  `vitest.config.ts`, `src/` with its `main.ts`, `test/`): `qemu-server` (which holds `src/qemu/`
+  and `src/qmp/`, the QEMU pieces nothing else uses), `qemu-reverse-proxy`, `automation-server`,
+  `automation-client`, `dashboard` (the Worker, with its `wrangler.jsonc` and `dev` script, and an
+  `exports` entry `./worker` for its Worker entry, which the system tests import), `viz` (its own
+  tsconfig names `@opentui/solid`) and `ctrl` (its `bin` is the app's). An app imports packages
+  and its own modules, never another app and never the root's code; the dashboard bundles the
+  driving agent's guides and the ticket template from the root, which are documents, not code
+  (`test/repo/architecture.unit.test.ts` checks it). Each app declares the errors only it
+  raises in its own `errors.ts` (qemu-server the QMP and QEMU errors, automation-server
+  `AutomationClientError` and `JobNotFound`, automation-client `CliFailed`), as the harness
+  (`src/harness/errors.ts`) and the session REPL (`src/session/errors.ts`) do, identifiers
+  unchanged.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
   schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
@@ -233,13 +247,18 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   or retry that decides how, and the searches the apps make over jobs; refused are HTTP, a
   platform module and an app. Stopping a driver at its automation client is transport, so
   `Reclaim.reclaim` takes the app's `stop` and `Abort.running` closes a row its app has stopped.
-  `packages/testing/src/` is dev-only: `stores.ts` (`fakeTestStore`, `fakeAutomationStore`,
-  `fakeServerStore`, `fakeProcessStatsStore`, fakes that answer the way the Postgres stores do),
-  `http-client.ts` (an `HttpClient` answered by a script, a recorder or an app, no socket) and `linear.ts` (`fakeLinear`, its ids and
-  `ticketFor`). It imports `effect`, `@oligarchy/db`, `@oligarchy/linear` and its own files, and
-  sits above every layer, so a package or the root may only dev-depend on it. Its admission rule:
-  a fake that a package's tests and an app's tests both use; a fake with one consumer stays with
-  that consumer, and a fake of a package's own store stays in that package's `test/`.
+  `packages/testing/src/` is dev-only: `stores.ts` (a fake of every store, answering the way the
+  Postgres stores do, and `fakeStores`, all of them at once), `http-client.ts` (an `HttpClient`
+  answered by a script, a recorder or an app, no socket), `linear.ts` (`fakeLinear`, its ids and
+  `ticketFor`), `log.ts` (`fakeLog`, a `Log` that keeps its lines), `reporter.ts` (`collect`, what
+  reaches the `ErrorReporter`), `spawner.ts` (`fakeSpawner`, child processes scripted per
+  command), `fs.ts` (`recordingFs` over a table of paths, and `intercepting`, the real file system
+  with its writes recorded) and `stdio.ts` (`capture`, stdout and stderr byte for byte). It
+  imports `effect`, `@oligarchy/db`, `@oligarchy/linear`, `@oligarchy/log` and its own files, and
+  sits above every layer, so a package, an app or the root may only dev-depend on it. Its
+  admission rule: a fake that two of them use (two apps, a package and an app, an app and a
+  script); a fake with one consumer stays with that consumer, and a fake of a package's own store
+  stays in that package's `test/`.
   `packages/observability/src/` is where lines, failures and spans go once
   written: `log.ts` (`LogLive`, the row-writing `Log` layer: one drain fiber takes each line
   with its row in call order, inserts the row, then writes the line; a refused row writes the
@@ -276,11 +295,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `effect`, `@effect/platform-node`, `@oligarchy/env`, `@oligarchy/log`, `@oligarchy/shared` and
   its own files. Its admission rule: the contract, serving it, calling the proxy, guarding a
   route; refused are a store, a loop and a client with one consumer
-  (`automation-server/client.ts` stays in its app). What only one side
-  knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
-  package that raises it exists: `src/shared/errors.ts` holds those (the app errors) and shrinks
-  as each package is created, re-exporting nothing.
-- `src/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
+  (`automation-server/client.ts` stays in its app). What only one side knows (QEMU, the
+  harness) stays with that app or script.
+- `apps/dashboard/` is a Hono Worker, not Effect: it reaches Postgres
   through Hyperdrive and drizzle with one `pg.Client` per request ended in `finally` (a client
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
@@ -305,9 +322,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   default, so a local worker and production can name different teams. A dashboard var would be
   deleted on the next deploy.
 - Files are kebab-case, one concept per file: `api.ts`, `contract.ts`, `errors.ts`, `config.ts`,
-  `main.ts`, `<domain>.ts`. Tests mirror source names under `test/<dir>/<file>.unit.test.ts`;
-  anything that spawns a process, opens a socket or needs Docker or QEMU lives under
-  `test/integration/*.integration.test.ts`; fakes under `test/support/`.
+  `main.ts`, `<domain>.ts`. Tests mirror source names in their own package's or app's `test/`
+  (`apps/qemu-server/test/qemu/iso.unit.test.ts` for `apps/qemu-server/src/qemu/iso.ts`), and
+  the scripts' under the root's `test/<dir>/`; a test that spawns a built process or needs Docker
+  lives under the root's `test/integration/*.integration.test.ts`, one that needs only the real
+  OS (a socket, the qemu binary) in its owner's `*.integration.test.ts` lane.
 - Import relative modules as namespaces with the `.ts` extension
   (`import * as Sessions from "./sessions.ts"`, `import type * as Domain from "./domain.ts"`);
   side-effect and asset imports are exempt. No barrels, no re-exports, no `export ... from`.
@@ -336,10 +355,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   qemu-server's `main.ts`, beside its own `Host`), `import * as ProcessUsage from
   "@oligarchy/fleet/process"`, `import * as Member from "@oligarchy/fleet/member"`, `import *
   as Sweep from "@oligarchy/fleet/sweep"`, and in tests `import * as TestingStores from
-  "@oligarchy/testing/stores"` and `import * as TestingLinear from "@oligarchy/testing/linear"`.
+  "@oligarchy/testing/stores"` and `import * as TestingLinear from "@oligarchy/testing/linear"`, and `TestingHttp`, `TestingLog`, `TestingReporter`, `TestingSpawner`, `TestingFs` and `TestingStdio` for the rest of `@oligarchy/testing`.
   The seven errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`, `EnvErrors`,
-  `DbErrors`, `LinearErrors` and `JobsErrors` everywhere so none shadows the main package's
-  staged `Errors`; when that file is gone, `SharedErrors` becomes `Errors`. The observability package is `import * as
+  `DbErrors`, `LinearErrors` and `JobsErrors` everywhere so none shadows an app's or
+  script's own `Errors`, its `errors.ts`. The observability package is `import * as
   Observability from "@oligarchy/observability/log"` (`Observability.LogLive`, the row-writing
   `Log` layer the five graphs build), `import * as Sentry from "@oligarchy/observability/sentry"`
   and `import * as Dsn from "@oligarchy/observability/dsn"`.
@@ -359,13 +378,14 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   Sentry groups on it. So a schema that moves keeps its identifier, and the http package's are
   still `@oligarchy/shared/...`.
 - Only the boundary files may import `node:*`, read `process.*`, or use `setTimeout`,
-  `setInterval`, `new Promise` or `async`: every `src/**/main.ts` and the files named in
+  `setInterval`, `new Promise` or `async`: every entry (`apps/<name>/src/main.ts`,
+  `src/<name>/main.ts`) and the files named in
   `BOUNDARY_FILES` in `test/repo/architecture.unit.test.ts`, each the one place a Node API (a
   socket, a stream, a pool's error event, the tty, a timer) is wrapped into Effect. A non-boundary
   file that needs exactly one `node:*` module for something Effect lacks (a streaming hash, an
   inflate) is listed in `NODE_IMPORT_EXCEPTIONS` there with that module. A Promise SDK needs no
-  exemption: it is wrapped in `Effect.tryPromise`. `packages/*/src` is scanned like `src/`;
-  `src/dashboard/**` and `test/**` are not. To add a boundary file or an exception, add it to the list with a comment naming why,
+  exemption: it is wrapped in `Effect.tryPromise`. `packages/*/src` and `apps/*/src` are
+  scanned like `src/`; `apps/dashboard/**` and the tests are not. To add a boundary file or an exception, add it to the list with a comment naming why,
   in one change; nothing else grants it.
 
 ## Core rules
@@ -431,7 +451,7 @@ The `Database` service in `packages/db/src/client.ts` is the model: `makeDatabas
 acquires the pool without connecting under `Effect.acquireRelease`, re-enters Effect from
 `pool.on("error")` with `Effect.runForkWith(context)`, and its release logs instead of failing.
 
-A graph, from `src/qemu-server/main.ts`: one reference per service, a layer that depends on a value
+A graph, from `apps/qemu-server/src/main.ts`: one reference per service, a layer that depends on a value
 unwrapped, and the reporter beneath the log so the log rows flush before the reporter does.
 
 ```ts
@@ -461,7 +481,7 @@ The variable lookup, the CLI's output and config, `Log.Colors` and the platform 
 - Model every expected failure as
   `class X extends Schema.TaggedError<X>("@oligarchy/shared/errors/X")("X", fields, annotations?)`
   in `packages/shared/src/errors.ts` when more than one package or app raises it, in the one
-  that raises it otherwise (in `src/shared/errors.ts` until that package exists), or, when an
+  that raises it otherwise (an app's own `errors.ts` for an app's), or, when an
   HTTP API declares it (an `ApiError`), in `packages/http/src/errors.ts` beside its wire
   codec; never `Data.TaggedError`, never a bare `Error` in an error channel.
 - The class name equals the `_tag`; no `Error` suffix unless the concept is the error (`QmpError`,
@@ -876,7 +896,7 @@ Env.run(
   written and is not logged twice. The status is on the wire before the body can fail, so the
   stream is tapped for the one error line a mid-stream death leaves.
 - A page for an operator's browser has no bearer to send, so no Effect process serves one: the
-  page is the dashboard's (`src/dashboard/`), behind its access control, and reads rows. What it
+  page is the dashboard's (`apps/dashboard/`), behind its access control, and reads rows. What it
   shows of a process is what that process wrote on a schedule (the server's `servers` row every
   thirty seconds, its `generation` counting the writes, so a number that stops moving is a process
   that stopped without deleting its row, and ten minutes of that is a row the reader of its kind
@@ -1165,8 +1185,8 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` renders, builds the row and offers both at once. `console.*`
-  appears only in `src/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
-  fake `Log` layer (`test/support/log.ts`) or `Log.layerStdout` with `TestConsole.logLines`.
+  appears only in `apps/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
+  fake `Log` layer (`@oligarchy/testing/log`) or `Log.layerStdout` with `TestConsole.logLines`.
 
 ## Sentry
 
@@ -1177,7 +1197,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   Sentry.nativeNodeFetchIntegration({ spans: false })] })`. `SENTRY_DSN` in `dsn.ts` is the one
   hard-coded constant (public by design) and is shared with the dashboard.
 - `@sentry/bun` (Sentry's SDK for the runtime, `@sentry/node` underneath) and `@sentry/effect`
-  are imported only in `packages/observability/`; `@sentry/cloudflare` only in `src/dashboard/`. All
+  are imported only in `packages/observability/`; `@sentry/cloudflare` only in `apps/dashboard/`. All
   three are pinned to one version through the catalog so `@sentry/core` is not duplicated
   (`SentryEffectTracer` relies on one `getActiveSpan()`).
 - Route exceptions through one `ErrorReporter.make` installed with `ErrorReporter.layer([reporter])`
@@ -1204,8 +1224,9 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   or `Effect.catchDefect` to the same; `log.error` is what reports. Flush in a root scope
   finalizer, `Effect.addFinalizer(() => Effect.asVoid(Effect.promise(() =>
   Sentry.flush(2_000))))`, registered by `SentryLive` and ordered after the `Log` flush.
-- Test the policy with `ErrorReporter.make` collecting errors (`test/support/reporter.ts`), a
-  recording `Tracer` (`test/support/tracer.ts`) and an in-memory Sentry transport; never mock it.
+- Test the policy with `ErrorReporter.make` collecting errors (`@oligarchy/testing/reporter`), a
+  recording `Tracer` (`apps/qemu-server/test/support/tracer.ts`) and an in-memory Sentry
+  transport; never mock it.
 
 The reporter in `packages/observability/src/sentry.ts` (`tag`/`toSentryLevel` are its helpers): one
 `captureException` per reported cause, a `LogLine` unwrapped to the cause it carries.
@@ -1328,14 +1349,15 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   `bun run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
   executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary. A
-  workspace package's unit tests sit in `packages/<name>/test/` under its own `vitest.config.ts`
-  and import its sources relatively; `bun run test:unit` runs them after the root's. A unit test
-  stays in the package it tests: a package's tests never import the root's `test/support/`, so
-  what they fake is an inline layer of the methods used or a fake from `@oligarchy/testing`. A
-  package test that needs the real OS but no container (fleet's `process.integration.test.ts`,
-  which reads `/proc` and runs `ps`) sits beside it as `*.integration.test.ts` under the
-  package's own `integration` project and `test:integration` lane, which the root's
-  `test:integration` reaches after its own.
+  workspace package's or app's unit tests sit in its own `test/` under its own
+  `vitest.config.ts` and import its sources relatively; `bun run test:unit` runs them after the
+  root's. A unit test stays in the package it tests: a package's or app's tests never import the
+  root's `test/support/` or another app, so what they fake is an inline layer of the methods used,
+  a helper in their own `test/support/` (qemu-server's QEMU fakes, viz's renderer and terminal),
+  or a fake from `@oligarchy/testing`. A test that needs the real OS but no container (fleet's
+  `process.integration.test.ts`, which reads `/proc` and runs `ps`; qemu-server's QEMU process and
+  QMP socket) sits beside it as `*.integration.test.ts` under its owner's `integration` project
+  and `test:integration` lane, which the root's `test:integration` reaches after its own.
 - Run every test before anything is pushed to master or merged into it: `bun run check:fast`,
   then the whole integration lane with Docker up, `OLIGARCHY_REQUIRE_DATABASE=1 bun run
   test:integration`, so a database test fails instead of skipping. Never only the tests that look
@@ -1353,11 +1375,11 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Fakes are `Layer.succeed(Tag)(Tag.of({...}))` factories that record their calls
   (`fakeLog().lines`, `fakeQemu().calls`, `fakeSessionStore().sessions`,
   `fakeServerStore().routes`) with every unused member `Effect.die("Unexpected
-  <Service>.<method>")`, kept under `test/support/`, one file per seam, plus loopback stubs for
-  the process tests and `postgres.ts`. A fake that a package's tests and the apps' tests both use
-  lives in `@oligarchy/testing` instead (the test, automation, server and process-stats stores,
-  Linear, and the HTTP client fake today),
-  and `test/support/` builds on it. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
+  <Service>.<method>")`. A fake one package or app uses is its own, in its `test/support/`, one
+  file per seam; a fake a second one uses lives in `@oligarchy/testing` (every store, Linear,
+  the HTTP client, the recording `Log`, the error-reporter collector, the child-process spawner,
+  the recording file system and captured stdio today). The root's `test/support/` keeps the
+  session REPL's fakes and the system tests' loopback stubs and `postgres.ts`. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
   that calls other HTTP servers gets `TestingHttp.recordRequests(respond)` provided to its layer
   alone, so the `HttpClient` in the test's scope still points at the server under test.
 - Assert failures with `Effect.flip` and `expect(error).toMatchObject({ _tag, message })`;
@@ -1466,10 +1488,10 @@ change ships (Tests, above).
   `missing-star-in-yield-effect-gen`, `missing-return-yield-star`, `effect-fn-implicit-any`,
   `class-self-mismatch`, `non-object-effect-service-type`, `schema-opaque-instance-member`,
   `overridden-schema-constructor`, `schema-literal-non-finite`, `outdated-api`,
-  `promise-in-effect-success`, `strict-effect-provide`, the last off only for `src/**/main.ts`,
-  `packages/env/src/run.ts`, `packages/observability/src/instrument.ts`, `test/**`, `packages/*/test/**`
-  and `vitest.global-setup.ts`); `typescript/no-floating-promises` off for `test/**`,
-  `packages/*/test/**` and the global setup. No `warn` tier.
+  `promise-in-effect-success`, `strict-effect-provide`, the last off only for the entries,
+  `packages/env/src/run.ts`, `packages/observability/src/instrument.ts`, every package's and
+  app's tests and `vitest.global-setup.ts`); `typescript/no-floating-promises` off for the tests
+  and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
   final newline; `packages/db/drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
   `wrangler.jsonc` ignored. `.editorconfig` matches.
