@@ -23,10 +23,22 @@ export const repeat = <A extends readonly unknown[], T, E>(
   };
 };
 
-// Calls fn after every interval milliseconds. The returned function stops it.
+// Calls fn after every interval milliseconds, using one timeout at a time.
+// The returned function clears the pending timeout and does not schedule another.
 export const tick = (fn: () => unknown, interval: number): (() => void) => {
-  const id = setInterval(fn, interval);
+  let stopped = false;
+  let timer = setTimeout(function run() {
+    if (stopped) {
+      return;
+    }
+    fn();
+    if (stopped) {
+      return;
+    }
+    timer = setTimeout(run, interval);
+  }, interval);
   return () => {
-    clearInterval(id);
+    stopped = true;
+    clearTimeout(timer);
   };
 };
