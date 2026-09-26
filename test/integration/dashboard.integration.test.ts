@@ -7,11 +7,11 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, it } from "vitest";
 import * as DbSchema from "@oligarchy/db/schema";
-import { app, scheduled } from "../../src/dashboard/dashboard.tsx";
+import * as Worker from "@oligarchy/dashboard/worker";
 import * as Postgres from "../support/postgres.ts";
 import * as StubProxy from "../support/stub-proxy.ts";
 
-const QUERY = fileURLToPath(new URL("../../src/dashboard/query.ts", import.meta.url));
+const QUERY = fileURLToPath(new URL("../../apps/dashboard/src/query.ts", import.meta.url));
 const SCHEMA = fileURLToPath(new URL("../../packages/db/src/schema.ts", import.meta.url));
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REFUSED_URL = `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`;
@@ -368,7 +368,7 @@ type Page = {
 // The Worker in-process: the Hono app answers a Request with the Hyperdrive binding pointed at
 // the container, so the page is what production renders from these rows.
 const getPage = async (path: string, databaseUrl: string): Promise<Page> => {
-  const response = await app.request(path, undefined, {
+  const response = await Worker.app.request(path, undefined, {
     HYPERDRIVE: { connectionString: databaseUrl },
   });
   return { status: response.status, html: await response.text() };
@@ -397,7 +397,7 @@ const postForm = async (
   readonly location: string | null;
   readonly text: string;
 }> => {
-  const response = await app.request(
+  const response = await Worker.app.request(
     path,
     {
       method: "POST",
@@ -971,7 +971,7 @@ const postAbortSuite = async (
   run: string,
   reach: SuiteReach = UNREACHABLE,
 ): Promise<number> => {
-  const response = await app.request(
+  const response = await Worker.app.request(
     "/suites/abort",
     {
       method: "POST",
@@ -1364,7 +1364,7 @@ const postAbort = async (
   env: AbortEnv,
   action: QueuedJob["action"] = "drive",
 ): Promise<{ readonly status: number; readonly body: unknown }> => {
-  const response = await app.request(
+  const response = await Worker.app.request(
     "/abort",
     {
       method: "POST",
@@ -1477,7 +1477,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
     const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
-      const response = await app.request(
+      const response = await Worker.app.request(
         "/abort",
         {
           method: "POST",
@@ -1504,7 +1504,7 @@ describe("dashboard POST /abort happy path: the outbound calls", () => {
     const proxy = await StubProxy.startStubProxy(() => StubProxy.OK);
     const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
-      const response = await app.request(
+      const response = await Worker.app.request(
         "/abort",
         {
           method: "POST",
@@ -1585,7 +1585,7 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
     const linear = await StubProxy.startStubProxy(() => StubProxy.OK);
     try {
       for (const body of [{ ticket: "ABT-NOACT" }, { ticket: "ABT-NOACT", action: "reboot" }]) {
-        const response = await app.request(
+        const response = await Worker.app.request(
           "/abort",
           {
             method: "POST",
@@ -1631,7 +1631,7 @@ describe("dashboard POST /abort unhappy path: always 200", () => {
   });
 
   it("answers 200 without a redirect when the definitions page asks over htmx and names no job", async () => {
-    const response = await app.request(
+    const response = await Worker.app.request(
       "/abort",
       {
         method: "POST",
@@ -2098,7 +2098,7 @@ describe.skipIf(dbUrl === "")("dashboard/query deleteOldRows happy path", () => 
       ]);
     });
     await expect(
-      scheduled(
+      Worker.scheduled(
         CRON,
         abortBindings({
           databaseUrl: dbUrl,
@@ -2179,7 +2179,7 @@ describe("dashboard/query deleteOldRows unhappy path: unreachable database", () 
   // The cron's failure is thrown, so Cloudflare records the event as failed and Sentry's wrapper
   // reports it; the connection string never reaches the message.
   it("the scheduled handler rejects with the refused connection, without echoing the password", async () => {
-    const outcome = await scheduled(
+    const outcome = await Worker.scheduled(
       CRON,
       abortBindings({
         databaseUrl: REFUSED_URL,

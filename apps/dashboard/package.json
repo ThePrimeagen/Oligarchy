@@ -1,0 +1,35 @@
+{
+  "name": "@oligarchy/dashboard",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./worker": "./src/dashboard.tsx"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run",
+    "dev": "wrangler dev --remote --env local"
+  },
+  "dependencies": {
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/jobs": "workspace:*",
+    "@oligarchy/linear": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/observability": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "@sentry/cloudflare": "catalog:",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "hono": "^4.13.5",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "^4.127.1"
+  }
+}

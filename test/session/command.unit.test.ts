@@ -10,8 +10,8 @@ import * as Api from "@oligarchy/http/api";
 import * as SessionCommand from "../../src/session/command.ts";
 import * as State from "../../src/session/state.ts";
 import * as FakeTty from "../support/fake-tty.ts";
-import * as StdioSupport from "../support/stdio.ts";
-import * as Stores from "../support/stores.ts";
+import * as TestingStdio from "@oligarchy/testing/stdio";
+import * as TestingStores from "@oligarchy/testing/stores";
 
 const IMAGE_ID = "9b2f1c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d";
 const OTHER_ID = "0c3d2e1f-5a6b-4c7d-9e8f-0a1b2c3d4e5f";
@@ -37,9 +37,9 @@ const TerminalStub = Layer.succeed(Terminal.Terminal)(
 );
 
 const harness = () => {
-  const actions = Stores.fakeActionStore();
+  const actions = TestingStores.fakeActionStore();
   const touched: Array<string> = [];
-  const stdio = StdioSupport.capture();
+  const stdio = TestingStdio.capture();
   const command = SessionCommand.makeSessionCommand({
     database: () => {
       touched.push("database");

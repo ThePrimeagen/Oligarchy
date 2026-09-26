@@ -5,6 +5,7 @@ import * as Automation from "@oligarchy/db/automation";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as ProcessStats from "@oligarchy/db/process-stats";
 import * as Servers from "@oligarchy/db/servers";
+import * as Sessions from "@oligarchy/db/sessions";
 import * as Tests from "@oligarchy/db/tests";
 import * as Stores from "../src/stores.ts";
 
@@ -313,6 +314,55 @@ describe("fakeProcessStatsStore unhappy path", () => {
       }).pipe(Effect.provide(fake.layer));
       expect(error).toBe(refused);
       expect(fake.reports).toEqual([]);
+    }),
+  );
+});
+
+const SESSION = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
+
+describe("fakeSessionStore happy path", () => {
+  it.effect("a session is found by its id in any case, and its end closes its agent's run", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeSessionStore();
+      yield* Effect.gen(function* () {
+        const store = yield* Sessions.SessionStore;
+        yield* store.insertSession(SESSION, { iso: "omarchy.iso" }, "downloading");
+        yield* store.registerAgent("OLI-1", SESSION);
+        yield* store.sessionRunning(SESSION.toUpperCase());
+        expect(yield* store.getSessionStatus(SESSION)).toEqual(Option.some("running"));
+        yield* store.endSession(SESSION, "succeeded", null);
+      }).pipe(Effect.provide(fake.layer));
+      expect(fake.sessions.map((row) => row.status)).toEqual(["succeeded"]);
+      expect(fake.agentRuns.map((run) => run.endedAt === null)).toEqual([false]);
+    }),
+  );
+});
+
+describe("fakeSessionStore unhappy path", () => {
+  it.effect("a second run for one agent is the primary key's DatabaseError", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeSessionStore();
+      const error = yield* Effect.gen(function* () {
+        const store = yield* Sessions.SessionStore;
+        yield* store.registerAgent("OLI-1", SESSION);
+        return yield* Effect.flip(store.registerAgent("OLI-1", SESSION));
+      }).pipe(Effect.provide(fake.layer));
+      expect(error).toMatchObject({ _tag: "DatabaseError", operation: "registerAgent" });
+    }),
+  );
+});
+
+describe("fakeStores", () => {
+  it.effect("provides every store at once, sharing nothing between two fixtures", () =>
+    Effect.gen(function* () {
+      const first = Stores.fakeStores();
+      const second = Stores.fakeStores();
+      yield* Effect.gen(function* () {
+        const store = yield* Sessions.SessionStore;
+        yield* store.insertSession(SESSION, { iso: "omarchy.iso" }, "running");
+      }).pipe(Effect.provide(first.layer));
+      expect(first.sessions.sessions).toHaveLength(1);
+      expect(second.sessions.sessions).toEqual([]);
     }),
   );
 });

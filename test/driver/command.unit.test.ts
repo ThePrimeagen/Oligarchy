@@ -16,7 +16,7 @@ import * as SharedErrors from "@oligarchy/shared/errors";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as DriverCommand from "../../src/driver/command.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as Stdio from "../support/stdio.ts";
+import * as TestingStdio from "@oligarchy/testing/stdio";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -108,7 +108,7 @@ const run = (
       Layer.mergeAll(
         Config.fromValues(options?.env ?? { OPENROUTER_API_KEY: TOKEN }),
         file(options && "contents" in options ? options.contents : app),
-        Stdio.capture().layer,
+        TestingStdio.capture().layer,
         TerminalStub,
         Path.layer,
         TestingHttp.die,

@@ -1,0 +1,2925 @@
+import { describe, expect } from "vitest";
+import { it } from "@effect/vitest";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
+import { TestClock } from "effect/testing";
+import {
+  HttpBody,
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpRouter,
+} from "effect/unstable/http";
+import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
+import { NodeHttpServer } from "@effect/platform-node";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Config from "@oligarchy/env/config";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
+import * as TestingHttp from "@oligarchy/testing/http-client";
+import * as TestingStores from "@oligarchy/testing/stores";
+import * as Handlers from "../src/handlers.ts";
+import * as Router from "../src/router.ts";
+import * as Setup from "../src/setup.ts";
+import * as TestingLog from "@oligarchy/testing/log";
+import * as TestingReporter from "@oligarchy/testing/reporter";
+
+const TOKEN = "test-token";
+const SERVER_A = "http://10.0.0.5:42069";
+const SERVER_B = "http://10.0.0.6:42069";
+const SESSION_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
+const STARTED_ID = "8f4e2c1a-6b7d-4e5f-9a0b-1c2d3e4f5a6b";
+const IMAGE_ID = "3c9b2f80-5a1e-4d6c-8b7a-9e0f1a2b3c4d";
+const AGENT_ID = "OLI-61";
+const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
+const AUTHORIZATION = `Bearer ${TOKEN}`;
+
+const stats = (qemus: number) => ({
+  qemus,
+  memory: { totalBytes: 16_000, usedBytes: 4_000, freeBytes: 12_000 },
+  cpu: {
+    cores: 4,
+    mean: 20.5,
+    mean1m: 22.3,
+    mean2m: 21.4,
+    mean3m: 20.9,
+    p10: 19.8,
+    p25: 20.1,
+    p75: 20.9,
+    p90: 21.1,
+  },
+});
+
+const ProxyConfigLive = Layer.succeed(Config.ProxyConfig)({
+  token: Redacted.make(TOKEN),
+  databaseUrl: Redacted.make("postgres://unused"),
+});
+
+const bearer = (token: string) =>
+  HttpApiMiddleware.layerClient(Api.BearerAuth, ({ next, request }) =>
+    next(HttpClientRequest.bearerToken(request, token)),
+  );
+
+// A server that refuses the connection: what node:http reports for a host that is down.
+const refused = (request: HttpClientRequest.HttpClientRequest, url: URL) =>
+  Effect.fail(
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({
+        request,
+        cause: new Error(`connect ECONNREFUSED ${url.host}`),
+      }),
+    }),
+  );
+
+// The fleet as most tests see it: both servers answer their /stats, A holds two machines and B
+// one, and every routed request is answered ok.
+const fleet: TestingHttp.Respond = (_, url) =>
+  url.pathname === "/stats"
+    ? TestingHttp.json(stats(url.origin === SERVER_A ? 2 : 1))
+    : TestingHttp.json({ ok: "true" });
+
+// A fleet whose servers answer the named paths as scripted and everything else through `rest`.
+const answering =
+  (
+    table: Readonly<Record<string, () => Response>>,
+    rest: TestingHttp.Respond = fleet,
+  ): TestingHttp.Respond =>
+  (request, url) => {
+    const scripted = table[url.pathname];
+    return scripted === undefined ? rest(request, url) : scripted();
+  };
+
+type Fixture = {
+  readonly store: TestingStores.FakeServerStore;
+  readonly sessions: TestingStores.FakeSessionStore;
+  readonly upstream: TestingHttp.Recorder;
+  readonly log: TestingLog.FakeLog;
+  readonly reporter: TestingReporter.Collector;
+  readonly setup: Layer.Layer<Setup.Setup>;
+};
+
+const fixture = (
+  respond: TestingHttp.Respond = fleet,
+  overrides: Partial<Fixture> = {},
+): Fixture => ({
+  store: TestingStores.fakeServerStore(),
+  sessions: TestingStores.fakeSessionStore(),
+  upstream: TestingHttp.recordRequests(respond),
+  log: TestingLog.fakeLog(),
+  reporter: TestingReporter.collect(),
+  setup: noopSetup,
+  ...overrides,
+});
+
+// The reverse proxy's routes on a loopback server; the upstream servers are the recorder's
+// HttpClient, given to the Router alone, so the HttpClient in scope still points at the server.
+const noopSetup = Layer.succeed(Setup.Setup)(
+  Setup.Setup.of({
+    open: () => Effect.void,
+    install: () => Effect.void,
+  }),
+);
+
+const serve = (fixed: Fixture) =>
+  HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
+    Layer.provide(
+      Router.Router.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            fixed.store.layer,
+            fixed.sessions.layer,
+            fixed.log.layer,
+            fixed.upstream.layer,
+            ProxyConfigLive,
+            fixed.setup,
+          ),
+        ),
+      ),
+    ),
+    Layer.provide(Layer.mergeAll(fixed.log.layer, ProxyConfigLive)),
+    Layer.provideMerge(NodeHttpServer.layerTest),
+    Layer.provideMerge(fixed.reporter.layer),
+    Layer.provideMerge(bearer(TOKEN)),
+  );
+
+// What ./client speaks: the server's own contract, unchanged.
+const qemuServerClient = HttpApiClient.make(Api.QemuServerApi);
+// What an operator speaks to the reverse proxy alone.
+const qemuReverseProxyClient = HttpApiClient.make(Api.QemuReverseProxyApi);
+
+const decoder = new TextDecoder();
+
+const serverBody = (url: string) => Contract.ServerBody.make({ url });
+
+// A registered qemu server, as the fake store's rows carry it: what this reverse proxy fronts.
+const qemu = (url: string) => ({
+  id: crypto.randomUUID(),
+  url,
+  name: null,
+  type: "qemu" as const,
+});
+
+const upstreamCalls = (fixed: Fixture) =>
+  fixed.upstream.requests.map((request) => `${request.method} ${request.url}`);
+
+describe("server registration", () => {
+  it.effect(
+    "POST /servers probes GET /stats with the bearer, stores the url as a qemu server and logs it",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const ok = yield* api.Servers.register({ payload: serverBody(SERVER_A) });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([
+          {
+            method: "GET",
+            url: `${SERVER_A}/stats`,
+            headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+            body: "",
+          },
+        ]);
+        expect(fixed.store.servers).toEqual([
+          expect.objectContaining({ url: SERVER_A, type: "qemu" }),
+        ]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: `server registered; ${SERVER_A}`,
+            location: "server",
+            agentId: undefined,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("a url with a trailing slash probes /stats with one slash and is stored as given", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        yield* api.Servers.register({ payload: serverBody(`${SERVER_A}/`) });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
+      expect(fixed.store.servers).toEqual([
+        expect.objectContaining({ url: `${SERVER_A}/`, type: "qemu" }),
+      ]);
+    }),
+  );
+
+  it.effect("registering a url twice probes twice and keeps it once", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        yield* api.Servers.register({ payload: serverBody(SERVER_A) });
+        yield* api.Servers.register({ payload: serverBody(SERVER_A) });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `GET ${SERVER_A}/stats`]);
+      expect(fixed.store.servers).toEqual([
+        expect.objectContaining({ url: SERVER_A, type: "qemu" }),
+      ]);
+      expect(TestingLog.texts(fixed.log)).toEqual([
+        `server registered; ${SERVER_A}`,
+        `server registered; ${SERVER_A}`,
+      ]);
+    }),
+  );
+
+  it.effect("DELETE /servers removes the server, logs it, and never probes", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const ok = yield* api.Servers.unregister({ payload: serverBody(SERVER_A) });
+        expect(ok.ok).toBe("true");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([
+        expect.objectContaining({ url: SERVER_B, type: "qemu" }),
+      ]);
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "info",
+          text: `server removed; ${SERVER_A}`,
+          location: "server",
+          agentId: undefined,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("DELETE /servers for a url never registered is 404 not found", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Servers.unregister({ payload: serverBody(SERVER_A) }));
+        expect(error).toMatchObject({ _tag: "NotFound", message: "not found" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.del("/servers", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe({ url: SERVER_A }),
+        });
+        expect(raw.status).toBe(404);
+        expect(yield* raw.json).toEqual({ error: "not found" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "DELETE /servers failed: not found",
+          location: "server",
+          agentId: undefined,
+          skipSentry: true,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "DELETE /servers failed: not found",
+          location: "server",
+          agentId: undefined,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "GET /servers answers every qemu server with its stats in registration order, null for one that does not answer, and logs nothing",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.origin === SERVER_B ? refused(request, url) : TestingHttp.json(stats(2)),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const [servers, response] = yield* api.Servers.servers({
+            responseMode: "decoded-and-response",
+          });
+          expect(servers.servers).toHaveLength(2);
+          expect(servers.servers[0]).toMatchObject({ url: SERVER_A, stats: stats(2) });
+          expect(servers.servers[1]).toEqual(Contract.Server.make({ url: SERVER_B, stats: null }));
+          expect(yield* response.json).toEqual({
+            servers: [
+              { url: SERVER_A, stats: stats(2) },
+              { url: SERVER_B, stats: null },
+            ],
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(upstreamCalls(fixed).sort()).toEqual([
+          `GET ${SERVER_A}/stats`,
+          `GET ${SERVER_B}/stats`,
+        ]);
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("GET /servers with nothing registered is an empty list", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get("/servers", { headers: { authorization: AUTHORIZATION } });
+        expect(raw.status).toBe(200);
+        expect(yield* raw.json).toEqual({ servers: [] });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+    }),
+  );
+});
+
+describe("minted", () => {
+  const ISO = "https://iso.omarchy.org/omarchy-4.0.2.iso";
+  const SERVER_C = "http://10.0.0.7:42069";
+  const MINTED_PATH = `/minted?iso=${encodeURIComponent(ISO)}`;
+  // Each server's own GET /minted answer, by origin; anything else is the fleet as usual.
+  const holding =
+    (answers: Readonly<Record<string, (iso: string) => Response>>): TestingHttp.Respond =>
+    (request, url) => {
+      const answer = answers[url.origin];
+      return url.pathname === "/minted" && answer !== undefined
+        ? answer(url.searchParams.get("iso") ?? "")
+        : fleet(request, url);
+    };
+  const has = (minted: boolean) => (iso: string) => TestingHttp.json({ iso, minted });
+
+  it.effect(
+    "GET /minted asks every qemu server /minted with the bearer and answers minted, unminted or unreachable per server in registration order, logging nothing (happy)",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.origin === SERVER_C
+            ? refused(request, url)
+            : holding({ [SERVER_A]: has(true), [SERVER_B]: has(false) })(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B), qemu(SERVER_C));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const [minted, response] = yield* api.Servers.minted({
+            query: { iso: ISO },
+            responseMode: "decoded-and-response",
+          });
+          expect(minted).toEqual(
+            Contract.MintedServers.make({
+              iso: ISO,
+              servers: [
+                Contract.MintedServer.make({ url: SERVER_A, state: "minted" }),
+                Contract.MintedServer.make({ url: SERVER_B, state: "unminted" }),
+                Contract.MintedServer.make({ url: SERVER_C, state: "unreachable" }),
+              ],
+            }),
+          );
+          expect(yield* response.json).toEqual({
+            iso: ISO,
+            servers: [
+              { url: SERVER_A, state: "minted" },
+              { url: SERVER_B, state: "unminted" },
+              { url: SERVER_C, state: "unreachable" },
+            ],
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(upstreamCalls(fixed).sort()).toEqual([
+          `GET ${SERVER_A}${MINTED_PATH}`,
+          `GET ${SERVER_B}${MINTED_PATH}`,
+          `GET ${SERVER_C}${MINTED_PATH}`,
+        ]);
+        expect(
+          fixed.upstream.requests.every(
+            (request) => request.headers.authorization === AUTHORIZATION,
+          ),
+        ).toBe(true);
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("a name nothing was saved under is 200 with every server unminted", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(holding({ [SERVER_A]: has(false), [SERVER_B]: has(false) }));
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get("/minted?iso=poophead.iso", {
+          headers: { authorization: AUTHORIZATION },
+        });
+        expect(raw.status).toBe(200);
+        expect(yield* raw.json).toEqual({
+          iso: "poophead.iso",
+          servers: [
+            { url: SERVER_A, state: "unminted" },
+            { url: SERVER_B, state: "unminted" },
+          ],
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed).sort()).toEqual([
+        `GET ${SERVER_A}/minted?iso=poophead.iso`,
+        `GET ${SERVER_B}/minted?iso=poophead.iso`,
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a server answering 200 without the Minted shape, or with an error status, is unreachable (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(
+          holding({
+            [SERVER_A]: () => TestingHttp.json({ ok: "true" }),
+            [SERVER_B]: () => TestingHttp.json({ error: "internal error" }, 500),
+          }),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const minted = yield* api.Servers.minted({ query: { iso: ISO } });
+          expect(minted.servers.map((server) => server.state)).toEqual([
+            "unreachable",
+            "unreachable",
+          ]);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("a server that never answers is unreachable after the probe timeout (unhappy)", () =>
+    Effect.gen(function* () {
+      const probing = yield* Deferred.make<void>();
+      const fixed = fixture((request, url) =>
+        url.origin === SERVER_B
+          ? Deferred.succeed(probing, undefined).pipe(Effect.andThen(Effect.never))
+          : holding({ [SERVER_A]: has(true) })(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const request = yield* Effect.forkChild(api.Servers.minted({ query: { iso: ISO } }));
+        yield* Deferred.await(probing);
+        yield* TestClock.adjust("9 seconds");
+        expect(request.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust("1 second");
+        const minted = yield* Fiber.join(request);
+        expect(minted.servers).toEqual([
+          Contract.MintedServer.make({ url: SERVER_A, state: "minted" }),
+          Contract.MintedServer.make({ url: SERVER_B, state: "unreachable" }),
+        ]);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("GET /minted with nothing registered is an empty list and asks no server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get(MINTED_PATH, { headers: { authorization: AUTHORIZATION } });
+        expect(raw.status).toBe(200);
+        expect(yield* raw.json).toEqual({ iso: ISO, servers: [] });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+    }),
+  );
+
+  it.effect("GET /minted without an iso is 400 and asks no server (unhappy)", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        for (const path of ["/minted", "/minted?iso="]) {
+          const raw = yield* http.get(path, { headers: { authorization: AUTHORIZATION } });
+          expect(raw.status).toBe(400);
+          expect(yield* raw.json).toMatchObject({ error: expect.stringContaining('["iso"]') });
+        }
+        const unauthorized = yield* http.get(MINTED_PATH);
+        expect(unauthorized.status).toBe(401);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines.map((line) => line.text)).toEqual([
+        expect.stringContaining("GET /minted failed: "),
+        expect.stringContaining("GET /minted?iso= failed: "),
+        `GET ${MINTED_PATH} failed: unauthorized`,
+      ]);
+    }),
+  );
+});
+
+describe("registration refusals", () => {
+  it.effect("a url that is not http or https is 400 with the url rule and is never probed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        for (const url of ["qemu.example.com:42069", "ftp://qemu.example.com", ""]) {
+          const raw = yield* http.post("/servers", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe({ url }),
+          });
+          expect(raw.status).toBe(400);
+          expect(yield* raw.json).toMatchObject({
+            error: expect.stringContaining("url must be an http or https url"),
+          });
+        }
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.store.servers).toEqual([]);
+      expect(fixed.log.lines).toHaveLength(3);
+      expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
+    }),
+  );
+
+  it.effect(
+    "a server that refuses the connection is 502 server <url> unreachable: <cause>, stored nowhere, logged with the cause",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(refused);
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+          expect(error).toMatchObject({
+            _tag: "ServerFailed",
+            message: `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          });
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/servers", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe({ url: SERVER_A }),
+          });
+          expect(raw.status).toBe(502);
+          expect(yield* raw.json).toEqual({
+            error: `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.servers).toEqual([]);
+        expect(fixed.log.lines).toHaveLength(2);
+        expect(fixed.log.lines[0]).toMatchObject({
+          level: "error",
+          text: `POST /servers failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          location: "server",
+          agentId: undefined,
+          skipSentry: false,
+        });
+        expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
+      }),
+  );
+
+  it.effect("a server answering 401 is 502 server <url> answered 401: unauthorized", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => TestingHttp.json({ error: "unauthorized" }, 401));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} answered 401: unauthorized`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
+    }),
+  );
+
+  it.effect("a 404 with a non-json body carries the body raw, an empty one request failed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((_, url) =>
+        url.origin === SERVER_A
+          ? new Response("<html>nope</html>", { status: 404 })
+          : new Response(null, { status: 503 }),
+      );
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const first = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+        expect(first.message).toBe(`server ${SERVER_A} answered 404: <html>nope</html>`);
+        const second = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_B) }));
+        expect(second.message).toBe(`server ${SERVER_B} answered 503: request failed`);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a 200 whose body cannot be read is 502 unreachable with the read failure", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.error(new Error("read ECONNRESET"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      );
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} unreachable: read ECONNRESET`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
+    }),
+  );
+
+  it.effect("a 200 that is not stats is 502 server <url> answered 200 without stats", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(() => TestingHttp.json({ hello: "world" }));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} answered 200 without stats`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
+      expect(fixed.log.lines[0]?.skipSentry).toBe(false);
+    }),
+  );
+
+  it.effect("a probe that never answers is 502 unreachable: no response within 10 seconds", () =>
+    Effect.gen(function* () {
+      const probing = yield* Deferred.make<void>();
+      const fixed = fixture(() =>
+        Deferred.succeed(probing, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const request = yield* Effect.forkChild(
+          Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) })),
+        );
+        yield* Deferred.await(probing);
+        yield* TestClock.adjust("9 seconds");
+        expect(request.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust("1 second");
+        const error = yield* Fiber.join(request);
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} unreachable: no response within 10 seconds`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
+    }),
+  );
+
+  it.effect("a failed insert is 500 internal error logged with the driver's reason", () =>
+    Effect.gen(function* () {
+      const failure = DbErrors.DatabaseError.make({
+        operation: "addServer",
+        message: "Failed query: insert into servers",
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+      });
+      const fixed = fixture(fleet, {
+        store: TestingStores.fakeServerStore({ addServer: () => Effect.fail(failure) }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
+        expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /servers failed: connect ECONNREFUSED 127.0.0.1:5432",
+          location: "server",
+          agentId: undefined,
+          skipSentry: false,
+          cause: failure,
+        },
+      ]);
+    }),
+  );
+});
+
+describe("placement", () => {
+  const startBody = Contract.StartBody.make({ iso: "omarchy.iso", agent: AGENT_ID });
+  const reserveBody = Contract.ReserveAgentBody.make({ agent: AGENT_ID });
+
+  // Servers answer a start with the id they minted; `null` scripts one that answers without it.
+  const placing =
+    (started: string | null = STARTED_ID): TestingHttp.Respond =>
+    (request, url) =>
+      url.pathname === "/start"
+        ? TestingHttp.json(started === null ? { ok: "true" } : { id: started })
+        : fleet(request, url);
+
+  it.effect("ties go to the first registered server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        answering(
+          {
+            "/stats": () => TestingHttp.json(stats(1)),
+            "/reserve": () => TestingHttp.json({ ok: "true" }),
+          },
+          placing(),
+        ),
+      );
+      fixed.store.servers.push(qemu(SERVER_B), qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+    }),
+  );
+
+  it.effect("a server whose probe fails is reported and the rest are placed on", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.origin === SERVER_A && url.pathname === "/stats") {
+          return refused(request, url);
+        }
+        return url.pathname === "/reserve"
+          ? TestingHttp.json({ ok: "true" })
+          : placing()(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(fixed.log.lines[0]).toMatchObject({
+        level: "error",
+        text: `server skipped; server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+        location: "server",
+        agentId: AGENT_ID,
+        skipSentry: false,
+      });
+      expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
+      expect(fixed.log.lines[1]).toEqual({
+        level: "info",
+        text: `reserved; ${SERVER_B}`,
+        location: "server",
+        agentId: AGENT_ID,
+        skipSentry: false,
+        cause: undefined,
+      });
+    }),
+  );
+
+  it.effect("no registered server is 503 no server registered, logged and reported", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        // /reserve answers 503 twice over — the reverse proxy's own NoServer and a server's
+        // AtCapacity passed through — on one `{ error }` body, so the generated client cannot
+        // tell them apart by tag; the status and the message are the contract, as ./client's
+        // ProxyRefusal 503 reads them.
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
+        expect(error.message).toBe("no server registered");
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "no server registered" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: no server registered",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /reserve failed: no server registered",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("every server failing its probe is 503 no server available after the errors", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(refused);
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
+        expect(error.message).toBe("no server available");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+      expect(fixed.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+        [
+          "error",
+          `server skipped; server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          AGENT_ID,
+        ],
+        [
+          "error",
+          `server skipped; server ${SERVER_B} unreachable: connect ECONNREFUSED 10.0.0.6:42069`,
+          AGENT_ID,
+        ],
+        ["error", "POST /reserve failed: no server available", AGENT_ID],
+      ]);
+      expect(
+        fixed.log.lines
+          .filter((line) => line.text.startsWith("server skipped;"))
+          .every((line) => !line.skipSentry && line.cause instanceof Error),
+      ).toBe(true);
+    }),
+  );
+
+  it.effect("POST /start without a reservation is 400 no reservation", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/start", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(startBody),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "POST /reserve probes every qemu server, tries the fewest qemus, records the agent and logs it",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const ok = yield* api.Sessions.reserve({ payload: reserveBody });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests[2]).toEqual({
+          method: "POST",
+          url: `${SERVER_B}/reserve`,
+          headers: expect.objectContaining({
+            authorization: AUTHORIZATION,
+            "content-type": "application/json",
+          }),
+          body: '{"agent":"OLI-61"}',
+        });
+        expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "info",
+            text: `reserved; ${SERVER_B}`,
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("overlapping reserves for the same agent are one 200 and one already reserved", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const results = yield* Effect.all(
+          [
+            Effect.exit(api.Sessions.reserve({ payload: reserveBody })),
+            Effect.exit(api.Sessions.reserve({ payload: reserveBody })),
+          ],
+          { concurrency: "unbounded" },
+        );
+        expect(results.filter(Exit.isSuccess)).toHaveLength(1);
+        const failed = results.find(Exit.isFailure);
+        expect(failed !== undefined && Cause.squash(failed.cause)).toMatchObject({
+          _tag: "BadRequest",
+          message: "already reserved",
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(
+        fixed.upstream.requests.filter((request) => request.url.endsWith("/reserve")),
+      ).toHaveLength(1);
+    }),
+  );
+
+  it.effect("a second reserve for the same agent is 400 already reserved and reaches Sentry", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "already reserved" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "already reserved" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+      expect(
+        fixed.upstream.requests.filter((request) => request.url.endsWith("/reserve")),
+      ).toHaveLength(1);
+      expect(fixed.log.lines.filter((line) => line.text.includes("already reserved"))).toEqual([
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: "POST /reserve failed: already reserved",
+          location: "server",
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("a reserve the first server refuses with 503 is placed on the next", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve") {
+          return url.origin === SERVER_B
+            ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+            : TestingHttp.json({ ok: "true" });
+        }
+        return fleet(request, url);
+      });
+      // B has fewer qemus, so place tries B first; it is full, A takes the slot.
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/reserve"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+    }),
+  );
+
+  it.effect("every server at capacity is 503 at capacity, without an agent route", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve"
+          ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+      expect(fixed.log.lines.filter((line) => line.level === "error")).toEqual([]);
+    }),
+  );
+
+  it.effect("an unexpected reserve failure is logged and the next server is tried", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve" && url.origin === SERVER_B) {
+          return TestingHttp.json({ error: "internal error" }, 500);
+        }
+        return url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: reserveBody })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/reserve"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+      const failed = fixed.log.lines.filter((line) => line.text.startsWith("reserve failed;"));
+      expect(failed).toEqual([
+        expect.objectContaining({
+          level: "error",
+          text: `reserve failed; ${SERVER_B}`,
+          agentId: AGENT_ID,
+          location: "server",
+          skipSentry: false,
+        }),
+      ]);
+      expect(failed[0]?.cause).toBeDefined();
+    }),
+  );
+
+  it.effect("every unexpected reserve failure is logged and the reserve stays unavailable", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? refused(request, url) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "no server available" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/reserve"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+      const failed = fixed.log.lines.filter((line) => line.text.startsWith("reserve failed;"));
+      expect(failed.map((line) => [line.level, line.text, line.agentId, line.skipSentry])).toEqual([
+        ["error", `reserve failed; ${SERVER_B}`, AGENT_ID, false],
+        ["error", `reserve failed; ${SERVER_A}`, AGENT_ID, false],
+      ]);
+      expect(failed.every((line) => line.cause !== undefined)).toBe(true);
+    }),
+  );
+
+  const ISO = "https://example.com/omarchy.iso";
+  const resumeBody = Contract.ReserveAgentBody.make({ agent: AGENT_ID, resume: ISO });
+  const setupNeeded = (maxJobs: number) =>
+    TestingHttp.json({ error: `setup needed: max-jobs is ${String(maxJobs)}` }, 409);
+  const reserveUrls = (fixed: Fixture) =>
+    fixed.upstream.requests
+      .filter((request) => request.url.endsWith("/reserve"))
+      .map((request) => request.url);
+
+  it.effect(
+    "a resume skips an unminted server with room and lands on the least-busy minted one",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          // B is less busy and has no disk; A holds the disk and has room.
+          return url.origin === SERVER_B ? setupNeeded(4) : TestingHttp.json({ ok: "true" });
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(
+            Contract.Ok.make({}),
+          );
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+        const reserves = fixed.upstream.requests.filter((request) =>
+          request.url.endsWith("/reserve"),
+        );
+        expect(reserves.map((request) => request.url)).toEqual([
+          `${SERVER_B}/reserve`,
+          `${SERVER_A}/reserve`,
+        ]);
+        expect(reserves[0]?.body).toBe(JSON.stringify(resumeBody));
+        expect(fixed.log.lines.map((line) => [line.level, line.text])).toEqual([
+          ["info", `reserved; ${SERVER_A}`],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a resume lands on the least-busy minted server and does not ask a busier unminted one",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          return url.origin === SERVER_B ? TestingHttp.json({ ok: "true" }) : setupNeeded(4);
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(
+            Contract.Ok.make({}),
+          );
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_B);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+      }),
+  );
+
+  it.effect(
+    "a resume no minted server can take opens one mint for every unminted server (happy)",
+    () =>
+      Effect.gen(function* () {
+        const opened: Array<string> = [];
+        const fixed = fixture(
+          (request, url) =>
+            url.pathname === "/reserve"
+              ? setupNeeded(url.origin === SERVER_B ? 2 : 8)
+              : fleet(request, url),
+          {
+            setup: Layer.succeed(Setup.Setup)(
+              Setup.Setup.of({
+                open: (_iso, serverUrl) =>
+                  Effect.sync(() => {
+                    opened.push(serverUrl);
+                  }),
+                install: () => Effect.void,
+              }),
+            ),
+          },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 2`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(opened).toEqual([SERVER_B, SERVER_A]);
+      }),
+  );
+
+  it.effect("a resume that lands on a minted server does not open a mint (unhappy)", () =>
+    Effect.gen(function* () {
+      const opened: Array<string> = [];
+      const fixed = fixture(
+        (request, url) => {
+          if (url.pathname !== "/reserve") {
+            return fleet(request, url);
+          }
+          return url.origin === SERVER_B ? TestingHttp.json({ ok: "true" }) : setupNeeded(4);
+        },
+        {
+          setup: Layer.succeed(Setup.Setup)(
+            Setup.Setup.of({
+              open: (_iso, serverUrl) =>
+                Effect.sync(() => {
+                  opened.push(serverUrl);
+                }),
+              install: () => Effect.void,
+            }),
+          ),
+        },
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(opened).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a resume no minted server can take is 409 naming the least-busy free unminted server and its max-jobs",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/reserve"
+            ? setupNeeded(url.origin === SERVER_B ? 2 : 8)
+            : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuReverseProxyClient;
+          const error = yield* Effect.flip(api.Sessions.reserve({ payload: resumeBody }));
+          expect(error).toMatchObject({
+            _tag: "SetupNeeded",
+            message: `setup needed: ${SERVER_B} max-jobs is 2`,
+          });
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 2`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([
+          `${SERVER_B}/reserve`,
+          `${SERVER_A}/reserve`,
+          `${SERVER_B}/reserve`,
+          `${SERVER_A}/reserve`,
+        ]);
+        expect(fixed.log.lines.map((line) => [line.text, line.agentId, line.skipSentry])).toEqual([
+          [`POST /reserve failed: setup needed: ${SERVER_B} max-jobs is 2`, AGENT_ID, true],
+          [`POST /reserve failed: setup needed: ${SERVER_B} max-jobs is 2`, AGENT_ID, true],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a full least-busy server is not the setup candidate; the free unminted one's max-jobs is",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.pathname === "/stats") {
+            return TestingHttp.json(stats(url.origin === SERVER_A ? 0 : 5));
+          }
+          if (url.pathname === "/reserve") {
+            return url.origin === SERVER_A
+              ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+              : setupNeeded(8);
+          }
+          return fleet(request, url);
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 8`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_A}/reserve`, `${SERVER_B}/reserve`]);
+      }),
+  );
+
+  it.effect("a resume every server refuses with 503 is at capacity, not setup needed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve"
+          ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(resumeBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect(
+    "a resume whose probe fails is skipped, and the remaining free unminted server is the candidate",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) => {
+          if (url.origin === SERVER_A && url.pathname === "/stats") {
+            return refused(request, url);
+          }
+          return url.pathname === "/reserve" ? setupNeeded(4) : fleet(request, url);
+        });
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(resumeBody),
+          });
+          expect(raw.status).toBe(409);
+          expect(yield* raw.json).toEqual({
+            error: `setup needed: ${SERVER_B} max-jobs is 4`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+        expect(fixed.log.lines.map((line) => [line.level, line.text, line.skipSentry])).toEqual([
+          [
+            "error",
+            `server skipped; server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+            false,
+          ],
+          ["error", `POST /reserve failed: setup needed: ${SERVER_B} max-jobs is 4`, true],
+        ]);
+        expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
+      }),
+  );
+
+  it.effect("a malformed 409 is logged and the next server can accept", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname !== "/reserve") {
+          return fleet(request, url);
+        }
+        return url.origin === SERVER_B
+          ? TestingHttp.json({ error: "nope" }, 409)
+          : TestingHttp.json({ ok: "true" });
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: resumeBody })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+      expect(fixed.log.lines.filter((line) => line.level === "error")).toEqual([
+        expect.objectContaining({
+          text: `reserve failed; ${SERVER_B}`,
+          agentId: AGENT_ID,
+          location: "server",
+          skipSentry: false,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("an unexpected 4xx is logged and the next server can accept", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve" && url.origin === SERVER_B) {
+          return TestingHttp.json({ error: "bad reserve" }, 400);
+        }
+        return url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: reserveBody })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+      expect(fixed.log.lines.filter((line) => line.text === `reserve failed; ${SERVER_B}`)).toEqual(
+        [
+          expect.objectContaining({
+            level: "error",
+            agentId: AGENT_ID,
+            skipSentry: false,
+          }),
+        ],
+      );
+    }),
+  );
+
+  it.effect("a pinned non-200 success is reported and is not a reservation", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve") {
+          return url.origin === SERVER_A
+            ? TestingHttp.json({ ok: "true" }, 201)
+            : TestingHttp.json({ ok: "true" });
+        }
+        return fleet(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBeGreaterThanOrEqual(400);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+      expect(reserveUrls(fixed)).toEqual([`${SERVER_A}/reserve`]);
+      expect(fixed.log.lines.filter((line) => line.level === "error")).toEqual([
+        expect.objectContaining({
+          text: `reserve failed; ${SERVER_A}`,
+          agentId: AGENT_ID,
+          skipSentry: false,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a reserve the server accepts whose route cannot be saved relinquishes that server and stops",
+    () => {
+      const failure = DbErrors.DatabaseError.make({
+        operation: "routeAgent",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      return Effect.gen(function* () {
+        const fixed = fixture(
+          (request, url) =>
+            url.pathname === "/reserve" || url.pathname === "/relinquish"
+              ? TestingHttp.json({ ok: "true" })
+              : fleet(request, url),
+          {
+            store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }),
+          },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(reserveBody),
+          });
+          expect(raw.status).toBe(500);
+          expect(yield* raw.json).toEqual({ error: "DATABASE FAILURE" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.size).toBe(0);
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+        expect(
+          fixed.upstream.requests
+            .filter((request) => request.url.endsWith("/relinquish"))
+            .map((request) => request.url),
+        ).toEqual([`${SERVER_B}/relinquish`]);
+        expect(fixed.log.lines.filter((line) => line.text === `route failed; ${SERVER_B}`)).toEqual(
+          [
+            expect.objectContaining({
+              level: "error",
+              agentId: AGENT_ID,
+              skipSentry: false,
+              cause: failure,
+            }),
+          ],
+        );
+      });
+    },
+  );
+
+  it.effect("a relinquish that fails after a route write failure is reported", () => {
+    const failure = DbErrors.DatabaseError.make({
+      operation: "routeAgent",
+      message: "connection reset",
+      cause: new Error("connection reset"),
+    });
+    return Effect.gen(function* () {
+      const fixed = fixture(
+        (request, url) => {
+          if (url.pathname === "/relinquish") {
+            return TestingHttp.json({ error: "internal error" }, 500);
+          }
+          return url.pathname === "/reserve"
+            ? TestingHttp.json({ ok: "true" })
+            : fleet(request, url);
+        },
+        { store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(500);
+        expect(yield* raw.json).toEqual({ error: "DATABASE FAILURE" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+      expect(fixed.log.lines.filter((line) => line.text === `route failed; ${SERVER_B}`)).toEqual([
+        expect.objectContaining({
+          level: "error",
+          skipSentry: false,
+          cause: failure,
+        }),
+      ]);
+      expect(fixed.log.lines.filter((line) => line.text.startsWith("relinquish failed;"))).toEqual([
+        expect.objectContaining({
+          level: "error",
+          text: `relinquish failed; ${SERVER_B}`,
+          agentId: AGENT_ID,
+          skipSentry: false,
+        }),
+      ]);
+    });
+  });
+
+  it.effect(
+    "a route write that commits and then fails is a reservation and is not relinquished",
+    () => {
+      const failure = DbErrors.DatabaseError.make({
+        operation: "routeAgent",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      const agents = new Map<string, string>();
+      return Effect.gen(function* () {
+        const fixed = fixture(
+          (request, url) =>
+            url.pathname === "/reserve" || url.pathname === "/relinquish"
+              ? TestingHttp.json({ ok: "true" })
+              : fleet(request, url),
+          {
+            store: TestingStores.fakeServerStore({
+              routeAgent: (agentId, url) =>
+                Effect.gen(function* () {
+                  agents.set(agentId, url);
+                  return yield* Effect.fail(failure);
+                }),
+              serverForAgent: (agentId) =>
+                Effect.sync(() => Option.fromUndefinedOr(agents.get(agentId))),
+            }),
+          },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.post("/reserve", {
+            headers: { authorization: AUTHORIZATION },
+            body: HttpBody.jsonUnsafe(reserveBody),
+          });
+          expect(raw.status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(agents.get(AGENT_ID)).toBe(SERVER_B);
+        expect(
+          fixed.upstream.requests.filter((request) => request.url.endsWith("/relinquish")),
+        ).toEqual([]);
+      });
+    },
+  );
+
+  it.effect(
+    "a relinquish that never answers is reported after ten seconds and does not hang",
+    () => {
+      const failure = DbErrors.DatabaseError.make({
+        operation: "routeAgent",
+        message: "connection reset",
+        cause: new Error("connection reset"),
+      });
+      return Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const fixed = fixture(
+          (request, url) => {
+            if (url.pathname === "/relinquish") {
+              return Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+            }
+            return url.pathname === "/reserve"
+              ? TestingHttp.json({ ok: "true" })
+              : fleet(request, url);
+          },
+          { store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const request = yield* Effect.forkChild(
+            http.post("/reserve", {
+              headers: { authorization: AUTHORIZATION },
+              body: HttpBody.jsonUnsafe(reserveBody),
+            }),
+          );
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("10 seconds");
+          const response = yield* Fiber.join(request);
+          expect(response.status).toBe(500);
+          expect(yield* response.json).toEqual({ error: "DATABASE FAILURE" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`]);
+        expect(fixed.log.lines.filter((line) => line.text === `route failed; ${SERVER_B}`)).toEqual(
+          [
+            expect.objectContaining({
+              level: "error",
+              skipSentry: false,
+              cause: failure,
+            }),
+          ],
+        );
+        expect(
+          fixed.log.lines.some(
+            (line) =>
+              line.level === "error" &&
+              line.text === `relinquish failed; ${SERVER_B}` &&
+              !line.skipSentry,
+          ),
+        ).toBe(true);
+      });
+    },
+  );
+
+  it.effect("a raw setup-needed body is not a mint answer", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname !== "/reserve") {
+          return fleet(request, url);
+        }
+        return new Response("setup needed: max-jobs is 4", {
+          status: 409,
+          headers: { "content-type": "text/plain" },
+        });
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(resumeBody),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "no server available" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.size).toBe(0);
+      expect(reserveUrls(fixed)).toEqual([`${SERVER_B}/reserve`, `${SERVER_A}/reserve`]);
+      expect(
+        fixed.log.lines
+          .filter((line) => line.text.startsWith("reserve failed;"))
+          .map((line) => [line.level, line.skipSentry]),
+      ).toEqual([
+        ["error", false],
+        ["error", false],
+      ]);
+    }),
+  );
+
+  // A reserve pinned to a server url goes there and nowhere else: what ./ctrl mint relies on to
+  // put one install on every server.
+  it.effect("a pinned reserve is probed, asked and routed on that server alone", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
+      );
+      // B has fewer machines and would win the ranking; the pin says A.
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.reserve({ payload: pinned })).toEqual(Contract.Ok.make({}));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      // The body reaches the server as it came, pin included; the server ignores the pin.
+      expect(fixed.upstream.requests[1]?.body).toBe(JSON.stringify(pinned));
+      expect(fixed.store.agents.get(AGENT_ID)).toBe(SERVER_A);
+      expect(fixed.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+        ["info", `reserved; ${SERVER_A}`, AGENT_ID],
+      ]);
+    }),
+  );
+
+  it.effect("a pinned server's 503 passes through as it came and routes nothing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/reserve"
+          ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(503);
+        expect(yield* raw.json).toEqual({ error: "at capacity: max-jobs is 1" });
+      }).pipe(Effect.provide(serve(fixed)));
+      // No falling back to B: a pin is a pin.
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      expect(fixed.store.agents.size).toBe(0);
+      expect(fixed.log.lines.filter((line) => line.level === "error")).toEqual([]);
+    }),
+  );
+
+  it.effect("a pinned server's unexpected reserve failure is logged and does not fall back", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve") {
+          return url.origin === SERVER_A
+            ? TestingHttp.json({ error: "internal error" }, 500)
+            : TestingHttp.json({ ok: "true" });
+        }
+        return fleet(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(500);
+        expect(yield* raw.json).toEqual({ error: "internal error" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      expect(fixed.store.agents.size).toBe(0);
+      expect(fixed.log.lines.filter((line) => line.level === "error")).toEqual([
+        expect.objectContaining({
+          text: `reserve failed; ${SERVER_A}`,
+          agentId: AGENT_ID,
+          location: "server",
+          skipSentry: false,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("a pinned resume passes that server's 409 through and does not try another", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) => {
+        if (url.pathname !== "/reserve") {
+          return fleet(request, url);
+        }
+        return url.origin === SERVER_A ? setupNeeded(4) : TestingHttp.json({ ok: "true" });
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({
+        agent: AGENT_ID,
+        server: SERVER_A,
+        resume: ISO,
+      });
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(409);
+        expect(yield* raw.json).toEqual({ error: "setup needed: max-jobs is 4" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`, `POST ${SERVER_A}/reserve`]);
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect("a pin to a url the fleet does not know is 404 no server <url>, asking nobody", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_B });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: pinned }));
+        expect(error).toMatchObject({ _tag: "NotFound", message: `no server ${SERVER_B}` });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/reserve", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(pinned),
+        });
+        expect(raw.status).toBe(404);
+        expect(yield* raw.json).toEqual({ error: `no server ${SERVER_B}` });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.store.agents.size).toBe(0);
+      expect(fixed.log.lines.map((line) => [line.text, line.agentId, line.skipSentry])).toEqual([
+        [`POST /reserve failed: no server ${SERVER_B}`, AGENT_ID, true],
+        [`POST /reserve failed: no server ${SERVER_B}`, AGENT_ID, true],
+      ]);
+    }),
+  );
+
+  it.effect("a pinned server whose probe fails is 502 server unreachable, never skipped", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.origin === SERVER_A ? refused(request, url) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      const pinned = Contract.ReserveAgentBody.make({ agent: AGENT_ID, server: SERVER_A });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuReverseProxyClient;
+        const error = yield* Effect.flip(api.Sessions.reserve({ payload: pinned }));
+        expect(error).toMatchObject({
+          _tag: "ServerFailed",
+          message: `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/stats`]);
+      expect(fixed.store.agents.size).toBe(0);
+    }),
+  );
+
+  it.effect(
+    "POST /relinquish after reserve forwards to the reserved server and forgets the agent",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/relinquish" || url.pathname === "/reserve"
+            ? TestingHttp.json({ ok: "true" })
+            : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          yield* api.Sessions.reserve({ payload: reserveBody });
+          const ok = yield* api.Sessions.relinquish({ payload: reserveBody });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
+        expect(
+          fixed.upstream.requests
+            .filter((request) => request.url.endsWith("/relinquish"))
+            .map((request) => request.url),
+        ).toEqual([`${SERVER_B}/relinquish`]);
+        expect(fixed.log.lines.filter((line) => line.text.startsWith("relinquished"))).toEqual([
+          {
+            level: "info",
+            text: `relinquished; ${SERVER_B}`,
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("a 200 whose body dies still forgets the agent", () =>
+    Effect.gen(function* () {
+      const encoder = new TextEncoder();
+      const fixed = fixture((request, url) => {
+        if (url.pathname === "/reserve") {
+          return TestingHttp.json({ ok: "true" });
+        }
+        if (url.pathname === "/relinquish") {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(encoder.encode('{"ok":"true"}'));
+                controller.error(new Error("read ECONNRESET"));
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return fleet(request, url);
+      });
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/relinquish", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(200);
+        yield* Effect.exit(raw.text);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
+    }),
+  );
+
+  // The server let the reservation go on its own (ten minutes unused) or restarted: it holds
+  // nothing for the agent, so the route is stale too, and a fresh reserve must be able to place.
+  it.effect(
+    "POST /relinquish answered 400 no reservation by the server forgets the agent and passes the 400 through",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(
+          answering({
+            "/relinquish": () => TestingHttp.json({ error: "no reservation" }, 400),
+            "/reserve": () => TestingHttp.json({ ok: "true" }),
+          }),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          yield* api.Sessions.reserve({ payload: reserveBody });
+          expect(fixed.store.agents.has(AGENT_ID)).toBe(true);
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+          // Forgotten: the agent can reserve again, and the placement runs afresh.
+          yield* api.Sessions.reserve({ payload: reserveBody });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.store.agents.has(AGENT_ID)).toBe(true);
+        expect(
+          fixed.upstream.requests
+            .filter((request) => request.url.endsWith("/reserve"))
+            .map((request) => request.url),
+        ).toEqual([`${SERVER_B}/reserve`, `${SERVER_B}/reserve`]);
+        expect(fixed.log.lines.filter((line) => line.text.startsWith("reservation gone"))).toEqual([
+          {
+            level: "info",
+            text: `reservation gone; ${SERVER_B}`,
+            location: "server",
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: undefined,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("POST /relinquish answered 500 by the server keeps the agent routed", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        answering({
+          "/relinquish": () => TestingHttp.json({ error: "internal error" }, 500),
+          "/reserve": () => TestingHttp.json({ ok: "true" }),
+        }),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+        expect(error).toMatchObject({ _tag: "Internal" });
+        // Still routed: the server may well hold the slot, so a second reserve is refused.
+        const again = yield* Effect.flip(api.Sessions.reserve({ payload: reserveBody }));
+        expect(again).toMatchObject({ _tag: "BadRequest", message: "already reserved" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(true);
+      expect(fixed.log.lines.some((line) => line.text.startsWith("reservation gone"))).toBe(false);
+      expect(fixed.log.lines.some((line) => line.text.startsWith("relinquished"))).toBe(false);
+    }),
+  );
+
+  it.effect(
+    "POST /relinquish for an agent whose session is routed forwards to that session's server",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture((request, url) =>
+          url.pathname === "/relinquish" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
+        );
+        fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+        // As after a start: the agent's reservation route is gone, the session's route stands.
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        fixed.store.routes.set(SESSION_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const ok = yield* api.Sessions.relinquish({ payload: reserveBody });
+          expect(ok).toEqual(Contract.Ok.make({}));
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(upstreamCalls(fixed)).toEqual([`POST ${SERVER_A}/relinquish`]);
+        expect(fixed.store.routes.get(SESSION_ID)).toBe(SERVER_A);
+        expect(fixed.log.lines.map((line) => line.text)).toEqual([`relinquished; ${SERVER_A}`]);
+      }),
+  );
+
+  it.effect(
+    "POST /relinquish whose session route cannot be read is 500 internal error attributed to that session (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const failure = DbErrors.DatabaseError.make({
+          operation: "serverForSession",
+          message: "Failed query: select from session_servers",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const fixed = fixture(fleet, {
+          store: TestingStores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
+        });
+        fixed.store.servers.push(qemu(SERVER_A));
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /relinquish failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: SESSION_ID,
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: failure,
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "POST /relinquish for an agent whose session was never routed here is 400 no reservation (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        fixed.store.servers.push(qemu(SERVER_A));
+        fixed.sessions.agentRuns.push({
+          agentId: AGENT_ID,
+          sessionId: SESSION_ID,
+          startedAt: new Date(),
+          endedAt: null,
+        });
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+          expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([]);
+      }),
+  );
+
+  it.effect("POST /relinquish without a reservation is 400 no reservation", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(api.Sessions.relinquish({ payload: reserveBody }));
+        expect(error).toMatchObject({ _tag: "BadRequest", message: "no reservation" });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/relinquish", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(reserveBody),
+        });
+        expect(raw.status).toBe(400);
+        expect(yield* raw.json).toEqual({ error: "no reservation" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+    }),
+  );
+
+  it.effect("POST /start after reserve forwards to the reserved server", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        answering({
+          "/start": () => TestingHttp.json({ id: STARTED_ID }),
+          "/reserve": () => TestingHttp.json({ ok: "true" }),
+        }),
+      );
+      fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        yield* api.Sessions.reserve({ payload: reserveBody });
+        yield* api.Sessions.start({ payload: startBody });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.agents.has(AGENT_ID)).toBe(false);
+      expect(fixed.store.routes.get(STARTED_ID)).toBe(SERVER_B);
+      expect(
+        fixed.upstream.requests
+          .filter((request) => request.url.endsWith("/start"))
+          .map((request) => request.url),
+      ).toEqual([`${SERVER_B}/start`]);
+    }),
+  );
+
+  it.effect("a start the server refuses passes through as it came, without a route or a line", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/start"
+          ? TestingHttp.json({ error: "qemu: disk not found: /tmp/nope.qcow2" }, 502)
+          : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+        expect(error).toMatchObject({
+          _tag: "StartFailed",
+          message: "qemu: disk not found: /tmp/nope.qcow2",
+        });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/start", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(startBody),
+        });
+        expect(raw.status).toBe(502);
+        expect(raw.headers["content-type"]).toContain("application/json");
+        expect(yield* raw.text).toBe('{"error":"qemu: disk not found: /tmp/nope.qcow2"}');
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.routes.size).toBe(0);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a 200 without an id is 502 server <url> answered 200 without an id", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(placing(null));
+      fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/start", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe(startBody),
+        });
+        expect(raw.status).toBe(502);
+        expect(yield* raw.json).toEqual({
+          error: `server ${SERVER_A} answered 200 without an id`,
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.routes.size).toBe(0);
+      expect(fixed.log.lines).toHaveLength(1);
+      expect(fixed.log.lines[0]).toMatchObject({
+        level: "error",
+        text: `POST /start failed: server ${SERVER_A} answered 200 without an id`,
+        agentId: AGENT_ID,
+        skipSentry: false,
+      });
+      expect(fixed.log.lines[0]?.cause).toBeDefined();
+    }),
+  );
+
+  it.effect("a server that dies mid-start is 502 unreachable attributed to the agent", () =>
+    Effect.gen(function* () {
+      const fixed = fixture((request, url) =>
+        url.pathname === "/start" ? refused(request, url) : fleet(request, url),
+      );
+      fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        // ./client reads a 502 on /start as StartFailed: same status, same message, which is all
+        // ./client ever shows.
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+        expect(error.message).toBe(
+          `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+        );
+        expect(error._tag).toBe("StartFailed");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toHaveLength(1);
+      expect(fixed.log.lines[0]).toMatchObject({
+        level: "error",
+        text: `POST /start failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+        location: "server",
+        agentId: AGENT_ID,
+        skipSentry: false,
+      });
+    }),
+  );
+
+  it.effect(
+    "a route that cannot be recorded is 500 internal error attributed to the new session",
+    () =>
+      Effect.gen(function* () {
+        const failure = DbErrors.DatabaseError.make({
+          operation: "routeSession",
+          message: "Failed query: insert into session_servers",
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+        });
+        const fixed = fixture(placing(), {
+          store: TestingStores.fakeServerStore({ routeSession: () => Effect.fail(failure) }),
+        });
+        fixed.store.servers.push(qemu(SERVER_A));
+        fixed.store.agents.set(AGENT_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(api.Sessions.start({ payload: startBody }));
+          expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+        }).pipe(Effect.provide(serve(fixed)));
+        // No compensating stop: the machine times out on its server, as the doc says.
+        expect(upstreamCalls(fixed)).toEqual([`POST ${SERVER_A}/start`]);
+        expect(fixed.log.lines).toEqual([
+          {
+            level: "error",
+            text: "POST /start failed: connect ECONNREFUSED 127.0.0.1:5432",
+            location: STARTED_ID,
+            agentId: AGENT_ID,
+            skipSentry: false,
+            cause: failure,
+          },
+        ]);
+      }),
+  );
+
+  it.effect("POST /start records the route even when the client disconnects mid-start", () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const recorded = yield* Deferred.make<string>();
+      const fixed = fixture(
+        (request, url) =>
+          url.pathname === "/start"
+            ? Effect.gen(function* () {
+                yield* Deferred.succeed(entered, undefined);
+                yield* Deferred.await(release);
+                return TestingHttp.json({ id: STARTED_ID });
+              })
+            : fleet(request, url),
+        {
+          store: TestingStores.fakeServerStore({
+            routeSession: (id, url) => Deferred.succeed(recorded, `${id} ${url}`),
+          }),
+        },
+      );
+      fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.agents.set(AGENT_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const request = yield* Effect.forkChild(api.Sessions.start({ payload: startBody }));
+        yield* Deferred.await(entered);
+        // The interrupt lands on the client fiber: the connection is gone, the handler is not.
+        yield* Fiber.interrupt(request);
+        const exit = yield* Fiber.await(request);
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+        expect(Deferred.isDoneUnsafe(recorded)).toBe(false);
+        yield* Deferred.succeed(release, undefined);
+        expect(yield* Deferred.await(recorded)).toBe(`${STARTED_ID} ${SERVER_A}`);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+});
+
+describe("forwarding", () => {
+  it.effect(
+    "GET /image forwards the query with the bearer and passes status, content-type, x-image-url and the bytes back",
+    () =>
+      Effect.gen(function* () {
+        const imageUrl = Contract.StoredImageUrl(IMAGE_ID);
+        const fixed = fixture(
+          () =>
+            new Response(PNG, {
+              status: 200,
+              headers: { "content-type": "image/png", "x-image-url": imageUrl, date: "never" },
+            }),
+        );
+        fixed.store.routes.set(SESSION_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const [image, response] = yield* api.Sessions.image({
+            query: { id: SESSION_ID, agent: AGENT_ID },
+            responseMode: "decoded-and-response",
+          });
+          expect([...image.body]).toEqual([...PNG]);
+          expect(image.headers["x-image-url"]).toBe(imageUrl);
+          expect(response.headers["content-type"]).toBe("image/png");
+          expect(response.headers["x-image-url"]).toBe(imageUrl);
+          expect(response.headers.date).not.toBe("never");
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([
+          {
+            method: "GET",
+            url: `${SERVER_A}/image?id=${SESSION_ID}&agent=${AGENT_ID}`,
+            headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+            body: "",
+          },
+        ]);
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("GET /serial passes text/plain through, a stored slash joined once", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        (_, url) =>
+          new Response(`${url.pathname} log\n`, {
+            status: 200,
+            headers: { "content-type": "text/plain" },
+          }),
+      );
+      fixed.store.routes.set(SESSION_ID, `${SERVER_A}/`);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const [serial, serialResponse] = yield* api.Sessions.serial({
+          query: { id: SESSION_ID, agent: AGENT_ID },
+          responseMode: "decoded-and-response",
+        });
+        expect(decoder.decode(serial)).toBe("/serial log\n");
+        expect(serialResponse.headers["content-type"]).toBe("text/plain");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([
+        `GET ${SERVER_A}/serial?id=${SESSION_ID}&agent=${AGENT_ID}`,
+      ]);
+    }),
+  );
+
+  it.effect("GET /follow streams the upstream body through as application/x-ndjson", () =>
+    Effect.gen(function* () {
+      const lines = [
+        '{"type":"session","status":"running"}\n',
+        '{"type":"session","status":"succeeded"}\n',
+      ];
+      const encoder = new TextEncoder();
+      const fixed = fixture(
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                for (const line of lines) {
+                  controller.enqueue(encoder.encode(line));
+                }
+                controller.close();
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/x-ndjson" } },
+          ),
+      );
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const [stream, response] = yield* api.Sessions.follow({
+          query: { id: SESSION_ID },
+          responseMode: "decoded-and-response",
+        });
+        expect(response.headers["content-type"]).toBe("application/x-ndjson");
+        expect(yield* Stream.mkString(Stream.decodeText(stream))).toBe(lines.join(""));
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`GET ${SERVER_A}/follow?id=${SESSION_ID}`]);
+    }),
+  );
+
+  it.effect("GET /follow streams each line as the server writes it, not once it has ended", () =>
+    Effect.gen(function* () {
+      const first = '{"type":"session","status":"running"}\n';
+      const second = '{"type":"session","status":"succeeded"}\n';
+      const encoder = new TextEncoder();
+      // The server writes the second line only once the test has read the first one: a reverse
+      // proxy that buffered the body would hang here until the test timeout instead of streaming.
+      let releaseSecond: () => void = () => undefined;
+      const secondReleased = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      const fixed = fixture(
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(encoder.encode(first));
+              },
+              async pull(controller) {
+                await secondReleased;
+                controller.enqueue(encoder.encode(second));
+                controller.close();
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/x-ndjson" } },
+          ),
+      );
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const stream = yield* api.Sessions.follow({ query: { id: SESSION_ID } });
+        const received: Array<string> = [];
+        yield* Stream.runForEach(Stream.decodeText(stream), (chunk) =>
+          Effect.sync(() => {
+            received.push(chunk);
+            if (received.join("") === first) {
+              releaseSecond();
+            }
+          }),
+        );
+        expect(received.join("")).toBe(first + second);
+      }).pipe(Effect.provide(serve(fixed)));
+    }),
+  );
+
+  it.effect("a routed session keeps its server after that server is unregistered", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(
+        () => new Response("serial\n", { status: 200, headers: { "content-type": "text/plain" } }),
+      );
+      fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const operator = yield* qemuReverseProxyClient;
+        yield* operator.Servers.unregister({ payload: serverBody(SERVER_A) });
+        const api = yield* qemuServerClient;
+        const serial = yield* api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } });
+        expect(decoder.decode(serial)).toBe("serial\n");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.store.servers).toEqual([]);
+      expect(upstreamCalls(fixed)).toEqual([
+        `GET ${SERVER_A}/serial?id=${SESSION_ID}&agent=${AGENT_ID}`,
+      ]);
+    }),
+  );
+
+  it.effect("a body is forwarded as the text it arrived as, spacing and key order included", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      const text = `{ "agent" : "${AGENT_ID}",\n  "keys":"a b" , "id": "${SESSION_ID}" }`;
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* http.post("/send-keys", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.text(text, "application/json"),
+        });
+        expect(response.status).toBe(200);
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests.map((request) => request.body)).toEqual([text]);
+    }),
+  );
+
+  it.effect("every driving POST forwards its body as it came and passes the ok through", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      const sendKeys = Contract.SendKeysBody.make({
+        id: SESSION_ID,
+        keys: "ls<ENTER>",
+        agent: AGENT_ID,
+      });
+      const click = Contract.MouseClickBody.make({
+        id: SESSION_ID,
+        x: 0.5,
+        y: 0.25,
+        button: "left",
+        agent: AGENT_ID,
+      });
+      const drag = Contract.MouseDragBody.make({
+        id: SESSION_ID,
+        from: { x: 0.1, y: 0.2 },
+        to: { x: 0.9, y: 0.2 },
+        button: "left",
+        modifiers: ["super"],
+        agent: AGENT_ID,
+      });
+      const intentStart = Contract.IntentStartBody.make({
+        id: SESSION_ID,
+        agent: AGENT_ID,
+        test_result_id: "result-1",
+        message: "open a terminal",
+      });
+      const intentEnd = Contract.IntentEndBody.make({ id: SESSION_ID, agent: AGENT_ID });
+      const stop = Contract.StopBody.make({
+        id: SESSION_ID,
+        agent: AGENT_ID,
+        status: "succeeded",
+        reason: "done",
+      });
+      const save = Contract.SaveBody.make({ id: SESSION_ID, agent: AGENT_ID });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        expect(yield* api.Sessions.sendKeys({ payload: sendKeys })).toEqual(Contract.Ok.make({}));
+        expect((yield* api.Sessions.mouseClick({ payload: click })).ok).toBe("true");
+        expect((yield* api.Sessions.mouseDrag({ payload: drag })).ok).toBe("true");
+        expect((yield* api.Sessions.intentStart({ payload: intentStart })).ok).toBe("true");
+        expect((yield* api.Sessions.intentEnd({ payload: intentEnd })).ok).toBe("true");
+        const [ok, response] = yield* api.Sessions.stop({
+          payload: stop,
+          responseMode: "decoded-and-response",
+        });
+        expect(ok.ok).toBe("true");
+        expect(yield* response.text).toBe('{"ok":"true"}');
+        expect((yield* api.Sessions.save({ payload: save })).ok).toBe("true");
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([
+        {
+          method: "POST",
+          url: `${SERVER_A}/send-keys`,
+          headers: expect.objectContaining({
+            authorization: AUTHORIZATION,
+            "content-type": "application/json",
+          }),
+          body: JSON.stringify({ id: SESSION_ID, keys: "ls<ENTER>", agent: AGENT_ID }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/mouse/click`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({
+            id: SESSION_ID,
+            x: 0.5,
+            y: 0.25,
+            button: "left",
+            agent: AGENT_ID,
+          }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/mouse/drag`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({
+            id: SESSION_ID,
+            from: { x: 0.1, y: 0.2 },
+            to: { x: 0.9, y: 0.2 },
+            button: "left",
+            modifiers: ["super"],
+            agent: AGENT_ID,
+          }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/intent/start`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({
+            id: SESSION_ID,
+            agent: AGENT_ID,
+            test_result_id: "result-1",
+            message: "open a terminal",
+          }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/intent/end`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({ id: SESSION_ID, agent: AGENT_ID }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/stop`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({
+            id: SESSION_ID,
+            agent: AGENT_ID,
+            status: "succeeded",
+            reason: "done",
+          }),
+        },
+        {
+          method: "POST",
+          url: `${SERVER_A}/save`,
+          headers: expect.objectContaining({ authorization: AUTHORIZATION }),
+          body: JSON.stringify({ id: SESSION_ID, agent: AGENT_ID }),
+        },
+      ]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a save the server fails passes through as its 502 and is not logged here", () =>
+    Effect.gen(function* () {
+      const message = "guest did not power off within 2 minutes";
+      const fixed = fixture(() => TestingHttp.json({ error: message }, 502));
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(
+          api.Sessions.save({
+            payload: Contract.SaveBody.make({ id: SESSION_ID, agent: AGENT_ID }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "SaveFailed", message });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.post("/save", {
+          headers: { authorization: AUTHORIZATION },
+          body: HttpBody.jsonUnsafe({ id: SESSION_ID, agent: AGENT_ID }),
+        });
+        expect(raw.status).toBe(502);
+        expect(yield* raw.json).toEqual({ error: message });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(upstreamCalls(fixed)).toEqual([`POST ${SERVER_A}/save`, `POST ${SERVER_A}/save`]);
+      expect(fixed.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect("a server's refusal passes through unchanged and is not logged here", () =>
+    Effect.gen(function* () {
+      const message = `agent "OLI-99" does not own session "${SESSION_ID}"`;
+      const fixed = fixture(() => TestingHttp.json({ error: message }, 403));
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(
+          api.Sessions.sendKeys({
+            payload: Contract.SendKeysBody.make({ id: SESSION_ID, keys: "a", agent: "OLI-99" }),
+          }),
+        );
+        expect(error).toMatchObject({ _tag: "Forbidden", message });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get(`/serial?id=${SESSION_ID}&agent=OLI-99`, {
+          headers: { authorization: AUTHORIZATION },
+        });
+        expect(raw.status).toBe(403);
+        expect(yield* raw.json).toEqual({ error: message });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines).toEqual([]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+});
+
+describe("forwarding refusals", () => {
+  it.effect("a uuid nobody routed is 404 unknown session attributed to it and the agent", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(
+          api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }),
+        );
+        expect(error).toMatchObject({
+          _tag: "UnknownSession",
+          message: `unknown session "${SESSION_ID}"`,
+        });
+        const http = yield* HttpClient.HttpClient;
+        const raw = yield* http.get(`/follow?id=${SESSION_ID}`, {
+          headers: { authorization: AUTHORIZATION },
+        });
+        expect(raw.status).toBe(404);
+        expect(yield* raw.json).toEqual({ error: `unknown session "${SESSION_ID}"` });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: unknown session "${SESSION_ID}"`,
+          location: SESSION_ID,
+          agentId: AGENT_ID,
+          skipSentry: true,
+          cause: undefined,
+        },
+        {
+          level: "error",
+          text: `GET /follow?id=${SESSION_ID} failed: unknown session "${SESSION_ID}"`,
+          location: SESSION_ID,
+          agentId: undefined,
+          skipSentry: true,
+          cause: undefined,
+        },
+      ]);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect("an id that is not a uuid is 404 unknown session without reading the store", () =>
+    Effect.gen(function* () {
+      const fixed = fixture(fleet, {
+        store: TestingStores.fakeServerStore({
+          serverForSession: () => Effect.die("Unexpected ServerStore.serverForSession"),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const named = yield* Effect.flip(
+          api.Sessions.stop({
+            payload: Contract.StopBody.make({ id: "garbage", agent: AGENT_ID }),
+          }),
+        );
+        expect(named).toMatchObject({
+          _tag: "UnknownSession",
+          message: 'unknown session "garbage"',
+        });
+        const empty = yield* Effect.flip(api.Sessions.follow({ query: { id: "" } }));
+        expect(empty).toMatchObject({ _tag: "UnknownSession", message: 'unknown session ""' });
+        const save = yield* Effect.flip(
+          api.Sessions.save({
+            payload: Contract.SaveBody.make({ id: "garbage", agent: AGENT_ID }),
+          }),
+        );
+        expect(save).toMatchObject({
+          _tag: "UnknownSession",
+          message: 'unknown session "garbage"',
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.log.lines.map((line) => [line.text, line.location, line.agentId])).toEqual([
+        ['POST /stop failed: unknown session "garbage"', "server", AGENT_ID],
+        ['GET /follow?id= failed: unknown session ""', "server", undefined],
+        ['POST /save failed: unknown session "garbage"', "server", AGENT_ID],
+      ]);
+    }),
+  );
+
+  it.effect(
+    "a routed server that refuses the connection is 502 server <url> unreachable, attributed and reported",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture(refused);
+        fixed.store.routes.set(SESSION_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const api = yield* qemuServerClient;
+          const error = yield* Effect.flip(
+            api.Sessions.sendKeys({
+              payload: Contract.SendKeysBody.make({ id: SESSION_ID, keys: "a", agent: AGENT_ID }),
+            }),
+          );
+          expect(error.message).toBe(
+            `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          );
+          expect(error._tag).toBe("ExchangeFailed");
+          const http = yield* HttpClient.HttpClient;
+          const raw = yield* http.get(`/follow?id=${SESSION_ID}`, {
+            headers: { authorization: AUTHORIZATION },
+          });
+          expect(raw.status).toBe(502);
+          expect(yield* raw.json).toEqual({
+            error: `server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          });
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toHaveLength(2);
+        expect(fixed.log.lines[0]).toMatchObject({
+          level: "error",
+          text: `POST /send-keys failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          location: SESSION_ID,
+          agentId: AGENT_ID,
+          skipSentry: false,
+        });
+        expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
+        expect(fixed.log.lines[1]).toMatchObject({
+          text: `GET /follow?id=${SESSION_ID} failed: server ${SERVER_A} unreachable: connect ECONNREFUSED 10.0.0.5:42069`,
+          location: SESSION_ID,
+          agentId: undefined,
+          skipSentry: false,
+        });
+      }),
+  );
+
+  it.effect(
+    "a server that dies mid-stream ends the client's answer short and logs forward cut short",
+    () =>
+      Effect.gen(function* () {
+        const encoder = new TextEncoder();
+        const fixed = fixture(
+          () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(encoder.encode('{"type":"session","status":"running"}\n'));
+                  controller.error(new Error("read ECONNRESET"));
+                },
+              }),
+              { status: 200, headers: { "content-type": "application/x-ndjson" } },
+            ),
+        );
+        fixed.store.routes.set(SESSION_ID, SERVER_A);
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const response = yield* http.get(`/follow?id=${SESSION_ID}`, {
+            headers: { authorization: AUTHORIZATION },
+          });
+          // The headers were on the wire before the body failed: a 200 whose body ends short.
+          expect(response.status).toBe(200);
+          const body = yield* Effect.exit(Stream.runCollect(Stream.decodeText(response.stream)));
+          expect(Exit.isSuccess(body) ? [...body.value].join("") : "").not.toContain("succeeded");
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.log.lines).toHaveLength(1);
+        expect(fixed.log.lines[0]).toMatchObject({
+          level: "error",
+          text: `forward cut short; server ${SERVER_A} unreachable: read ECONNRESET`,
+          location: SESSION_ID,
+          agentId: undefined,
+          skipSentry: false,
+        });
+        expect(fixed.log.lines[0]?.cause).toBeInstanceOf(Error);
+      }),
+  );
+
+  it.effect("a route lookup that fails is 500 internal error with the driver's reason", () =>
+    Effect.gen(function* () {
+      const failure = DbErrors.DatabaseError.make({
+        operation: "serverForSession",
+        message: "Failed query: select from session_servers",
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+      });
+      const fixed = fixture(fleet, {
+        store: TestingStores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
+      });
+      yield* Effect.gen(function* () {
+        const api = yield* qemuServerClient;
+        const error = yield* Effect.flip(
+          api.Sessions.image({ query: { id: SESSION_ID, agent: AGENT_ID } }),
+        );
+        expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines).toEqual([
+        {
+          level: "error",
+          text: `GET /image?id=${SESSION_ID}&agent=${AGENT_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
+          location: SESSION_ID,
+          agentId: AGENT_ID,
+          skipSentry: false,
+          cause: failure,
+        },
+      ]);
+    }),
+  );
+
+  const everyRoute: ReadonlyArray<readonly [string, string, boolean]> = [
+    ["POST", "/reserve", true],
+    ["POST", "/relinquish", true],
+    ["POST", "/start", true],
+    ["GET", `/image?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
+    ["GET", `/serial?id=${SESSION_ID}&agent=${AGENT_ID}`, false],
+    ["GET", `/follow?id=${SESSION_ID}`, false],
+    ["POST", "/stop", true],
+    ["POST", "/save", true],
+    ["POST", "/send-keys", true],
+    ["POST", "/mouse/move", true],
+    ["POST", "/mouse/click", true],
+    ["POST", "/mouse/double-click", true],
+    ["POST", "/mouse/scroll", true],
+    ["POST", "/mouse/drag", true],
+    ["POST", "/mouse/hold", true],
+    ["POST", "/mouse/release", true],
+    ["POST", "/intent/start", true],
+    ["POST", "/intent/end", true],
+    ["POST", "/servers", true],
+    ["DELETE", "/servers", true],
+    ["GET", "/servers", false],
+  ];
+
+  const request = (
+    http: HttpClient.HttpClient,
+    method: string,
+    path: string,
+    hasBody: boolean,
+    headers: Record<string, string>,
+  ) => {
+    const options = {
+      headers,
+      body: hasBody ? HttpBody.text("{}", "application/json") : undefined,
+    };
+    if (method === "POST") {
+      return http.post(path, options);
+    }
+    if (method === "DELETE") {
+      return http.del(path, options);
+    }
+    return http.get(path, options);
+  };
+
+  it.effect("every route refuses a missing or wrong bearer with 401 and one error line", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.servers.push(qemu(SERVER_A));
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        for (const [method, path, hasBody] of everyRoute) {
+          const missing = yield* request(http, method, path, hasBody, {});
+          expect(missing.status, `${method} ${path}`).toBe(401);
+          expect(yield* missing.json).toEqual({ error: "unauthorized" });
+          const wrong = yield* request(http, method, path, hasBody, {
+            authorization: "Bearer wrong",
+          });
+          expect(wrong.status, `${method} ${path}`).toBe(401);
+        }
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines).toHaveLength(everyRoute.length * 2);
+      expect(
+        fixed.log.lines.every(
+          (line) =>
+            line.level === "error" &&
+            line.text.endsWith(" failed: unauthorized") &&
+            line.skipSentry,
+        ),
+      ).toBe(true);
+      expect(fixed.reporter.reported).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "GET /stats, GET /images/:id and anything unrouted are 404 not found and never logged",
+    () =>
+      Effect.gen(function* () {
+        const fixed = fixture();
+        fixed.store.servers.push(qemu(SERVER_A));
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          const headers = { authorization: AUTHORIZATION };
+          for (const path of ["/stats", `/images/${IMAGE_ID}`, "/nope"]) {
+            const response = yield* http.get(path, { headers });
+            expect(response.status, path).toBe(404);
+            expect(yield* response.json).toEqual({ error: "not found" });
+          }
+          const noToken = yield* http.get("/stats");
+          expect(noToken.status).toBe(404);
+          const wrongMethod = yield* http.del("/start", { headers });
+          expect(wrongMethod.status).toBe(404);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.upstream.requests).toEqual([]);
+        expect(fixed.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect("a malformed body and a body failing the schema are 400 before any routing", () =>
+    Effect.gen(function* () {
+      const fixed = fixture();
+      fixed.store.routes.set(SESSION_ID, SERVER_A);
+      yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const headers = { authorization: AUTHORIZATION };
+        const malformed = yield* http.post("/send-keys", {
+          headers,
+          body: HttpBody.text("{bad", "application/json"),
+        });
+        expect(malformed.status).toBe(400);
+        expect(yield* malformed.json).toEqual({ error: "Expected a valid JSON body" });
+        const missingKeys = yield* http.post("/send-keys", {
+          headers,
+          body: HttpBody.jsonUnsafe({ id: SESSION_ID, agent: AGENT_ID }),
+        });
+        expect(missingKeys.status).toBe(400);
+        expect(yield* missingKeys.json).toMatchObject({
+          error: expect.stringContaining('["keys"]'),
+        });
+      }).pipe(Effect.provide(serve(fixed)));
+      expect(fixed.upstream.requests).toEqual([]);
+      expect(fixed.log.lines).toHaveLength(2);
+      expect(fixed.log.lines[0]?.text).toBe("POST /send-keys failed: Expected a valid JSON body");
+      expect(fixed.log.lines.every((line) => line.skipSentry)).toBe(true);
+    }),
+  );
+});

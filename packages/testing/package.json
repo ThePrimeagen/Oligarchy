@@ -3,8 +3,13 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./fs": "./src/fs.ts",
     "./http-client": "./src/http-client.ts",
     "./linear": "./src/linear.ts",
+    "./log": "./src/log.ts",
+    "./reporter": "./src/reporter.ts",
+    "./spawner": "./src/spawner.ts",
+    "./stdio": "./src/stdio.ts",
     "./stores": "./src/stores.ts"
   },
   "scripts": {
@@ -14,9 +19,11 @@
   "dependencies": {
     "@oligarchy/db": "workspace:*",
     "@oligarchy/linear": "workspace:*",
+    "@oligarchy/log": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",

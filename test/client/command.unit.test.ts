@@ -10,8 +10,8 @@ import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/http/api";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as ClientCommand from "../../src/client/command.ts";
-import * as FakeFs from "../support/fake-fs.ts";
-import * as Stdio from "../support/stdio.ts";
+import * as TestingFs from "@oligarchy/testing/fs";
+import * as TestingStdio from "@oligarchy/testing/stdio";
 
 const SERVER = "http://127.0.0.1:42069";
 const TOKEN = "test-token";
@@ -39,7 +39,7 @@ type Options = {
   readonly env?: Config.Values;
   readonly fs?: Layer.Layer<FileSystem.FileSystem>;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
-  readonly stdio?: Stdio.Captured;
+  readonly stdio?: TestingStdio.Captured;
 };
 
 const run = (args: ReadonlyArray<string>, options: Options = {}) =>
@@ -48,7 +48,7 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
       Layer.mergeAll(
         Config.fromValues(options.env ?? { OLIGARCHY_TOKEN: TOKEN }),
         options.http ?? TestingHttp.die,
-        (options.stdio ?? Stdio.capture()).layer,
+        (options.stdio ?? TestingStdio.capture()).layer,
         options.fs ?? NodeFileSystem.layer,
         NodePath.layer,
         TerminalStub,
@@ -619,7 +619,7 @@ describe("client output", () => {
       const dir = yield* fs.makeTempDirectoryScoped();
       const output = path.join(dir, "shot.png");
       const recorder = TestingHttp.recordRequests(image);
-      const stdio = Stdio.capture();
+      const stdio = TestingStdio.capture();
       yield* run(["get-image", ...shared, "--session-id", SESSION, "-o", output], {
         http: recorder.layer,
         stdio,
@@ -649,7 +649,7 @@ describe("client output", () => {
 
   it.effect("get-image without -o writes the raw bytes to stdout", () =>
     Effect.gen(function* () {
-      const stdio = Stdio.capture();
+      const stdio = TestingStdio.capture();
       yield* run(["get-image", ...shared, "--session-id", SESSION], {
         http: TestingHttp.respondWith(image),
         stdio,
@@ -670,12 +670,12 @@ describe("client output", () => {
         () =>
           new Response("boot log\n", { status: 200, headers: { "content-type": "text/plain" } }),
       );
-      const stdio = Stdio.capture();
+      const stdio = TestingStdio.capture();
       yield* run(["get-serial", ...shared, "--session-id", SESSION], {
         http: recorder.layer,
         stdio,
       });
-      expect(Stdio.text(stdio.stdout)).toBe("boot log\n");
+      expect(TestingStdio.text(stdio.stdout)).toBe("boot log\n");
       expect(recorder.requests[0]?.url).toBe(`${SERVER}/serial?id=${SESSION}&agent=${AGENT}`);
       yield* run(["get-serial", ...shared, "--session-id", SESSION, "-o", output], {
         http: recorder.layer,
@@ -707,9 +707,9 @@ describe("client output", () => {
             { status: 200, headers: { "content-type": "application/x-ndjson" } },
           ),
       );
-      const stdio = Stdio.capture();
+      const stdio = TestingStdio.capture();
       yield* run(["follow", ...shared, "--session-id", SESSION], { http: recorder.layer, stdio });
-      expect(Stdio.text(stdio.stdout)).toBe(lines.join(""));
+      expect(TestingStdio.text(stdio.stdout)).toBe(lines.join(""));
       expect(recorder.requests[0]?.method).toBe("GET");
       expect(recorder.requests[0]?.url).toBe(`${SERVER}/follow?id=${SESSION}`);
       expect(recorder.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
@@ -721,7 +721,7 @@ describe("client output", () => {
       const recorder = TestingHttp.recordRequests(() =>
         TestingHttp.json({ error: `session "${SESSION}" has already completed (succeeded)` }, 409),
       );
-      const stdio = Stdio.capture();
+      const stdio = TestingStdio.capture();
       const error = yield* Effect.flip(
         run(["follow", ...shared, "--session-id", SESSION], { http: recorder.layer, stdio }),
       );
@@ -1039,7 +1039,7 @@ describe("client local checks", () => {
     Effect.gen(function* () {
       const recorder = TestingHttp.recordRequests(ok);
       const fs = FileSystem.layerNoop({
-        stat: (path) => Effect.fail(FakeFs.notFound("stat", path)),
+        stat: (path) => Effect.fail(TestingFs.notFound("stat", path)),
       });
       const error = yield* Effect.flip(run(["start", ...shared], { fs, http: recorder.layer }));
       expect(error._tag).toBe("CommandError");

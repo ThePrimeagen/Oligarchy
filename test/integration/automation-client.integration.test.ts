@@ -13,7 +13,6 @@ import { it } from "@effect/vitest";
 import { Effect, Schedule } from "effect";
 import * as DbClient from "@oligarchy/db/client";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Driver from "../../src/automation-client/driver.ts";
 import * as Postgres from "../support/postgres.ts";
 
 const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", import.meta.url));
@@ -364,11 +363,15 @@ describeWithDatabase("automation client POST /run", () => {
           expect(await response.json()).toEqual({ ok: "true" });
           expect(readFileSync(join(process.cwd, "argv"), "utf8")).toBe(
             [
-              ...Driver.args({
-                prompt: "do the work",
-                agentId: "OLI-42",
-                action: "drive",
-              }),
+              // What the client hands ./driver, spelled here: this test drives the built process.
+              "--action",
+              "drive",
+              "--prompt",
+              "do the work",
+              "--agent-id",
+              "OLI-42",
+              "--debug-log",
+              "/tmp/oligarchy-driver-OLI-42.jsonl",
               "",
             ].join("\n"),
           );

@@ -1,0 +1,30 @@
+{
+  "name": "@oligarchy/automation-server",
+  "private": true,
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/fleet": "workspace:*",
+    "@oligarchy/http": "workspace:*",
+    "@oligarchy/jobs": "workspace:*",
+    "@oligarchy/linear": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/observability": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@oligarchy/testing": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
