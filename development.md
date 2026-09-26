@@ -63,14 +63,16 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today nine: `@oligarchy/shared`, the
+  dashboard, the tests); `packages/*` are its libraries, today ten: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
   from outside and the runner that installs it (Config and Runtime entry, below),
   `@oligarchy/db`, the whole database (Database and Migrations, below), `@oligarchy/linear`,
   the Linear API, `@oligarchy/jobs`, a job and its actions (both under Layout, below),
   `@oligarchy/observability`, where lines, failures and spans go once written (Log and Sentry,
-  below), `@oligarchy/routes`, the HTTP contract (HttpApi server, below), and
+  below), `@oligarchy/fleet`, how a server measures itself, announces itself and how the fleet
+  forgets a dead one (under Layout, below), `@oligarchy/routes`, the HTTP contract (HttpApi
+  server, below), and
   `@oligarchy/testing`, the fakes more than one package's tests use, which nothing but a test
   may import. A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
@@ -87,7 +89,11 @@ exist.
   by name, resolves all the same. `test/repo/architecture.unit.test.ts` names both. Every
   `tsconfig.json` extends `tsconfig.base.json`; the root adds only hono's JSX. `check:types` and
   `test:unit` run the root's lane, then `bun run --workspaces <lane>`, which runs that script in
-  every package and fails when one does; every package has both scripts, on Bun. Lint and format
+  every package and fails when one does; every package has both scripts, on Bun.
+  `test:integration` runs the root's lane, then `bun run --workspaces --if-present
+  test:integration`: a package whose tests need the real OS (a child process, `/proc`) but no
+  container has that lane too, on Bun, and `--if-present` because Bun fails a `--workspaces` run
+  on a package without the script. Lint and format
   run once, at the root, over the whole tree.
 - Dependencies run one way. Two files never import each other: oxlint's `import/no-cycle` is on
   as an error and follows package `exports`, so a loop through two packages is caught too. A
@@ -96,8 +102,8 @@ exist.
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
   `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` and `@oligarchy/linear` at 3,
-  `@oligarchy/jobs` and `@oligarchy/observability` at 4 and `@oligarchy/routes` at 5, holding
-  `http`'s slot, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
+  `@oligarchy/jobs` and `@oligarchy/observability` at 4, `@oligarchy/fleet` at 5 and
+  `@oligarchy/routes` beside it, holding `http`'s slot, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
   it). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
@@ -158,7 +164,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `public/` and `prompts/`, the operator documents, this document, `src/`, `test/` and
   `packages/`.
 - `src/` is one directory per process plus what is left of the shared kernel (`src/shared/`:
-  the staged errors, `process-usage.ts`, `stale-servers.ts`); `main.ts` files are the entries.
+  the staged errors); `main.ts` files are the entries.
 - `packages/<name>/` is a workspace package: `package.json`, `tsconfig.json`, `vitest.config.ts`,
   `src/` and `test/`. `packages/shared/src/` holds `domain.ts` (ids, the vocabularies, the QMP
   schemas, the follow stream), `errors.ts` (the domain errors more than one package or app raises,
@@ -227,8 +233,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   or retry that decides how, and the searches the apps make over jobs; refused are HTTP, a
   platform module and an app. Stopping a driver at its automation client is transport, so
   `Reclaim.reclaim` takes the app's `stop` and `Abort.running` closes a row its app has stopped.
-  `packages/testing/src/` is dev-only: `stores.ts` (`fakeTestStore`, `fakeAutomationStore`, fakes
-  that answer the way the Postgres stores do) and `linear.ts` (`fakeLinear`, its ids and
+  `packages/testing/src/` is dev-only: `stores.ts` (`fakeTestStore`, `fakeAutomationStore`,
+  `fakeServerStore`, `fakeProcessStatsStore`, fakes that answer the way the Postgres stores do) and `linear.ts` (`fakeLinear`, its ids and
   `ticketFor`). It imports `effect`, `@oligarchy/db`, `@oligarchy/linear` and its own files, and
   sits above every layer, so a package or the root may only dev-depend on it. Its admission rule:
   a fake that a package's tests and an app's tests both use; a fake with one consumer stays with
@@ -241,7 +247,25 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   (the SDK, preloaded) and `dsn.ts`. It imports `effect`, Sentry, `@oligarchy/db`,
   `@oligarchy/log`, `@oligarchy/shared` and its own files. Its admission rule: a destination for
   lines, failures and spans; refused are text formatting (log) and anything a package would need
-  in order to log. `packages/routes/src/` holds `api.ts`, `contract.ts` and
+  in order to log. `packages/fleet/src/` is how a server measures itself, announces itself, and
+  how the fleet forgets a dead one: `host.ts` (the `Host` sampler, a boundary file: host cpu
+  every five seconds into a 60-sample window, `collect` answering memory and cpu; a reading that
+  throws is one `failed to sample cpu usage` line and the next is compared with the last good
+  one), `process.ts` (the `ProcessUsage` reader, a boundary file: this process's memory and cpu
+  from `/proc`, or on macOS from `listProcesses`, the ps listing handed to `psSource` as a value;
+  `PsFailed`), `member.ts` (`announce`, the one heartbeat template, `HEARTBEAT_INTERVAL` and
+  `detail`) and `sweep.ts` (`forget`). A member is a qemu server or an automation client: it
+  says what only it knows (`report`, its guests and jobs each tick; `onJoin`, retried each tick
+  until it lands; `onLeave`, before the row goes), and the template adds the host's and this
+  process's readings, writes the `servers` and `process_stats` rows every thirty seconds, logs
+  each failure as one line under the member's attribution and keeps ticking, and deletes the row
+  when its scope closes. Each app's `heartbeat.ts` is only its member; the proxy and the
+  automation server, which read a kind, call `forget` for it. The wire's `Stats` is the host's
+  values and a machine count, so the apps build it and fleet knows no contract. It imports
+  `effect`, `@oligarchy/db`, `@oligarchy/log`, `@oligarchy/shared` and its own files. Its
+  admission rule: measuring this host or process, and the fleet's membership rows; a member
+  reports its counts and fleet never starts, stops or reads a session or a job; refused are HTTP
+  and anything about what a member does. `packages/routes/src/` holds `api.ts`, `contract.ts` and
   `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
   contract can be read, and depended on, without the processes that serve it. What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
@@ -297,7 +321,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   LinearErrors from "@oligarchy/linear/errors"`, one namespace per jobs module by its file name
   (`import * as Open from "@oligarchy/jobs/open"`, and `Close`, `Find`, `Board`, `Abort`,
   `Ready`, `Reclaim`, `Templates` the same way), `import * as JobsErrors from
-  "@oligarchy/jobs/errors"`, and in tests `import * as TestingStores from
+  "@oligarchy/jobs/errors"`, `import * as Host from "@oligarchy/fleet/host"` (`FleetHost` in
+  qemu-server's `main.ts`, beside its own `Host`), `import * as ProcessUsage from
+  "@oligarchy/fleet/process"`, `import * as Member from "@oligarchy/fleet/member"`, `import *
+  as Sweep from "@oligarchy/fleet/sweep"`, and in tests `import * as TestingStores from
   "@oligarchy/testing/stores"` and `import * as TestingLinear from "@oligarchy/testing/linear"`.
   The seven errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`, `EnvErrors`,
   `DbErrors`, `LinearErrors` and `JobsErrors` everywhere so none shadows the main package's
@@ -346,7 +373,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   view); a failure there is a `Result`, a thrown value from a library wrapped in one `try`.
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
-  (`Database.make(url)`, `Stats.make(source)`, `makeQemuServerCommand(server)`,
+  (`Database.make(url)`, `Host.make(source)`, `makeQemuServerCommand(server)`,
   `makeQemuReverseProxyCommand(server)`, `makeAutomationServerCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
@@ -1286,7 +1313,13 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary. A
   workspace package's unit tests sit in `packages/<name>/test/` under its own `vitest.config.ts`
-  and import its sources relatively; `bun run test:unit` runs them after the root's.
+  and import its sources relatively; `bun run test:unit` runs them after the root's. A unit test
+  stays in the package it tests: a package's tests never import the root's `test/support/`, so
+  what they fake is an inline layer of the methods used or a fake from `@oligarchy/testing`. A
+  package test that needs the real OS but no container (fleet's `process.integration.test.ts`,
+  which reads `/proc` and runs `ps`) sits beside it as `*.integration.test.ts` under the
+  package's own `integration` project and `test:integration` lane, which the root's
+  `test:integration` reaches after its own.
 - Run every test before anything is pushed to master or merged into it: `bun run check:fast`,
   then the whole integration lane with Docker up, `OLIGARCHY_REQUIRE_DATABASE=1 bun run
   test:integration`, so a database test fails instead of skipping. Never only the tests that look
@@ -1306,7 +1339,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   `fakeServerStore().routes`) with every unused member `Effect.die("Unexpected
   <Service>.<method>")`, kept under `test/support/`, one file per seam, plus loopback stubs for
   the process tests and `postgres.ts`. A fake that a package's tests and the apps' tests both use
-  lives in `@oligarchy/testing` instead (the test store, the automation store and Linear today),
+  lives in `@oligarchy/testing` instead (the test, automation, server and process-stats stores
+  and Linear today),
   and `test/support/` builds on it. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
   that calls other HTTP servers gets `FakeHttp.recordRequests(respond)` provided to its layer
   alone, so the `HttpClient` in the test's scope still points at the server under test.
@@ -1370,7 +1404,7 @@ One `it.effect` over the real fakes with `Effect.flip`.
 const Fakes = Layer.mergeAll(
   FakeQemu.fakeQemu().layer,
   FakeQemu.fakeIso().layer,
-  FakeQemu.fakeStats,
+  FakeQemu.fakeHost,
   Stores.fakeSessionStore().layer,
   Stores.fakeActionStore().layer,
   FakeLog.fakeLog().layer,

@@ -4,8 +4,8 @@ Status: phase 0 is done ([PR #232](https://github.com/ThePrimeagen/Oligarchy/pul
 workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
 (`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
-(`@oligarchy/db`), phase 6 (`@oligarchy/observability`), phase 7 (`@oligarchy/linear`) and phase 8
-(`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`). The rest of this file is the plan for
+(`@oligarchy/db`), phase 6 (`@oligarchy/observability`), phase 7 (`@oligarchy/linear`), phase 8
+(`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`) and phase 9 (`@oligarchy/fleet`). The rest of this file is the plan for
 the remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it
 lands.
 
@@ -195,10 +195,10 @@ Write each phase's tests before any of that phase's code, and see them fail.
 
 **Phase 1: cycle checks**
 
-- [ ] TEST (new) `test/repo/scripts.unit.test.ts`: `.oxlintrc.json` turns `import/no-cycle` on
+- [x] TEST (new) `test/repo/scripts.unit.test.ts`: `.oxlintrc.json` turns `import/no-cycle` on
       as an error. Happy: the checked-in config. Unhappy: a config without the rule, or with it
       off, is named.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: every workspace package appears in the
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: every workspace package appears in the
       declared layer list and depends only on packages in a strictly lower layer. Happy: the real
       graph (`routes` in `http`'s slot above `shared`). Unhappy: a made-up upward edge, a
       same-layer edge, a two-package loop and a package missing from the list are each named,
@@ -402,27 +402,27 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 9: `@oligarchy/fleet`**
 
-- [ ] TEST (move) `test/qemu/stats.unit.test.ts` to `packages/fleet/test/host.unit.test.ts`,
+- [x] TEST (move) `test/qemu/stats.unit.test.ts` to `packages/fleet/test/host.unit.test.ts`,
       scripting its readings in the file, with `Log.layerStdout` or an inline recording `Log`.
-- [ ] TEST (alter) host sampler: a reading that throws logs
+- [x] TEST (alter) host sampler: a reading that throws logs
       `failed to sample cpu usage: <detail>` with the thrown value as the cause, and the next
       tick still samples against the last good reading. A clean tick logs nothing. `collect`
       returns `{ memory, cpu }` and takes no `qemus`.
-- [ ] TEST (move) `test/shared/process-usage.unit.test.ts` to
+- [x] TEST (move) `test/shared/process-usage.unit.test.ts` to
       `packages/fleet/test/process.unit.test.ts`, with the `/proc` cases on an inline
       `FileSystem.layerNoop`.
-- [ ] TEST (alter) process reader on macOS: the `ps` cases feed a listing string. A listing that
+- [x] TEST (alter) process reader on macOS: the `ps` cases feed a listing string. A listing that
       never answers fails after ten seconds. The SIGTERM, then SIGKILL a second later, settings
       are checked on the command value. Failures assert `PsFailed`.
-- [ ] TEST (move) `test/integration/process-usage.integration.test.ts` to
+- [x] TEST (move) `test/integration/process-usage.integration.test.ts` to
       `packages/fleet/test/process.integration.test.ts`, under fleet's own `test:integration`
       lane, on the platform's child-process layer.
-- [ ] TEST (move) `fakeServerStore` and `fakeProcessStatsStore` from `test/support/stores.ts`
+- [x] TEST (move) `fakeServerStore` and `fakeProcessStatsStore` from `test/support/stores.ts`
       to `packages/testing/src/stores.ts`: fleet's member and sweep tests and the apps' heartbeat
       tests all need them. Their own cases (a url registers once; a second route is the primary
       key's `DatabaseError`; the heartbeat upsert registers) move to
       `packages/testing/test/stores.unit.test.ts`.
-- [ ] TEST (new) `packages/fleet/test/member.unit.test.ts`, on `TestClock` with
+- [x] TEST (new) `packages/fleet/test/member.unit.test.ts`, on `TestClock` with
       `Testing.fakeServerStore` and `Testing.fakeProcessStatsStore`. Happy: the first tick writes
       the servers row with the member's type, name and
       `qemus`, and the sampler's memory and cpu, then the process row with `jobs` and the
@@ -433,23 +433,23 @@ container and stay in the root's integration project until phase 12.
       tick moves on; a failing `onJoin` is one line and runs again next tick; a failing delete
       logs `unannounce failed` and the scope still closes; a failing `onLeave` is one line and
       the row is still deleted.
-- [ ] TEST (move) `test/shared/stale-servers.unit.test.ts` to
+- [x] TEST (move) `test/shared/stale-servers.unit.test.ts` to
       `packages/fleet/test/sweep.unit.test.ts`.
-- [ ] TEST (alter) `test/qemu-server/heartbeat.unit.test.ts`: one case that qemu-server
+- [x] TEST (alter) `test/qemu-server/heartbeat.unit.test.ts`: one case that qemu-server
       announces its own `Member` (type `qemu`, the server location, `qemus` from its machine
       count, `jobs` from its slots). Its `onJoin` removes this url's setup requests and logs
       `setup cleared; <url>; <n>` when any went: happy, the rows go; unhappy, a failing removal
       is retried next tick. A failing process read is `PsFailed`, not `CliFailed`.
-- [ ] TEST (alter) `test/automation-client/heartbeat.unit.test.ts`: one case that
+- [x] TEST (alter) `test/automation-client/heartbeat.unit.test.ts`: one case that
       automation-client announces its own `Member` (type `automation-client`, its attribution,
       `qemus: 0`, `jobs` from its sessions) and has no `onJoin`. A failing process read is
       `PsFailed`.
-- [ ] TEST (alter) `test/qemu-server/sessions.unit.test.ts`: `sessions.stats` is the machine
+- [x] TEST (alter) `test/qemu-server/sessions.unit.test.ts`: `sessions.stats` is the machine
       count plus the sampler's values (`test/support/fake-qemu.ts` fake stats return plain
       values).
-- [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: the boundary-file list names
+- [x] TEST (alter) `test/repo/architecture.unit.test.ts`: the boundary-file list names
       `packages/fleet/src/host.ts` and `process.ts` (they read `node:os` and `process.*`).
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: a package may add a `test:integration` lane
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: a package may add a `test:integration` lane
       on Bun; the root `test:integration` runs the root's lane, then
       `bun run --workspaces --if-present test:integration`. Unhappy: a package integration lane
       off Bun, and a fan-out without `--if-present`, are each named.
@@ -848,24 +848,56 @@ Decided while working the phase:
 
 **Phase 9: `@oligarchy/fleet`**
 
-- [ ] Create `packages/fleet` with `host.ts` (from `src/qemu/stats.ts`), `process.ts` (from
+- [x] Create `packages/fleet` with `host.ts` (from `src/qemu/stats.ts`), `process.ts` (from
       `src/shared/process-usage.ts`), `member.ts` (the template, from the two `heartbeat.ts`)
       and `sweep.ts` (from `src/shared/stale-servers.ts`). The `detail` helper that unwraps a
       `DatabaseError`'s cause, copied in all three source files today, is written once.
-- [ ] Host: drop `qemus`, return `{ memory, cpu }`, drop the `@oligarchy/routes/contract` import
+- [x] Host: drop `qemus`, return `{ memory, cpu }`, drop the `@oligarchy/routes/contract` import
       in the same change (it is the one edge that would put fleet and http on the same layer with
       an edge), keep today's log line for a skipped reading.
-- [ ] Give the process reader `PsFailed` (a `Schema.TaggedError`, identifier
+- [x] Give the process reader `PsFailed` (a `Schema.TaggedError`, identifier
       `@oligarchy/fleet/process/PsFailed`) and the listing seam.
-- [ ] qemu-server and automation-client each define their `Member` and call `Fleet.announce`;
+- [x] qemu-server and automation-client each define their `Member` and call `Fleet.announce`;
       the proxy and automation-server call `Fleet.forget`. Delete both `heartbeat.ts` files and
       `stale-servers.ts`. The apps build `Contract.Stats` from the values plus the machine count.
-- [ ] Add `fakeServerStore` and `fakeProcessStatsStore` to `@oligarchy/testing`; fleet
+- [x] Add `fakeServerStore` and `fakeProcessStatsStore` to `@oligarchy/testing`; fleet
       dev-depends on it.
-- [ ] Add fleet's `test:integration` lane and the `--workspaces --if-present` fan-out.
+- [x] Add fleet's `test:integration` lane and the `--workspaces --if-present` fan-out.
 - [x] Add `@effect/vitest` to the catalog (done in phase 3, for log's `it.effect` tests).
-- [ ] Update the architecture boundary-file list for the new paths.
-- [ ] `development.md`: the unit-test rule, per-package integration lanes and the fleet template.
+- [x] Update the architecture boundary-file list for the new paths.
+- [x] `development.md`: the unit-test rule, per-package integration lanes and the fleet template.
+
+What phase 9 decided that the checklist left open, and what it found:
+
+- The two `heartbeat.ts` files are not deleted: each keeps only its app's member (`type`,
+  attribution, `report`, and qemu-server's `onJoin`) and calls `Member.announce`, so each app's
+  heartbeat test still has a source to mirror. The loop, the rows, the failure lines, the
+  interval and the delete are fleet's.
+- A failed `report` is `report failed: <detail>` and writes neither row; a failed `onJoin` is
+  `join failed: <detail>` and the tick still writes; a failed `onLeave` is `leave failed:
+  <detail>` and the row is still deleted. qemu-server's setup removal used to fail as `setup
+  clear failed`; it is `join failed` now, still under the server's location.
+- Omitted hooks default their type parameters to `never`: without the defaults an absent
+  `onJoin` or `onLeave` inferred `unknown` requirements, which the Effect language service
+  refuses.
+- `detail` and `HEARTBEAT_INTERVAL` live in `member.ts`, and `sweep.ts` takes both from it: the
+  sweep ticks as often as a member writes, which is what makes a silent row gone within one
+  heartbeat of its tenth minute. No `errors.ts`: `PsFailed` is `process.ts`'s, as its identifier
+  says.
+- The macOS reader's seam is `psSource(pid, cpuUsage, list)`, where `list` answers `{ text, ps }`
+  (the listing and the ps pid, which the tree walk leaves out). `listProcesses` is the real
+  listing with the ten-second timeout; its test gives it an inline spawner and reads the
+  SIGTERM and one-second SIGKILL settings off the command the spawner was handed, rather than
+  exporting the command for a test to read.
+- `Host.collect` and `ProcessUsage.collect` are values wrapped in `Effect.withSpan`, not
+  `Effect.fn`: `collect` lost its one argument (NEED_FIXING item 8 names both).
+- The automation client's member lines carry its location and no `agentId`, as its heartbeat's
+  did; its process attribution (with the `agentId`) stays for its other lines.
+- The fakes `fakeServerStore` and `fakeProcessStatsStore` had no cases of their own; the ones
+  the checklist names are new in `packages/testing/test/stores.unit.test.ts`.
+- `test/support/fake-qemu.ts`'s `fakeStats` is `fakeHost`, answering `HOST_STATS`, non-zero plain
+  values, so the sessions test shows them reaching `/stats` beside the machine count.
+- The phase 1 test boxes are ticked: both tests landed with PR #236 and were never checked off.
 
 **Phase 10: `@oligarchy/http`**
 
