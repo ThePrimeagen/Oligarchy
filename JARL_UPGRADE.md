@@ -5,6 +5,8 @@ Consult this table of contents first. Read only the section you need.
 | Section |
 |---------|
 | [What this is](#what-this-is) |
+| [One process, one environment](#one-process-one-environment) |
+| [The database](#the-database) |
 | [The command line](#the-command-line) |
 | [Where a flag's value comes from](#where-a-flags-value-comes-from) |
 | [Refusals](#refusals) |
@@ -26,6 +28,45 @@ Built: `v2/packages/env/src/args.ts`, every flag any program takes, exported as 
 Not built yet: the builder and the parser below. `v2/packages/env/src/cli.ts` and `commands.ts`
 still read the old noun-then-verb shape; the parser replaces them, and `Env.command`,
 `Env.flag.*`, `flags.ts` and the `App` object literal go with them.
+
+## One process, one environment
+
+- A program does its work in its own process and starts no program of ours. The automation client
+  runs a drive or a mint itself instead of spawning `./driver`, and the session REPL goes with
+  `client`. The one child is opencode, for a diagnose.
+- So `--env-file` belongs to the process it was given to: `Env.create` reads it once, alongside the
+  process environment and `.env`, and nothing forwards it or inherits it. `create` never hands its
+  path to the program, because there is no one to hand it on to.
+- Opencode inherits the automation client's process environment, plus `OPENCODE_CONFIG_CONTENT`.
+  The `./ctrl` commands the diagnosing agent runs read their own environment: the process
+  environment, then `.env` in their working directory. A variable held only by an `--env-file`
+  given to the automation client never reaches them, so a host that diagnoses keeps `DATABASE_URL`
+  in its environment or its `.env`.
+
+## The database
+
+- The database is created from a URL handed to it, and that is the only way to create one. The db
+  package never reads the environment, as today's `Database.layer(url)` does not.
+- `main` creates it right after `Env.create`, from `env.vars.databaseUrl`, and pings it before it
+  runs the command; a server pings before it listens. The URL stays a `Secret` until the database
+  opens its pool, so it never reaches a log.
+- A command that uses the database names `databaseUrl` among its variables. Named on the app, every
+  command has it and `main` creates the database once, before it switches on the command. Named on
+  some commands, only those carry it, and reading it without narrowing to one of them does not
+  compile: `Property 'databaseUrl' does not exist on type '{ databaseUrl: Secret; } | {}'`.
+- A test hands the program a fake database, or points `DATABASE_URL` at a local Postgres through
+  `fakeIo`.
+
+```ts
+const result = await Env.create(ctrl);
+// HelpRequested prints and exits 0; any other failure prints its message and exits 1.
+const env = result.value;
+const db = Db.create(env.vars.databaseUrl);
+await jarl.unwrap(db.ping());
+switch (env.command) {
+  // every branch has db
+}
+```
 
 ## The command line
 
