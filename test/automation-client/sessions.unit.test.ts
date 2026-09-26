@@ -3,7 +3,7 @@ import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as ApiErrors from "@oligarchy/http/errors";
 import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";

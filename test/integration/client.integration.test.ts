@@ -807,23 +807,24 @@ describe("./client bundle cache", () => {
     expect((await stat(BUNDLE)).mtimeMs).toBeGreaterThan(0);
   });
 
-  // The bundle holds the routes package the client imports, so an edit there is an edit to it.
+  // The bundle holds the http package the client calls the proxy through, so an edit there is an
+  // edit to it.
   it("rebuilds when a source of a workspace package the client imports is newer", async () => {
-    const ROUTES_SOURCE = fileURLToPath(
-      new URL("../../packages/routes/src/api.ts", import.meta.url),
+    const HTTP_SOURCE = fileURLToPath(
+      new URL("../../packages/http/src/proxy-client.ts", import.meta.url),
     );
     await runClient(["--help"]);
     const built = await stat(BYTECODE);
-    const original = await stat(ROUTES_SOURCE);
+    const original = await stat(HTTP_SOURCE);
     const edited = new Date(built.mtimeMs + 1_000);
-    await utimes(ROUTES_SOURCE, edited, edited);
+    await utimes(HTTP_SOURCE, edited, edited);
     try {
       const result = await runClient(["--help"]);
       expect(result.stderr).toBe("");
       expect(result.code).toBe(0);
       expect((await stat(BYTECODE)).mtimeMs).toBeGreaterThan(built.mtimeMs);
     } finally {
-      await utimes(ROUTES_SOURCE, original.atime, original.mtime);
+      await utimes(HTTP_SOURCE, original.atime, original.mtime);
     }
   });
 

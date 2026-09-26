@@ -21,7 +21,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Client from "@oligarchy/db/client";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as QemuServerCommand from "../../src/qemu-server/command.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
@@ -79,7 +79,7 @@ const REQUIRED: ReadonlyArray<string> = [...MAX_JOBS, ...NAME];
 // What a run without --data-dir and without OLIGARCHY_DATA_DIR keeps its cache under.
 const DATA_DIR = Qemu.dataDir;
 
-// The host check, the server layer and the failure signal the command is built from.
+// The host check and the server the command is built from; `serverFailed` is a server error after listen.
 const fakeServer = (missing: ReadonlyArray<string> = []) => {
   const checked: Array<Domain.QemuDisplay> = [];
   const served: Array<Served> = [];
@@ -92,13 +92,11 @@ const fakeServer = (missing: ReadonlyArray<string> = []) => {
         return missing;
       }),
     serve: (display, automation, maxJobs, name, port, url, dataDir) =>
-      Layer.effectDiscard(
-        Effect.gen(function* () {
-          served.push([display, automation, maxJobs, name, port, url, dataDir]);
-          yield* Deferred.succeed(listening, undefined);
-        }),
-      ),
-    serverFailed,
+      Effect.gen(function* () {
+        served.push([display, automation, maxJobs, name, port, url, dataDir]);
+        yield* Deferred.succeed(listening, undefined);
+        return yield* Deferred.await(serverFailed);
+      }),
   };
   return { checked, served, listening, serverFailed, server };
 };
@@ -549,7 +547,7 @@ describe("qemu server command startup failures", () => {
       const fake = fakeServer();
       const failing: QemuServerCommand.QemuServer<never, never> = {
         ...fake.server,
-        serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
+        serve: () => Effect.fail(new HttpServerError.ServeError({ cause })),
       };
       const log = FakeLog.fakeLog();
       const error = yield* Effect.flip(run(failing, [...REQUIRED, "--port", "42069"], log));
@@ -569,7 +567,7 @@ describe("qemu server command startup failures", () => {
       const fake = fakeServer();
       const failing: QemuServerCommand.QemuServer<never, never> = {
         ...fake.server,
-        serve: () => Layer.effectDiscard(Effect.fail(cleanup)),
+        serve: () => Effect.fail(cleanup),
       };
       const log = FakeLog.fakeLog();
       const error = yield* Effect.flip(run(failing, [...REQUIRED], log));

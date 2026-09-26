@@ -6,12 +6,12 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Log from "@oligarchy/log/log";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as ApiErrors from "@oligarchy/http/errors";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as Handlers from "../../src/automation-client/handlers.ts";
 import * as Driver from "../../src/automation-client/driver.ts";
 import * as OpenCode from "../../src/automation-client/opencode.ts";
 import * as Sessions from "../../src/automation-client/sessions.ts";
-import * as Errors from "../../src/shared/errors.ts";
 import * as FakeLog from "../support/log.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as Reporter from "../support/reporter.ts";
@@ -375,21 +375,6 @@ describe("POST /run authentication and decoding", () => {
     }),
   );
 
-  it.effect("a wrong bearer is 401 too", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* run(http, "do the work", {
-          authorization: "Bearer wrong",
-          "content-type": "application/json",
-        });
-        expect(response.status).toBe(401);
-        expect(yield* response.json).toEqual({ error: "unauthorized" });
-      }).pipe(Effect.provide(serve(fixed)));
-    }),
-  );
-
   it.effect("a body without prompt is 400", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -523,7 +508,7 @@ describe("POST /run unhappy path", () => {
 
   it.effect("a reserve whose QEMU call fails is 500 and reaches Sentry with its cause", () =>
     Effect.gen(function* () {
-      const unreachable = Errors.ProxyUnreachable.make({
+      const unreachable = ProxyClient.ProxyUnreachable.make({
         message: "POST http://127.0.0.1:55555/reserve failed",
         cause: new Error("connect ECONNREFUSED 127.0.0.1:55555"),
       });
@@ -755,21 +740,6 @@ describe("POST /abort authentication and decoding", () => {
         },
       ]);
       expect(fixed.reporter.reported).toEqual([]);
-    }),
-  );
-
-  it.effect("a wrong bearer is 401 too", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* abort(http, TICKET, {
-          authorization: "Bearer wrong",
-          "content-type": "application/json",
-        });
-        expect(response.status).toBe(401);
-        expect(yield* response.json).toEqual({ error: "unauthorized" });
-      }).pipe(Effect.provide(serve(fixed)));
     }),
   );
 

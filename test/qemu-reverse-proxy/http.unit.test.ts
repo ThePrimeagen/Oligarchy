@@ -13,13 +13,13 @@ import { HttpApiClient, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as Handlers from "../../src/qemu-reverse-proxy/handlers.ts";
 import * as Router from "../../src/qemu-reverse-proxy/router.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
@@ -73,17 +73,17 @@ const refused = (request: HttpClientRequest.HttpClientRequest, url: URL) =>
 
 // The fleet as most tests see it: both servers answer their /stats, A holds two machines and B
 // one, and every routed request is answered ok.
-const fleet: FakeHttp.Respond = (_, url) =>
+const fleet: TestingHttp.Respond = (_, url) =>
   url.pathname === "/stats"
-    ? FakeHttp.json(stats(url.origin === SERVER_A ? 2 : 1))
-    : FakeHttp.json({ ok: "true" });
+    ? TestingHttp.json(stats(url.origin === SERVER_A ? 2 : 1))
+    : TestingHttp.json({ ok: "true" });
 
 // A fleet whose servers answer the named paths as scripted and everything else through `rest`.
 const answering =
   (
     table: Readonly<Record<string, () => Response>>,
-    rest: FakeHttp.Respond = fleet,
-  ): FakeHttp.Respond =>
+    rest: TestingHttp.Respond = fleet,
+  ): TestingHttp.Respond =>
   (request, url) => {
     const scripted = table[url.pathname];
     return scripted === undefined ? rest(request, url) : scripted();
@@ -92,16 +92,19 @@ const answering =
 type Fixture = {
   readonly store: TestingStores.FakeServerStore;
   readonly sessions: Stores.FakeSessionStore;
-  readonly upstream: FakeHttp.Recorder;
+  readonly upstream: TestingHttp.Recorder;
   readonly log: FakeLog.FakeLog;
   readonly reporter: Reporter.Collector;
   readonly setup: Layer.Layer<Setup.Setup>;
 };
 
-const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> = {}): Fixture => ({
+const fixture = (
+  respond: TestingHttp.Respond = fleet,
+  overrides: Partial<Fixture> = {},
+): Fixture => ({
   store: TestingStores.fakeServerStore(),
   sessions: Stores.fakeSessionStore(),
-  upstream: FakeHttp.recordRequests(respond),
+  upstream: TestingHttp.recordRequests(respond),
   log: FakeLog.fakeLog(),
   reporter: Reporter.collect(),
   setup: noopSetup,
@@ -295,7 +298,7 @@ describe("server registration", () => {
     () =>
       Effect.gen(function* () {
         const fixed = fixture((request, url) =>
-          url.origin === SERVER_B ? refused(request, url) : FakeHttp.json(stats(2)),
+          url.origin === SERVER_B ? refused(request, url) : TestingHttp.json(stats(2)),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
@@ -341,14 +344,14 @@ describe("minted", () => {
   const MINTED_PATH = `/minted?iso=${encodeURIComponent(ISO)}`;
   // Each server's own GET /minted answer, by origin; anything else is the fleet as usual.
   const holding =
-    (answers: Readonly<Record<string, (iso: string) => Response>>): FakeHttp.Respond =>
+    (answers: Readonly<Record<string, (iso: string) => Response>>): TestingHttp.Respond =>
     (request, url) => {
       const answer = answers[url.origin];
       return url.pathname === "/minted" && answer !== undefined
         ? answer(url.searchParams.get("iso") ?? "")
         : fleet(request, url);
     };
-  const has = (minted: boolean) => (iso: string) => FakeHttp.json({ iso, minted });
+  const has = (minted: boolean) => (iso: string) => TestingHttp.json({ iso, minted });
 
   it.effect(
     "GET /minted asks every qemu server /minted with the bearer and answers minted, unminted or unreachable per server in registration order, logging nothing (happy)",
@@ -430,8 +433,8 @@ describe("minted", () => {
       Effect.gen(function* () {
         const fixed = fixture(
           holding({
-            [SERVER_A]: () => FakeHttp.json({ ok: "true" }),
-            [SERVER_B]: () => FakeHttp.json({ error: "internal error" }, 500),
+            [SERVER_A]: () => TestingHttp.json({ ok: "true" }),
+            [SERVER_B]: () => TestingHttp.json({ error: "internal error" }, 500),
           }),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -570,7 +573,7 @@ describe("registration refusals", () => {
 
   it.effect("a server answering 401 is 502 server <url> answered 401: unauthorized", () =>
     Effect.gen(function* () {
-      const fixed = fixture(() => FakeHttp.json({ error: "unauthorized" }, 401));
+      const fixed = fixture(() => TestingHttp.json({ error: "unauthorized" }, 401));
       yield* Effect.gen(function* () {
         const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
@@ -627,7 +630,7 @@ describe("registration refusals", () => {
 
   it.effect("a 200 that is not stats is 502 server <url> answered 200 without stats", () =>
     Effect.gen(function* () {
-      const fixed = fixture(() => FakeHttp.json({ hello: "world" }));
+      const fixed = fixture(() => TestingHttp.json({ hello: "world" }));
       yield* Effect.gen(function* () {
         const api = yield* qemuReverseProxyClient;
         const error = yield* Effect.flip(api.Servers.register({ payload: serverBody(SERVER_A) }));
@@ -702,10 +705,10 @@ describe("placement", () => {
 
   // Servers answer a start with the id they minted; `null` scripts one that answers without it.
   const placing =
-    (started: string | null = STARTED_ID): FakeHttp.Respond =>
+    (started: string | null = STARTED_ID): TestingHttp.Respond =>
     (request, url) =>
       url.pathname === "/start"
-        ? FakeHttp.json(started === null ? { ok: "true" } : { id: started })
+        ? TestingHttp.json(started === null ? { ok: "true" } : { id: started })
         : fleet(request, url);
 
   it.effect("ties go to the first registered server", () =>
@@ -713,8 +716,8 @@ describe("placement", () => {
       const fixed = fixture(
         answering(
           {
-            "/stats": () => FakeHttp.json(stats(1)),
-            "/reserve": () => FakeHttp.json({ ok: "true" }),
+            "/stats": () => TestingHttp.json(stats(1)),
+            "/reserve": () => TestingHttp.json({ ok: "true" }),
           },
           placing(),
         ),
@@ -735,7 +738,7 @@ describe("placement", () => {
           return refused(request, url);
         }
         return url.pathname === "/reserve"
-          ? FakeHttp.json({ ok: "true" })
+          ? TestingHttp.json({ ok: "true" })
           : placing()(request, url);
       });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -860,7 +863,7 @@ describe("placement", () => {
     () =>
       Effect.gen(function* () {
         const fixed = fixture((request, url) =>
-          url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+          url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
@@ -894,7 +897,7 @@ describe("placement", () => {
   it.effect("overlapping reserves for the same agent are one 200 and one already reserved", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
-        url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+        url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -923,7 +926,7 @@ describe("placement", () => {
   it.effect("a second reserve for the same agent is 400 already reserved and reaches Sentry", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
-        url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+        url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -969,8 +972,8 @@ describe("placement", () => {
       const fixed = fixture((request, url) => {
         if (url.pathname === "/reserve") {
           return url.origin === SERVER_B
-            ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+            : TestingHttp.json({ ok: "true" });
         }
         return fleet(request, url);
       });
@@ -993,7 +996,7 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
         url.pathname === "/reserve"
-          ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
           : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1015,9 +1018,9 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture((request, url) => {
         if (url.pathname === "/reserve" && url.origin === SERVER_B) {
-          return FakeHttp.json({ error: "internal error" }, 500);
+          return TestingHttp.json({ error: "internal error" }, 500);
         }
-        return url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url);
+        return url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url);
       });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -1077,7 +1080,7 @@ describe("placement", () => {
   const ISO = "https://example.com/omarchy.iso";
   const resumeBody = Contract.ReserveAgentBody.make({ agent: AGENT_ID, resume: ISO });
   const setupNeeded = (maxJobs: number) =>
-    FakeHttp.json({ error: `setup needed: max-jobs is ${String(maxJobs)}` }, 409);
+    TestingHttp.json({ error: `setup needed: max-jobs is ${String(maxJobs)}` }, 409);
   const reserveUrls = (fixed: Fixture) =>
     fixed.upstream.requests
       .filter((request) => request.url.endsWith("/reserve"))
@@ -1092,7 +1095,7 @@ describe("placement", () => {
             return fleet(request, url);
           }
           // B is less busy and has no disk; A holds the disk and has room.
-          return url.origin === SERVER_B ? setupNeeded(4) : FakeHttp.json({ ok: "true" });
+          return url.origin === SERVER_B ? setupNeeded(4) : TestingHttp.json({ ok: "true" });
         });
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
@@ -1124,7 +1127,7 @@ describe("placement", () => {
           if (url.pathname !== "/reserve") {
             return fleet(request, url);
           }
-          return url.origin === SERVER_B ? FakeHttp.json({ ok: "true" }) : setupNeeded(4);
+          return url.origin === SERVER_B ? TestingHttp.json({ ok: "true" }) : setupNeeded(4);
         });
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
@@ -1184,7 +1187,7 @@ describe("placement", () => {
           if (url.pathname !== "/reserve") {
             return fleet(request, url);
           }
-          return url.origin === SERVER_B ? FakeHttp.json({ ok: "true" }) : setupNeeded(4);
+          return url.origin === SERVER_B ? TestingHttp.json({ ok: "true" }) : setupNeeded(4);
         },
         {
           setup: Layer.succeed(Setup.Setup)(
@@ -1254,11 +1257,11 @@ describe("placement", () => {
       Effect.gen(function* () {
         const fixed = fixture((request, url) => {
           if (url.pathname === "/stats") {
-            return FakeHttp.json(stats(url.origin === SERVER_A ? 0 : 5));
+            return TestingHttp.json(stats(url.origin === SERVER_A ? 0 : 5));
           }
           if (url.pathname === "/reserve") {
             return url.origin === SERVER_A
-              ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+              ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
               : setupNeeded(8);
           }
           return fleet(request, url);
@@ -1284,7 +1287,7 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
         url.pathname === "/reserve"
-          ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
           : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1344,8 +1347,8 @@ describe("placement", () => {
           return fleet(request, url);
         }
         return url.origin === SERVER_B
-          ? FakeHttp.json({ error: "nope" }, 409)
-          : FakeHttp.json({ ok: "true" });
+          ? TestingHttp.json({ error: "nope" }, 409)
+          : TestingHttp.json({ ok: "true" });
       });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -1369,9 +1372,9 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture((request, url) => {
         if (url.pathname === "/reserve" && url.origin === SERVER_B) {
-          return FakeHttp.json({ error: "bad reserve" }, 400);
+          return TestingHttp.json({ error: "bad reserve" }, 400);
         }
-        return url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url);
+        return url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url);
       });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -1397,8 +1400,8 @@ describe("placement", () => {
       const fixed = fixture((request, url) => {
         if (url.pathname === "/reserve") {
           return url.origin === SERVER_A
-            ? FakeHttp.json({ ok: "true" }, 201)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ ok: "true" }, 201)
+            : TestingHttp.json({ ok: "true" });
         }
         return fleet(request, url);
       });
@@ -1436,7 +1439,7 @@ describe("placement", () => {
         const fixed = fixture(
           (request, url) =>
             url.pathname === "/reserve" || url.pathname === "/relinquish"
-              ? FakeHttp.json({ ok: "true" })
+              ? TestingHttp.json({ ok: "true" })
               : fleet(request, url),
           {
             store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }),
@@ -1483,9 +1486,11 @@ describe("placement", () => {
       const fixed = fixture(
         (request, url) => {
           if (url.pathname === "/relinquish") {
-            return FakeHttp.json({ error: "internal error" }, 500);
+            return TestingHttp.json({ error: "internal error" }, 500);
           }
-          return url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url);
+          return url.pathname === "/reserve"
+            ? TestingHttp.json({ ok: "true" })
+            : fleet(request, url);
         },
         { store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
       );
@@ -1531,7 +1536,7 @@ describe("placement", () => {
         const fixed = fixture(
           (request, url) =>
             url.pathname === "/reserve" || url.pathname === "/relinquish"
-              ? FakeHttp.json({ ok: "true" })
+              ? TestingHttp.json({ ok: "true" })
               : fleet(request, url),
           {
             store: TestingStores.fakeServerStore({
@@ -1578,7 +1583,7 @@ describe("placement", () => {
               return Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
             }
             return url.pathname === "/reserve"
-              ? FakeHttp.json({ ok: "true" })
+              ? TestingHttp.json({ ok: "true" })
               : fleet(request, url);
           },
           { store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
@@ -1659,7 +1664,7 @@ describe("placement", () => {
   it.effect("a pinned reserve is probed, asked and routed on that server alone", () =>
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
-        url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+        url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
       );
       // B has fewer machines and would win the ranking; the pin says A.
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1682,7 +1687,7 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
         url.pathname === "/reserve"
-          ? FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
+          ? TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503)
           : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1708,8 +1713,8 @@ describe("placement", () => {
       const fixed = fixture((request, url) => {
         if (url.pathname === "/reserve") {
           return url.origin === SERVER_A
-            ? FakeHttp.json({ error: "internal error" }, 500)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ error: "internal error" }, 500)
+            : TestingHttp.json({ ok: "true" });
         }
         return fleet(request, url);
       });
@@ -1743,7 +1748,7 @@ describe("placement", () => {
         if (url.pathname !== "/reserve") {
           return fleet(request, url);
         }
-        return url.origin === SERVER_A ? setupNeeded(4) : FakeHttp.json({ ok: "true" });
+        return url.origin === SERVER_A ? setupNeeded(4) : TestingHttp.json({ ok: "true" });
       });
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       const pinned = Contract.ReserveAgentBody.make({
@@ -1817,7 +1822,7 @@ describe("placement", () => {
       Effect.gen(function* () {
         const fixed = fixture((request, url) =>
           url.pathname === "/relinquish" || url.pathname === "/reserve"
-            ? FakeHttp.json({ ok: "true" })
+            ? TestingHttp.json({ ok: "true" })
             : fleet(request, url),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1851,7 +1856,7 @@ describe("placement", () => {
       const encoder = new TextEncoder();
       const fixed = fixture((request, url) => {
         if (url.pathname === "/reserve") {
-          return FakeHttp.json({ ok: "true" });
+          return TestingHttp.json({ ok: "true" });
         }
         if (url.pathname === "/relinquish") {
           return new Response(
@@ -1890,8 +1895,8 @@ describe("placement", () => {
       Effect.gen(function* () {
         const fixed = fixture(
           answering({
-            "/relinquish": () => FakeHttp.json({ error: "no reservation" }, 400),
-            "/reserve": () => FakeHttp.json({ ok: "true" }),
+            "/relinquish": () => TestingHttp.json({ error: "no reservation" }, 400),
+            "/reserve": () => TestingHttp.json({ ok: "true" }),
           }),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1927,8 +1932,8 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture(
         answering({
-          "/relinquish": () => FakeHttp.json({ error: "internal error" }, 500),
-          "/reserve": () => FakeHttp.json({ ok: "true" }),
+          "/relinquish": () => TestingHttp.json({ error: "internal error" }, 500),
+          "/reserve": () => TestingHttp.json({ ok: "true" }),
         }),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1952,7 +1957,7 @@ describe("placement", () => {
     () =>
       Effect.gen(function* () {
         const fixed = fixture((request, url) =>
-          url.pathname === "/relinquish" ? FakeHttp.json({ ok: "true" }) : fleet(request, url),
+          url.pathname === "/relinquish" ? TestingHttp.json({ ok: "true" }) : fleet(request, url),
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         // As after a start: the agent's reservation route is gone, the session's route stands.
@@ -2057,8 +2062,8 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture(
         answering({
-          "/start": () => FakeHttp.json({ id: STARTED_ID }),
-          "/reserve": () => FakeHttp.json({ ok: "true" }),
+          "/start": () => TestingHttp.json({ id: STARTED_ID }),
+          "/reserve": () => TestingHttp.json({ ok: "true" }),
         }),
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -2081,7 +2086,7 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fixed = fixture((request, url) =>
         url.pathname === "/start"
-          ? FakeHttp.json({ error: "qemu: disk not found: /tmp/nope.qcow2" }, 502)
+          ? TestingHttp.json({ error: "qemu: disk not found: /tmp/nope.qcow2" }, 502)
           : fleet(request, url),
       );
       fixed.store.servers.push(qemu(SERVER_A));
@@ -2208,7 +2213,7 @@ describe("placement", () => {
             ? Effect.gen(function* () {
                 yield* Deferred.succeed(entered, undefined);
                 yield* Deferred.await(release);
-                return FakeHttp.json({ id: STARTED_ID });
+                return TestingHttp.json({ id: STARTED_ID });
               })
             : fleet(request, url),
         {
@@ -2546,7 +2551,7 @@ describe("forwarding", () => {
   it.effect("a save the server fails passes through as its 502 and is not logged here", () =>
     Effect.gen(function* () {
       const message = "guest did not power off within 2 minutes";
-      const fixed = fixture(() => FakeHttp.json({ error: message }, 502));
+      const fixed = fixture(() => TestingHttp.json({ error: message }, 502));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;
@@ -2572,7 +2577,7 @@ describe("forwarding", () => {
   it.effect("a server's refusal passes through unchanged and is not logged here", () =>
     Effect.gen(function* () {
       const message = `agent "OLI-99" does not own session "${SESSION_ID}"`;
-      const fixed = fixture(() => FakeHttp.json({ error: message }, 403));
+      const fixed = fixture(() => TestingHttp.json({ error: message }, 403));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;

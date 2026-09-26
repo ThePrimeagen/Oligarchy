@@ -6,10 +6,10 @@ import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as VizCommand from "../../src/viz/command.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import { fakeRenderer, rows } from "../support/fake-renderer.ts";
 import { fakeTerminal } from "../support/fake-terminal.ts";
 import * as StdioSupport from "../support/stdio.ts";
@@ -73,7 +73,7 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
               tty.layer,
               screen.layer,
               stdio.layer,
-              FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+              TestingHttp.respondWith(() => new Response(null, { status: 404 })),
               Config.fromValues(env),
             ),
           ),

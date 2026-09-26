@@ -5,9 +5,9 @@ import { NodeServices } from "@effect/platform-node";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Schema, Scope } from "effect";
 import { HttpClientError, type HttpClientRequest } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as FakeFs from "../support/fake-fs.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 
 const URL_ISO = "https://iso.example.com/omarchy/omarchy-3.0.iso";
@@ -84,11 +84,11 @@ const unreachable = (
   });
 
 // No request may be made: every call is a defect naming the url.
-const refuseHttp: FakeHttp.Respond = (request, url) =>
+const refuseHttp: TestingHttp.Respond = (request, url) =>
   Effect.die(`unexpected ${request.method} ${url.toString()}`);
 
 const routes =
-  (options: Routes = {}): FakeHttp.Respond =>
+  (options: Routes = {}): TestingHttp.Respond =>
   (_request, url) =>
     url.toString().endsWith(".sha256")
       ? (options.sidecar ?? (() => sidecarFor(DIGEST)))()
@@ -103,13 +103,13 @@ type Fixture = {
   readonly path: Path.Path;
   readonly intercepted: FakeFs.Intercepted;
   readonly log: FakeLog.FakeLog;
-  readonly http: FakeHttp.Recorder;
+  readonly http: TestingHttp.Recorder;
   readonly iso: Iso.IsoService;
   readonly manifest: Effect.Effect<Iso.Manifest>;
   readonly writeManifest: (manifest: Iso.Manifest) => Effect.Effect<void>;
 };
 
-const fixture = (respond: FakeHttp.Respond = routes()) =>
+const fixture = (respond: TestingHttp.Respond = routes()) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -120,7 +120,7 @@ const fixture = (respond: FakeHttp.Respond = routes()) =>
     const manifestPath = path.join(isos, "manifest.json");
     const intercepted = FakeFs.intercepting();
     const log = FakeLog.fakeLog();
-    const http = FakeHttp.recordRequests(respond);
+    const http = TestingHttp.recordRequests(respond);
     const layer = Iso.Iso.layer.pipe(
       Layer.provide(
         Layer.mergeAll(

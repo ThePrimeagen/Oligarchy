@@ -1,5 +1,5 @@
 import { Effect, Layer, Option } from "effect";
-import type * as ApiErrors from "@oligarchy/routes/errors";
+import type * as ApiErrors from "@oligarchy/http/errors";
 import type * as Iso from "../../src/qemu/iso.ts";
 import * as Minted from "../../src/qemu/minted.ts";
 

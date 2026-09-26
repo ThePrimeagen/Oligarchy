@@ -21,10 +21,10 @@ import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as SharedErrors from "@oligarchy/shared/errors";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as DriverLog from "../../src/driver/log.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 
 const TOKEN = "super-secret-token";
@@ -154,24 +154,28 @@ const isModel = (url: URL): boolean => url.origin === "https://openrouter.ai";
 const routed = (
   model: () => Response,
   guest: (url: URL) => Response = (url) =>
-    url.pathname === "/start" ? FakeHttp.json({ id: SESSION }) : FakeHttp.json({ ok: "true" }),
-) => FakeHttp.recordRequests((_request, url) => (isModel(url) ? model() : guest(url)));
+    url.pathname === "/start"
+      ? TestingHttp.json({ id: SESSION })
+      : TestingHttp.json({ ok: "true" }),
+) => TestingHttp.recordRequests((_request, url) => (isModel(url) ? model() : guest(url)));
 
 const modelRequests = (
-  requests: ReadonlyArray<FakeHttp.Recorded>,
-): ReadonlyArray<FakeHttp.Recorded> => requests.filter((request) => isModel(new URL(request.url)));
+  requests: ReadonlyArray<TestingHttp.Recorded>,
+): ReadonlyArray<TestingHttp.Recorded> =>
+  requests.filter((request) => isModel(new URL(request.url)));
 
 const guestRequests = (
-  requests: ReadonlyArray<FakeHttp.Recorded>,
-): ReadonlyArray<FakeHttp.Recorded> => requests.filter((request) => !isModel(new URL(request.url)));
+  requests: ReadonlyArray<TestingHttp.Recorded>,
+): ReadonlyArray<TestingHttp.Recorded> =>
+  requests.filter((request) => !isModel(new URL(request.url)));
 
-const guestPaths = (requests: ReadonlyArray<FakeHttp.Recorded>): ReadonlyArray<string> =>
+const guestPaths = (requests: ReadonlyArray<TestingHttp.Recorded>): ReadonlyArray<string> =>
   guestRequests(requests).map((request) => new URL(request.url).pathname);
 
-const askText = (requests: ReadonlyArray<FakeHttp.Recorded>, index: number): string =>
+const askText = (requests: ReadonlyArray<TestingHttp.Recorded>, index: number): string =>
   userText(modelRequests(requests)[index]?.body);
 
-const past = (requests: ReadonlyArray<FakeHttp.Recorded>, index: number): string =>
+const past = (requests: ReadonlyArray<TestingHttp.Recorded>, index: number): string =>
   reasons(modelRequests(requests)[index]?.body);
 
 type Script = FakeSpawner.Script;
@@ -253,7 +257,7 @@ const userImages = (body: string | undefined): ReadonlyArray<string> => {
   return urls;
 };
 
-const imagesAt = (requests: ReadonlyArray<FakeHttp.Recorded>, index: number) =>
+const imagesAt = (requests: ReadonlyArray<TestingHttp.Recorded>, index: number) =>
   userImages(modelRequests(requests)[index]?.body);
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0xff]);
@@ -269,9 +273,9 @@ const withScreen =
   (image: () => Response = screenshot) =>
   (url: URL): Response => {
     if (url.pathname === "/start") {
-      return FakeHttp.json({ id: SESSION });
+      return TestingHttp.json({ id: SESSION });
     }
-    return url.pathname === "/image" ? image() : FakeHttp.json({ ok: "true" });
+    return url.pathname === "/image" ? image() : TestingHttp.json({ ok: "true" });
   };
 
 const getImage = () => speak("look at the screen", "get-image");
@@ -600,7 +604,7 @@ describe("driver loop", () => {
   it.effect("a start that does not boot fails the loop and does not ask the model (unhappy)", () =>
     Effect.gen(function* () {
       const recorder = routed(answers(done()), () =>
-        FakeHttp.json({ error: "no reservation" }, 400),
+        TestingHttp.json({ error: "no reservation" }, 400),
       );
       const log: Array<string> = [];
       const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), log));
@@ -707,11 +711,14 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(answers(sendKeys(null), done()), (url) => {
           if (url.pathname === "/start") {
-            return FakeHttp.json({ id: SESSION });
+            return TestingHttp.json({ id: SESSION });
           }
           return url.pathname === "/intent/start"
-            ? FakeHttp.json({ error: "Cannot start one intent when one's already running." }, 400)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json(
+                { error: "Cannot start one intent when one's already running." },
+                400,
+              )
+            : TestingHttp.json({ ok: "true" });
         });
         const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
         expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
@@ -735,15 +742,15 @@ describe("driver loop", () => {
           answers(sendKeys("press the key", 1), sendKeys("press it again", 1), done()),
           (url) => {
             if (url.pathname === "/start") {
-              return FakeHttp.json({ id: SESSION });
+              return TestingHttp.json({ id: SESSION });
             }
             if (url.pathname === "/send-keys") {
               presses += 1;
               return presses === 1
-                ? FakeHttp.json({ error: "keys refused" }, 400)
-                : FakeHttp.json({ ok: "true" });
+                ? TestingHttp.json({ error: "keys refused" }, 400)
+                : TestingHttp.json({ ok: "true" });
             }
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           },
         );
         const { stopped: outcome } = yield* run(
@@ -773,15 +780,15 @@ describe("driver loop", () => {
           answers(sendKeys("press the key", 1), sendKeys("look again", 2), done()),
           (url) => {
             if (url.pathname === "/start") {
-              return FakeHttp.json({ id: SESSION });
+              return TestingHttp.json({ id: SESSION });
             }
             if (url.pathname === "/intent/end") {
               ends += 1;
               return ends === 1
-                ? FakeHttp.json({ error: "no intent open" }, 400)
-                : FakeHttp.json({ ok: "true" });
+                ? TestingHttp.json({ error: "no intent open" }, 400)
+                : TestingHttp.json({ ok: "true" });
             }
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           },
         );
         const { stopped: outcome } = yield* run(
@@ -920,7 +927,7 @@ describe("driver loop", () => {
     () =>
       Effect.gen(function* () {
         const model = answers(sendKeys("press the key", 1), done());
-        const recorder = FakeHttp.recordRequests((request, url) => {
+        const recorder = TestingHttp.recordRequests((request, url) => {
           if (isModel(url)) {
             return model();
           }
@@ -935,8 +942,8 @@ describe("driver loop", () => {
             );
           }
           return url.pathname === "/start"
-            ? FakeHttp.json({ id: SESSION })
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ id: SESSION })
+            : TestingHttp.json({ ok: "true" });
         });
         const log: Array<string> = [];
         const { stopped: outcome } = yield* run(
@@ -990,15 +997,15 @@ describe("driver loop", () => {
           answers(sendKeys("open the menu"), sendKeys("open the menu"), done()),
           (url) => {
             if (url.pathname === "/start") {
-              return FakeHttp.json({ id: SESSION });
+              return TestingHttp.json({ id: SESSION });
             }
             if (url.pathname === "/intent/start") {
               opens += 1;
               return opens === 1
-                ? FakeHttp.json({ error: "intent refused" }, 400)
-                : FakeHttp.json({ ok: "true" });
+                ? TestingHttp.json({ error: "intent refused" }, 400)
+                : TestingHttp.json({ ok: "true" });
             }
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           },
         );
         yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
@@ -1018,11 +1025,11 @@ describe("driver loop", () => {
     Effect.gen(function* () {
       const recorder = routed(answers(sendKeys(), done()), (url) => {
         if (url.pathname === "/start") {
-          return FakeHttp.json({ id: SESSION });
+          return TestingHttp.json({ id: SESSION });
         }
         return url.pathname === "/send-keys"
-          ? FakeHttp.json({ error: "x".repeat(2_000) }, 400)
-          : FakeHttp.json({ ok: "true" });
+          ? TestingHttp.json({ error: "x".repeat(2_000) }, 400)
+          : TestingHttp.json({ ok: "true" });
       });
       yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
       const again = past(recorder.requests, 1);
@@ -1045,11 +1052,11 @@ describe("driver loop", () => {
             ]),
           (url) => {
             if (url.pathname === "/start") {
-              return FakeHttp.json({ id: SESSION });
+              return TestingHttp.json({ id: SESSION });
             }
             return url.pathname === "/stop"
-              ? FakeHttp.json({ error: "guest already gone" }, 400)
-              : FakeHttp.json({ ok: "true" });
+              ? TestingHttp.json({ error: "guest already gone" }, 400)
+              : TestingHttp.json({ ok: "true" });
           },
         );
         const log: Array<string> = [];
@@ -1213,11 +1220,11 @@ describe("driver loop", () => {
         answers(notACall(), notACall(), sendKeys(), notACall(), notACall(), done()),
         (url) => {
           if (url.pathname === "/start") {
-            return FakeHttp.json({ id: SESSION });
+            return TestingHttp.json({ id: SESSION });
           }
           return url.pathname === "/send-keys"
-            ? FakeHttp.json({ error: "keyboard is busy" }, 409)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ error: "keyboard is busy" }, 409)
+            : TestingHttp.json({ ok: "true" });
         },
       );
       const { stopped: outcome } = yield* run(
@@ -1297,7 +1304,7 @@ describe("driver loop", () => {
 
   it.effect("an unreachable OpenRouter is a loop failure and stops the session", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests((request, url) => {
+      const recorder = TestingHttp.recordRequests((request, url) => {
         if (isModel(url)) {
           return Effect.fail(
             new HttpClientError.HttpClientError({
@@ -1309,8 +1316,8 @@ describe("driver loop", () => {
           );
         }
         return url.pathname === "/start"
-          ? FakeHttp.json({ id: SESSION })
-          : FakeHttp.json({ ok: "true" });
+          ? TestingHttp.json({ id: SESSION })
+          : TestingHttp.json({ ok: "true" });
       });
       const log: Array<string> = [];
       const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), log));
@@ -1622,7 +1629,7 @@ describe("driver loop", () => {
         yield* tick(60);
         return yield* Fiber.join(fiber);
       });
-    const bodiesAt = (requests: ReadonlyArray<FakeHttp.Recorded>, path: string) =>
+    const bodiesAt = (requests: ReadonlyArray<TestingHttp.Recorded>, path: string) =>
       guestRequests(requests)
         .filter((request) => new URL(request.url).pathname === path)
         .map((request): unknown => JSON.parse(request.body ?? "{}"));
@@ -1738,15 +1745,15 @@ describe("driver loop", () => {
           ),
           (url) => {
             if (url.pathname === "/start") {
-              return FakeHttp.json({ id: SESSION });
+              return TestingHttp.json({ id: SESSION });
             }
             if (url.pathname === "/mouse/move") {
               moves += 1;
               return moves === 2
-                ? FakeHttp.json({ error: "qemu: closed" }, 502)
-                : FakeHttp.json({ ok: "true" });
+                ? TestingHttp.json({ error: "qemu: closed" }, 502)
+                : TestingHttp.json({ ok: "true" });
             }
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           },
         );
         const exit = yield* driven(recorder);
@@ -1757,7 +1764,7 @@ describe("driver loop", () => {
       }),
     );
 
-    const systemAt = (requests: ReadonlyArray<FakeHttp.Recorded>, index: number): string =>
+    const systemAt = (requests: ReadonlyArray<TestingHttp.Recorded>, index: number): string =>
       systemText(modelRequests(requests)[index]?.body);
 
     it.effect("the ask with the screenshot names the move before it and the values it ran", () =>
@@ -1813,7 +1820,7 @@ describe("driver loop", () => {
           ),
           (url) => {
             if (url.pathname === "/start") {
-              return FakeHttp.json({ id: SESSION });
+              return TestingHttp.json({ id: SESSION });
             }
             if (url.pathname === "/image") {
               return screenshot();
@@ -1821,10 +1828,10 @@ describe("driver loop", () => {
             if (url.pathname === "/mouse/move") {
               moves += 1;
               return moves === 2
-                ? FakeHttp.json({ error: "qemu: closed" }, 502)
-                : FakeHttp.json({ ok: "true" });
+                ? TestingHttp.json({ error: "qemu: closed" }, 502)
+                : TestingHttp.json({ ok: "true" });
             }
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           },
         );
         const exit = yield* driven(recorder);
@@ -1858,7 +1865,7 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), done()),
-          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+          withScreen(() => TestingHttp.json({ error: "qemu: closed" }, 502)),
         );
         const { stopped: outcome } = yield* run(
           config(),
@@ -1878,7 +1885,7 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), done()),
-          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+          withScreen(() => TestingHttp.json({ error: "qemu: closed" }, 502)),
         );
         yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
         expect(modelRequests(recorder.requests)).toHaveLength(2);
@@ -1902,7 +1909,7 @@ describe("driver loop", () => {
         answers(getImage(), getImage(), done()),
         withScreen(() => {
           shots += 1;
-          return shots === 1 ? screenshot() : FakeHttp.json({ error: "exchange failed" }, 502);
+          return shots === 1 ? screenshot() : TestingHttp.json({ error: "exchange failed" }, 502);
         }),
       );
       yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
@@ -1917,7 +1924,7 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), done()),
-          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+          withScreen(() => TestingHttp.json({ error: "qemu: closed" }, 502)),
         );
         const log: Array<string> = [];
         const { stopped: outcome, spawner } = yield* run(
@@ -1951,7 +1958,7 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), getImage(), getImage()),
-          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+          withScreen(() => TestingHttp.json({ error: "qemu: closed" }, 502)),
         );
         const log: Array<string> = [];
         const { stopped: outcome, spawner } = yield* run(
@@ -1983,7 +1990,7 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           answers(getImage(), notACall()),
-          withScreen(() => FakeHttp.json({ error: "qemu: closed" }, 502)),
+          withScreen(() => TestingHttp.json({ error: "qemu: closed" }, 502)),
         );
         const log: Array<string> = [];
         const { stopped: outcome, spawner } = yield* run(
@@ -2012,11 +2019,11 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(answers(getImage(), getImage(), getImage()), (url) => {
           if (url.pathname === "/start") {
-            return FakeHttp.json({ id: SESSION });
+            return TestingHttp.json({ id: SESSION });
           }
           return url.pathname === "/image"
-            ? FakeHttp.json({ error: `unknown session "${SESSION}"` }, 404)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ error: `unknown session "${SESSION}"` }, 404)
+            : TestingHttp.json({ ok: "true" });
         });
         const log: Array<string> = [];
         const error = yield* Effect.flip(
@@ -2046,11 +2053,11 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(answers(getImage()), (url) => {
           if (url.pathname === "/start") {
-            return FakeHttp.json({ id: SESSION });
+            return TestingHttp.json({ id: SESSION });
           }
           return url.pathname === "/intent/start"
-            ? FakeHttp.json({ error: `unknown session "${SESSION}"` }, 404)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ error: `unknown session "${SESSION}"` }, 404)
+            : TestingHttp.json({ ok: "true" });
         });
         const error = yield* Effect.flip(
           run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
@@ -2070,14 +2077,14 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(answers(getImage(), done()), (url) => {
           if (url.pathname === "/start") {
-            return FakeHttp.json({ id: SESSION });
+            return TestingHttp.json({ id: SESSION });
           }
           if (url.pathname === "/image") {
-            return FakeHttp.json({ error: "exchange failed" }, 502);
+            return TestingHttp.json({ error: "exchange failed" }, 502);
           }
           return url.pathname === "/save"
-            ? FakeHttp.json({ error: "guest did not power off within 2 minutes" }, 500)
-            : FakeHttp.json({ ok: "true" });
+            ? TestingHttp.json({ error: "guest did not power off within 2 minutes" }, 500)
+            : TestingHttp.json({ ok: "true" });
         });
         const log: Array<string> = [];
         const error = yield* Effect.flip(

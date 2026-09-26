@@ -15,7 +15,7 @@ import {
 import * as Client from "@oligarchy/db/client";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import { TestConsole } from "effect/testing";
 import { Command } from "effect/unstable/cli";
 import { HttpServerError } from "effect/unstable/http";
@@ -68,7 +68,7 @@ const CliTestLayer = Layer.mergeAll(
 const MUSE = "openrouter/meta/muse-spark-1.3-contributor";
 const MODELS = { drive: MUSE, diagnose: MUSE, mint: MUSE };
 
-// The server layer and the failure signal the command is built from.
+// The server the command is built from; `serverFailed` is a server error after listen.
 const fakeServer = () => {
   const served: Array<{
     readonly port: number;
@@ -78,13 +78,11 @@ const fakeServer = () => {
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: AutomationServerCommand.AutomationServer<never> = {
     serve: (port, models) =>
-      Layer.effectDiscard(
-        Effect.gen(function* () {
-          served.push({ port, models });
-          yield* Deferred.succeed(listening, undefined);
-        }),
-      ),
-    serverFailed,
+      Effect.gen(function* () {
+        served.push({ port, models });
+        yield* Deferred.succeed(listening, undefined);
+        return yield* Deferred.await(serverFailed);
+      }),
   };
   return { served, listening, serverFailed, server };
 };
@@ -254,7 +252,7 @@ describe("automation server command startup failures", () => {
       const fake = fakeServer();
       const failing: AutomationServerCommand.AutomationServer<never> = {
         ...fake.server,
-        serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
+        serve: () => Effect.fail(new HttpServerError.ServeError({ cause })),
       };
       const log = FakeLog.fakeLog();
       const error = yield* Effect.flip(run(failing, ["--port", "54321"], log));

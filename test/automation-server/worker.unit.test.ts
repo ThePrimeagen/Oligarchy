@@ -20,6 +20,7 @@ import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingLinear from "@oligarchy/testing/linear";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as Errors from "../../src/shared/errors.ts";
@@ -31,7 +32,6 @@ import * as Sessions from "../../src/automation-client/sessions.ts";
 import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Worker from "../../src/automation-server/worker.ts";
 import * as FakeFs from "../support/fake-fs.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeSpawner from "../support/fake-spawner.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
@@ -166,14 +166,14 @@ const closing = (tests: TestingStores.FakeTestStore, status: ResultStatus = "pas
     for (const row of tests.results) {
       row.status = status;
     }
-    return FakeHttp.json({ ok: "true" });
+    return TestingHttp.json({ ok: "true" });
   });
 
 // A client whose /reserve is ok and whose every other request is answered by `respond`.
 const reserving =
-  (respond: FakeHttp.Respond): FakeHttp.Respond =>
+  (respond: TestingHttp.Respond): TestingHttp.Respond =>
   (request, url) =>
-    url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : respond(request, url);
+    url.pathname === "/reserve" ? TestingHttp.json({ ok: "true" }) : respond(request, url);
 
 const erroredMoves = (linear: TestingLinear.FakeLinear) =>
   linear.calls.filter((call) => call.method === "moveToErrored");
@@ -326,12 +326,12 @@ describe("dispatch happy path", () => {
       seedLiveClient(fixed.servers);
       const reserved = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.pathname === "/reserve") {
           return Effect.gen(function* () {
             yield* Deferred.succeed(reserved, undefined);
             yield* Deferred.await(release);
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           });
         }
         return closing(fixed.tests);
@@ -364,15 +364,15 @@ describe("dispatch happy path", () => {
         const releaseReserve = yield* Deferred.make<void>();
         const started = yield* Deferred.make<void>();
         const releaseRun = yield* Deferred.make<void>();
-        const http = FakeHttp.recordRequests((request, url) => {
+        const http = TestingHttp.recordRequests((request, url) => {
           if (url.pathname === "/reserve") {
             if (url.href.startsWith(URL)) {
-              return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+              return TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
             }
             return Effect.gen(function* () {
               yield* Deferred.succeed(reserved, undefined);
               yield* Deferred.await(releaseReserve);
-              return FakeHttp.json({ ok: "true" });
+              return TestingHttp.json({ ok: "true" });
             });
           }
           return Effect.gen(function* () {
@@ -419,7 +419,7 @@ describe("dispatch happy path", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation, "drive");
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "completed");
         expect(fixed.automation.jobs[0]).toMatchObject({
@@ -456,7 +456,7 @@ describe("dispatch happy path", () => {
       seedFacts(fixed.tests, "Lock the screen from the menu.");
       seedJob(fixed.automation, "drive");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       const posted = JSON.parse(http.requests[1]?.body ?? "");
@@ -483,7 +483,7 @@ describe("dispatch happy path", () => {
       seedJob(fixed.automation, "mint");
       fixed.pins.set(RESULT_ID, "http://127.0.0.1:55332");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       const posted = JSON.parse(http.requests[1]?.body ?? "");
@@ -502,7 +502,7 @@ describe("dispatch happy path", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation, "drive");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests, "failed")));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests, "failed")));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs[0]?.status).toBe("completed");
@@ -523,7 +523,7 @@ describe("dispatch happy path", () => {
         seedVerdict(fixed, "passed");
         seedDiagnose(fixed.automation);
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const http = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "succeeded");
         expect(fixed.automation.jobs[0]?.status).toBe("succeeded");
@@ -568,7 +568,7 @@ describe("dispatch happy path", () => {
       seedVerdict(fixed, "passed");
       seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const http = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
       yield* Deferred.await(moving);
       expect(fixed.automation.jobs[0]?.status).toBe("running");
@@ -593,7 +593,7 @@ describe("dispatch happy path", () => {
       const first = seedLiveClient(fixed.servers, URL);
       const second = seedLiveClient(fixed.servers, OTHER_URL);
       const third = seedLiveClient(fixed.servers, THIRD_URL);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settleAll(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs.map((job) => job.serverId)).toEqual([
@@ -628,21 +628,21 @@ describe("dispatch happy path", () => {
       const secondRun = yield* Deferred.make<void>();
       let reserves = 0;
       let runs = 0;
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.pathname === "/reserve") {
           reserves += 1;
           if (reserves === 1) {
             return Effect.gen(function* () {
               yield* Deferred.succeed(firstHeld, undefined);
               yield* Deferred.await(releaseFirst);
-              return FakeHttp.json({ ok: "true" });
+              return TestingHttp.json({ ok: "true" });
             });
           }
           if (reserves === 2) {
             return Effect.gen(function* () {
               yield* Deferred.succeed(secondHeld, undefined);
               yield* Deferred.await(releaseSecond);
-              return FakeHttp.json({ ok: "true" });
+              return TestingHttp.json({ ok: "true" });
             });
           }
           return Effect.die(new Error(`unexpected reserve ${String(reserves)}`));
@@ -693,7 +693,7 @@ describe("dispatch happy path", () => {
       const firstRelease = yield* Deferred.make<void>();
       const secondRelease = yield* Deferred.make<void>();
       let runs = 0;
-      const http = FakeHttp.recordRequests(
+      const http = TestingHttp.recordRequests(
         reserving(() =>
           Effect.gen(function* () {
             const index = runs;
@@ -736,7 +736,7 @@ describe("dispatch happy path", () => {
       const firstRelease = yield* Deferred.make<void>();
       const secondRelease = yield* Deferred.make<void>();
       let runs = 0;
-      const http = FakeHttp.recordRequests(
+      const http = TestingHttp.recordRequests(
         reserving(() =>
           Effect.gen(function* () {
             const index = runs;
@@ -787,7 +787,7 @@ describe("dispatch happy path", () => {
       seedLiveClient(fixed.servers);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests(
+      const http = TestingHttp.recordRequests(
         reserving(() =>
           Effect.gen(function* () {
             yield* Deferred.succeed(started, undefined);
@@ -829,7 +829,7 @@ describe("dispatch happy path", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         const clientId = seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
         yield* start(fixed, http.layer);
         yield* Deferred.await(moving);
         expect(fixed.automation.jobs[0]).toMatchObject({
@@ -877,7 +877,7 @@ describe("dispatch happy path", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       const clientId = seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(attempts).toBe(3);
@@ -896,7 +896,7 @@ describe("the harness closes the board", () => {
       seedJob(fixed.automation, "mint");
       fixed.pins.set(RESULT_ID, "http://127.0.0.1:55332");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs[0]).toMatchObject({
@@ -924,7 +924,7 @@ describe("the harness closes the board", () => {
       seedVerdict(fixed, "failed");
       seedDiagnose(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const http = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "succeeded");
       expect(fixed.automation.jobs[0]).toMatchObject({ action: "diagnose", status: "succeeded" });
@@ -947,7 +947,7 @@ describe("a drive that returns with its result still open", () => {
         seedResult(fixed.tests, TICKET, "running");
         seedJob(fixed.automation, "drive");
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const http = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "errored");
         const reason = `driver exited; result ${RESULT_ID} is running`;
@@ -997,7 +997,7 @@ describe("a drive that returns with its result still open", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "errored");
       expect(lookups).toBeGreaterThanOrEqual(2);
@@ -1018,11 +1018,11 @@ describe("a drive that returns with its result still open", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(
+      const http = TestingHttp.recordRequests(
         reserving(() =>
           Effect.sync(() => {
             fixed.tests.results.splice(0, fixed.tests.results.length);
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           }),
         ),
       );
@@ -1047,7 +1047,7 @@ describe("a diagnose is dispatched only after its drive completed", () => {
           seedJob(fixed.automation, "diagnose");
           seedJob(fixed.automation, "drive", RESULT_ID, status);
           seedLiveClient(fixed.servers);
-          const http = FakeHttp.recordRequests(() => Effect.die("nothing is asked of a client"));
+          const http = TestingHttp.recordRequests(() => Effect.die("nothing is asked of a client"));
           const scope = yield* start(fixed, http.layer);
           yield* settle(fixed.automation.jobs, "aborted");
           expect(fixed.automation.jobs[0]).toMatchObject({
@@ -1071,7 +1071,7 @@ describe("a diagnose is dispatched only after its drive completed", () => {
       seedJob(fixed.automation, "diagnose");
       seedJob(fixed.automation, "drive");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(fixed.automation.jobs.map((job) => [job.action, job.status])).toEqual([
@@ -1114,9 +1114,9 @@ describe("dispatch unhappy path", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         const clientId = seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests((request, url) => {
+        const http = TestingHttp.recordRequests((request, url) => {
           if (url.pathname === "/reserve" || url.pathname === "/abort") {
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           }
           return closing(fixed.tests);
         });
@@ -1178,7 +1178,7 @@ describe("dispatch unhappy path", () => {
         seedResult(fixed.tests);
         seedDiagnose(fixed.automation);
         const clientId = seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const http = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "errored");
         expect(attempts).toBe(3);
@@ -1213,9 +1213,9 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
       const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
-      const http = FakeHttp.recordRequests((request, url) =>
+      const http = TestingHttp.recordRequests((request, url) =>
         url.pathname === "/reserve"
-          ? FakeHttp.json({ ok: "true" })
+          ? TestingHttp.json({ ok: "true" })
           : Effect.fail(
               new HttpClientError.HttpClientError({
                 reason: new HttpClientError.TransportError({ request, cause }),
@@ -1244,8 +1244,8 @@ describe("dispatch unhappy path", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(
-          reserving(() => FakeHttp.json({ error: "opencode exited 1" }, 500)),
+        const http = TestingHttp.recordRequests(
+          reserving(() => TestingHttp.json({ error: "opencode exited 1" }, 500)),
         );
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "errored");
@@ -1270,8 +1270,8 @@ describe("dispatch unhappy path", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(
-          reserving(() => FakeHttp.json({ error: "run aborted" }, 409)),
+        const http = TestingHttp.recordRequests(
+          reserving(() => TestingHttp.json({ error: "run aborted" }, 409)),
         );
         const scope = yield* start(fixed, http.layer);
         yield* eventually(() => sentTo(http, "/run").length === 1, "the drive running");
@@ -1292,7 +1292,7 @@ describe("dispatch unhappy path", () => {
       const fixed = harness();
       seedResult(fixed.tests);
       seedJob(fixed.automation);
-      yield* start(fixed, FakeHttp.die);
+      yield* start(fixed, TestingHttp.die);
       yield* Effect.yieldNow;
       expect(fixed.automation.jobs[0]?.status).toBe("pending");
       expect(FakeLog.texts(fixed.log)).toEqual([]);
@@ -1306,7 +1306,7 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       fixed.servers.servers.push({ id: crypto.randomUUID(), url: URL, name: null, type: "qemu" });
       fixed.servers.heartbeats.push({ url: URL, type: "qemu", name: "garage", stats: STATS });
-      yield* start(fixed, FakeHttp.die);
+      yield* start(fixed, TestingHttp.die);
       yield* Effect.yieldNow;
       expect(fixed.automation.jobs[0]?.status).toBe("pending");
     }),
@@ -1316,7 +1316,7 @@ describe("dispatch unhappy path", () => {
     Effect.gen(function* () {
       const fixed = harness();
       seedLiveClient(fixed.servers);
-      yield* start(fixed, FakeHttp.die);
+      yield* start(fixed, TestingHttp.die);
       yield* Effect.yieldNow;
       expect(fixed.automation.jobs).toEqual([]);
       expect(FakeLog.texts(fixed.log)).toEqual([]);
@@ -1330,7 +1330,7 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.respondWith((request) =>
+      const http = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({ request, cause }),
@@ -1376,7 +1376,7 @@ describe("dispatch unhappy path", () => {
         const fs = FileSystem.layerNoop({
           readFileString: (path) => Effect.fail(FakeFs.permissionDenied("open", path)),
         });
-        yield* start(fixed, FakeHttp.die, fs);
+        yield* start(fixed, TestingHttp.die, fs);
         yield* settle(fixed.automation.jobs, "errored");
         expect(fixed.automation.jobs[0]?.status).toBe("errored");
         expect(fixed.automation.jobs[0]?.reason).toMatch(/^prompt:/);
@@ -1392,7 +1392,7 @@ describe("dispatch unhappy path", () => {
       seedResult(fixed.tests, null);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
-      yield* start(fixed, FakeHttp.die);
+      yield* start(fixed, TestingHttp.die);
       yield* settle(fixed.automation.jobs, "errored");
       expect(fixed.automation.jobs[0]).toMatchObject({
         status: "errored",
@@ -1411,7 +1411,7 @@ describe("dispatch unhappy path", () => {
       seedLiveClient(fixed.servers);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests(
+      const http = TestingHttp.recordRequests(
         reserving(() =>
           Effect.gen(function* () {
             yield* Deferred.succeed(started, undefined);
@@ -1454,8 +1454,8 @@ describe("dispatch unhappy path", () => {
         id: job.id,
         createdAt: job.createdAt,
       }));
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
+      const http = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
       );
       yield* start(fixed, http.layer);
       for (let i = 0; i < 200; i++) {
@@ -1506,17 +1506,17 @@ describe("dispatch unhappy path", () => {
         const held = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
         let reserves = 0;
-        const http = FakeHttp.recordRequests((request, url) => {
+        const http = TestingHttp.recordRequests((request, url) => {
           if (url.pathname === "/reserve") {
             reserves += 1;
             if (reserves === 1) {
               return Effect.gen(function* () {
                 yield* Deferred.succeed(held, undefined);
                 yield* Deferred.await(release);
-                return FakeHttp.json({ error: "opencode refused" }, 500);
+                return TestingHttp.json({ error: "opencode refused" }, 500);
               });
             }
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           }
           return closing(fixed.tests);
         });
@@ -1550,12 +1550,12 @@ describe("dispatch unhappy path", () => {
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       let reserves = 0;
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.pathname === "/reserve") {
           reserves += 1;
           return reserves === 1
-            ? FakeHttp.json({ ok: "true" })
-            : FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+            ? TestingHttp.json({ ok: "true" })
+            : TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
         }
         return Effect.gen(function* () {
           yield* Deferred.succeed(started, undefined);
@@ -1598,9 +1598,9 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       const first = seedLiveClient(fixed.servers);
       const second = seedLiveClient(fixed.servers, OTHER_URL);
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.pathname === "/reserve" && url.href.startsWith(URL)) {
-          return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+          return TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
         }
         return reserving(() => closing(fixed.tests))(request, url);
       });
@@ -1628,9 +1628,9 @@ describe("dispatch unhappy path", () => {
         seedLiveClient(fixed.servers, URL);
         const second = seedLiveClient(fixed.servers, OTHER_URL);
         const third = seedLiveClient(fixed.servers, THIRD_URL);
-        const http = FakeHttp.recordRequests((request, url) => {
+        const http = TestingHttp.recordRequests((request, url) => {
           if (url.pathname === "/reserve" && url.href.startsWith(URL)) {
-            return FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
+            return TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503);
           }
           return reserving(() => closing(fixed.tests))(request, url);
         });
@@ -1675,8 +1675,8 @@ describe("dispatch unhappy path", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
+      const http = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
       );
       yield* start(fixed, http.layer);
       for (let i = 0; i < 200; i++) {
@@ -1704,8 +1704,8 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
       seedLiveClient(fixed.servers, OTHER_URL);
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
+      const http = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
       );
       yield* start(fixed, http.layer);
       for (let i = 0; i < 200; i++) {
@@ -1739,7 +1739,7 @@ describe("dispatch unhappy path", () => {
       const first = seedLiveClient(fixed.servers);
       const second = seedLiveClient(fixed.servers, OTHER_URL);
       const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.href.startsWith(URL)) {
           return Effect.fail(
             new HttpClientError.HttpClientError({
@@ -1777,7 +1777,7 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
       seedLiveClient(fixed.servers, OTHER_URL);
-      const http = FakeHttp.recordRequests(() => FakeHttp.json({ nope: true }));
+      const http = TestingHttp.recordRequests(() => TestingHttp.json({ nope: true }));
       yield* start(fixed, http.layer);
       for (let i = 0; i < 200; i++) {
         if (sentryErrors(fixed.log).length >= 2) {
@@ -1816,16 +1816,16 @@ describe("dispatch unhappy path", () => {
       seedLiveClient(fixed.servers);
       const reserved = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.pathname === "/reserve") {
           return Effect.gen(function* () {
             yield* Deferred.succeed(reserved, undefined);
             yield* Deferred.await(release);
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           });
         }
         if (url.pathname === "/abort") {
-          return FakeHttp.json({ ok: "true" });
+          return TestingHttp.json({ ok: "true" });
         }
         return closing(fixed.tests);
       });
@@ -1895,7 +1895,7 @@ describe("dispatch unhappy path", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       const clientId = seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(attempts).toBe(3);
@@ -1948,7 +1948,7 @@ describe("dispatch unhappy path", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         const clientId = seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "completed");
         expect(attempts).toBeGreaterThan(1);
@@ -1976,9 +1976,9 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
       const aborting = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests((request, url) => {
+      const http = TestingHttp.recordRequests((request, url) => {
         if (url.pathname === "/reserve") {
-          return FakeHttp.json({ ok: "true" });
+          return TestingHttp.json({ ok: "true" });
         }
         return Deferred.succeed(aborting, undefined).pipe(Effect.andThen(Effect.never));
       });
@@ -2018,12 +2018,12 @@ describe("dispatch unhappy path", () => {
         const fixed = harness(TestingLinear.fakeLinear(), automation);
         seedPair(fixed);
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests((request, url) => {
+        const http = TestingHttp.recordRequests((request, url) => {
           if (url.pathname === "/reserve") {
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           }
           if (url.pathname === "/abort") {
-            return FakeHttp.json({ ok: "true" });
+            return TestingHttp.json({ ok: "true" });
           }
           return closing(fixed.tests);
         });
@@ -2108,9 +2108,9 @@ describe("dispatch unhappy path", () => {
       const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedPair(fixed);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests((request, url) =>
+      const http = TestingHttp.recordRequests((request, url) =>
         url.pathname === "/abort" || url.pathname === "/reserve"
-          ? FakeHttp.json({ ok: "true" })
+          ? TestingHttp.json({ ok: "true" })
           : closing(fixed.tests),
       );
       yield* start(fixed, http.layer);
@@ -2158,9 +2158,9 @@ describe("dispatch unhappy path", () => {
       const fixed = harness(TestingLinear.fakeLinear(), automation);
       seedPair(fixed);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests((request, url) =>
+      const http = TestingHttp.recordRequests((request, url) =>
         url.pathname === "/abort" || url.pathname === "/reserve"
-          ? FakeHttp.json({ ok: "true" })
+          ? TestingHttp.json({ ok: "true" })
           : closing(fixed.tests),
       );
       yield* start(fixed, http.layer);
@@ -2218,8 +2218,8 @@ describe("dispatch unhappy path", () => {
       seedJob(fixed.automation, "mint", RESULT_B);
       fixed.pins.set(RESULT_B, "http://127.0.0.1:55332");
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
+      const http = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
       );
       yield* start(fixed, http.layer);
       for (let i = 0; i < 200; i++) {
@@ -2250,7 +2250,7 @@ describe("dispatch unhappy path", () => {
       seedResult(fixed.tests, TICKET, "pending", RESULT_ID);
       seedJob(fixed.automation, "mint", RESULT_ID);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const http = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "errored");
       expect(http.requests).toEqual([]);
@@ -2296,7 +2296,7 @@ const SHUTTING_DOWN = "automation server shutting down";
 const JOB_NOT_FOUND = `JobNotFound: Job had "running" status but 404'd.`;
 
 // The urls of the requests sent to one path, in the order they were sent.
-const sentTo = (http: FakeHttp.Recorder, path: string) =>
+const sentTo = (http: TestingHttp.Recorder, path: string) =>
   http.requests.map((request) => request.url).filter((url) => url.endsWith(path));
 
 describe("a running job left by the last automation server", () => {
@@ -2310,9 +2310,9 @@ describe("a running job left by the last automation server", () => {
         const clientId = seedLiveClient(fixed.servers);
         seedRunning(fixed.automation, clientId);
         seedJob(fixed.automation, "drive", RESULT_B);
-        const http = FakeHttp.recordRequests((request, url) =>
+        const http = TestingHttp.recordRequests((request, url) =>
           url.pathname === "/abort" || url.pathname === "/reserve"
-            ? FakeHttp.json({ ok: "true" })
+            ? TestingHttp.json({ ok: "true" })
             : closing(fixed.tests),
         );
         yield* start(fixed, http.layer);
@@ -2355,8 +2355,8 @@ describe("a running job left by the last automation server", () => {
         seedResult(fixed.tests);
         seedRunning(fixed.automation, seedLiveClient(fixed.servers));
         const id = fixed.automation.jobs[0]?.id;
-        const http = FakeHttp.recordRequests(() =>
-          FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+        const http = TestingHttp.recordRequests(() =>
+          TestingHttp.json({ error: `unknown session "${TICKET}"` }, 404),
         );
         yield* start(fixed, http.layer);
         yield* settle(fixed.automation.jobs, "errored");
@@ -2395,7 +2395,7 @@ describe("a running job left by the last automation server", () => {
         seedResult(fixed.tests);
         seedRunning(fixed.automation, seedLiveClient(fixed.servers));
         const cause = new Error("connect ECONNREFUSED 127.0.0.1:55333");
-        const http = FakeHttp.recordRequests((request) =>
+        const http = TestingHttp.recordRequests((request) =>
           Effect.fail(
             new HttpClientError.HttpClientError({
               reason: new HttpClientError.TransportError({ request, cause }),
@@ -2425,7 +2425,7 @@ describe("a running job left by the last automation server", () => {
       seedResult(fixed.tests);
       seedRunning(fixed.automation, seedLiveClient(fixed.servers));
       const asked = yield* Deferred.make<void>();
-      const http = FakeHttp.recordRequests(() =>
+      const http = TestingHttp.recordRequests(() =>
         Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
       );
       yield* start(fixed, http.layer);
@@ -2457,7 +2457,7 @@ describe("a running job left by the last automation server", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+      const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
       yield* start(fixed, http.layer);
       yield* settle(fixed.automation.jobs, "completed");
       expect(sentryErrors(fixed.log)).toEqual([
@@ -2495,7 +2495,7 @@ describe("a running job left by the last automation server", () => {
       seedRunning(fixed.automation, null, RESULT_ID);
       seedRunning(fixed.automation, null, RESULT_B);
       const id = fixed.automation.jobs[0]?.id;
-      yield* start(fixed, FakeHttp.die);
+      yield* start(fixed, TestingHttp.die);
       yield* settle(fixed.automation.jobs, "errored");
       yield* eventually(() => moved(fixed.linear).length > 0, "the next job moved");
       expect(fixed.automation.jobs.map((job) => job.status)).toEqual(["running", "errored"]);
@@ -2538,7 +2538,7 @@ describe("a running job left by the last automation server", () => {
       );
       seedResult(fixed.tests);
       seedRunning(fixed.automation, null);
-      const scope = yield* start(fixed, FakeHttp.die);
+      const scope = yield* start(fixed, TestingHttp.die);
       yield* Deferred.await(moving);
       const shutdown = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
       for (let i = 0; i < 100; i++) {
@@ -2555,7 +2555,7 @@ describe("a running job left by the last automation server", () => {
 
 // Two drives on two automation clients, each parked on /run, which a shutdown does not end:
 // ./driver outlives a dropped /run.
-const twoRunning = (fixed: Harness, http: FakeHttp.Recorder) =>
+const twoRunning = (fixed: Harness, http: TestingHttp.Recorder) =>
   Effect.gen(function* () {
     seedPair(fixed);
     seedLiveClient(fixed.servers);
@@ -2583,7 +2583,7 @@ const wrapped = (
 
 // Every request but /abort waits forever; /abort is ok.
 const stoppable = reserving((_request, url) =>
-  url.pathname === "/abort" ? FakeHttp.json({ ok: "true" }) : Effect.never,
+  url.pathname === "/abort" ? TestingHttp.json({ ok: "true" }) : Effect.never,
 );
 
 describe("a shutdown with drives running", () => {
@@ -2606,7 +2606,7 @@ describe("a shutdown with drives running", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(stoppable);
+        const http = TestingHttp.recordRequests(stoppable);
         const scope = yield* start(fixed, http.layer);
         yield* Deferred.await(writing);
         const shutdown = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
@@ -2637,7 +2637,7 @@ describe("a shutdown with drives running", () => {
       seedResult(fixed.tests);
       seedJob(fixed.automation);
       seedLiveClient(fixed.servers);
-      const http = FakeHttp.recordRequests(stoppable);
+      const http = TestingHttp.recordRequests(stoppable);
       const scope = yield* start(fixed, http.layer);
       yield* eventually(() => sentTo(http, "/run").length === 1, "the drive running");
       let closed = false;
@@ -2666,10 +2666,10 @@ describe("a shutdown with drives running", () => {
       Effect.gen(function* () {
         const fixed = harness();
         const stopped = yield* Deferred.make<void>();
-        const http = FakeHttp.recordRequests(
+        const http = TestingHttp.recordRequests(
           reserving((_request, url) =>
             url.pathname === "/abort"
-              ? Deferred.await(stopped).pipe(Effect.as(FakeHttp.json({ ok: "true" })))
+              ? Deferred.await(stopped).pipe(Effect.as(TestingHttp.json({ ok: "true" })))
               : Effect.never,
           ),
         );
@@ -2718,13 +2718,13 @@ describe("a shutdown with drives running", () => {
     () =>
       Effect.gen(function* () {
         const fixed = harness();
-        const http = FakeHttp.recordRequests(
+        const http = TestingHttp.recordRequests(
           reserving((_request, url) => {
             if (url.pathname !== "/abort") {
               return Effect.never;
             }
             return url.href.startsWith(URL)
-              ? FakeHttp.json({ error: "kill EPERM" }, 500)
+              ? TestingHttp.json({ error: "kill EPERM" }, 500)
               : Effect.never;
           }),
         );
@@ -2779,10 +2779,10 @@ describe("a shutdown with drives running", () => {
         seedJob(fixed.automation);
         seedLiveClient(fixed.servers);
         const id = fixed.automation.jobs[0]?.id;
-        const http = FakeHttp.recordRequests(
+        const http = TestingHttp.recordRequests(
           reserving((_request, url) =>
             url.pathname === "/abort"
-              ? FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404)
+              ? TestingHttp.json({ error: `unknown session "${TICKET}"` }, 404)
               : Effect.never,
           ),
         );
@@ -2838,7 +2838,7 @@ describe("a shutdown with drives running", () => {
         seedResult(fixed.tests);
         seedJob(fixed.automation);
         seedLiveClient(fixed.servers);
-        const http = FakeHttp.recordRequests(reserving(() => closing(fixed.tests)));
+        const http = TestingHttp.recordRequests(reserving(() => closing(fixed.tests)));
         const scope = yield* start(fixed, http.layer);
         yield* Deferred.await(judging);
         const shutdown = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
@@ -2928,7 +2928,7 @@ const sixJobClient = (script: FakeSpawner.Script = () => ({})) =>
     const client: SixJobClient = {
       spawner,
       sessions,
-      http: FakeHttp.serving(
+      http: TestingHttp.serving(
         Effect.provideService(app, Sessions.Sessions, sessions).pipe(Effect.provide(clientConfig)),
       ),
     };
