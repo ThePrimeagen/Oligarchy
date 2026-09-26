@@ -6,7 +6,9 @@ workspace and `@oligarchy/routes`), so is phase 1 ([PR
 (`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
 (`@oligarchy/db`), phase 6 (`@oligarchy/observability`), phase 7 (`@oligarchy/linear`), phase 8
 (`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`), phase 9 (`@oligarchy/fleet`) and
-phase 10 (`@oligarchy/http`) and phase 11 (the seven apps under `apps/`). The rest of this file is the plan for
+phase 10 (`@oligarchy/http`), phase 11 (the seven apps under `apps/`) and phase 12
+(`@oligarchy/integration-testing`): every phase of this plan is done. What follows is the plan
+as it was worked, with each phase's decisions beside its checklist. The rest of this file is the plan for
 the remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it
 lands.
 
@@ -525,15 +527,15 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 12: finish integration testing**
 
-- [ ] TEST (move) the remaining integration tests (every one that copies the Postgres template or
+- [x] TEST (move) the remaining integration tests (every one that copies the Postgres template or
       spawns a built process) into `packages/integration-testing/test/`.
-- [ ] TEST (alter) `automation-client.integration.test.ts`: spells the driver's arguments it
+- [x] TEST (alter) `automation-client.integration.test.ts`: spells the driver's arguments it
       starts the child with, instead of importing `Driver.args` from the app.
-- [ ] TEST (alter) `dashboard.integration.test.ts`: imports the Worker entry (`app`,
+- [x] TEST (alter) `dashboard.integration.test.ts`: imports the Worker entry (`app`,
       `scheduled`) from `@oligarchy/dashboard`.
-- [ ] TEST (alter) `test/repo/scripts.unit.test.ts`: the integration package's lane runs one
+- [x] TEST (alter) `test/repo/scripts.unit.test.ts`: the integration package's lane runs one
       worker with the global setup, and the root `test:integration` reaches it.
-- [ ] TEST (new) `test/repo/architecture.unit.test.ts`: no package or app depends on
+- [x] TEST (new) `test/repo/architecture.unit.test.ts`: no package or app depends on
       `@oligarchy/integration-testing`; integration-testing's only app import is the dashboard's
       entry. Unhappy: a second app import, or any dependency on integration-testing, is named.
 
@@ -1038,11 +1040,37 @@ What phase 11 decided that the checklist left open, and what it found:
 
 **Phase 12: finish integration testing**
 
-- [ ] Create `packages/integration-testing` with the container global setup, the template copy
+- [x] Create `packages/integration-testing` with the container global setup, the template copy
       (`postgres.ts`), the loopback stubs (`stub-proxy.ts`) and the one-worker lane.
-- [ ] Move the remaining integration tests. Delete `test/integration/` and the root's integration
+- [x] Move the remaining integration tests. Delete `test/integration/` and the root's integration
       project.
-- [ ] Add `@effect/platform-node` to the catalog if a second package needs it by then.
+- [x] Add `@effect/platform-node` to the catalog if a second package needs it by then.
+
+What phase 12 decided that the checklist left open, and what it found:
+
+- The two alterations (the driver's arguments spelled, the Worker entry imported as
+  `@oligarchy/dashboard/worker`) were made in phase 11, which already refused a root file
+  reaching into `apps/`.
+- `postgres.ts` and `stub-proxy.ts` are the package's own `test/support/`; the global setup and its
+  `ProvidedContext` declaration (`vitest.d.ts`) sit beside its `vitest.config.ts`. The setup finds
+  the migrations from its own file (`../db/drizzle`) instead of the working directory, and the
+  tests reach the wrappers and the repo root one level deeper. viz's test keeps its own
+  `stripAnsi`; `fake-tty.ts` stays with the session REPL's tests.
+- The package has no unit tests, so it has no `test:unit`, and the root's `test:unit` fan-out takes
+  `--if-present`; the scripts test holds every other workspace to its unit lane, and this one to
+  `test:integration`, which runs one worker behind the global setup. The root has no integration
+  tests: its `test:integration` is the fan-out alone.
+- It sits on a layer of its own above `testing` (8), since it depends on an app; the architecture
+  test also names any package or app that lists it, and any app import from it but the
+  dashboard's Worker entry, relative paths into `apps/` included. The dashboard test's child still
+  loads `apps/dashboard/src/query.ts` by path inside the process it spawns: a string it hands a
+  child, not an import.
+- It type-checks the dashboard's Worker entry under hono's JSX and loads its text modules, so the
+  root tsconfig and vitest config lost both, and the root lost what only the system tests used
+  (`@testcontainers/postgresql`, `drizzle-orm`, `pg`, `@types/pg`, `@oligarchy/dashboard`), and
+  the two packages nothing in the root imports any more (`@oligarchy/linear`,
+  `@oligarchy/observability`).
+- `@effect/platform-node` was in the catalog before this phase.
 
 ### Verification (every phase)
 

@@ -24,7 +24,7 @@ exist.
   `packages/`), `bun.lock` or the wrapper is newer than either cached file or one is missing, and
   when the build fails prints
   its output and one line saying so on stderr, then runs the sources
-  (`test/integration/client.integration.test.ts` pins all three). `./driver` is that same wrapper
+  (`packages/integration-testing/test/client.integration.test.ts` pins all three). `./driver` is that same wrapper
   for `src/driver/main.ts`, cached under `node_modules/.cache/oligarchy/driver/`. A stack trace from
   the bundle names the bundle; `bun run client` and `bun run driver` run the sources for one that
   names them. `--no-env-file`
@@ -62,8 +62,8 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (the scripts
-  `client`, `driver` and `session`, the repo tests and, until they move, the system tests);
-  `apps/*` are the seven apps (Layout, below), and `packages/*` are the libraries, today ten: `@oligarchy/shared`, the
+  `client`, `driver` and `session`, and the repo tests);
+  `apps/*` are the seven apps (Layout, below), and `packages/*` are the libraries, today eleven: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
   from outside and the runner that installs it (Config and Runtime entry, below),
@@ -74,7 +74,7 @@ exist.
   forgets a dead one (under Layout, below), `@oligarchy/http`, the HTTP contract, serving it
   and calling the proxy (HttpApi server, below), and
   `@oligarchy/testing`, the fakes more than one package's tests use, which nothing but a test
-  may import. A workspace package is source-first: its `exports` map each
+  may import, and `@oligarchy/integration-testing`, the system tests (Tests, below). A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
@@ -87,13 +87,16 @@ exist.
   itself declares: resolution walks up to the root's `node_modules`, where every workspace
   package is linked, so a package importing a workspace package it does not declare, or itself
   by name, resolves all the same. `test/repo/architecture.unit.test.ts` names both. Every
-  `tsconfig.json` extends `tsconfig.base.json`; the root adds only hono's JSX. `check:types` and
-  `test:unit` run the root's lane, then `bun run --workspaces <lane>`, which runs that script in
-  every package and fails when one does; every package has both scripts, on Bun.
-  `test:integration` runs the root's lane, then `bun run --workspaces --if-present
-  test:integration`: a package whose tests need the real OS (a child process, `/proc`) but no
-  container has that lane too, on Bun, and `--if-present` because Bun fails a `--workspaces` run
-  on a package without the script. Lint and format
+  `tsconfig.json` extends `tsconfig.base.json`; the dashboard, viz and the system tests add their
+  JSX runtime. `check:types` runs the root's lane, then `bun run --workspaces check:types`, which
+  runs that script in every package and app and fails when one does. `test:unit` runs the root's
+  lane, then `bun run --workspaces --if-present test:unit`: every package and app has the lane,
+  on Bun, but the system tests, which have only `test:integration`; `--if-present` because Bun
+  fails a `--workspaces` run on a package without the script, and the scripts test holds every
+  other workspace to its unit lane. `test:integration` is `bun run --workspaces --if-present
+  test:integration` alone: the root has no integration tests. A package or app whose tests need
+  the real OS (a child process, `/proc`, the qemu binary) but no container has that lane, on
+  Bun, and so does `@oligarchy/integration-testing`, the system tests. Lint and format
   run once, at the root, over the whole tree.
 - Dependencies run one way. Two files never import each other: oxlint's `import/no-cycle` is on
   as an error and follows package `exports`, so a loop through two packages is caught too. A
@@ -105,7 +108,8 @@ exist.
   `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` and `@oligarchy/linear` at 3,
   `@oligarchy/jobs` and `@oligarchy/observability` at 4, `@oligarchy/fleet` and
   `@oligarchy/http` at 5, the seven apps at 6, so an app depending on another is a same-layer
-  edge, and `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach it). A package missing from the list, an upward
+  edge, `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach it, and
+  `@oligarchy/integration-testing` above that, which nothing may reach). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
@@ -325,8 +329,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `main.ts`, `<domain>.ts`. Tests mirror source names in their own package's or app's `test/`
   (`apps/qemu-server/test/qemu/iso.unit.test.ts` for `apps/qemu-server/src/qemu/iso.ts`), and
   the scripts' under the root's `test/<dir>/`; a test that spawns a built process or needs Docker
-  lives under the root's `test/integration/*.integration.test.ts`, one that needs only the real
-  OS (a socket, the qemu binary) in its owner's `*.integration.test.ts` lane.
+  is a system test, in `packages/integration-testing/test/*.integration.test.ts`, and one that
+  needs only the real OS (a socket, the qemu binary) is in its owner's `*.integration.test.ts`
+  lane.
 - Import relative modules as namespaces with the `.ts` extension
   (`import * as Sessions from "./sessions.ts"`, `import type * as Domain from "./domain.ts"`);
   side-effect and asset imports are exempt. No barrels, no re-exports, no `export ... from`.
@@ -408,7 +413,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `makeQemuReverseProxyCommand(server)`, `makeAutomationServerCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
-  appear only in the boundary files and `vitest.global-setup.ts`.
+  appear only in the boundary files and the system tests' global setup.
 - Time comes from `Clock.currentTimeMillis` and `Clock.currentTimeNanos`, never `Date.now()` or
   `setTimeout`, so `TestClock.adjust` drives every timer in a test.
 - No classes except the Effect declaration forms: `Schema.Class`, `Schema.TaggedError`,
@@ -1185,7 +1190,7 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   `location = 'automation'` (and process-wide lines also use `agentId = 'automation'`), while
   durable work remains `automation_jobs`. A fatal path flushes the log, then Sentry, then exits.
 - `Log` installs no Effect `Logger`; `emit` renders, builds the row and offers both at once. `console.*`
-  appears only in `apps/dashboard/**` and `vitest.global-setup.ts`. Test log output through the
+  appears only in `apps/dashboard/**` and the system tests' global setup. Test log output through the
   fake `Log` layer (`@oligarchy/testing/log`) or `Log.layerStdout` with `TestConsole.logLines`.
 
 ## Sentry
@@ -1345,9 +1350,16 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 
 - Tests are written first. No code lands until a set of failing unit tests describes it, and every
   surface has both a happy and an unhappy test. Plan for failures and how they are handled.
-- Vitest only, two lanes: `test/**/*.unit.test.{ts,tsx}` (no I/O beyond local fakes;
-  `bun run test:unit`, part of `check:fast`) and `test/integration/*.integration.test.ts` (spawned
-  executables, sockets, containers, processes; `bun run test:integration`). `passWithNoTests` is
+- Vitest only, two lanes: `*.unit.test.{ts,tsx}` in each package's, app's and the root's
+  `test/` (no I/O beyond local fakes; `bun run test:unit`, part of `check:fast`) and
+  `*.integration.test.ts` (spawned executables, sockets, containers, processes; `bun run
+  test:integration`, which runs every package's lane). The system tests, every one that copies
+  the Postgres template or spawns a built process, are `@oligarchy/integration-testing`
+  (`packages/integration-testing/`): its lane runs one worker, one file at a time, behind the
+  global setup that starts and migrates the container. It drives each app as the process its
+  wrapper starts and imports none of them, but the dashboard, which has no process to spawn: its
+  Worker entry is `@oligarchy/dashboard/worker`. It sits above every layer, and nothing depends on
+  it (`test/repo/architecture.unit.test.ts` checks both). `passWithNoTests` is
   false. Anything that needs `qemu-system-x86_64` is integration and gated on the binary. A
   workspace package's or app's unit tests sit in its own `test/` under its own
   `vitest.config.ts` and import its sources relatively; `bun run test:unit` runs them after the
@@ -1379,7 +1391,7 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   file per seam; a fake a second one uses lives in `@oligarchy/testing` (every store, Linear,
   the HTTP client, the recording `Log`, the error-reporter collector, the child-process spawner,
   the recording file system and captured stdio today). The root's `test/support/` keeps the
-  session REPL's fakes and the system tests' loopback stubs and `postgres.ts`. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
+  session REPL's fakes; the system tests' loopback stubs and `postgres.ts` are their package's. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
   that calls other HTTP servers gets `TestingHttp.recordRequests(respond)` provided to its layer
   alone, so the `HttpClient` in the test's scope still points at the server under test.
 - Assert failures with `Effect.flip` and `expect(error).toMatchObject({ _tag, message })`;
@@ -1397,8 +1409,9 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   and for a server its readiness, its signals, the pid gone and the port refusing, with stdout and
   stderr opened on `/dev/full`. Spawn helpers may be plain functions inside the test file.
 - Postgres tests run against Testcontainers with the real migrations and the seed in
-  `vitest.global-setup.ts`. That database is a template that refuses connections: each
-  integration file works in its own copy, made when it loads `test/support/postgres.ts`, and
+  `packages/integration-testing/vitest.global-setup.ts`. That database is a template that refuses
+  connections: each integration file works in its own copy, made when it loads
+  `packages/integration-testing/test/support/postgres.ts`, and
   reads it from `Postgres.getDbUrl()`
   (`Postgres.describeWithDatabase` skips when it is empty). So no file sees rows another file
   wrote, and the order vitest runs files in cannot change a result. A test still asserts only
@@ -1490,7 +1503,7 @@ change ships (Tests, above).
   `overridden-schema-constructor`, `schema-literal-non-finite`, `outdated-api`,
   `promise-in-effect-success`, `strict-effect-provide`, the last off only for the entries,
   `packages/env/src/run.ts`, `packages/observability/src/instrument.ts`, every package's and
-  app's tests and `vitest.global-setup.ts`); `typescript/no-floating-promises` off for the tests
+  app's tests and the system tests' global setup); `typescript/no-floating-promises` off for the tests
   and the global setup. No `warn` tier.
 - oxfmt: `printWidth` 100, `tabWidth` 2, spaces, semicolons, double quotes, `trailingComma: "all"`,
   final newline; `packages/db/drizzle/**`, `public/**`, `prompts/**`, `**/*.md`, `bun.lock` and
