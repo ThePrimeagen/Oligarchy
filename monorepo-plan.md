@@ -1071,6 +1071,10 @@ What phase 12 decided that the checklist left open, and what it found:
   the two packages nothing in the root imports any more (`@oligarchy/linear`,
   `@oligarchy/observability`).
 - `@effect/platform-node` was in the catalog before this phase.
+- The integration lane, with Docker, QEMU and `OLIGARCHY_REQUIRE_DATABASE=1`, now entirely the
+  packages' lanes: the system tests' 299 passed and the two that fail on `master` too
+  (NEED_FIXING item 11) failed the same way, as before the move; qemu-server's twenty and fleet's
+  one passed.
 
 ### Verification (every phase)
 
@@ -1718,10 +1722,11 @@ decision 1) is decided there.
   `automation-client.integration.test.ts` imports `Driver.args` today to spell the child's
   arguments; it spells them itself. The one exception is the dashboard, which has no process to
   spawn.
-- **Fan-out.** The root `test:integration` runs the root's lane, then
-  `bun run --workspaces --if-present test:integration`: `--workspaces` skips the root package and
-  errors on a workspace without the script, so both halves are needed. `test:unit` and
-  `check:types` already give every package the script and need no `--if-present`.
+- **Fan-out.** The root has no integration tests since phase 12, so its `test:integration` is
+  `bun run --workspaces --if-present test:integration` alone: `--workspaces` errors on a
+  workspace without the script. `test:unit` runs the root's lane, then `bun run --workspaces
+  --if-present test:unit`, for the system tests alone have no unit lane; `check:types` gives every
+  package the script and needs no `--if-present`.
 
 ### The unit-test rule
 

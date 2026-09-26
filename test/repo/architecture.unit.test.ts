@@ -747,10 +747,25 @@ describe("workspace packages", () => {
   });
 
   it("nothing depends on the system tests, and they import no app but the dashboard's Worker entry (happy)", () => {
+    const dir = "packages/integration-testing";
+    const files = [
+      ...filesUnder(`${dir}/test`),
+      ...["vitest.config.ts", "vitest.global-setup.ts", "vitest.d.ts"].map(
+        (file) => `${dir}/${file}`,
+      ),
+    ];
+    const pkg = workspacePackages.find((candidate) => candidate.dir === dir);
+    expect(pkg).toBeDefined();
     expect(
       systemTestProblems(
         workspacePackages,
-        filesUnder("packages/integration-testing/test").map((path) => [path, read(path)] as const),
+        files.map((path) => [path, read(path)] as const),
+      ),
+    ).toEqual([]);
+    // It has no src/, so the package-wide import check reads its tests and setup instead.
+    expect(
+      violationsIn(files, (_, source) =>
+        packageImportProblems(pkg ?? { name: "", dependsOn: [] }, source),
       ),
     ).toEqual([]);
   });

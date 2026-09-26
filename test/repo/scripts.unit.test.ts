@@ -206,7 +206,7 @@ describe("package.json scripts", () => {
 
   // `bun run` hands a node-shebang bin to Node when one is installed; vitest and its forked
   // workers must run on the runtime the wrappers run.
-  it("forces vitest onto bun in both lanes", () => {
+  it("forces vitest onto bun in the root's unit lane", () => {
     expect(scripts["test:unit"]).toMatch(/^bun --bun vitest run /);
   });
 

@@ -1369,7 +1369,7 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   or a fake from `@oligarchy/testing`. A test that needs the real OS but no container (fleet's
   `process.integration.test.ts`, which reads `/proc` and runs `ps`; qemu-server's QEMU process and
   QMP socket) sits beside it as `*.integration.test.ts` under its owner's `integration` project
-  and `test:integration` lane, which the root's `test:integration` reaches after its own.
+  and `test:integration` lane, which the root's `test:integration` reaches.
 - Run every test before anything is pushed to master or merged into it: `bun run check:fast`,
   then the whole integration lane with Docker up, `OLIGARCHY_REQUIRE_DATABASE=1 bun run
   test:integration`, so a database test fails instead of skipping. Never only the tests that look
