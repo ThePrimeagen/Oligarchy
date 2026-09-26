@@ -1,2 +1,2 @@
 #!/bin/sh
-exec bun --no-env-file --preload "$(dirname "$0")/src/viz/preload.ts" "$(dirname "$0")/src/viz/main.ts" "$@"
+exec bun --no-env-file --preload "$(dirname "$0")/apps/viz/src/preload.ts" "$(dirname "$0")/apps/viz/src/main.ts" "$@"

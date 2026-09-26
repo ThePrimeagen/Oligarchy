@@ -35,7 +35,7 @@ touch "$DEST/active"
 [ -f "$DEST/next" ] || echo 1 > "$DEST/next"
 
 # The iso cache names a download after its url with every character a file system could object
-# to replaced by `_` (src/qemu/iso.ts cacheFileName), and records it in manifest.json as
+# to replaced by `_` (apps/qemu-server/src/qemu/iso.ts cacheFileName), and records it in manifest.json as
 # { "<file>": { status: "cached", cachedAt, lastUsedAt } }. A dir holding both is a server that
 # already downloaded the ISO.
 FILE=$(printf '%s' "$ISO" | tr '<>:"/\\|?*' '_________')

@@ -25,7 +25,7 @@ import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as DriverLog from "../../src/driver/log.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as FakeSpawner from "../support/fake-spawner.ts";
+import * as TestingSpawner from "@oligarchy/testing/spawner";
 
 const TOKEN = "super-secret-token";
 const MODEL = "openrouter/test-model";
@@ -178,7 +178,7 @@ const askText = (requests: ReadonlyArray<TestingHttp.Recorded>, index: number): 
 const past = (requests: ReadonlyArray<TestingHttp.Recorded>, index: number): string =>
   reasons(modelRequests(requests)[index]?.body);
 
-type Script = FakeSpawner.Script;
+type Script = TestingSpawner.Script;
 
 const capturingFs = (
   log: Array<string>,
@@ -385,7 +385,7 @@ const run = (
 ) =>
   Effect.gen(function* () {
     const parsed = yield* app;
-    const spawner = FakeSpawner.fakeSpawner(script);
+    const spawner = TestingSpawner.fakeSpawner(script);
     const agentId = options?.agentId ?? "OLI-1";
     const prompt = options?.prompt ?? "Lock the screen.";
     const store = storeFor(
@@ -1081,7 +1081,7 @@ describe("driver loop", () => {
     Effect.gen(function* () {
       const recorder = routed(answers(done()));
       const log: Array<string> = [];
-      const spawner = FakeSpawner.fakeSpawner((_command, args) =>
+      const spawner = TestingSpawner.fakeSpawner((_command, args) =>
         args[0] === "test-results" ? { exitCode: 0 } : {},
       );
       const parsed = yield* config();
@@ -1352,7 +1352,7 @@ describe("driver loop", () => {
       // so the model is never asked, and the harness still stops the session it opened.
       const recorder = routed(answers(done()));
       const log: Array<string> = [];
-      const spawner = FakeSpawner.fakeSpawner((_command, args) =>
+      const spawner = TestingSpawner.fakeSpawner((_command, args) =>
         args[0] === "test-results" ? { exitCode: 0 } : {},
       );
       const parsed = yield* config({

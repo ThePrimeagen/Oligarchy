@@ -40,16 +40,25 @@
     {
       "files": [
         "src/**/main.ts",
+        "apps/*/src/main.ts",
         "packages/env/src/run.ts",
         "packages/observability/src/instrument.ts",
         "test/**/*.ts",
         "packages/*/test/**/*.ts",
+        "apps/*/test/**/*.ts",
+        "apps/*/test/**/*.tsx",
         "vitest.global-setup.ts"
       ],
       "rules": { "effecttsgo/strict-effect-provide": "off" }
     },
     {
-      "files": ["test/**/*.ts", "packages/*/test/**/*.ts", "vitest.global-setup.ts"],
+      "files": [
+        "test/**/*.ts",
+        "packages/*/test/**/*.ts",
+        "apps/*/test/**/*.ts",
+        "apps/*/test/**/*.tsx",
+        "vitest.global-setup.ts"
+      ],
       "rules": { "typescript/no-floating-promises": "off" }
     }
   ],

@@ -8,6 +8,57 @@
         "@effect/platform-node": "catalog:",
         "@oligarchy/db": "workspace:*",
         "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "effect": "catalog:",
+        "pg": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/tsgo": "0.41.0",
+        "@effect/vitest": "catalog:",
+        "@oligarchy/dashboard": "workspace:*",
+        "@oligarchy/testing": "workspace:*",
+        "@testcontainers/postgresql": "^11.14.0",
+        "@types/node": "catalog:",
+        "@types/pg": "catalog:",
+        "oxfmt": "0.66.0",
+        "oxlint": "1.81.0",
+        "oxlint-tsgolint": "7.0.2001",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "apps/automation-client": {
+      "name": "@oligarchy/automation-client",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/fleet": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "apps/automation-server": {
+      "name": "@oligarchy/automation-server",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
         "@oligarchy/fleet": "workspace:*",
         "@oligarchy/http": "workspace:*",
         "@oligarchy/jobs": "workspace:*",
@@ -15,32 +66,134 @@
         "@oligarchy/log": "workspace:*",
         "@oligarchy/observability": "workspace:*",
         "@oligarchy/shared": "workspace:*",
-        "@opentui/core": "0.5.11",
-        "@opentui/solid": "0.5.11",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "apps/ctrl": {
+      "name": "@oligarchy/ctrl",
+      "bin": {
+        "ctrl": "src/main.ts",
+      },
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/jobs": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "apps/dashboard": {
+      "name": "@oligarchy/dashboard",
+      "dependencies": {
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/jobs": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
         "@sentry/cloudflare": "catalog:",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "hono": "^4.13.5",
         "pg": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@types/node": "catalog:",
+        "@types/pg": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+        "wrangler": "^4.127.1",
+      },
+    },
+    "apps/qemu-reverse-proxy": {
+      "name": "@oligarchy/qemu-reverse-proxy",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/fleet": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/jobs": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "apps/qemu-server": {
+      "name": "@oligarchy/qemu-server",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/fleet": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/observability": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "apps/viz": {
+      "name": "@oligarchy/viz",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "@opentui/core": "0.5.11",
+        "@opentui/solid": "0.5.11",
+        "effect": "catalog:",
         "solid-js": "1.9.12",
       },
       "devDependencies": {
         "@babel/core": "7.28.0",
         "@babel/preset-typescript": "7.27.1",
-        "@effect/tsgo": "0.41.0",
         "@effect/vitest": "catalog:",
         "@oligarchy/testing": "workspace:*",
-        "@testcontainers/postgresql": "^11.14.0",
         "@types/babel__core": "7.20.5",
         "@types/node": "catalog:",
-        "@types/pg": "catalog:",
         "babel-preset-solid": "1.9.12",
-        "oxfmt": "0.66.0",
-        "oxlint": "1.81.0",
-        "oxlint-tsgolint": "7.0.2001",
         "typescript": "catalog:",
         "vitest": "catalog:",
-        "wrangler": "^4.127.1",
       },
     },
     "packages/db": {
@@ -188,9 +341,11 @@
       "dependencies": {
         "@oligarchy/db": "workspace:*",
         "@oligarchy/linear": "workspace:*",
+        "@oligarchy/log": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
+        "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
         "@types/node": "catalog:",
         "typescript": "catalog:",
@@ -465,6 +620,14 @@
 
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4", "", { "os": "win32", "cpu": "x64" }, "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ=="],
 
+    "@oligarchy/automation-client": ["@oligarchy/automation-client@workspace:apps/automation-client"],
+
+    "@oligarchy/automation-server": ["@oligarchy/automation-server@workspace:apps/automation-server"],
+
+    "@oligarchy/ctrl": ["@oligarchy/ctrl@workspace:apps/ctrl"],
+
+    "@oligarchy/dashboard": ["@oligarchy/dashboard@workspace:apps/dashboard"],
+
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
@@ -481,9 +644,15 @@
 
     "@oligarchy/observability": ["@oligarchy/observability@workspace:packages/observability"],
 
+    "@oligarchy/qemu-reverse-proxy": ["@oligarchy/qemu-reverse-proxy@workspace:apps/qemu-reverse-proxy"],
+
+    "@oligarchy/qemu-server": ["@oligarchy/qemu-server@workspace:apps/qemu-server"],
+
     "@oligarchy/shared": ["@oligarchy/shared@workspace:packages/shared"],
 
     "@oligarchy/testing": ["@oligarchy/testing@workspace:packages/testing"],
+
+    "@oligarchy/viz": ["@oligarchy/viz@workspace:apps/viz"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
@@ -1307,7 +1476,7 @@
 
     "wrappy": ["wrappy@1.0.2", "", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
 
-    "ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
+    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
 
     "xtend": ["xtend@4.0.2", "", {}, "sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ=="],
 
@@ -1328,8 +1497,6 @@
     "zip-stream": ["zip-stream@6.0.1", "", { "dependencies": { "archiver-utils": "^5.0.0", "compress-commons": "^6.0.2", "readable-stream": "^4.0.0" } }, "sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA=="],
 
     "@cspotcode/source-map-support/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
-
-    "@effect/platform-node-shared/ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
 
     "@esbuild-kit/core-utils/esbuild": ["esbuild@0.18.20", "", { "optionalDependencies": { "@esbuild/android-arm": "0.18.20", "@esbuild/android-arm64": "0.18.20", "@esbuild/android-x64": "0.18.20", "@esbuild/darwin-arm64": "0.18.20", "@esbuild/darwin-x64": "0.18.20", "@esbuild/freebsd-arm64": "0.18.20", "@esbuild/freebsd-x64": "0.18.20", "@esbuild/linux-arm": "0.18.20", "@esbuild/linux-arm64": "0.18.20", "@esbuild/linux-ia32": "0.18.20", "@esbuild/linux-loong64": "0.18.20", "@esbuild/linux-mips64el": "0.18.20", "@esbuild/linux-ppc64": "0.18.20", "@esbuild/linux-riscv64": "0.18.20", "@esbuild/linux-s390x": "0.18.20", "@esbuild/linux-x64": "0.18.20", "@esbuild/netbsd-x64": "0.18.20", "@esbuild/openbsd-x64": "0.18.20", "@esbuild/sunos-x64": "0.18.20", "@esbuild/win32-arm64": "0.18.20", "@esbuild/win32-ia32": "0.18.20", "@esbuild/win32-x64": "0.18.20" }, "bin": "bin/esbuild" }, "sha512-ceqxoedUrcayh7Y7ZX6NdbbDzGROiyVBgC4PriJThBKSVPWnnFHZAkfI1lJT8QFkOwH4qOS2SJkS4wvpGl8BpA=="],
 
@@ -1366,6 +1533,8 @@
     "lazystream/readable-stream": ["readable-stream@2.3.8", "", { "dependencies": { "core-util-is": "~1.0.0", "inherits": "~2.0.3", "isarray": "~1.0.0", "process-nextick-args": "~2.0.0", "safe-buffer": "~5.1.1", "string_decoder": "~1.1.1", "util-deprecate": "~1.0.1" } }, "sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA=="],
 
     "miniflare/undici": ["undici@7.29.0", "", {}, "sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw=="],
+
+    "miniflare/ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
 
     "parse5/entities": ["entities@6.0.1", "", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
 

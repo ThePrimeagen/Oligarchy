@@ -15,6 +15,7 @@ const filesUnder = (dir: string): ReadonlyArray<string> =>
 
 const PackageJson = Schema.Struct({
   name: Schema.String,
+  // An app exports nothing, but the dashboard's Worker entry.
   exports: Schema.Record(Schema.String, Schema.String),
   dependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   devDependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
@@ -24,16 +25,21 @@ const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(Package
 const workspaceNames = (deps: Readonly<Record<string, string>> | undefined) =>
   Object.keys(deps ?? {}).filter((dep) => dep.startsWith("@oligarchy/"));
 
-// Each workspace package with the specifiers its exports answer (`./api` is
-// `@oligarchy/http/api`) and the workspace packages its dependencies and devDependencies name.
-const workspacePackages = readdirSync(join(root, "packages"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map(({ name: dir }) => {
+// Each workspace package, a library under packages/ or an app under apps/, with the specifiers
+// its exports answer (`./api` is `@oligarchy/http/api`) and the workspace packages its
+// dependencies and devDependencies name.
+const workspacePackages = ["packages", "apps"]
+  .flatMap((parent) =>
+    readdirSync(join(root, parent), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `${parent}/${entry.name}`),
+  )
+  .map((dir) => {
     const { name, exports, dependencies, devDependencies } = decodePackageJson(
-      read(`packages/${dir}/package.json`),
+      read(`${dir}/package.json`),
     );
     return {
-      dir: `packages/${dir}`,
+      dir,
       name,
       modules: Object.keys(exports).map((key) => `${name}${key.slice(1)}`),
       dependsOn: workspaceNames(dependencies),
@@ -50,7 +56,9 @@ const devPackageGraph: PackageGraph = new Map(
   workspacePackages.map((pkg) => [pkg.name, pkg.devDependsOn]),
 );
 
-// testing's fakes sit above the apps that use them: nothing may depend on it, only dev-depend.
+// The apps sit on 6, so an app depending on another is a same-layer edge. testing's fakes sit
+// above the apps that use them: nothing may depend on it, only dev-depend.
+const APP = 6;
 const TOP = 7;
 
 // The layer each package sits on, numbered as in monorepo-plan.md's picture (shared 0, log 1,
@@ -68,6 +76,13 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/observability": 4,
   "@oligarchy/fleet": 5,
   "@oligarchy/http": 5,
+  "@oligarchy/automation-client": APP,
+  "@oligarchy/automation-server": APP,
+  "@oligarchy/ctrl": APP,
+  "@oligarchy/dashboard": APP,
+  "@oligarchy/qemu-reverse-proxy": APP,
+  "@oligarchy/qemu-server": APP,
+  "@oligarchy/viz": APP,
   "@oligarchy/testing": TOP,
 };
 
@@ -142,10 +157,33 @@ const devEdgeProblems = (graph: PackageGraph, devGraph: PackageGraph): ReadonlyA
   );
 
 // The viz's Solid components are `.tsx`; the same rules bind them, and every workspace package's.
+// The dashboard is a Hono Worker, not Effect, and keeps its own rules.
 const sources = (): ReadonlyArray<string> =>
   ["src", ...workspacePackages.map((pkg) => `${pkg.dir}/src`)]
     .flatMap(filesUnder)
-    .filter((path) => !path.startsWith("src/dashboard/"));
+    .filter((path) => !path.startsWith("apps/dashboard/"));
+
+// An entry: an app's `apps/<name>/src/main.ts` or a script's `src/<name>/main.ts`.
+const isEntry = (path: string): boolean =>
+  /^apps\/[^/]+\/src\/main\.ts$/.test(path) || /^src\/[^/]+\/main\.ts$/.test(path);
+
+// An app is built from packages: its relative imports of code stay inside the app, and it names
+// no other app, so nothing an app holds is another's to reach for, and no app reaches into the
+// root's code. A document is not code: the dashboard bundles the driving agent's guides and the
+// ticket template from the repo root as its ticket text.
+const appImportProblems = (path: string, source: string): ReadonlyArray<string> => {
+  const app = path.split("/").slice(0, 2).join("/");
+  const apps = workspacePackages.filter((pkg) => pkg.dir.startsWith("apps/"));
+  const self = apps.find((pkg) => pkg.dir === app)?.name;
+  return importSpecifiers(source).filter((specifier) =>
+    specifier.startsWith(".")
+      ? /\.tsx?$/.test(specifier) && !join(dirname(path), specifier).startsWith(`${app}/`)
+      : apps.some(
+          (pkg) =>
+            pkg.name !== self && (specifier === pkg.name || specifier.startsWith(`${pkg.name}/`)),
+        ),
+  );
+};
 
 const SHARED_SOURCES = "packages/shared/src/";
 const LOG_SOURCES = "packages/log/src/";
@@ -222,9 +260,9 @@ const workspaceImportProblems = (path: string, source: string): ReadonlyArray<st
     const clause = m[1] ?? "";
     const specifier = m[2] ?? "";
     if (specifier.startsWith(".")) {
-      return join(dirname(path), specifier).startsWith("packages/")
-        ? [`"${specifier}" reaches into packages/`]
-        : [];
+      const target = join(dirname(path), specifier);
+      const into = ["packages/", "apps/"].find((dir) => target.startsWith(dir));
+      return into === undefined ? [] : [`"${specifier}" reaches into ${into}`];
     }
     if (!specifier.startsWith("@oligarchy/")) {
       return [];
@@ -240,10 +278,9 @@ const workspaceImportProblems = (path: string, source: string): ReadonlyArray<st
 // V2-PLAN §1: the only files allowed to import `node:*`, read `process.*`, or use
 // `setTimeout`/`new Promise`/`async`.
 const BOUNDARY_FILES = new Set([
-  "src/qmp/socket.ts",
-  "src/qemu-server/main.ts",
+  "apps/qemu-server/src/qmp/socket.ts",
   "src/session/readline.ts",
-  "src/qemu/qemu.ts",
+  "apps/qemu-server/src/qemu/qemu.ts",
   // The host's cpu times and memory, read from node:os.
   "packages/fleet/src/host.ts",
   // This process's own cpu and pid, and which host it is on: macOS has no /proc to read them.
@@ -258,8 +295,7 @@ const BOUNDARY_FILES = new Set([
   "packages/db/src/client.ts",
 ]);
 
-const isBoundary = (path: string): boolean =>
-  BOUNDARY_FILES.has(path) || /^src\/[^/]+\/main\.ts$/.test(path);
+const isBoundary = (path: string): boolean => BOUNDARY_FILES.has(path) || isEntry(path);
 
 // Non-boundary files allowed exactly one node:* import. Effect's Crypto.digest is one-shot, so a
 // multi-gigabyte ISO is hashed with node:crypto's streaming createHash; Effect has no inflate, so
@@ -267,9 +303,9 @@ const isBoundary = (path: string): boolean =>
 // HMAC-SHA256, which Effect's digest does not compute. The client tool's description is client.md,
 // read once, so the harness does not keep a second copy of the client's commands.
 const NODE_IMPORT_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
-  ["src/qemu/iso.ts", "node:crypto"],
+  ["apps/qemu-server/src/qemu/iso.ts", "node:crypto"],
   ["src/session/image.ts", "node:zlib"],
-  ["src/automation-server/signature.ts", "node:crypto"],
+  ["apps/automation-server/src/signature.ts", "node:crypto"],
   ["src/harness/tools.ts", "node:fs"],
   // The custom harness driving prompt is read once, the same way client.md is.
   ["src/driver/prompt.ts", "node:fs"],
@@ -350,7 +386,7 @@ describe("Effect.run placement", () => {
   it("appears only in main.ts and the three named files", () => {
     expect(
       violations((path, source) => {
-        if (/^src\/[^/]+\/main\.ts$/.test(path)) {
+        if (isEntry(path)) {
           return [];
         }
         const calls = [...stripStringsAndComments(source).matchAll(/\bEffect\.(run\w+)/g)].map(
@@ -370,23 +406,23 @@ describe("Effect.run placement", () => {
       sources().filter((path) => pattern.test(stripStringsAndComments(read(path))));
     expect(calling(/\bNodeRuntime\.runMain\b/)).toEqual(["packages/env/src/run.ts"]);
     expect(calling(/\bRuntime\.makeRunMain\b/)).toEqual(["src/session/main.ts"]);
-    expect(calling(/\bEnv\.run\(/)).toEqual([
-      "src/automation-client/main.ts",
-      "src/automation-server/main.ts",
-      "src/client/main.ts",
-      "src/ctrl/main.ts",
-      "src/driver/main.ts",
-      "src/qemu-reverse-proxy/main.ts",
-      "src/qemu-server/main.ts",
-      "src/viz/main.ts",
+    expect(calling(/\bEnv\.run\(/).toSorted()).toEqual([
+      "apps/automation-client/src/main.ts",
+      "apps/automation-server/src/main.ts",
+      "apps/ctrl/src/main.ts",
+      "apps/qemu-reverse-proxy/src/main.ts",
+      "apps/qemu-server/src/main.ts",
+      "apps/viz/src/main.ts",
       "packages/db/src/migrate.ts",
+      "src/client/main.ts",
+      "src/driver/main.ts",
     ]);
   });
 
   it("never runs an effect through ManagedRuntime or runSync outside main", () => {
     expect(
       violations((path, source) =>
-        /^src\/[^/]+\/main\.ts$/.test(path)
+        isEntry(path)
           ? []
           : [
               ...stripStringsAndComments(source).matchAll(
@@ -634,6 +670,43 @@ describe("workspace packages", () => {
     ]);
   });
 
+  it("an app's sources import packages and its own modules only, never another app or the root (happy)", () => {
+    const apps = workspacePackages.filter((pkg) => pkg.dir.startsWith("apps/"));
+    expect(apps.map((pkg) => pkg.name).toSorted()).toEqual(
+      Object.keys(LAYERS)
+        .filter((name) => LAYERS[name] === APP)
+        .toSorted(),
+    );
+    expect(
+      violationsIn(
+        apps.flatMap((pkg) => filesUnder(`${pkg.dir}/src`)),
+        appImportProblems,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names an app importing another app by name or by path, and the root's src/ (unhappy)", () => {
+    expect(
+      appImportProblems(
+        "apps/qemu-reverse-proxy/src/router.ts",
+        [
+          'import { Effect } from "effect";',
+          'import * as Http from "@oligarchy/http/proxy-client";',
+          'import * as Setup from "./setup.ts";',
+          'import * as Proxy from "@oligarchy/qemu-reverse-proxy/router";',
+          'import * as Handlers from "@oligarchy/qemu-server/handlers";',
+          'import * as Client from "../../automation-server/src/client.ts";',
+          'import * as Image from "../../../src/session/image.ts";',
+          'import clientMd from "../../../client.md";',
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "@oligarchy/qemu-server/handlers",
+      "../../automation-server/src/client.ts",
+      "../../../src/session/image.ts",
+    ]);
+  });
+
   it("every package is in the layer list and depends only on strictly lower layers (happy)", () => {
     expect(packageGraph.size).toBeGreaterThan(0);
     expect(layerProblems(packageGraph, LAYERS)).toEqual([]);
@@ -707,7 +780,7 @@ describe("workspace packages", () => {
     ]);
   });
 
-  it("names a relative path into packages/, a named import and an unexported module (unhappy)", () => {
+  it("names a relative path into packages/ or apps/, a named import and an unexported module (unhappy)", () => {
     expect(
       workspaceImportProblems(
         "src/client/actions.ts",
@@ -716,6 +789,7 @@ describe("workspace packages", () => {
           'import type * as Contract from "@oligarchy/http/contract";',
           'import * as Errors from "../shared/errors.ts";',
           'import * as Errors from "../../packages/http/src/errors.ts";',
+          'import * as Worker from "../../apps/dashboard/src/dashboard.tsx";',
           'import { QemuServerApi } from "@oligarchy/http/api";',
           'import * as Http from "@oligarchy/http";',
           'import * as Source from "@oligarchy/http/src/api.ts";',
@@ -723,6 +797,7 @@ describe("workspace packages", () => {
       ),
     ).toEqual([
       '"../../packages/http/src/errors.ts" reaches into packages/',
+      '"../../apps/dashboard/src/dashboard.tsx" reaches into apps/',
       'import { QemuServerApi } from "@oligarchy/http/api"',
       '"@oligarchy/http" is not an exported module',
       '"@oligarchy/http/src/api.ts" is not an exported module',
@@ -748,18 +823,6 @@ describe("module conventions", () => {
           }
           return problems;
         }),
-      ),
-    ).toEqual([]);
-  });
-
-  // A `.tsx` under src/ is a Solid component file for OpenTUI, so it names that JSX runtime for
-  // the type checker; without the pragma tsc would check it against the dashboard's hono/jsx.
-  it("every .tsx outside the dashboard opens with the @opentui/solid jsxImportSource pragma", () => {
-    expect(
-      violations((path, source) =>
-        path.endsWith(".tsx") && !source.startsWith("/** @jsxImportSource @opentui/solid */\n")
-          ? ["missing /** @jsxImportSource @opentui/solid */"]
-          : [],
       ),
     ).toEqual([]);
   });

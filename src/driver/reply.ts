@@ -1,7 +1,7 @@
 import { Cause, Exit, Result, Schema } from "effect";
 import * as Render from "@oligarchy/log/render";
 import type * as Tools from "../harness/tools.ts";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "../harness/errors.ts";
 
 // One line, the tool call. client runs that action under the step it names, counted from 1.
 // Done finishes the task. The harness stops the session.

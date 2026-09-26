@@ -6,7 +6,7 @@
 /.prod-env
 /automation-logs
 node_modules/
-/.wrangler
+.wrangler/
 /tmp/
 /automation-super-run-logs
 /SCRATCH.md

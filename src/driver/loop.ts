@@ -29,7 +29,7 @@ import * as Intent from "../harness/intent.ts";
 import * as OpenRouter from "../harness/openrouter.ts";
 import * as Pointer from "../harness/pointer.ts";
 import * as Tools from "../harness/tools.ts";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "../harness/errors.ts";
 import * as Client from "./client.ts";
 import * as Log from "./log.ts";
 import * as Prompt from "./prompt.ts";

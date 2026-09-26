@@ -1,10 +1,15 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Exit, Option } from "effect";
+import * as Actions from "@oligarchy/db/actions";
 import * as Automation from "@oligarchy/db/automation";
+import * as DebugLogs from "@oligarchy/db/debug-logs";
+import * as Diagnosis from "@oligarchy/db/diagnosis";
 import * as DbErrors from "@oligarchy/db/errors";
+import * as Logs from "@oligarchy/db/logs";
 import * as ProcessStats from "@oligarchy/db/process-stats";
 import * as Servers from "@oligarchy/db/servers";
+import * as Sessions from "@oligarchy/db/sessions";
 import * as Tests from "@oligarchy/db/tests";
 import * as Stores from "../src/stores.ts";
 
@@ -314,5 +319,223 @@ describe("fakeProcessStatsStore unhappy path", () => {
       expect(error).toBe(refused);
       expect(fake.reports).toEqual([]);
     }),
+  );
+});
+
+const SESSION = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
+
+describe("fakeSessionStore happy path", () => {
+  it.effect("a session is found by its id in any case, and its end closes its agent's run", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeSessionStore();
+      yield* Effect.gen(function* () {
+        const store = yield* Sessions.SessionStore;
+        yield* store.insertSession(SESSION, { iso: "omarchy.iso" }, "downloading");
+        yield* store.registerAgent("OLI-1", SESSION);
+        yield* store.sessionRunning(SESSION.toUpperCase());
+        expect(yield* store.getSessionStatus(SESSION)).toEqual(Option.some("running"));
+        yield* store.endSession(SESSION, "succeeded", null);
+      }).pipe(Effect.provide(fake.layer));
+      expect(fake.sessions.map((row) => row.status)).toEqual(["succeeded"]);
+      expect(fake.agentRuns.map((run) => run.endedAt === null)).toEqual([false]);
+    }),
+  );
+});
+
+describe("fakeSessionStore unhappy path", () => {
+  it.effect("a second run for one agent is the primary key's DatabaseError", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeSessionStore();
+      const error = yield* Effect.gen(function* () {
+        const store = yield* Sessions.SessionStore;
+        yield* store.registerAgent("OLI-1", SESSION);
+        return yield* Effect.flip(store.registerAgent("OLI-1", SESSION));
+      }).pipe(Effect.provide(fake.layer));
+      expect(error).toMatchObject({ _tag: "DatabaseError", operation: "registerAgent" });
+    }),
+  );
+});
+
+describe("fakeStores", () => {
+  it.effect("provides every store at once, sharing nothing between two fixtures", () =>
+    Effect.gen(function* () {
+      const first = Stores.fakeStores();
+      const second = Stores.fakeStores();
+      yield* Effect.gen(function* () {
+        const store = yield* Sessions.SessionStore;
+        yield* store.insertSession(SESSION, { iso: "omarchy.iso" }, "running");
+      }).pipe(Effect.provide(first.layer));
+      expect(first.sessions.sessions).toHaveLength(1);
+      expect(second.sessions.sessions).toEqual([]);
+    }),
+  );
+});
+
+const CAPABILITIES = { execute: "qmp_capabilities" as const, arguments: {}, id: 1 };
+const IMAGE = "3c9b2f80-5a1e-4d6c-8b7a-9e0f1a2b3c4d";
+
+describe("fakeActionStore happy path", () => {
+  it.effect(
+    "an action is numbered, finished with its image, and listed in its session's order",
+    () =>
+      Effect.gen(function* () {
+        const fake = Stores.fakeActionStore();
+        const [listed, image, images] = yield* Effect.gen(function* () {
+          const store = yield* Actions.ActionStore;
+          const first = yield* store.startAction({
+            sessionId: SESSION,
+            agentId: "OLI-1",
+            request: CAPABILITIES,
+          });
+          yield* store.startAction({ sessionId: "other", agentId: "OLI-2", request: CAPABILITIES });
+          yield* store.finishAction(
+            first,
+            { state: "completed", response: { return: {} } },
+            { id: IMAGE, data: new Uint8Array([1, 2]) },
+          );
+          return [
+            yield* store.listActions(SESSION.toUpperCase()),
+            yield* store.getImage(IMAGE),
+            yield* store.listImages(SESSION),
+          ] as const;
+        }).pipe(Effect.provide(fake.layer));
+        expect(listed.map((row) => [row.id, row.state])).toEqual([[1, "completed"]]);
+        expect(image).toEqual(Option.some(new Uint8Array([1, 2])));
+        expect(images.map((row) => [row.id, row.actionId])).toEqual([[IMAGE, 1]]);
+      }),
+  );
+});
+
+describe("fakeActionStore unhappy path", () => {
+  it.effect("an image nobody stored is none, and an action finished without one stores none", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeActionStore();
+      const image = yield* Effect.gen(function* () {
+        const store = yield* Actions.ActionStore;
+        const id = yield* store.startAction({
+          sessionId: SESSION,
+          agentId: "OLI-1",
+          request: CAPABILITIES,
+        });
+        yield* store.finishAction(id, { state: "completed", response: { return: {} } });
+        return yield* store.getImage(IMAGE);
+      }).pipe(Effect.provide(fake.layer));
+      expect(image).toEqual(Option.none());
+      expect(fake.images).toEqual([]);
+    }),
+  );
+});
+
+const logRow = (text: string, location: string | null) => ({
+  text,
+  level: "info" as const,
+  location,
+  agentId: null,
+});
+
+describe("fakeLogStore happy path", () => {
+  it.effect("keeps every row, lists a location's in order and the newest few for recent", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeLogStore();
+      const [forSession, recent] = yield* Effect.gen(function* () {
+        const store = yield* Logs.LogStore;
+        yield* store.insertLog(logRow("one", SESSION));
+        yield* store.insertLog(logRow("two", "server"));
+        yield* store.insertLog(logRow("three", SESSION));
+        return [yield* store.listLogs(SESSION), yield* store.listRecent(2)] as const;
+      }).pipe(Effect.provide(fake.layer));
+      expect(forSession.map((row) => row.text)).toEqual(["one", "three"]);
+      expect(recent.map((row) => row.text)).toEqual(["two", "three"]);
+      expect(fake.rows).toHaveLength(3);
+    }),
+  );
+});
+
+describe("fakeLogStore unhappy path", () => {
+  it.effect("a refused insert fails as told and keeps nothing", () =>
+    Effect.gen(function* () {
+      const refused = DbErrors.DatabaseError.make({ operation: "insertLog", message: "refused" });
+      const fake = Stores.fakeLogStore({ insertLog: () => Effect.fail(refused) });
+      const error = yield* Effect.gen(function* () {
+        const store = yield* Logs.LogStore;
+        return yield* Effect.flip(store.insertLog(logRow("lost", null)));
+      }).pipe(Effect.provide(fake.layer));
+      expect(error).toBe(refused);
+      expect(fake.rows).toEqual([]);
+    }),
+  );
+});
+
+describe("fakeDebugLogStore", () => {
+  it.effect(
+    "records each save (happy), and a session with no stored log reads none (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const fake = Stores.fakeDebugLogStore();
+        const read = yield* Effect.gen(function* () {
+          const store = yield* DebugLogs.DebugLogStore;
+          yield* store.saveDebugLog(SESSION, { serial: "login:", qemu: "qemu: started" });
+          return yield* store.getDebugLog(SESSION);
+        }).pipe(Effect.provide(fake.layer));
+        expect(fake.saves).toEqual([
+          { sessionId: SESSION, serial: "login:", qemu: "qemu: started" },
+        ]);
+        expect(read).toEqual(Option.none());
+      }),
+  );
+});
+
+describe("fakeDiagnosisStore happy path", () => {
+  it.effect("error types list by key, and a session's diagnosis is found in any case", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeDiagnosisStore();
+      const [types, found] = yield* Effect.gen(function* () {
+        const store = yield* Diagnosis.DiagnosisStore;
+        yield* store.createErrorType("stuck-boot", "the guest never booted");
+        yield* store.createErrorType("bad-proof", "the proof was wrong");
+        yield* store.saveDiagnosis({
+          sessionId: SESSION,
+          verdict: "failed",
+          errorType: "stuck-boot",
+          summary: "never booted",
+          model: "model",
+        });
+        return [
+          yield* store.listErrorTypes(),
+          yield* store.getDiagnosis(SESSION.toUpperCase()),
+        ] as const;
+      }).pipe(Effect.provide(fake.layer));
+      expect(types.map((row) => row.key)).toEqual(["bad-proof", "stuck-boot"]);
+      expect(Option.map(found, (row) => row.errorType)).toEqual(Option.some("stuck-boot"));
+    }),
+  );
+});
+
+describe("fakeDiagnosisStore unhappy path", () => {
+  it.effect(
+    "a second error type with one key, and a second diagnosis of a session, are refused",
+    () =>
+      Effect.gen(function* () {
+        const fake = Stores.fakeDiagnosisStore();
+        const answers = yield* Effect.gen(function* () {
+          const store = yield* Diagnosis.DiagnosisStore;
+          const input = {
+            sessionId: SESSION,
+            verdict: "failed" as const,
+            errorType: "stuck-boot",
+            summary: "never booted",
+            model: "model",
+          };
+          return [
+            yield* store.createErrorType("stuck-boot", "one"),
+            yield* store.createErrorType("stuck-boot", "two"),
+            yield* store.saveDiagnosis(input),
+            yield* store.saveDiagnosis(input),
+          ];
+        }).pipe(Effect.provide(fake.layer));
+        expect(answers).toEqual([true, false, true, false]);
+        expect(fake.errorTypes).toHaveLength(1);
+        expect(fake.diagnoses).toHaveLength(1);
+      }),
   );
 });

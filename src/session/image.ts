@@ -1,6 +1,6 @@
 import { inflateSync } from "node:zlib";
 import { Encoding, Result, Schema } from "effect";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 export type ImageProtocol = "kitty" | "iterm" | "ansi";
 

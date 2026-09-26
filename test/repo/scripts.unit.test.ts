@@ -50,30 +50,41 @@ const cycleRuleProblems = (config: OxlintConfig): ReadonlyArray<string> => {
   ];
 };
 
-const WORKSPACES = readdirSync(join(root, "packages"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => `packages/${entry.name}`);
+// The libraries under packages/ and the apps under apps/, each a workspace package of its own.
+const WORKSPACES = ["packages", "apps"].flatMap((parent) =>
+  readdirSync(join(root, parent), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${parent}/${entry.name}`),
+);
 
-// Every process and what its wrapper and script preload before the entry loads: Sentry on the
-// instrumented ones, and on viz the Solid JSX transform its OpenTUI components are written for.
+// Every process, its entry (an app's under apps/, a script's under src/) and what its wrapper and
+// script preload before the entry loads: Sentry on the instrumented ones, and on viz the Solid
+// JSX transform its OpenTUI components are written for.
 const INSTRUMENT = "packages/observability/src/instrument.ts";
-const SOLID_JSX = "src/viz/preload.ts";
-const PROCESSES: Readonly<Record<string, ReadonlyArray<string>>> = {
-  client: [],
-  driver: [],
-  session: [],
-  viz: [SOLID_JSX],
-  ctrl: [INSTRUMENT],
-  "qemu-server": [INSTRUMENT],
-  "qemu-reverse-proxy": [INSTRUMENT],
-  "automation-server": [INSTRUMENT],
-  "automation-client": [INSTRUMENT],
+const SOLID_JSX = "apps/viz/src/preload.ts";
+type Process = { readonly entry: string; readonly preloads: ReadonlyArray<string> };
+const app = (name: string, preloads: ReadonlyArray<string>): Process => ({
+  entry: `apps/${name}/src/main.ts`,
+  preloads,
+});
+const rootScript = (name: string): Process => ({ entry: `src/${name}/main.ts`, preloads: [] });
+const PROCESSES: Readonly<Record<string, Process>> = {
+  client: rootScript("client"),
+  driver: rootScript("driver"),
+  session: rootScript("session"),
+  viz: app("viz", [SOLID_JSX]),
+  ctrl: app("ctrl", [INSTRUMENT]),
+  "qemu-server": app("qemu-server", [INSTRUMENT]),
+  "qemu-reverse-proxy": app("qemu-reverse-proxy", [INSTRUMENT]),
+  "automation-server": app("automation-server", [INSTRUMENT]),
+  "automation-client": app("automation-client", [INSTRUMENT]),
 };
 const count = (text: string, needle: string): number => text.split(needle).length - 1;
 
-// A process is a `bin` entry, a script ending in `src/<name>/main.ts`, or a root sh wrapper
-// naming one. Each must be in PROCESSES, or it runs with preloads nobody checked.
-const ENTRY = /src\/([a-z-]+)\/main\.ts/g;
+// A process is a `bin` entry (the root's or an app's), a script ending in an entry
+// (`apps/<name>/src/main.ts` or `src/<name>/main.ts`), or a root sh wrapper naming one. Each must be
+// in PROCESSES, or it runs with preloads nobody checked.
+const ENTRY = /(?:apps\/([a-z-]+)\/src|src\/([a-z-]+))\/main\.ts/g;
 const unregistered = (input: {
   readonly bin: Readonly<Record<string, string>>;
   readonly scripts: Readonly<Record<string, string>>;
@@ -85,7 +96,7 @@ const unregistered = (input: {
   }
   for (const text of [...Object.values(input.scripts), ...Object.values(input.wrappers)]) {
     for (const match of text.matchAll(ENTRY)) {
-      const name = match[1];
+      const name = match[1] ?? match[2];
       if (name !== undefined) {
         names.add(name);
       }
@@ -93,6 +104,13 @@ const unregistered = (input: {
   }
   return [...names].filter((name) => !(name in PROCESSES)).sort();
 };
+
+const binProblems = (dir: string, bins: Readonly<Record<string, string>>): ReadonlyArray<string> =>
+  Object.entries(bins).flatMap(([name, path]) => {
+    const target = join(dir, path);
+    const entry = PROCESSES[name]?.entry;
+    return target === entry ? [] : [`${name} -> ${target} is not ${entry ?? "a registered entry"}`];
+  });
 
 const rootWrappers = (): Readonly<Record<string, string>> =>
   Object.fromEntries(
@@ -105,10 +123,37 @@ const rootWrappers = (): Readonly<Record<string, string>> =>
 const NOT_BUN = /\bnode\b|\bnpm\b|\bnpx\b|--experimental-strip-types|--import\b/;
 
 describe("package.json scripts", () => {
-  const { bin = {}, scripts } = decodePackageJson(read("package.json"));
+  const { bin: rootBin = {}, scripts } = decodePackageJson(read("package.json"));
+  const bin = Object.assign(
+    {},
+    rootBin,
+    ...WORKSPACES.map((dir) => decodePackageJson(read(`${dir}/package.json`)).bin ?? {}),
+  );
 
   it("registers every process in PROCESSES: each bin, entry script and root wrapper (happy)", () => {
     expect(unregistered({ bin, scripts, wrappers: rootWrappers() })).toEqual([]);
+  });
+
+  // An app's command is its own: its bin lives in its package.json. Every bin, the root's or an
+  // app's, names the entry PROCESSES gives that process, from its own package's directory.
+  it("every bin names its process's entry from its own package (happy)", () => {
+    expect(binProblems(".", rootBin)).toEqual([]);
+    for (const dir of WORKSPACES) {
+      expect(
+        binProblems(dir, decodePackageJson(read(`${dir}/package.json`)).bin ?? {}),
+        dir,
+      ).toEqual([]);
+    }
+    expect(Object.keys(rootBin).toSorted()).toEqual(["client", "driver", "session"]);
+  });
+
+  it("names a bin that points at another file, or at an app's entry from the root (unhappy)", () => {
+    expect(binProblems(".", { viz: "src/viz/main.ts", client: "src/client/main.ts" })).toEqual([
+      "viz -> src/viz/main.ts is not apps/viz/src/main.ts",
+    ]);
+    expect(binProblems("apps/ctrl", { ctrl: "src/cli.ts" })).toEqual([
+      "ctrl -> apps/ctrl/src/cli.ts is not apps/ctrl/src/main.ts",
+    ]);
   });
 
   it("names a bin, an entry script or a wrapper that PROCESSES does not know (unhappy)", () => {
@@ -118,9 +163,10 @@ describe("package.json scripts", () => {
         scripts: { ...scripts, room: "bun --no-env-file src/room/main.ts" },
         wrappers: {
           arena: '#!/bin/sh\nexec bun --no-env-file "$(dirname "$0")/src/arena/main.ts" "$@"\n',
+          yard: '#!/bin/sh\nexec bun --no-env-file "$(dirname "$0")/apps/yard/src/main.ts" "$@"\n',
         },
       }),
-    ).toEqual(["arena", "lobby", "room"]);
+    ).toEqual(["arena", "lobby", "room", "yard"]);
   });
 
   it("exposes the check and test scripts by their full names", () => {
@@ -146,10 +192,10 @@ describe("package.json scripts", () => {
   // `$` inside values, where the config provider reads `.env` alone, as written, for what the
   // environment lacks, plus `--env-file` when one was passed.
   it("runs every process on bun from its entry with exactly the preloads it needs", () => {
-    for (const [name, preloads] of Object.entries(PROCESSES)) {
+    for (const [name, { entry, preloads }] of Object.entries(PROCESSES)) {
       const script = scripts[name] ?? "";
       expect(script.startsWith("bun --no-env-file "), name).toBe(true);
-      expect(script.endsWith(` src/${name}/main.ts`), name).toBe(true);
+      expect(script.endsWith(` ${entry}`), name).toBe(true);
       for (const preload of preloads) {
         expect(script, name).toContain(`--preload ./${preload}`);
       }
@@ -169,6 +215,12 @@ describe("package.json scripts", () => {
   it("check:types and test:unit run the root's own lane, then every workspace package's", () => {
     expect(scripts["check:types"]).toMatch(/ && bun run --workspaces check:types$/);
     expect(scripts["test:unit"]).toMatch(/ && bun run --workspaces test:unit$/);
+  });
+
+  // The Worker is the dashboard app's: the root's dev runs the app's own dev script.
+  it("dev runs the dashboard app's dev script from its directory", () => {
+    expect(scripts.dev).toBe("bun run --cwd apps/dashboard dev");
+    expect(decodePackageJson(read("apps/dashboard/package.json")).scripts.dev).toBeDefined();
   });
 
   it("names no other runtime, package manager or Node flag anywhere", () => {
@@ -219,14 +271,14 @@ describe("package.json scripts", () => {
 describe("root executables", () => {
   // The preload is named from the wrapper's own directory: an operator runs ./viz from anywhere.
   it("each execs bun on its entry with exactly the preloads it needs, never node", () => {
-    for (const [name, preloads] of Object.entries(PROCESSES)) {
+    for (const [name, { entry, preloads }] of Object.entries(PROCESSES)) {
       if (name === "client" || name === "driver") {
         continue;
       }
       const wrapper = read(name);
       expect(wrapper.startsWith("#!/bin/sh\n"), name).toBe(true);
       expect(wrapper, name).toContain("exec bun --no-env-file ");
-      expect(wrapper, name).toContain(`"$(dirname "$0")/src/${name}/main.ts" "$@"`);
+      expect(wrapper, name).toContain(`"$(dirname "$0")/${entry}" "$@"`);
       for (const preload of preloads) {
         expect(wrapper, name).toContain(`--preload "$(dirname "$0")/${preload}"`);
       }
@@ -348,10 +400,45 @@ describe(".github/workflows/migrations.yml", () => {
   });
 });
 
+// A starter runs apps through their root wrappers, so it starts each from the entry and with the
+// preloads the wrapper test pins, and never names a source path itself.
+const starterProblems = (text: string): ReadonlyArray<string> => [
+  ...[...text.matchAll(/"\$ROOT\/([a-z-]+)"/g)]
+    .map((match) => match[1] ?? "")
+    .filter((name) => !(PROCESSES[name]?.entry.startsWith("apps/") ?? false))
+    .map((name) => `${name} is not an app`),
+  ...[...text.matchAll(/apps\/[a-z-]+\/src\/main\.ts|src\/[a-z-]+\/main\.ts/g)].map(
+    (match) => `${match[0]} is named directly`,
+  ),
+];
+
 describe("fleet starters", () => {
+  const STARTERS = ["start-automation-server-client", "start-server-proxy-client"];
+
+  it("start each app through its root wrapper (happy)", () => {
+    for (const name of STARTERS) {
+      expect(starterProblems(read(name)), name).toEqual([]);
+    }
+    expect(
+      [...read("start-server-proxy-client").matchAll(/"\$ROOT\/([a-z-]+)"/g)].map((m) => m[1]),
+    ).toEqual(["qemu-reverse-proxy", "qemu-server"]);
+  });
+
+  it("names a script that is not an app, and an entry named directly (unhappy)", () => {
+    expect(
+      starterProblems(
+        '"$ROOT/client" &\nbun apps/qemu-server/src/main.ts &\nbun src/viz/main.ts &\n',
+      ),
+    ).toEqual([
+      "client is not an app",
+      "apps/qemu-server/src/main.ts is named directly",
+      "src/viz/main.ts is named directly",
+    ]);
+  });
+
   // The first signal asks. A child waiting on a response must not make the second do nothing.
   it("a second signal kills both children", () => {
-    for (const name of ["start-automation-server-client", "start-server-proxy-client"]) {
+    for (const name of STARTERS) {
       const script = read(name);
       expect(script, name).toContain("kill -TERM");
       expect(script, name).toContain("kill -KILL");

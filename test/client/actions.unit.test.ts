@@ -7,7 +7,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as Config from "@oligarchy/env/config";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as Actions from "../../src/client/actions.ts";
-import * as Stdio from "../support/stdio.ts";
+import * as TestingStdio from "@oligarchy/testing/stdio";
 
 const TOKEN = "test-token";
 const SESSION = "session-1";
@@ -21,7 +21,7 @@ const run = (args: ReadonlyArray<string>, http: Layer.Layer<HttpClient.HttpClien
         Config.fromValues({ OLIGARCHY_TOKEN: TOKEN }),
         NodeFileSystem.layer,
         NodePath.layer,
-        Stdio.capture().layer,
+        TestingStdio.capture().layer,
       ),
     ),
   );

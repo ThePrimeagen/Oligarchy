@@ -1,5 +1,5 @@
 import { Result, Schema } from "effect";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 // What the model asked to run. `arguments` is the JSON it sent, kept verbatim
 // until a tool call is turned into a command line.
