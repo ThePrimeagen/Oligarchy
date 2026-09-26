@@ -23,6 +23,7 @@ import * as Actions from "@oligarchy/db/actions";
 import * as DebugLogs from "@oligarchy/db/debug-logs";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as SessionStore from "@oligarchy/db/sessions";
+import * as Host from "@oligarchy/fleet/host";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
@@ -34,7 +35,6 @@ import * as Iso from "../qemu/iso.ts";
 import * as Keys from "../qemu/keys.ts";
 import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
-import * as Stats from "../qemu/stats.ts";
 import type * as Qmp from "../qmp/client.ts";
 import * as Errors from "../shared/errors.ts";
 
@@ -268,7 +268,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
     const qemu = yield* Qemu.Qemu;
     const iso = yield* Iso.Iso;
     const minted = yield* Minted.Minted;
-    const stats = yield* Stats.Stats;
+    const host = yield* Host.Host;
     const sessionStore = yield* SessionStore.SessionStore;
     const actionStore = yield* Actions.ActionStore;
     const debugLogs = yield* DebugLogs.DebugLogStore;
@@ -1405,7 +1405,15 @@ const make = (maxJobs: number, selfUrl?: string) =>
       stop,
       save,
       follow,
-      stats: Effect.flatMap(Ref.get(sessions), (map) => stats.collect(map.size)),
+      stats: Effect.flatMap(Ref.get(sessions), (map) =>
+        Effect.map(host.collect, (values) =>
+          Contract.Stats.make({
+            qemus: map.size,
+            memory: Contract.Memory.make(values.memory),
+            cpu: Contract.Cpu.make(values.cpu),
+          }),
+        ),
+      ),
       minted: (name) => Effect.map(minted.find(name), Option.isSome),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };
@@ -1424,7 +1432,7 @@ export class Sessions extends Context.Service<Sessions>()("@oligarchy/qemu-serve
     | Qemu.Qemu
     | Iso.Iso
     | Minted.Minted
-    | Stats.Stats
+    | Host.Host
     | SessionStore.SessionStore
     | Actions.ActionStore
     | DebugLogs.DebugLogStore

@@ -515,7 +515,7 @@ describe("ProcessUsage.psSource unhappy path (macOS)", () => {
 // A spawner that hands ps the scripted stdout, recording the command it was given and whether
 // the handle's scope was released (the real spawner's release is what signals the process).
 const psSpawner = (
-  answer: { readonly stdout: string | "never" } | { readonly spawnError: string },
+  answer: { readonly stdout: string } | { readonly silent: true } | { readonly spawnError: string },
 ) => {
   const commands: Array<ChildProcess.StandardCommand> = [];
   let released = false;
@@ -542,9 +542,7 @@ const psSpawner = (
         }),
       );
       const stdout =
-        answer.stdout === "never"
-          ? Stream.never
-          : Stream.make(new TextEncoder().encode(answer.stdout));
+        "silent" in answer ? Stream.never : Stream.make(new TextEncoder().encode(answer.stdout));
       return ChildProcessSpawner.makeHandle({
         pid: ChildProcessSpawner.ProcessId(PS_PID),
         exitCode: Effect.never,
@@ -611,7 +609,7 @@ describe("ProcessUsage.listProcesses unhappy path", () => {
   it.effect(
     "a listing that never answers fails with PsFailed after ten seconds, and its process is released",
     () => {
-      const spawner = psSpawner({ stdout: "never" });
+      const spawner = psSpawner({ silent: true });
       return Effect.gen(function* () {
         const listing = yield* Effect.forkChild(Effect.flip(ProcessUsage.listProcesses));
         yield* TestClock.adjust("9 seconds");

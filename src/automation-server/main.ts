@@ -15,12 +15,12 @@ import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
+import * as Sweep from "@oligarchy/fleet/sweep";
 import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
-import * as StaleServers from "../shared/stale-servers.ts";
 import * as Backlog from "./backlog.ts";
 import * as AutomationClient from "./client.ts";
 import * as AutomationServerCommand from "./command.ts";
@@ -53,7 +53,7 @@ const ServerLive = (port: number, models: { drive: string; diagnose: string; min
         automationAttr,
       );
       yield* Worker.dispatch(models);
-      yield* StaleServers.forget("automation-client");
+      yield* Sweep.forget("automation-client");
       yield* Backlog.watch();
     }),
   ).pipe(

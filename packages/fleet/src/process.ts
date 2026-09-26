@@ -1,8 +1,7 @@
-import { Clock, Context, Effect, FileSystem, Layer, Option, Ref, Stream } from "effect";
+import { Clock, Context, Effect, FileSystem, Layer, Option, Ref, Schema, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
-import * as Errors from "./errors.ts";
 
 // USER_HZ on Linux: /proc/self/stat counts in these ticks, and macOS's microseconds are read as
 // them so both hosts share one window.
@@ -18,10 +17,16 @@ export type ProcessSample = {
   readonly cpuPercent: number;
 };
 
-export type Source = () => Effect.Effect<Reading, Errors.CliFailed>;
+// macOS's ps could not be run, did not answer, or did not list this process.
+export class PsFailed extends Schema.TaggedError<PsFailed>("@oligarchy/fleet/process/PsFailed")(
+  "PsFailed",
+  { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) },
+) {}
+
+export type Source = () => Effect.Effect<Reading, PsFailed>;
 
 export type ProcessUsageService = {
-  readonly collect: Effect.Effect<ProcessSample, Errors.CliFailed>;
+  readonly collect: Effect.Effect<ProcessSample, PsFailed>;
 };
 
 // After the last `)` of comm, fields are 3-indexed from state. utime is 14, stime is 15.
@@ -143,13 +148,19 @@ const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm;
 const PS_TIMEOUT = "10 seconds";
 const PS_FORCE_KILL_AFTER = "1 second";
 
+// What one ps printed, and its own pid: it is root's child for its moment.
+export type Listing = {
+  readonly text: string;
+  readonly ps: number;
+};
+
 // The rss of `root` and every descendant, as the /proc walk sums them. The ps that printed the
-// listing is root's child for its moment and is left out: /proc is read without one.
-const treeRssBytes = (listing: string, root: number, ps: number): Option.Option<number> => {
+// listing is left out: /proc is read without one.
+const treeRssBytes = (listing: Listing, root: number): Option.Option<number> => {
   const rss = new Map<number, number>();
   const children = new Map<number, Array<number>>();
-  for (const [, pid, ppid, kb] of listing.matchAll(PS_ROW)) {
-    if (Number(pid) === ps) {
+  for (const [, pid, ppid, kb] of listing.text.matchAll(PS_ROW)) {
+    if (Number(pid) === listing.ps) {
       continue;
     }
     rss.set(Number(pid), Number(kb) * 1024);
@@ -175,57 +186,59 @@ const treeRssBytes = (listing: string, root: number, ps: number): Option.Option<
   return Option.some(total);
 };
 
-const psFailed = (message: string, cause?: unknown): Errors.CliFailed =>
-  cause === undefined
-    ? Errors.CliFailed.make({ command: PS, message })
-    : Errors.CliFailed.make({ command: PS, message, cause });
+// Every process with its parent and rss, as ps lists them.
+export const listProcesses: Effect.Effect<
+  Listing,
+  PsFailed,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.gen(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const handle = yield* spawner.spawn(
+    ChildProcess.make(PS, PS_ARGS, {
+      stdin: "ignore",
+      stderr: "ignore",
+      detached: false,
+      killSignal: "SIGTERM",
+      forceKillAfter: PS_FORCE_KILL_AFTER,
+    }),
+  );
+  const text = yield* Stream.mkString(Stream.decodeText(handle.stdout));
+  return { text, ps: handle.pid };
+}).pipe(
+  Effect.scoped,
+  // Node's own reason (`spawn /bin/ps EAGAIN`), not the PlatformError wrapper's.
+  Effect.mapError((error) =>
+    PsFailed.make({
+      message: ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message),
+      cause: error,
+    }),
+  ),
+  Effect.timeoutOrElse({
+    duration: PS_TIMEOUT,
+    orElse: () => Effect.fail(PsFailed.make({ message: `ps did not answer within ${PS_TIMEOUT}` })),
+  }),
+);
 
 // `cpuUsage` is getrusage's user and system microseconds for this pid, what utime and stime
 // count in /proc/self/stat, so the cpu stays this pid as it does on Linux.
-export const psSource = (
-  pid: number,
-  cpuUsage: () => { readonly user: number; readonly system: number },
-): Effect.Effect<Source, never, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const list = Effect.scoped(
-      Effect.gen(function* () {
-        const handle = yield* spawner.spawn(
-          ChildProcess.make(PS, PS_ARGS, {
-            stdin: "ignore",
-            stderr: "ignore",
-            detached: false,
-            killSignal: "SIGTERM",
-            forceKillAfter: PS_FORCE_KILL_AFTER,
-          }),
-        );
-        const text = yield* Stream.mkString(Stream.decodeText(handle.stdout));
-        return { text, ps: handle.pid };
-      }),
-    ).pipe(
-      // Node's own reason (`spawn /bin/ps EAGAIN`), not the PlatformError wrapper's.
-      Effect.mapError((error) =>
-        psFailed(
-          ExternalFailure.describeThrowable(ExternalFailure.causeOf(error), error.message),
-          error,
-        ),
-      ),
-      Effect.timeoutOrElse({
-        duration: PS_TIMEOUT,
-        orElse: () => Effect.fail(psFailed(`ps did not answer within ${PS_TIMEOUT}`)),
-      }),
-    );
-    return () =>
-      Effect.gen(function* () {
-        const { user, system } = cpuUsage();
-        const listed = yield* list;
-        const memoryBytes = Option.getOrUndefined(treeRssBytes(listed.text, pid, listed.ps));
-        if (memoryBytes === undefined) {
-          return yield* psFailed(`ps did not list this process (pid ${String(pid)})`);
-        }
-        return { cpuTicks: ((user + system) * CLK_TCK) / 1_000_000, memoryBytes };
-      });
-  });
+export const psSource =
+  (
+    pid: number,
+    cpuUsage: () => { readonly user: number; readonly system: number },
+    list: Effect.Effect<Listing, PsFailed>,
+  ): Source =>
+  () =>
+    Effect.gen(function* () {
+      const { user, system } = cpuUsage();
+      const listing = yield* list;
+      const memoryBytes = Option.getOrUndefined(treeRssBytes(listing, pid));
+      if (memoryBytes === undefined) {
+        return yield* PsFailed.make({
+          message: `ps did not list this process (pid ${String(pid)})`,
+        });
+      }
+      return { cpuTicks: ((user + system) * CLK_TCK) / 1_000_000, memoryBytes };
+    });
 
 const make = (source: Source): Effect.Effect<ProcessUsageService> =>
   Effect.gen(function* () {
@@ -257,19 +270,27 @@ const make = (source: Source): Effect.Effect<ProcessUsageService> =>
     return { collect } satisfies ProcessUsageService;
   });
 
-export class ProcessUsage extends Context.Service<ProcessUsage>()(
-  "@oligarchy/shared/ProcessUsage",
-  { make },
-) {
+export class ProcessUsage extends Context.Service<ProcessUsage>()("@oligarchy/fleet/ProcessUsage", {
+  make,
+}) {
   static readonly layer: Layer.Layer<
     ProcessUsage,
     never,
     FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
   > = Layer.effect(this)(
     Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const source =
         process.platform === "darwin"
-          ? yield* psSource(process.pid, () => process.cpuUsage())
+          ? psSource(
+              process.pid,
+              () => process.cpuUsage(),
+              Effect.provideService(
+                listProcesses,
+                ChildProcessSpawner.ChildProcessSpawner,
+                spawner,
+              ),
+            )
           : yield* procSource;
       return yield* make(source);
     }),

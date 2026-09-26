@@ -44,7 +44,7 @@
     "format": "oxfmt .",
     "check:types": "tsc --noEmit -p tsconfig.json && bun run --workspaces check:types",
     "test:unit": "bun --bun vitest run --project unit && bun run --workspaces test:unit",
-    "test:integration": "bun --bun vitest run --project integration --maxWorkers 1",
+    "test:integration": "bun --bun vitest run --project integration --maxWorkers 1 && bun run --workspaces --if-present test:integration",
     "check:fast": "bun run check:lint && bun run check:format && bun run check:types && bun run test:unit",
     "db:generate": "bun run --cwd packages/db db:generate",
     "db:migrate": "bun --no-env-file packages/db/src/migrate.ts",

@@ -1,110 +1,32 @@
-import { Cause, Effect, Ref, Schedule, type Scope, Schema } from "effect";
-import * as DbErrors from "@oligarchy/db/errors";
-import * as ProcessStats from "@oligarchy/db/process-stats";
-import * as Servers from "@oligarchy/db/servers";
+import { Effect } from "effect";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
-import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Member from "@oligarchy/fleet/member";
 import * as Log from "@oligarchy/log/log";
-import * as Render from "@oligarchy/log/render";
-import * as ProcessUsage from "../shared/process-usage.ts";
 import * as Sessions from "./sessions.ts";
 
-// Every thirty seconds, and the dashboard polls as often: a server's row is never more than one
-// poll behind, and three missed writes are what the page calls silent.
-const HEARTBEAT_INTERVAL = "30 seconds";
-
-const isDatabaseError = Schema.is(DbErrors.DatabaseError);
-
-// Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
-const detail = (error: unknown): string =>
-  isDatabaseError(error)
-    ? Render.errorDetail(ExternalFailure.causeOf(error))
-    : Render.errorDetail(error);
-
-// Announces this server under `url`: its `servers` row is written now and every thirty seconds
-// with what it knows of itself — a qemu server, this process boots nothing else — and the row's
-// generation counts the writes, so a number that stops moving is a server that stopped without a
-// chance to leave. The same tick inserts a `process_stats` row: current jobs, VmRSS of this
-// process and every child that still answers, and the cpu busy over the last thirty seconds. A
-// write that fails is one error line; the other write and the next tick still run. A shutdown
-// deletes the servers row only: the readings stay so they can be graphed later. Registered
-// before the loop so the fiber is interrupted first; a write in flight finishes (the write is
-// uninterruptible). A delete that fails is one `unannounce failed` line; the process still exits.
-export const announce = (
-  url: string,
-  name: string,
-): Effect.Effect<
-  void,
-  never,
-  | Scope.Scope
-  | Sessions.Sessions
-  | ProcessUsage.ProcessUsage
-  | Servers.ServerStore
-  | ProcessStats.ProcessStatsStore
-  | SetupRequests.SetupRequestStore
-  | Log.Log
-> =>
-  Effect.gen(function* () {
-    const sessions = yield* Sessions.Sessions;
-    const usage = yield* ProcessUsage.ProcessUsage;
-    const store = yield* Servers.ServerStore;
-    const processStore = yield* ProcessStats.ProcessStatsStore;
-    const setups = yield* SetupRequests.SetupRequestStore;
-    const log = yield* Log.Log;
-    const failed = (text: string) => (cause: Cause.Cause<unknown>) => {
-      const error = Cause.squash(cause);
-      return log.error(`${text}: ${detail(error)}`, {
-        location: Log.Locations.server,
-        cause: error,
-      });
-    };
-    const writeHeartbeat = sessions.stats.pipe(
-      Effect.flatMap((stats) =>
-        Effect.uninterruptible(
-          store.heartbeat(url, "qemu", name, {
-            qemus: stats.qemus,
-            memory: { totalBytes: stats.memory.totalBytes, usedBytes: stats.memory.usedBytes },
-            cpu: { mean1m: stats.cpu.mean1m, mean2m: stats.cpu.mean2m, mean3m: stats.cpu.mean3m },
-          }),
-        ),
-      ),
-      Effect.catchCause(failed("heartbeat failed")),
-    );
-    const writeProcess = Effect.gen(function* () {
-      const jobs = yield* sessions.jobs;
-      const sample = yield* usage.collect;
-      yield* Effect.uninterruptible(
-        processStore.report(name, "qemu", {
-          jobs,
-          memoryBytes: sample.memoryBytes,
-          cpuPercent: sample.cpuPercent,
-        }),
-      );
-    }).pipe(Effect.catchCause(failed("process stats failed")));
-    // Once the delete lands: a host that comes back must not keep a setup lock from the
-    // process that died. A failed delete is retried on the next tick; after it lands, later
-    // ticks leave an in-flight setup on this live server alone.
-    const setupCleared = yield* Ref.make(false);
-    const clearSetups = Effect.gen(function* () {
-      if (yield* Ref.get(setupCleared)) {
-        return;
-      }
+// Announces this qemu server under `url`: its machines as guests and its slots as jobs. On
+// joining it removes this url's setup rows once: a host that comes back must not keep a setup
+// lock from the process that died. A removal that fails is retried on the next tick; once it
+// lands, later ticks leave an in-flight setup on this live server alone.
+export const announce = (url: string, name: string) =>
+  Member.announce({
+    type: "qemu",
+    url,
+    name,
+    attribution: { location: Log.Locations.server },
+    report: Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      const stats = yield* sessions.stats;
+      return { qemus: stats.qemus, jobs: yield* sessions.jobs };
+    }),
+    onJoin: Effect.gen(function* () {
+      const setups = yield* SetupRequests.SetupRequestStore;
+      const log = yield* Log.Log;
       const removed = yield* setups.removeServer(url);
-      yield* Ref.set(setupCleared, true);
-      if (removed === 0) {
-        return;
+      if (removed > 0) {
+        yield* log.info(`setup cleared; ${url}; ${String(removed)}`, {
+          location: Log.Locations.server,
+        });
       }
-      yield* log.info(`setup cleared; ${url}; ${String(removed)}`, {
-        location: Log.Locations.server,
-      });
-    }).pipe(Effect.catchCause(failed("setup clear failed")));
-    const tick = clearSetups.pipe(Effect.andThen(writeHeartbeat), Effect.andThen(writeProcess));
-    // Before the loop: close interrupts the fiber first, then this runs.
-    yield* Effect.addFinalizer(() =>
-      store.removeServer(url).pipe(Effect.catchCause(failed("unannounce failed")), Effect.asVoid),
-    );
-    yield* tick.pipe(
-      Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL)),
-      Effect.forkScoped({ startImmediately: true }),
-    );
+    }),
   });

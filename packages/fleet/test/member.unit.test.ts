@@ -93,9 +93,9 @@ type Fakes = {
 };
 
 // The loop in a scope of its own, so a test can close it and prove the ticking stops.
-const start = <RJoin, EJoin, RLeave, ELeave>(
+const start = <RJoin = never, EJoin = never, RLeave = never, ELeave = never>(
   hooks: {
-    readonly report?: Effect.Effect<{ readonly qemus: number; readonly jobs: number }, unknown>;
+    readonly report?: Effect.Effect<{ readonly qemus: number; readonly jobs: number }>;
     readonly onJoin?: Effect.Effect<void, EJoin, RJoin>;
     readonly onLeave?: Effect.Effect<void, ELeave, RLeave>;
   } = {},
