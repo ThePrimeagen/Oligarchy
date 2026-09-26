@@ -6,7 +6,6 @@ import { html } from "hono/html";
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { jsxRenderer } from "hono/jsx-renderer";
 import {
-  abortAutomationJob,
   addServer,
   abortPendingSuiteJobs,
   abortTestSuite,
@@ -74,10 +73,10 @@ type Bindings = {
   LINEAR_API_TOKEN: string;
 };
 
-// The dashboard's one Linear call: an aborted job's ticket moves to the board's Aborted status,
-// so the ticket says what the queue says. Rejects with the reason when the ticket did not move:
-// the route logs it and answers all the same. A runtime per call, as the worker has no process
-// to hold one.
+// The suite abort's Linear call: each aborted result's ticket moves to the board's Aborted
+// status, so the ticket says what the queue says. Rejects with the reason when the ticket did
+// not move: the route logs it and answers all the same. A runtime per call, as the worker has
+// no process to hold one.
 const abortLinearIssue = async (env: Bindings, ticket: string): Promise<void> => {
   const runtime = ManagedRuntime.make(
     Linear.Linear.layer(
@@ -875,18 +874,14 @@ app.post("/servers/delete", async (context) => {
 });
 
 // POST /abort stops one job, named by its ticket and action as the page's form posts them (a
-// ticket has one drive and one diagnose), and moves the ticket to Aborted on the board. A
-// pending job has no client to stop: closing its row here is the whole abort, and the
-// dispatcher's next claim no longer finds it. A running job is the automation server's to
-// stop, and a 200 from that server is the close; it refuses a job that is not the one
-// running for the ticket, so a stale click cannot stop the other. A 4xx or 5xx, or no answer
-// at all, closes the running row here so the queue does not stay stuck; Sentry records
-// "Cloudflare aborted job" only when that write lands. Once a row closed either way the
-// ticket moves; a Linear failure is logged and the row stays closed. This route always
-// answers 200 when htmx or JSON asked, and a plain form post redirects. The servers page
-// gets the queue or /servers. A form that posts view=definitions gets the running list, or
-// /definitions, so aborting there does not land on the servers page. The operator's click
-// is done either way.
+// ticket has one drive and one diagnose), by forwarding both to the automation server's
+// /abort: it closes the row, pending or running, and moves the ticket to Aborted through Jobs.
+// It refuses a job that is not the one running for the ticket, so a stale click cannot stop
+// the other. A 4xx or 5xx, or no answer at all, is logged and nothing is written here: the row
+// and its ticket are the automation server's. This route always answers 200 when htmx or JSON
+// asked, and a plain form post redirects. The servers page gets the queue or /servers. A form
+// that posts view=definitions gets the running list, or /definitions, so aborting there does
+// not land on the servers page. The operator's click is done either way.
 // OpenCode's force-kill is 5s; ten seconds is that wait plus the round trip. A hung
 // server must not hold the operator's 200.
 const ABORT_TIMEOUT_MS = 10_000;
@@ -945,65 +940,23 @@ app.post("/abort", async (context) => {
       ticket !== "" &&
       (action === "drive" || action === "diagnose" || action === "mint")
     ) {
-      let closed = false;
       try {
-        closed = await abortAutomationJob(
-          context.env.HYPERDRIVE.connectionString,
-          ticket,
-          action,
-          "pending",
-        );
-      } catch (error) {
-        Sentry.captureException(error);
-        console.error("dashboard: aborting a job:", errorMessage(error));
-      }
-      if (!closed) {
-        try {
-          const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({ ticket, action }),
-            signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
-          });
-          closed = response.status === 200;
-          if (!closed) {
-            console.error(
-              `dashboard: aborting a job: automation server returned ${String(response.status)}`,
-            );
-          }
-        } catch (error) {
-          console.error("dashboard: aborting a job:", errorMessage(error));
-        }
-      }
-      if (!closed) {
-        try {
-          closed = await abortAutomationJob(
-            context.env.HYPERDRIVE.connectionString,
-            ticket,
-            action,
-            "running",
-          );
-          if (closed) {
-            Sentry.captureException(new Error("Cloudflare aborted job"));
-          }
-        } catch (error) {
-          Sentry.captureException(error);
-          console.error("dashboard: aborting a job:", errorMessage(error));
-        }
-      }
-      if (closed) {
-        try {
-          await abortLinearIssue(context.env, ticket);
-        } catch (error) {
-          Sentry.captureException(error);
+        const response = await fetch(new URL("/abort", context.env.AUTOMATION_SERVER_URL), {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${context.env.OLIGARCHY_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ticket, action }),
+          signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
+        });
+        if (response.status !== 200) {
           console.error(
-            `dashboard: aborting a job: ${ticket} stays on the board:`,
-            errorMessage(error),
+            `dashboard: aborting a job: automation server returned ${String(response.status)}`,
           );
         }
+      } catch (error) {
+        console.error("dashboard: aborting a job:", errorMessage(error));
       }
     }
   } catch (error) {
@@ -1016,12 +969,13 @@ app.post("/abort", async (context) => {
 // A uuid, the shape test_runs.id has. Anything else is not a suite to abort.
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// POST /suites/abort stops one suite that never finished. Pending jobs abort here first, the
-// same way /abort does, so a claim during the round trip never sees them. A running job is the
-// automation server's to stop. A miss still aborts the row here, same as /abort's running
-// fallback, and the client may still be driving; the VM itself ends when commands stop. The
+// POST /suites/abort stops one suite that never finished. Pending jobs abort here first, so a
+// claim during the round trip never sees them. A running job is the automation server's to
+// stop, forwarded the way /abort forwards. A miss still aborts the row here, and the client may
+// still be driving; the VM itself ends when commands stop. The
 // results still pending or running become aborted, which is what takes the suite out of the
-// running count, and each of their tickets moves to Aborted. A suite that has already finished
+// running count, and each of their tickets moves to Aborted, but for a ticket whose job the
+// automation server aborted: its abort already moved it. A suite that has already finished
 // is left as it is. A Linear miss is logged and the rows stay aborted. The click answers with
 // the queue.
 app.post("/suites/abort", async (context) => {
@@ -1047,6 +1001,8 @@ app.post("/suites/abort", async (context) => {
       return reply();
     }
     await abortPendingSuiteJobs(connectionString, run);
+    // A 200 is the automation server's abort, and that abort moved the ticket to Aborted.
+    const settled = new Set<string>();
     // The first pass is the slow one. A claim that won the pending abort shows up on
     // the second. A job that becomes running during that second pass is still running
     // afterwards; that window is one read, not the whole abort loop.
@@ -1068,7 +1024,9 @@ app.post("/suites/abort", async (context) => {
             body: JSON.stringify({ ticket: job.ticket, action: job.action }),
             signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
           });
-          if (response.status !== 200) {
+          if (response.status === 200) {
+            settled.add(job.ticket);
+          } else {
             missed = true;
             console.error(
               `dashboard: aborting a suite: automation server returned ${String(response.status)}`,
@@ -1089,6 +1047,9 @@ app.post("/suites/abort", async (context) => {
     }
     if (suite.aborted) {
       for (const ticket of suite.tickets) {
+        if (settled.has(ticket)) {
+          continue;
+        }
         try {
           await abortLinearIssue(context.env, ticket);
         } catch (error) {

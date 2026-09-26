@@ -6,8 +6,9 @@ import type * as Automation from "@oligarchy/db/automation";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Linear from "@oligarchy/linear/client";
 import * as LinearErrors from "@oligarchy/linear/errors";
+import * as TestingLinear from "@oligarchy/testing/linear";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as Backlog from "../../src/automation-server/backlog.ts";
-import * as FakeLinear from "../support/fake-linear.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Stores from "../support/stores.ts";
 
@@ -56,7 +57,7 @@ const ticket = (identifier: string, updatedAt: string): Linear.LinearBacklogTick
   updatedAt,
 });
 
-const seedResult = (tests: Stores.FakeTestStore, linearId: string, resultId = RESULT) => {
+const seedResult = (tests: TestingStores.FakeTestStore, linearId: string, resultId = RESULT) => {
   tests.results.push({
     id: resultId,
     runId: RUN,
@@ -72,7 +73,7 @@ const seedResult = (tests: Stores.FakeTestStore, linearId: string, resultId = RE
 };
 
 const seedJob = (
-  automation: Stores.FakeAutomationStore,
+  automation: TestingStores.FakeAutomationStore,
   resultId: string,
   action: Automation.AutomationAction,
   status: Automation.AutomationJobRow["status"],
@@ -109,7 +110,7 @@ const start = (
           board.splice(index, 1);
         }
       });
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         listBacklog: Effect.sync(() => [...board]),
         moveIssue: moveIssue ?? recordMove,
@@ -129,7 +130,7 @@ const ready = (identifier: string) => ({ method: "markReady" as const, identifie
 const automationNeeded = (identifier: string): Move => ({
   issueId: `issue-${identifier}`,
   identifier,
-  stateId: FakeLinear.STATES.automationNeeded,
+  stateId: TestingLinear.STATES.automationNeeded,
 });
 
 // Every poll writes one tracking line per column that lists a ticket. `acted` is everything else:
@@ -215,32 +216,6 @@ describe("backlog watch happy path", () => {
     }),
   );
 
-  it.effect("queues mint, not drive, when the backlog ticket's result is the mint definition", () =>
-    Effect.gen(function* () {
-      const board = [ticket(TICKET, SEEN)];
-      const { stores, moved, log, linear } = yield* start(board);
-      stores.tests.definitions.push({
-        id: 1,
-        name: "mint",
-        description: "install",
-        instruction: "boot",
-        proof: "desktop",
-        createdAt: new Date(0),
-      });
-      seedResult(stores.tests, TICKET);
-      yield* TestClock.adjust("90 seconds");
-      expect(stores.automation.jobs).toEqual([
-        expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
-      ]);
-      expect(moved).toEqual([automationNeeded(TICKET)]);
-      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
-      expect(acted(log)).toEqual([
-        "backlog watch processing out of bounds ticket; 3/3 pings; queueing mint and moving it to Automation Needed",
-        "backlog watch moved to Automation Needed; queued mint",
-      ]);
-    }),
-  );
-
   it.effect("adopts each ticket on its own rounds, leaving a newer one in the backlog", () =>
     Effect.gen(function* () {
       const board = [ticket(TICKET, SEEN)];
@@ -284,7 +259,7 @@ describe("backlog watch happy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...backlog]),
             listNeedsReview: Effect.sync(() => [...review]),
@@ -323,7 +298,7 @@ describe("backlog watch happy path", () => {
         const review = [ticket(OTHER, SEEN)];
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...needed]),
             listNeedsReview: Effect.sync(() => [...review]),
@@ -412,7 +387,7 @@ describe("backlog watch happy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...board]),
             moveIssue: (issue, stateId) =>
@@ -570,7 +545,7 @@ describe("backlog watch unhappy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.suspend(() =>
               fail ? Effect.fail(refused) : Effect.succeed([ticket(TICKET, SEEN)]),
@@ -672,7 +647,7 @@ describe("backlog watch unhappy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const steps: Array<string> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...board]),
             markReady: () =>
@@ -765,7 +740,7 @@ describe("backlog watch unhappy path", () => {
           message: "Failed query: select",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
-        const tests = Stores.fakeTestStore(
+        const tests = TestingStores.fakeTestStore(
           {},
           {
             findResultByLinearId: (linearId) =>
@@ -782,13 +757,13 @@ describe("backlog watch unhappy path", () => {
               ),
           },
         );
-        const automation = Stores.fakeAutomationStore();
+        const automation = TestingStores.fakeAutomationStore();
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
         announceClient(servers);
         const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN), ticket(THIRD, SEEN)];
         const moved: Array<Move> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listBacklog: Effect.sync(() => [...board]),
             moveIssue: (issue, stateId) =>
@@ -881,7 +856,7 @@ describe("backlog watch unhappy path", () => {
       let polls = 0;
       const stores = Stores.fakeStores();
       const log = FakeLog.fakeLog();
-      const linear = FakeLinear.fakeLinear({
+      const linear = TestingLinear.fakeLinear({
         overrides: {
           listBacklog: Effect.sync(() => {
             polls += 1;
@@ -913,7 +888,7 @@ const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =
     const stores = Stores.fakeStores();
     const log = FakeLog.fakeLog();
     const moved: Array<Move> = [];
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         [column]: Effect.sync(() => [...board]),
         moveIssue: (issue, stateId) =>
@@ -934,7 +909,7 @@ const startColumn = (column: Column, board: Array<Linear.LinearBacklogTicket>) =
 // Retention deletes TICKET's result right after the watch reads it, so any later lookup is empty.
 const startDeleting = (column: "listBacklog" | Column, board: Array<Linear.LinearBacklogTicket>) =>
   Effect.gen(function* () {
-    const tests = Stores.fakeTestStore(
+    const tests = TestingStores.fakeTestStore(
       {},
       {
         findResultByLinearId: (linearId) =>
@@ -946,11 +921,11 @@ const startDeleting = (column: "listBacklog" | Column, board: Array<Linear.Linea
           }),
       },
     );
-    const automation = Stores.fakeAutomationStore();
+    const automation = TestingStores.fakeAutomationStore();
     const servers = Stores.fakeServerStore();
     const log = FakeLog.fakeLog();
     const moved: Array<Move> = [];
-    const linear = FakeLinear.fakeLinear({
+    const linear = TestingLinear.fakeLinear({
       overrides: {
         [column]: Effect.sync(() => [...board]),
         moveIssue: (issue, stateId) =>
@@ -1021,25 +996,6 @@ describe("automation needed watch happy path", () => {
           "automation needed watch tracking out of bounds tickets; OLI-45 5/3 pings (handled)",
         ]);
       }),
-  );
-
-  it.effect("queues mint when the Automation Needed ticket's result is the mint definition", () =>
-    Effect.gen(function* () {
-      const board = [ticket(TICKET, SEEN)];
-      const { stores, moved, log, linear } = yield* startColumn("listAutomationNeeded", board);
-      stores.tests.definitions.push(mintDefinition);
-      seedResult(stores.tests, TICKET);
-      yield* TestClock.adjust("90 seconds");
-      expect(stores.automation.jobs).toEqual([
-        expect.objectContaining({ resultId: RESULT, action: "mint", status: "pending" }),
-      ]);
-      expect(moved).toEqual([]);
-      expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
-      expect(acted(log)).toEqual([
-        "automation needed watch processing out of bounds ticket; 3/3 pings; queueing mint",
-        "automation needed watch queued mint",
-      ]);
-    }),
   );
 
   it.effect(
@@ -1191,25 +1147,6 @@ describe("needs review watch happy path", () => {
         "needs review watch tracking out of bounds tickets; OLI-45 4/3 pings (handled)",
       );
     }),
-  );
-
-  it.effect(
-    "queues diagnose, not mint, when the Needs Review ticket's result is the mint definition",
-    () =>
-      Effect.gen(function* () {
-        const board = [ticket(TICKET, SEEN)];
-        const { stores, log } = yield* startColumn("listNeedsReview", board);
-        stores.tests.definitions.push(mintDefinition);
-        seedResult(stores.tests, TICKET);
-        yield* TestClock.adjust("90 seconds");
-        expect(stores.automation.jobs).toEqual([
-          expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
-        ]);
-        expect(acted(log)).toEqual([
-          "needs review watch processing out of bounds ticket; 3/3 pings; queueing diagnose",
-          "needs review watch queued diagnose",
-        ]);
-      }),
   );
 
   it.effect(
@@ -1498,7 +1435,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const stores = Stores.fakeStores();
         const log = FakeLog.fakeLog();
         const labeled: Array<string> = [];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...board]),
             markReady: (identifier) =>
@@ -1563,13 +1500,13 @@ describe("automation needed and needs review watch unhappy path", () => {
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
         let fail = true;
-        const tests = Stores.fakeTestStore();
-        const automation = Stores.fakeAutomationStore({
+        const tests = TestingStores.fakeTestStore();
+        const automation = TestingStores.fakeAutomationStore({
           jobStatus: () => (fail ? Effect.fail(refused) : Effect.succeed(Option.none())),
         });
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [ticket(TICKET, SEEN)]),
           },
@@ -1622,7 +1559,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const log = FakeLog.fakeLog();
         const automationBoard = [ticket(TICKET, SEEN)];
         const reviewBoard = [ticket(OTHER, SEEN)];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.suspend(() =>
               fail ? Effect.fail(refused) : Effect.succeed([...automationBoard]),
@@ -1678,7 +1615,7 @@ describe("automation needed and needs review watch unhappy path", () => {
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
         let fail = true;
-        const tests = Stores.fakeTestStore(
+        const tests = TestingStores.fakeTestStore(
           {},
           {
             findResultByLinearId: (linearId) =>
@@ -1695,12 +1632,12 @@ describe("automation needed and needs review watch unhappy path", () => {
               ),
           },
         );
-        const automation = Stores.fakeAutomationStore();
+        const automation = TestingStores.fakeAutomationStore();
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
         announceClient(servers);
         const board = [ticket(TICKET, SEEN)];
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listAutomationNeeded: Effect.sync(() => [...board]),
           },
@@ -1804,13 +1741,13 @@ describe("automation needed and needs review watch unhappy path", () => {
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
         let fail = true;
-        const tests = Stores.fakeTestStore();
-        const automation = Stores.fakeAutomationStore({
+        const tests = TestingStores.fakeTestStore();
+        const automation = TestingStores.fakeAutomationStore({
           jobStatus: () => (fail ? Effect.fail(refused) : Effect.succeed(Option.none())),
         });
         const servers = Stores.fakeServerStore();
         const log = FakeLog.fakeLog();
-        const linear = FakeLinear.fakeLinear({
+        const linear = TestingLinear.fakeLinear({
           overrides: {
             listNeedsReview: Effect.sync(() => [ticket(TICKET, SEEN)]),
           },

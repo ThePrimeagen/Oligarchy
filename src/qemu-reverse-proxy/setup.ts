@@ -1,14 +1,10 @@
 import { Cause, Context, Effect, Exit, FileSystem, Layer, Option, Ref, type Scope } from "effect";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
+import * as Open from "@oligarchy/jobs/open";
 import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Prompts from "../ctrl/prompts.ts";
-
-// The install ./ctrl mint already uses. One definition, one ticket pinned to the server.
-const MINT_DEFINITION = "mint";
-const MINT_LABEL = "mint";
 
 // Not a heartbeat. The loop exists only while a setup is still in flight, and a tick is this
 // far apart. It does not have to land on the second.
@@ -77,10 +73,12 @@ type Gate = { readonly on: boolean; readonly again: boolean };
 export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-proxy/Setup", {
   make: Effect.gen(function* () {
     const store = yield* SetupRequests.SetupRequestStore;
+    const log = yield* Log.Log;
+    // What Jobs.openMint needs beside those, captured once, so open asks nothing of the request
+    // that calls it.
     const tests = yield* Tests.TestStore;
     const linear = yield* Linear.Linear;
     const fs = yield* FileSystem.FileSystem;
-    const log = yield* Log.Log;
     // Filled by install, which runs in the server scope. A request's scope must not own the loop.
     let scope: Scope.Scope | null = null;
     const gate = yield* Ref.make<Gate>({ on: false, again: false });
@@ -119,84 +117,6 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
         ),
       );
 
-    // One mint ticket for this server, as ./ctrl mint writes one: a run, a result, a Linear
-    // issue born in Backlog and moved to Automation Needed with its body.
-    const ticket = Effect.fn("Setup.ticket")(function* (
-      iso: string,
-      serverUrl: string,
-      proxyUrl: string,
-    ) {
-      const definition = yield* tests.findTestDefinition(MINT_DEFINITION);
-      if (Option.isNone(definition)) {
-        return yield* Effect.fail({
-          message: `setup: no test definition named ${MINT_DEFINITION}; define the install once with ./ctrl test define --name ${MINT_DEFINITION}`,
-        });
-      }
-      const created = yield* tests.createRun({
-        iso,
-        serverUrl: proxyUrl,
-        definitions: [definition.value],
-      });
-      const result = created.results[0];
-      if (result === undefined) {
-        return yield* Effect.die(new Error(`setup: run ${created.runId} has no result`));
-      }
-      const resultId = result.id;
-      const issued = yield* Effect.gen(function* () {
-        const client = yield* Linear.Linear;
-        const teamId = yield* client.teamId;
-        const labelIds = yield* client.labelIds(teamId, MINT_LABEL);
-        const assigneeId = yield* client.assigneeId;
-        const states = yield* client.stateIds(teamId);
-        const issue = yield* client.createIssue({
-          teamId,
-          title: `Omarchy mint: ${serverUrl}`,
-          labelIds,
-          assigneeId,
-          stateId: states.backlog,
-        });
-        yield* tests.setLinearId(resultId, issue.identifier);
-        // The job is queued when the issue reaches Automation Needed. The pin has to be on the
-        // lock before that, or the dispatcher reserves the mint with no server.
-        const stored = yield* store.setResult(iso, serverUrl, resultId);
-        if (!stored) {
-          return yield* Effect.fail({
-            message: "setup row gone before its result was stored",
-          });
-        }
-        const description = yield* Prompts.renderMintIssue({
-          LINEAR_TICKET: issue.identifier,
-          RUN_ID: created.runId,
-          RESULT_ID: resultId,
-          ISO_URL: iso,
-          SERVER_URL: proxyUrl,
-          PINNED_SERVER: serverUrl,
-          INSTALL_NAME: definition.value.name,
-          INSTALL_DESCRIPTION: definition.value.description,
-          INSTALL_INSTRUCTION: definition.value.instruction,
-          INSTALL_PROOF: definition.value.proof,
-        });
-        yield* client.describeIssue(issue, description, states.automationNeeded);
-        return issue;
-      }).pipe(
-        Effect.provideService(Linear.Linear, linear),
-        Effect.provideService(FileSystem.FileSystem, fs),
-        Effect.catch((error) =>
-          tests.failRun(created.runId, Render.errorDetail(error)).pipe(
-            // The create already failed. Failing the run records it; that second failure is
-            // logged and the first error is what drops the lock.
-            Effect.catchCause((cause) =>
-              logged(
-                `setup failRun failed; ${created.runId}: ${Render.errorDetail(Cause.squash(cause))}`,
-              ),
-            ),
-            Effect.andThen(Effect.fail(error)),
-          ),
-        ),
-      );
-      return { runId: created.runId, resultId, identifier: issued.identifier };
-    });
-
     const arm = Effect.uninterruptible(
       Effect.gen(function* () {
         if (scope === null) {
@@ -219,8 +139,11 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
           yield* drop(iso, serverUrl, "reserve carried no host");
           return;
         }
-        // 3. The Linear issue. Steps 4 and 5 are left as they are.
-        // Today a failed ticket calls drop, which deletes the row. If that delete fails, drop
+        // 3. The mint job and its ticket, pinned to this server on the lock before the ticket
+        // reaches Automation Needed. A failure has already failed the run, naming any ticket
+        // left in Backlog, or logged why the run would not take it; a lock deleted meanwhile
+        // is one such failure.
+        // A failed ticket calls drop, which deletes the row. If that delete fails, drop
         // logs `setup release failed` through log.error. That line is reported to Sentry,
         // because it does not set skipSentry, and the delete's own cause is not attached.
         // Then we return. The row is still there, with no result id.
@@ -229,35 +152,21 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
         // sees the row and does not create another ticket. An issue createIssue already made,
         // before a later step failed, is not reconciled. A delete that keeps failing leaves
         // the server locked.
-        const exit = yield* Effect.exit(ticket(iso, serverUrl, proxyUrl));
+        const exit = yield* Effect.exit(
+          Open.openMint({ iso, serverUrl: proxyUrl, pinned: serverUrl }).pipe(
+            Effect.provideService(SetupRequests.SetupRequestStore, store),
+            Effect.provideService(Tests.TestStore, tests),
+            Effect.provideService(Linear.Linear, linear),
+            Effect.provideService(Log.Log, log),
+            Effect.provideService(FileSystem.FileSystem, fs),
+          ),
+        );
         if (Exit.isFailure(exit)) {
           yield* drop(iso, serverUrl, Render.errorDetail(Cause.squash(exit.cause)));
           return;
         }
-        // 6. The issue exists. Attach it to the lock and watch it.
-        const stored = yield* Effect.exit(store.setResult(iso, serverUrl, exit.value.resultId));
-        if (Exit.isFailure(stored)) {
-          yield* drop(
-            iso,
-            serverUrl,
-            `result not stored: ${Render.errorDetail(Cause.squash(stored.cause))}`,
-          );
-          return;
-        }
-        if (!stored.value) {
-          yield* tests
-            .failRun(exit.value.runId, "setup row gone before its result was stored")
-            .pipe(
-              Effect.catchCause((cause) =>
-                logged(
-                  `setup failRun failed; ${exit.value.runId}: ${Render.errorDetail(Cause.squash(cause))}`,
-                ),
-              ),
-            );
-          yield* log.info(`setup gone; ${serverUrl}; ${iso}`, { location: Log.Locations.server });
-          return;
-        }
-        yield* log.info(`setup ticket ${exit.value.identifier}; ${serverUrl}; ${iso}`, {
+        // 4. The issue exists and the lock names its result: watch it.
+        yield* log.info(`setup ticket ${exit.value.linear.identifier}; ${serverUrl}; ${iso}`, {
           location: Log.Locations.server,
         });
         yield* arm;

@@ -5,12 +5,11 @@ import { app } from "../../src/dashboard/dashboard.tsx";
 import {
   bundledPrompts,
   createTestSuiteRun,
-  responseJson,
   SuiteRequestError,
 } from "../../src/dashboard/suite.ts";
 import * as DbErrors from "@oligarchy/db/errors";
+import * as Templates from "@oligarchy/jobs/templates";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Prompts from "../../src/ctrl/prompts.ts";
 
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REQUIRED = "iso, version and serverUrl are required";
@@ -147,18 +146,18 @@ describe("POST /create-test-suite-run unhappy path: unreachable database", () =>
 });
 
 describe("create test-suite-run runner", () => {
-  it("hands the command its arguments and returns what the command returned (happy)", async () => {
+  it("hands Jobs.open the checked body and answers with the run it opened (happy)", async () => {
     const created = {
       id: "run-id",
-      tests: [{ id: "result-id", linear: { identifier: "OLI-42" } }],
+      tests: [{ id: "result-id", linear: "OLI-42" }],
     };
-    const calls: Array<readonly [string, string, string, ReadonlyArray<string>]> = [];
+    const calls: Array<readonly [string, string, string, unknown]> = [];
     const answer = await createTestSuiteRun(
       env,
       env.HYPERDRIVE.connectionString,
       body,
-      async (connectionString, token, team, args) => {
-        calls.push([connectionString, token, team, args]);
+      async (connectionString, token, team, request) => {
+        calls.push([connectionString, token, team, request]);
         return created;
       },
     );
@@ -167,13 +166,13 @@ describe("create test-suite-run runner", () => {
         env.HYPERDRIVE.connectionString,
         env.LINEAR_API_TOKEN,
         env.LINEAR_TEAM,
-        ["test", "run", "testsuite", "--iso", ISO, "--version", "1.2.3", "--server-url", SERVER],
+        { iso: ISO, version: "1.2.3", serverUrl: SERVER },
       ],
     ]);
     expect(answer).toBe(created);
   });
 
-  it("turns the command's empty-table refusal into the route's 400, and nothing else (unhappy)", async () => {
+  it("turns Jobs.open's empty-table refusal into the route's 400, and nothing else (unhappy)", async () => {
     const refused = createTestSuiteRun(env, env.HYPERDRIVE.connectionString, body, async () => {
       throw SharedErrors.CommandError.make({ message: "test: no test definitions found" });
     });
@@ -192,25 +191,7 @@ describe("create test-suite-run runner", () => {
     await expect(other).rejects.not.toBeInstanceOf(SuiteRequestError);
   });
 
-  it("reads the command's JSON, not a log line printed after it (happy)", () => {
-    const created = { id: "run-id", tests: [] };
-    expect(
-      responseJson([
-        "[global] info: test run-id created; 0 tests",
-        JSON.stringify(created),
-        "[global] error: db: log insert failed: connection terminated",
-      ]),
-    ).toEqual(created);
-  });
-
-  it("refuses output that never printed the JSON (unhappy)", () => {
-    expect(() => responseJson(["[global] info: nothing"])).toThrow(
-      "test run testsuite printed no JSON",
-    );
-    expect(() => responseJson(["{not json"])).toThrow("test run testsuite printed no JSON");
-  });
-
-  it("does not run the command for a body it refuses (unhappy)", async () => {
+  it("opens nothing for a body it refuses (unhappy)", async () => {
     const run = vi.fn(async () => ({ id: "run-id" }));
     await expect(
       createTestSuiteRun(env, env.HYPERDRIVE.connectionString, { iso: ISO }, run),
@@ -222,15 +203,15 @@ describe("create test-suite-run runner", () => {
 describe("bundled prompts", () => {
   it("serves the same ticket text ./ctrl reads from disk (happy)", async () => {
     const fromDisk = await Effect.runPromise(
-      Prompts.renderLinearIssue(ticket).pipe(Effect.provide(NodeFileSystem.layer)),
+      Templates.renderLinearIssue(ticket).pipe(Effect.provide(NodeFileSystem.layer)),
     );
     const fromWorker = await Effect.runPromise(
-      Prompts.renderLinearIssue(ticket).pipe(Effect.provide(bundledPrompts)),
+      Templates.renderLinearIssue(ticket).pipe(Effect.provide(bundledPrompts)),
     );
     expect(fromWorker).toBe(fromDisk);
   });
 
-  it("dies on a prompt path the command does not read (unhappy)", async () => {
+  it("dies on a prompt path a suite ticket does not read (unhappy)", async () => {
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;

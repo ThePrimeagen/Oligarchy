@@ -1,17 +1,18 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Cause, Console, Effect, Exit, FileSystem, Layer, ManagedRuntime } from "effect";
-import * as Command from "effect/unstable/cli/Command";
+import { Cause, Effect, Exit, FileSystem, Layer, ManagedRuntime, Option, Redacted } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as Client from "@oligarchy/db/client";
+import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
+import * as Open from "@oligarchy/jobs/open";
+import * as Linear from "@oligarchy/linear/client";
+import * as Log from "@oligarchy/log/log";
 import clientMd from "../../client.md";
 import ctrlLinearMd from "../../ctrl-linear.md";
 import linearIssue from "../../prompts/linear-issue.html";
-import * as CtrlCommand from "../ctrl/command.ts";
 
-// POST /create-test-suite-run runs `./ctrl test run testsuite`. The worker has no checkout, so
-// the files that command reads — the ticket template and the two guides it embeds — are these
-// strings, the same files wrangler loads as text.
+// POST /create-test-suite-run opens the same run as `./ctrl test run testsuite`, through
+// Jobs.open. The worker has no checkout, so the files the ticket template reads (the template
+// and the two guides it embeds) are these strings, the same files wrangler loads as text.
 
 const REQUIRED = "iso, version and serverUrl are required";
 
@@ -32,7 +33,7 @@ type SuiteRunner = (
   connectionString: string,
   token: string,
   team: string,
-  args: ReadonlyArray<string>,
+  request: SuiteBody,
 ) => Promise<unknown>;
 
 const fieldsOf = (value: unknown): value is { readonly [key: string]: unknown } =>
@@ -83,7 +84,7 @@ const promptText = (path: string): string | undefined => {
   return undefined;
 };
 
-// What `Prompts` reads through. A path this command does not ask for dies: an empty stand-in
+// What the ticket template reads through. A path this command does not ask for dies: an empty stand-in
 // would publish a ticket with the placeholder still in it.
 export const bundledPrompts: Layer.Layer<FileSystem.FileSystem> = FileSystem.layerNoop({
   readFileString: (path) => {
@@ -96,25 +97,6 @@ export const bundledPrompts: Layer.Layer<FileSystem.FileSystem> = FileSystem.lay
 
 const NO_DEFINITIONS = "test: no test definitions found";
 
-// The command prints one JSON object, then a finalizer may print a log line (a failed log insert
-// does not fail the command). The answer is the last JSON object, not whatever landed last.
-export const responseJson = (lines: ReadonlyArray<string>): unknown => {
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index];
-    if (line === undefined || !line.startsWith("{")) {
-      continue;
-    }
-    try {
-      return JSON.parse(line);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) {
-        throw error;
-      }
-    }
-  }
-  throw new Error("test run testsuite printed no JSON");
-};
-
 const commandMessage = (error: unknown): string | undefined => {
   if (typeof error !== "object" || error === null || !("message" in error)) {
     return undefined;
@@ -125,31 +107,28 @@ const commandMessage = (error: unknown): string | undefined => {
   return typeof error.message === "string" ? error.message : undefined;
 };
 
-// `Log` and the printed JSON both come through this console. A finalizer may add a line after.
-const runCtrlCommand: SuiteRunner = async (connectionString, token, team, args) => {
-  const lines: Array<string> = [];
-  const recording: Console.Console = Object.assign(Object.create(console), {
-    log: (...parts: ReadonlyArray<unknown>) => {
-      lines.push(parts.map(String).join(" "));
-    },
-  });
+// A runtime per request, as the worker has no process to hold one: the database and its
+// TestStore, Linear, lines to stdout, and the bundled templates as the file system. The token
+// and team are read as ctrl reads them, before anything is built, so an empty LINEAR_TEAM is
+// refused by name without a query or a Linear call.
+const openSuite: SuiteRunner = async (connectionString, token, team, request) => {
   const runtime = ManagedRuntime.make(
-    Layer.mergeAll(
-      Layer.merge(NodeServices.layer, bundledPrompts),
-      FetchHttpClient.layer,
-      Config.fromValues({
-        DATABASE_URL: connectionString,
-        LINEAR_API_TOKEN: token,
-        LINEAR_TEAM: team,
-      }),
-      Layer.succeed(Console.Console, recording),
-    ),
+    Layer.unwrap(
+      Effect.map(Config.linearAccess, (access) =>
+        Layer.mergeAll(
+          Tests.TestStore.layer.pipe(
+            Layer.provide(Client.Database.layer(Redacted.make(connectionString))),
+          ),
+          Linear.Linear.layer(access.token, access.team).pipe(Layer.provide(FetchHttpClient.layer)),
+          Log.Log.layerStdout,
+          bundledPrompts,
+        ),
+      ),
+    ).pipe(Layer.provide(Config.fromValues({ LINEAR_API_TOKEN: token, LINEAR_TEAM: team }))),
   );
-  let exit: Exit.Exit<void, unknown>;
+  let exit: Exit.Exit<unknown, unknown>;
   try {
-    exit = await runtime.runPromiseExit(
-      Command.runWith(CtrlCommand.makeCtrlCommand(), { version: Api.VERSION })(args),
-    );
+    exit = await runtime.runPromiseExit(Open.open({ ...request, name: Option.none() }));
   } finally {
     await runtime.dispose();
   }
@@ -157,28 +136,18 @@ const runCtrlCommand: SuiteRunner = async (connectionString, token, team, args) 
     const error = Cause.squash(exit.cause);
     throw error instanceof Error ? error : new Error(String(error));
   }
-  return responseJson(lines);
+  return exit.value;
 };
 
 export const createTestSuiteRun = async (
   env: { readonly LINEAR_API_TOKEN: string; readonly LINEAR_TEAM: string },
   connectionString: string,
   body: unknown,
-  run: SuiteRunner = runCtrlCommand,
+  run: SuiteRunner = openSuite,
 ): Promise<unknown> => {
   const request = readBody(body);
   try {
-    return await run(connectionString, env.LINEAR_API_TOKEN, env.LINEAR_TEAM, [
-      "test",
-      "run",
-      "testsuite",
-      "--iso",
-      request.iso,
-      "--version",
-      request.version,
-      "--server-url",
-      request.serverUrl,
-    ]);
+    return await run(connectionString, env.LINEAR_API_TOKEN, env.LINEAR_TEAM, request);
   } catch (error) {
     if (commandMessage(error) === NO_DEFINITIONS) {
       throw new SuiteRequestError(NO_DEFINITIONS);

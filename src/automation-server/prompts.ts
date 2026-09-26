@@ -1,5 +1,5 @@
 import { Array as Arr, Effect, FileSystem, Option, Result } from "effect";
-import * as Errors from "../shared/errors.ts";
+import * as JobsErrors from "@oligarchy/jobs/errors";
 
 const besideModule = (relative: string): string =>
   decodeURIComponent(new URL(relative, import.meta.url).pathname);
@@ -18,7 +18,7 @@ const read = Effect.fn("Prompts.read")(function* (path: string) {
     .readFileString(path)
     .pipe(
       Effect.mapError((error) =>
-        Errors.PromptError.make({ message: `prompt: ${error.message}`, cause: error }),
+        JobsErrors.PromptError.make({ message: `prompt: ${error.message}`, cause: error }),
       ),
     );
 });
@@ -27,7 +27,7 @@ const fill = (
   template: string,
   text: string,
   values: Readonly<Record<string, string>>,
-): Result.Result<string, Errors.PromptError> => {
+): Result.Result<string, JobsErrors.PromptError> => {
   const missing: Array<string> = [];
   const filled = text.replace(PLACEHOLDER, (match: string, name: string) => {
     const value = values[name];
@@ -41,7 +41,7 @@ const fill = (
     onNone: () => Result.succeed(filled),
     onSome: (name) =>
       Result.fail(
-        Errors.PromptError.make({
+        JobsErrors.PromptError.make({
           message: `prompt: prompts/${template} uses {{${name}}}, which has no value`,
         }),
       ),

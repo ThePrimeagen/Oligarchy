@@ -7,6 +7,7 @@ import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as VizCommand from "../../src/viz/command.ts";
 import * as FakeHttp from "../support/fake-http.ts";
 import { fakeRenderer, rows } from "../support/fake-renderer.ts";
@@ -40,11 +41,11 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
       });
     const servers = Stores.fakeServerStore({ listMachines: () => counted([]) });
     const process = Stores.fakeProcessStatsStore({ listSeries: () => counted([]) });
-    const automation = Stores.fakeAutomationStore({
+    const automation = TestingStores.fakeAutomationStore({
       listJobs: () => counted({ running: [], pending: [], completed: [] }),
     });
     const actions = Stores.fakeActionStore();
-    const tests = Stores.fakeTestStore();
+    const tests = TestingStores.fakeTestStore();
     const logs = Stores.fakeLogStore();
     const touched: Array<string> = [];
     const stdio = StdioSupport.capture();

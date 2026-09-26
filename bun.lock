@@ -8,6 +8,7 @@
         "@effect/platform-node": "catalog:",
         "@oligarchy/db": "workspace:*",
         "@oligarchy/env": "workspace:*",
+        "@oligarchy/jobs": "workspace:*",
         "@oligarchy/linear": "workspace:*",
         "@oligarchy/log": "workspace:*",
         "@oligarchy/observability": "workspace:*",
@@ -27,6 +28,7 @@
         "@babel/preset-typescript": "7.27.1",
         "@effect/tsgo": "0.41.0",
         "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
         "@testcontainers/postgresql": "^11.14.0",
         "@types/babel__core": "7.20.5",
         "@types/node": "catalog:",
@@ -69,6 +71,24 @@
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/jobs": {
+      "name": "@oligarchy/jobs",
+      "dependencies": {
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -136,6 +156,20 @@
         "effect": "catalog:",
       },
       "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/testing": {
+      "name": "@oligarchy/testing",
+      "dependencies": {
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/linear": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -413,6 +447,8 @@
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
+    "@oligarchy/jobs": ["@oligarchy/jobs@workspace:packages/jobs"],
+
     "@oligarchy/linear": ["@oligarchy/linear@workspace:packages/linear"],
 
     "@oligarchy/log": ["@oligarchy/log@workspace:packages/log"],
@@ -422,6 +458,8 @@
     "@oligarchy/routes": ["@oligarchy/routes@workspace:packages/routes"],
 
     "@oligarchy/shared": ["@oligarchy/shared@workspace:packages/shared"],
+
+    "@oligarchy/testing": ["@oligarchy/testing@workspace:packages/testing"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 

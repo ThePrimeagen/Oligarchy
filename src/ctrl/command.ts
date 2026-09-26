@@ -1,14 +1,4 @@
-import {
-  Array as Arr,
-  Cause,
-  Clock,
-  Console,
-  Effect,
-  Layer,
-  Option,
-  Redacted,
-  Schema,
-} from "effect";
+import { Array as Arr, Clock, Console, Effect, Layer, Option, Redacted, Schema } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
@@ -25,17 +15,14 @@ import * as Sessions from "@oligarchy/db/sessions";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
+import * as Open from "@oligarchy/jobs/open";
 import * as Linear from "@oligarchy/linear/client";
-import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
-import * as Failure from "@oligarchy/log/render";
 import * as Observability from "@oligarchy/observability/log";
 import * as Contract from "@oligarchy/routes/contract";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as Errors from "../shared/errors.ts";
-import * as Prompts from "./prompts.ts";
 import * as Render from "./render.ts";
 
 // ---------------------------------------------------------------------------
@@ -176,11 +163,6 @@ const list = Flag.boolean("list").pipe(
 
 const refuse = (message: string) => SharedErrors.CommandError.make({ message });
 
-// The one definition `mint` installs from, and the label its tickets carry beside the agent
-// test label the automation server watches.
-const MINT_DEFINITION = "mint";
-const MINT_LABEL = "mint";
-
 // The value of an Option, or the refusal the operator reads when it is absent.
 const orRefuse = <A, E, R>(
   self: Effect.Effect<Option.Option<A>, E, R>,
@@ -199,65 +181,12 @@ const printLines = (lines: ReadonlyArray<string>) =>
 
 const printJson = (value: unknown) => Console.log(Render.json(value));
 
-const noDefinitions = (name: Option.Option<string>): SharedErrors.CommandError =>
-  refuse(
-    Option.match(name, {
-      onNone: () => "test: no test definitions found",
-      onSome: (wanted) => `test: no test definition named ${wanted}`,
-    }),
-  );
-
-// Every definition ordered by name, or the one named; a name that matches nothing is refused,
-// an empty table is refused only when the caller needs at least one.
-const selectDefinitions = Effect.fn("ctrl.selectDefinitions")(function* (
-  name: Option.Option<string>,
-  atLeastOne: boolean,
-) {
-  const tests = yield* Tests.TestStore;
-  return yield* Option.match(name, {
-    onNone: () => tests.listTestDefinitions,
-    onSome: (wanted) => Effect.map(tests.findTestDefinition(wanted), Option.toArray),
-  }).pipe(
-    Effect.filterOrFail(
-      (rows) => rows.length > 0 || (Option.isNone(name) && !atLeastOne),
-      () => noDefinitions(name),
-    ),
-  );
-});
-
-const withReason = (error: LinearErrors.LinearError, message: string): LinearErrors.LinearError =>
-  LinearErrors.LinearError.make(
-    Object.assign(
-      { operation: error.operation, message },
-      error.status === undefined ? undefined : { status: error.status },
-      error.cause === undefined ? undefined : { cause: error.cause },
-    ),
-  );
-
 // ---------------------------------------------------------------------------
 // The command tree
 // ---------------------------------------------------------------------------
 
 export const makeCtrlCommand = (deps: Deps = live) => {
   const withDb = Layer.unwrap(Effect.map(Config.databaseUrl, (url) => deps.database(url)));
-
-  // From its creation until the update that moves it lands, a ticket sits in Backlog, where
-  // nothing drives it. Whatever cuts that stretch short — a refusal, a defect, the operator's
-  // SIGINT — leaves it there for good, so the line reaches Sentry rather than only the terminal
-  // the command was run from. Attached with Effect.onError: a finalizer runs on an interrupt too,
-  // and uninterruptibly, where a tapCause handler is skipped once the fiber is interrupted.
-  const trapped =
-    (log: typeof Log.Log.Service, ticket: Linear.LinearTicket) => (cause: Cause.Cause<unknown>) => {
-      const agentId = ticket.identifier;
-      if (Cause.hasInterruptsOnly(cause)) {
-        return log.error("ticket trapped in Backlog; interrupted", { agentId });
-      }
-      const error = Cause.squash(cause);
-      return log.error(`ticket trapped in Backlog; ${Failure.errorDetail(error)}`, {
-        agentId,
-        cause: error,
-      });
-    };
 
   // Sequential on purpose: DATABASE_URL, then LINEAR_API_TOKEN, then LINEAR_TEAM.
   const withDbAndLinear = Layer.unwrap(
@@ -279,11 +208,14 @@ export const makeCtrlCommand = (deps: Deps = live) => {
       ? yield* tests.listTestDefinitionHistory(input.name).pipe(
           Effect.filterOrFail(
             (wordings) => wordings.length > 0 || Option.isNone(input.name),
-            () => noDefinitions(input.name),
+            () => Open.noDefinitions(input.name),
           ),
           Effect.map((wordings) => Render.renderTestDefinitionHistory(wordings, input.details)),
         )
-      : Render.renderTestDefinitions(yield* selectDefinitions(input.name, false), input.details);
+      : Render.renderTestDefinitions(
+          yield* Open.selectDefinitions(input.name, false),
+          input.details,
+        );
     yield* printLines(lines);
   });
 
@@ -292,7 +224,7 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     const tests = yield* Tests.TestStore;
     const wordings = yield* tests.listTestDefinitionHistory(Option.some(input.name));
     if (!Arr.isReadonlyArrayNonEmpty(wordings)) {
-      return yield* noDefinitions(Option.some(input.name));
+      return yield* Open.noDefinitions(Option.some(input.name));
     }
     return yield* printLines(Render.renderTestDefinitionDetails(wordings));
   });
@@ -347,148 +279,15 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     yield* printJson({ id: defined.id, name: input.name, version: defined.version });
   });
 
-  // test run --name <definition>, and test run testsuite, which passes no name: one pending
-  // result per definition, each its newest wording, and one Linear ticket each.
+  // test run --name <definition>, and test run testsuite, which passes no name: the run and its
+  // tickets, as Jobs.open made them.
   const openRun = Effect.fn("ctrl.test.run")(function* (input: {
     readonly serverUrl: string;
     readonly iso: string;
     readonly version: string;
     readonly name: Option.Option<string>;
   }) {
-    const tests = yield* Tests.TestStore;
-    const linear = yield* Linear.Linear;
-    const log = yield* Log.Log;
-
-    // A mint job needs the server pinned by a setup request; suite tickets have no setup request.
-    const definitions = yield* Option.match(input.name, {
-      onNone: () =>
-        selectDefinitions(input.name, false).pipe(
-          Effect.map((rows) => rows.filter((row) => row.name !== MINT_DEFINITION)),
-          Effect.filterOrFail(
-            (rows) => rows.length > 0,
-            () => noDefinitions(input.name),
-          ),
-        ),
-      onSome: () => selectDefinitions(input.name, true),
-    });
-    const created = yield* tests.createRun({
-      iso: input.iso,
-      serverUrl: input.serverUrl,
-      definitions,
-    });
-    const resultIds = new Map(created.results.map((row) => [row.definitionId, row.id] as const));
-    // createRun inserts one result per definition in the same transaction; a missing one is a
-    // broken invariant, never a smaller experiment.
-    const experimentTests = yield* Effect.forEach(definitions, (definition) => {
-      const id = resultIds.get(definition.id);
-      return id === undefined
-        ? Effect.die(
-            new Error(`test: run ${created.runId} has no result for definition ${definition.name}`),
-          )
-        : Effect.succeed({
-            id,
-            definitionId: definition.id,
-            name: definition.name,
-            description: definition.description,
-            instruction: definition.instruction,
-            proof: definition.proof,
-          });
-    });
-    const experiment = {
-      id: created.runId,
-      iso: input.iso,
-      serverUrl: input.serverUrl,
-      version: input.version,
-      tests: experimentTests,
-    };
-
-    const tickets: Array<Linear.LinearTicket> = [];
-    const createTickets = Effect.gen(function* () {
-      const teamId = yield* linear.teamId;
-      const labelIds = yield* linear.labelIds(teamId, experiment.version);
-      const assigneeId = yield* linear.assigneeId;
-      const states = yield* linear.stateIds(teamId);
-      for (const test of experiment.tests) {
-        // Born in Backlog: the automation server queues nothing there, so the create webhook
-        // cannot beat the linear_id write below to the row.
-        const ticket = yield* linear.createIssue({
-          teamId,
-          title: `Omarchy: ${test.name}`,
-          labelIds,
-          assigneeId,
-          stateId: states.backlog,
-        });
-        tickets.push(ticket);
-        yield* Effect.onError(
-          Effect.gen(function* () {
-            // Webhooks name the ticket by its human-readable id; store it on the result so the
-            // automation queue can find the row without parsing the ticket body.
-            yield* tests.setLinearId(test.id, ticket.identifier);
-            // Linear assigns the identifier on create, and the body names it as the driver's
-            // agent id, so the description can only be rendered once the ticket exists.
-            const description = yield* Prompts.renderLinearIssue({
-              LINEAR_TICKET: ticket.identifier,
-              RUN_ID: experiment.id,
-              RESULT_ID: test.id,
-              VERSION: experiment.version,
-              ISO_URL: experiment.iso,
-              SERVER_URL: experiment.serverUrl,
-              TEST_NAME: test.name,
-              TEST_DESCRIPTION: test.description,
-              TEST_INSTRUCTION: test.instruction,
-              TEST_PROOF: test.proof,
-            });
-            // The move into Automation Needed is what queues the drive, and it goes last.
-            yield* linear.describeIssue(ticket, description, states.automationNeeded);
-          }),
-          trapped(log, ticket),
-        );
-      }
-    });
-    // A failure fails the run and every result with the reason, naming the tickets that did get
-    // created so they can be cleaned up by hand; the error goes on carrying that reason.
-    const failRunWith = <E extends { readonly message: string }>(
-      error: E,
-      namingTickets: (reason: string) => E,
-    ) =>
-      Effect.gen(function* () {
-        const identifiers = tickets.map((ticket) => ticket.identifier).join(", ");
-        const reason =
-          identifiers === "" ? error.message : `${error.message}; created ${identifiers}`;
-        yield* tests.failRun(experiment.id, reason);
-        return yield* Effect.fail(identifiers === "" ? error : namingTickets(reason));
-      });
-    yield* createTickets.pipe(
-      Effect.catchTags({
-        LinearError: (error) => failRunWith(error, (reason) => withReason(error, reason)),
-        PromptError: (error) =>
-          failRunWith(error, (reason) =>
-            Errors.PromptError.make(
-              Object.assign(
-                { message: reason },
-                error.cause === undefined ? undefined : { cause: error.cause },
-              ),
-            ),
-          ),
-        DatabaseError: (error) =>
-          failRunWith(error, (reason) =>
-            DbErrors.DatabaseError.make(
-              Object.assign(
-                { operation: error.operation, message: reason },
-                error.cause === undefined ? undefined : { cause: error.cause },
-              ),
-            ),
-          ),
-      }),
-    );
-
-    yield* log.info(
-      `test ${experiment.id} created; ${String(experiment.tests.length)} tests; ${tickets.map((ticket) => ticket.identifier).join(", ")}`,
-    );
-    yield* printJson({
-      id: experiment.id,
-      tests: experiment.tests.map((test, index) => ({ id: test.id, linear: tickets[index] })),
-    });
+    yield* printJson(yield* Open.open(input));
   });
 
   // mint --iso <https-url> [--unminted]
@@ -508,24 +307,10 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     // command's layers, the same order as every ctrl command), the bearer is the next variable
     // reported, and it is refused before any query or Linear call.
     const token = input.unminted ? Option.some(yield* Config.oligarchyToken) : Option.none();
-    const tests = yield* Tests.TestStore;
     const servers = yield* Servers.ServerStore;
-    const linear = yield* Linear.Linear;
     const log = yield* Log.Log;
 
-    const definition = yield* tests.findTestDefinition(MINT_DEFINITION).pipe(
-      Effect.flatMap(
-        Option.match({
-          onNone: () =>
-            Effect.fail(
-              refuse(
-                `mint: no test definition named ${MINT_DEFINITION}; define the install once with ./ctrl test define --name ${MINT_DEFINITION}`,
-              ),
-            ),
-          onSome: Effect.succeed,
-        }),
-      ),
-    );
+    const definition = yield* Open.mintDefinition();
     const fleet = yield* servers.listLiveServers("qemu").pipe(
       Effect.filterOrFail(
         (rows) => rows.length > 0,
@@ -562,113 +347,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           return fleet.filter((target) => state(target.url) === "unminted");
         }),
     });
-    if (targets.length === 0) {
-      return yield* printJson([]);
-    }
-
-    const teamId = yield* linear.teamId;
-    const labelIds = yield* linear.labelIds(teamId, MINT_LABEL);
-    const assigneeId = yield* linear.assigneeId;
-    const states = yield* linear.stateIds(teamId);
-
-    const minted: Array<{
-      readonly id: string;
-      readonly result: string;
-      readonly server: string;
-      readonly linear: Linear.LinearTicket;
-    }> = [];
-    // Every ticket Linear created, the one being described included, so a failure names it.
-    const tickets: Array<Linear.LinearTicket> = [];
-    const identifiers = () => tickets.map((ticket) => ticket.identifier).join(", ");
     // A failure fails the run it was creating and names the tickets that stand, as `test run`
     // does; the runs already whole for earlier servers are left standing, they are complete.
-    const failRunWith = <E extends { readonly message: string }>(
-      runId: string,
-      error: E,
-      namingTickets: (reason: string) => E,
-    ) =>
-      Effect.gen(function* () {
-        const created = identifiers();
-        const reason = created === "" ? error.message : `${error.message}; created ${created}`;
-        yield* tests.failRun(runId, reason);
-        return yield* Effect.fail(created === "" ? error : namingTickets(reason));
-      });
-    for (const target of targets) {
-      const created = yield* tests.createRun({
+    return yield* printJson(
+      yield* Open.openMints({
         iso: input.iso,
         serverUrl: input.serverUrl,
-        definitions: [definition],
-      });
-      // createRun inserts the result in the same transaction; a missing one is a broken invariant.
-      const result = yield* Effect.fromOption(Arr.head(created.results)).pipe(
-        Effect.mapError(
-          () =>
-            new Error(`mint: run ${created.runId} has no result for definition ${definition.name}`),
-        ),
-        Effect.orDie,
-      );
-      // Born in Backlog and moved to Automation Needed with its body, as `test run` does.
-      const ticket = Effect.gen(function* () {
-        const issued = yield* linear.createIssue({
-          teamId,
-          title: `Omarchy mint: ${target.url}`,
-          labelIds,
-          assigneeId,
-          stateId: states.backlog,
-        });
-        tickets.push(issued);
-        yield* Effect.onError(
-          Effect.gen(function* () {
-            yield* tests.setLinearId(result.id, issued.identifier);
-            const description = yield* Prompts.renderMintIssue({
-              LINEAR_TICKET: issued.identifier,
-              RUN_ID: created.runId,
-              RESULT_ID: result.id,
-              ISO_URL: input.iso,
-              SERVER_URL: input.serverUrl,
-              PINNED_SERVER: target.url,
-              INSTALL_NAME: definition.name,
-              INSTALL_DESCRIPTION: definition.description,
-              INSTALL_INSTRUCTION: definition.instruction,
-              INSTALL_PROOF: definition.proof,
-            });
-            yield* linear.describeIssue(issued, description, states.automationNeeded);
-          }),
-          trapped(log, issued),
-        );
-        return issued;
-      });
-      const issued = yield* ticket.pipe(
-        Effect.catchTags({
-          LinearError: (error) =>
-            failRunWith(created.runId, error, (reason) => withReason(error, reason)),
-          PromptError: (error) =>
-            failRunWith(created.runId, error, (reason) =>
-              Errors.PromptError.make(
-                Object.assign(
-                  { message: reason },
-                  error.cause === undefined ? undefined : { cause: error.cause },
-                ),
-              ),
-            ),
-          DatabaseError: (error) =>
-            failRunWith(created.runId, error, (reason) =>
-              DbErrors.DatabaseError.make(
-                Object.assign(
-                  { operation: error.operation, message: reason },
-                  error.cause === undefined ? undefined : { cause: error.cause },
-                ),
-              ),
-            ),
-        }),
-      );
-      minted.push({ id: created.runId, result: result.id, server: target.url, linear: issued });
-    }
-
-    yield* log.info(
-      `mint ${input.iso} created; ${String(minted.length)} servers; ${identifiers()}`,
+        definition,
+        servers: targets.map((target) => target.url),
+      }),
     );
-    return yield* printJson(minted);
   });
 
   // test list

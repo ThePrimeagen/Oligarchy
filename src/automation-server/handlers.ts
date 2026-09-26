@@ -1,10 +1,12 @@
 import { Context, Effect, Layer, Option, Redacted } from "effect";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as Automation from "@oligarchy/db/automation";
 import * as Servers from "@oligarchy/db/servers";
-import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
+import * as Abort from "@oligarchy/jobs/abort";
+import * as Board from "@oligarchy/jobs/board";
+import * as Find from "@oligarchy/jobs/find";
+import * as Ready from "@oligarchy/jobs/ready";
 import * as Log from "@oligarchy/log/log";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
@@ -14,8 +16,6 @@ import * as Middleware from "../qemu-server/middleware.ts";
 import * as Errors from "../shared/errors.ts";
 import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
-import * as Enqueue from "./enqueue.ts";
-import * as Ready from "./ready.ts";
 import * as Signature from "./signature.ts";
 import * as Webhook from "./webhook.ts";
 import * as Worker from "./worker.ts";
@@ -55,28 +55,28 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         return ok;
       }
       const event = parsed.value;
-      const job = Webhook.queuedAction(event);
-      if (Option.isNone(job)) {
-        yield* log.info(`linear webhook recorded; ${event.state}`, {
-          location: Log.Locations.automation,
-          agentId: event.ticket,
-        });
+      const recorded = log.info(`linear webhook recorded; ${event.state}`, {
+        location: Log.Locations.automation,
+        agentId: event.ticket,
+      });
+      if (!event.stateChanged || !Board.asks(event.state)) {
+        yield* recorded;
         return ok;
       }
-      const placed = yield* Enqueue.enqueueTicket(event.ticket, job.value).pipe(
-        Effect.mapError((error) =>
-          ApiErrors.Internal.make({ cause: error, agentId: event.ticket }),
-        ),
-      );
-      if (placed.result === "missing") {
+      const internal = (cause: unknown) =>
+        ApiErrors.Internal.make({ cause, agentId: event.ticket });
+      const job = yield* Find.byTicket(event.ticket).pipe(Effect.mapError(internal));
+      if (Option.isNone(job)) {
         yield* log.info(`linear webhook ignored; no result for ${event.state}`, {
           location: Log.Locations.automation,
           agentId: event.ticket,
         });
         return ok;
       }
+      const action = yield* Board.actionFor(event.state, job.value).pipe(Effect.mapError(internal));
+      const placed = yield* Board.enqueue(job.value, action).pipe(Effect.mapError(internal));
       if (placed.result === "duplicate") {
-        yield* log.info(`linear webhook ignored; ${placed.action} already queued`, {
+        yield* log.info(`linear webhook ignored; ${Board.already(placed)}`, {
           location: Log.Locations.automation,
           agentId: event.ticket,
         });
@@ -98,60 +98,38 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
 // A disconnect must not leave the client killed and the row still running.
 const uninterruptible = { uninterruptible: true } as const;
 
-// The job named by its ticket and action closes whether it waits or runs. A pending job has no
-// client to stop, so closing its row is the whole abort; a placement that reserved after this
-// wins nothing, because running is written only while the row is still pending, and that
-// placement releases the reservation. A running job is stopped at the client that took it,
-// then its row is closed. A client that answers 404 holds nothing to stop: that is reported,
-// and the row is closed all the same, so every caller reads the same 200. A job that is over,
-// or was never queued, is refused, and so is one that finished while its client was asked.
+// The action named by its ticket closes whether it waits or runs, and its ticket moves to
+// Aborted. A pending action is Jobs.abort's alone. A running one is stopped at the client that
+// took it, then Jobs closes it. A client that answers 404 holds nothing to stop: that is
+// reported, and the row is closed all the same, so every caller reads the same 200. An action
+// that is over, or was never queued, is refused, and so is one that finished while its client
+// was asked.
 export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", (handlers) =>
   handlers.handle(
     "abort",
     ({ payload }) =>
       Effect.gen(function* () {
-        const tests = yield* Tests.TestStore;
-        const automation = yield* Automation.AutomationStore;
         const servers = yield* Servers.ServerStore;
         const log = yield* Log.Log;
         const nothingToAbort = ApiErrors.BadRequest.make({
           message: `ticket "${payload.ticket}" has no ${payload.action} to abort`,
           agentId: payload.ticket,
         });
-        const result = yield* tests
-          .findResultByLinearId(payload.ticket)
-          .pipe(
-            Effect.mapError((error) =>
-              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
-            ),
-          );
+        const internal = (cause: unknown) =>
+          ApiErrors.Internal.make({ cause, agentId: payload.ticket });
+        const pending = yield* Abort.abort(payload.ticket, payload.action).pipe(
+          Effect.as(true),
+          Effect.catchTag("NoPendingAction", () => Effect.succeed(false)),
+          Effect.mapError(internal),
+        );
+        if (pending) {
+          return ok;
+        }
+        const result = yield* Find.byTicket(payload.ticket).pipe(Effect.mapError(internal));
         if (Option.isNone(result)) {
           return yield* nothingToAbort;
         }
-        const closedPending = yield* automation
-          .abortPending(result.value.id, payload.action)
-          .pipe(
-            Effect.mapError((error) =>
-              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
-            ),
-          );
-        if (closedPending) {
-          yield* log.info(`aborted pending ${payload.action}`, {
-            location: Log.Locations.automation,
-            agentId: payload.ticket,
-          });
-          if (payload.action !== "diagnose") {
-            yield* Ready.release(payload.ticket);
-          }
-          return ok;
-        }
-        const job = yield* automation
-          .findRunning(result.value.id)
-          .pipe(
-            Effect.mapError((error) =>
-              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
-            ),
-          );
+        const job = yield* Find.running(result.value).pipe(Effect.mapError(internal));
         if (Option.isNone(job)) {
           return yield* nothingToAbort;
         }
@@ -168,11 +146,7 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
         }
         const server = yield* servers
           .findServer(job.value.serverId)
-          .pipe(
-            Effect.mapError((error) =>
-              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
-            ),
-          );
+          .pipe(Effect.mapError(internal));
         if (Option.isNone(server)) {
           return yield* ApiErrors.RunFailed.make({
             message: `unknown server "${job.value.serverId}"`,
@@ -199,13 +173,9 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
                 ),
           ),
         );
-        const closed = yield* automation
-          .finish(job.value.id, "aborted", "aborted")
-          .pipe(
-            Effect.mapError((error) =>
-              ApiErrors.Internal.make({ cause: error, agentId: payload.ticket }),
-            ),
-          );
+        const closed = yield* Abort.running(payload.ticket, job.value).pipe(
+          Effect.mapError(internal),
+        );
         // The row closed some other way while its client was asked: the job finished, and a
         // finished job has nothing to abort. Its client's 404 was that ending, not JobNotFound.
         if (!closed) {
@@ -218,9 +188,6 @@ export const AbortLive = HttpApiBuilder.group(Api.AutomationServerApi, "Abort", 
           location: Log.Locations.automation,
           agentId: payload.ticket,
         });
-        if (job.value.action !== "diagnose") {
-          yield* Ready.release(payload.ticket);
-        }
         return ok;
       }),
     uninterruptible,

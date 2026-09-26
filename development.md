@@ -63,13 +63,16 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today six: `@oligarchy/shared`, the
+  dashboard, the tests); `packages/*` are its libraries, today nine: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
   from outside and the runner that installs it (Config and Runtime entry, below),
-  `@oligarchy/db`, the whole database (Database and Migrations, below),
+  `@oligarchy/db`, the whole database (Database and Migrations, below), `@oligarchy/linear`,
+  the Linear API, `@oligarchy/jobs`, a job and its actions (both under Layout, below),
   `@oligarchy/observability`, where lines, failures and spans go once written (Log and Sentry,
-  below), and `@oligarchy/routes`, the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  below), `@oligarchy/routes`, the HTTP contract (HttpApi server, below), and
+  `@oligarchy/testing`, the fakes more than one package's tests use, which nothing but a test
+  may import. A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
@@ -92,9 +95,10 @@ exist.
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
-  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` at 3, `@oligarchy/observability`
-  at 4 and `@oligarchy/routes` at 5, holding `http`'s
-  slot). A package missing from the list, an upward
+  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` and `@oligarchy/linear` at 3,
+  `@oligarchy/jobs` and `@oligarchy/observability` at 4 and `@oligarchy/routes` at 5, holding
+  `http`'s slot, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
+  it). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
@@ -199,11 +203,36 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   the board vocabulary `BACKLOG_STATE` ... `ABORTED_STATE`, `READY_LABEL`, `AGENT_TEST_LABEL`;
   `LinearTicket`, `LinearBacklogTicket`) and `errors.ts` (`LinearError`). It imports `effect`,
   `@oligarchy/env` and its own files. Every `moveTo*` but one finds its state by name on the
-  configured team; `moveToAborted` finds it on the ticket's own team, because its caller (the
-  dashboard) knows the ticket and not the board, and a ticket Linear does not know is refused
-  before any update. Its admission rule: a call to the Linear API, or a name the board uses;
-  refused are a store (a Linear primitive knows a ticket identifier, never a result), a template,
-  a rule about what a column means for a job, and a retry policy: those are jobs'.
+  configured team; `moveToAborted` finds it on the ticket's own team, because its callers (jobs'
+  abort and the dashboard's suite abort) know the ticket and not the board, and a ticket Linear
+  does not know is refused before any update. Its admission rule: a call to the Linear API, or a
+  name the board uses; refused are a store (a Linear primitive knows a ticket identifier, never a
+  result), a template, a rule about what a column means for a job, and a retry policy: those are
+  jobs'. `packages/jobs/src/` is a job and its actions: a job is a test result and its Linear
+  ticket, which move together, and an action is one of its `automation_jobs` rows (a drive, mint
+  or diagnose). It holds `open.ts` (`open` for `./ctrl test run` and the dashboard's suite,
+  `openMint` for the proxy's setup, `openMints` for `./ctrl mint`, `mintDefinition`,
+  `MINT_DEFINITION`; a failure fails the run it was opening and names the tickets created, and a
+  run that will not take that failure is a line), `close.ts` (`close`, `fail`,
+  `judge`, `moveTicket`: three attempts, then a line, the one retry policy), `ready.ts` (`mark`,
+  `release`), `board.ts` (which column asks for which action: `asks`, `actionFor`, `enqueue`,
+  and `already`, the words for a duplicate),
+  `abort.ts` (`abort` for a pending action, `running` for one its app already stopped),
+  `find.ts` (`byTicket`, `ofAction`, `nextPending`, `running`, `inherited`, `status`,
+  `hasPending`, `diagnosable`, `isOpen`), `reclaim.ts` (what a new automation server does with
+  an action the last one left running), `templates.ts` (the ticket templates under `prompts/`)
+  and `errors.ts` (`detail`, `PromptError`, `NoPendingAction`, `SetupGone`). It imports
+  `effect`, `@oligarchy/db`, `@oligarchy/linear`, `@oligarchy/log`, `@oligarchy/shared` and its
+  own files. Its admission rule: anything that writes a job's row and moves its ticket, the rule
+  or retry that decides how, and the searches the apps make over jobs; refused are HTTP, a
+  platform module and an app. Stopping a driver at its automation client is transport, so
+  `Reclaim.reclaim` takes the app's `stop` and `Abort.running` closes a row its app has stopped.
+  `packages/testing/src/` is dev-only: `stores.ts` (`fakeTestStore`, `fakeAutomationStore`, fakes
+  that answer the way the Postgres stores do) and `linear.ts` (`fakeLinear`, its ids and
+  `ticketFor`). It imports `effect`, `@oligarchy/db`, `@oligarchy/linear` and its own files, and
+  sits above every layer, so a package or the root may only dev-depend on it. Its admission rule:
+  a fake that a package's tests and an app's tests both use; a fake with one consumer stays with
+  that consumer, and a fake of a package's own store stays in that package's `test/`.
   `packages/observability/src/` is where lines, failures and spans go once
   written: `log.ts` (`LogLive`, the row-writing `Log` layer: one drain fiber takes each line
   with its row in call order, inserts the row, then writes the line; a refused row writes the
@@ -223,14 +252,22 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   left open holds a Hyperdrive connection past the response), never calls the qemu server's API, and
   reports route failures with `@sentry/cloudflare` — the one `captureException` outside
   `observability/`, and with the test setup the one place `console.*` is allowed. Nothing below
-  that says Effect applies to it, except `POST /create-test-suite-run`, which runs `./ctrl test run testsuite` in process rather than a second ticket client. Its `scheduled` handler is the retention policy: on the cron in
+  that says Effect applies to it, except `POST /create-test-suite-run`, which opens the suite
+  through jobs' `Open.open` in a `ManagedRuntime` built per request (the database's `TestStore`,
+  `Linear`, `Log.layerStdout`, the bundled ticket templates as the file system), rather than a
+  second ticket client. Its `scheduled` handler is the retention policy: on the cron in
   `wrangler.jsonc` it deletes every row older than seven days in one transaction, a row before
   the row it references, and leaves configuration (definitions, base prompts, error types, the
   fleet) alone; a row is history for a week and then gone. What it calls beyond Postgres is the
-  automation server's `/abort` and, through `@oligarchy/linear`'s `moveToAborted` on a
-  `ManagedRuntime` built per call over `FetchHttpClient`, Linear's GraphQL to move an aborted
-  job's ticket to the board's `Aborted` status; both urls are Cloudflare vars so the integration lane
-  points them at stubs, and the tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
+  automation server's `/abort`, which `POST /abort` only forwards to (the automation server
+  closes the row and moves the ticket through `Abort.abort`), and Linear's GraphQL: the suite
+  opened above, and `POST /suites/abort`, which moves each aborted result's ticket to the board's
+  `Aborted` status through `@oligarchy/linear`'s `moveToAborted` on a `ManagedRuntime` built per
+  call over `FetchHttpClient`, but for a ticket whose job automation-server answered 200 to
+  abort, which that abort already moved. `AUTOMATION_SERVER_URL` and the suite abort's
+  `LINEAR_API_URL` are Cloudflare vars so the integration lane points them at stubs; the suite
+  open calls Linear at its default url, as ctrl does, and its tests replace the runner. The
+  tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
   secrets, as is `LINEAR_TEAM`: the team `POST /create-test-suite-run` files tickets on, with no
   default, so a local worker and production can name different teams. A dashboard var would be
   deleted on the next deploy.
@@ -257,10 +294,14 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   "@oligarchy/db/client"` and one namespace per store (`Logs`, `Servers`, `Tests`, ...),
   `import * as DbSchema from "@oligarchy/db/schema"`, `import * as DbErrors from
   "@oligarchy/db/errors"`, `import * as Linear from "@oligarchy/linear/client"`, `import * as
-  LinearErrors from "@oligarchy/linear/errors"`. The six errors modules are `ApiErrors`,
-  `SharedErrors`, `LogErrors`, `EnvErrors`, `DbErrors` and `LinearErrors` everywhere so none
-  shadows the main package's staged `Errors`; when that file is gone, `SharedErrors` becomes
-  `Errors`. The observability package is `import * as
+  LinearErrors from "@oligarchy/linear/errors"`, one namespace per jobs module by its file name
+  (`import * as Open from "@oligarchy/jobs/open"`, and `Close`, `Find`, `Board`, `Abort`,
+  `Ready`, `Reclaim`, `Templates` the same way), `import * as JobsErrors from
+  "@oligarchy/jobs/errors"`, and in tests `import * as TestingStores from
+  "@oligarchy/testing/stores"` and `import * as TestingLinear from "@oligarchy/testing/linear"`.
+  The seven errors modules are `ApiErrors`, `SharedErrors`, `LogErrors`, `EnvErrors`,
+  `DbErrors`, `LinearErrors` and `JobsErrors` everywhere so none shadows the main package's
+  staged `Errors`; when that file is gone, `SharedErrors` becomes `Errors`. The observability package is `import * as
   Observability from "@oligarchy/observability/log"` (`Observability.LogLive`, the row-writing
   `Log` layer the five graphs build), `import * as Sentry from "@oligarchy/observability/sentry"`
   and `import * as Dsn from "@oligarchy/observability/dsn"`.
@@ -339,9 +380,9 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `Layer.effectDiscard` for background loops and fail-fast preconditions.
 - Background fibers belong to the layer scope: `Effect.forkScoped`, never `Effect.runFork`. Do not
   use `Layer.fresh` in production, or `Layer.catch` (not exported). `ManagedRuntime` is only the
-  dashboard's: the request that runs `./ctrl test run testsuite` and the abort that runs
-  `Linear.moveToAborted` (until phase 8 forwards it to automation-server). Each request is the
-  entry, and it disposes the runtime when the call returns.
+  dashboard's: the request that opens a suite through `Open.open` and the suite abort that runs
+  `Linear.moveToAborted`. Each request is the entry, and it disposes the runtime when the call
+  returns.
 - `HttpRouter.serve` provides the module-level `HttpRouter.layer`, so two `HttpRouter.serve`s in
   one graph share one router and both listeners serve both route sets. A process has one
   listener; a page for an operator is the dashboard's, not a second port (below).
@@ -555,7 +596,7 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   from "effect"`. Because the list is one, its names are a type, `Config.Variable`, and the
   package builds every environment the fleet runs under: `Config.live`, the chain below;
   `Config.fromValues(values)`, an explicit record and nothing else (unit tests, and the
-  dashboard's in-process `ctrl` run, which has no process to read); `Config.override(values)`,
+  dashboard's suite runtime, which has no process to read); `Config.override(values)`,
   the record ahead of the live chain, so one variable points elsewhere (a local Postgres) and
   every other still comes from the process, the env file and `.env`. `values` is a partial
   record over `Variable`, so a name not in the list does not compile; an empty string counts as
@@ -1264,7 +1305,9 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   (`fakeLog().lines`, `fakeQemu().calls`, `fakeSessionStore().sessions`,
   `fakeServerStore().routes`) with every unused member `Effect.die("Unexpected
   <Service>.<method>")`, kept under `test/support/`, one file per seam, plus loopback stubs for
-  the process tests and `postgres.ts`. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
+  the process tests and `postgres.ts`. A fake that a package's tests and the apps' tests both use
+  lives in `@oligarchy/testing` instead (the test store, the automation store and Linear today),
+  and `test/support/` builds on it. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
   that calls other HTTP servers gets `FakeHttp.recordRequests(respond)` provided to its layer
   alone, so the `HttpClient` in the test's scope still points at the server under test.
 - Assert failures with `Effect.flip` and `expect(error).toMatchObject({ _tag, message })`;

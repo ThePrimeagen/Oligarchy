@@ -1,0 +1,24 @@
+{
+  "name": "@oligarchy/testing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./linear": "./src/linear.ts",
+    "./stores": "./src/stores.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/linear": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -12,6 +12,7 @@ import type * as Servers from "@oligarchy/db/servers";
 import * as Config from "@oligarchy/env/config";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as Run from "../../src/viz/run.ts";
 import * as View from "../../src/viz/view.ts";
 import * as FakeHttp from "../support/fake-http.ts";
@@ -67,7 +68,7 @@ type Scripted = {
 const storesLayer = (
   scripted: Scripted = {},
   actions = Stores.fakeActionStore(),
-  tests = Stores.fakeTestStore(),
+  tests = TestingStores.fakeTestStore(),
   logs = Stores.fakeLogStore(),
 ) =>
   Layer.mergeAll(
@@ -77,7 +78,8 @@ const storesLayer = (
     Stores.fakeProcessStatsStore({
       listSeries: scripted.series ?? (() => Effect.succeed([garageSeries, runnerSeries])),
     }).layer,
-    Stores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) }).layer,
+    TestingStores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) })
+      .layer,
     actions.layer,
     tests.layer,
     logs.layer,
@@ -89,7 +91,7 @@ const storesLayer = (
 type Extra = {
   readonly spawner?: FakeSpawner;
   readonly actions?: Stores.FakeActionStore;
-  readonly tests?: Stores.FakeTestStore;
+  readonly tests?: TestingStores.FakeTestStore;
   readonly logs?: Stores.FakeLogStore;
   readonly http?: Layer.Layer<HttpClient.HttpClient>;
   readonly env?: Config.Values;
@@ -106,7 +108,7 @@ const live = (
         storesLayer(
           scripted,
           extra.actions ?? Stores.fakeActionStore(),
-          extra.tests ?? Stores.fakeTestStore(),
+          extra.tests ?? TestingStores.fakeTestStore(),
           extra.logs ?? Stores.fakeLogStore(),
         ),
         screen.layer,
@@ -1645,7 +1647,7 @@ describe("definition and ticket information", () => {
     () =>
       Effect.gen(function* () {
         const screen = fakeRenderer();
-        const tests = Stores.fakeTestStore({
+        const tests = TestingStores.fakeTestStore({
           definitions: [lockScreen(1, "old proof"), lockScreen(2, "It is locked.")],
         });
         const { fiber, setup } = yield* started(screen, {}, { tests });
@@ -1678,7 +1680,7 @@ describe("definition and ticket information", () => {
     () =>
       Effect.gen(function* () {
         const missing = fakeRenderer();
-        const byMissing = yield* started(missing, {}, { tests: Stores.fakeTestStore() });
+        const byMissing = yield* started(missing, {}, { tests: TestingStores.fakeTestStore() });
         byMissing.setup.mockInput.pressKey("d");
         yield* settle;
         expect(yield* footer(byMissing.setup)).toBe(
@@ -1693,7 +1695,7 @@ describe("definition and ticket information", () => {
           broken,
           {},
           {
-            tests: Stores.fakeTestStore(
+            tests: TestingStores.fakeTestStore(
               {},
               {
                 findTestDefinition: () =>
