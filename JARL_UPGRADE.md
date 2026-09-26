@@ -20,9 +20,9 @@ Consult this table of contents first. Read only the section you need.
 ## What this is
 
 `v2/` is the programs translated from Effect to jarl: plain async functions that return a
-`jarl.Result` instead of an `Effect`. This document holds two interfaces agreed for it: the command
-line every program reads, and the application interface `@oligarchy/env` gives a program to declare
-its commands, flags and variables.
+`jarl.Result` instead of an `Effect`. This document holds what is agreed for it: how processes and
+the database get their environment, the command line every program reads, and the application
+interface `@oligarchy/env` gives a program to declare its commands, flags and variables.
 
 Built: `v2/packages/env/src/args.ts`, every flag any program takes, exported as `Env.args` (#253).
 Not built yet: the builder and the parser below. `v2/packages/env/src/cli.ts` and `commands.ts`
@@ -45,8 +45,9 @@ still read the old noun-then-verb shape; the parser replaces them, and `Env.comm
 
 ## The database
 
-- The database is created from a URL handed to it, and that is the only way to create one. The db
-  package never reads the environment, as today's `Database.layer(url)` does not.
+- The database is created from a URL handed to it, and that is the only way to create one. v2's db
+  package, not written yet, has the one constructor `Db.create(url)` and never reads the
+  environment, as today's `Database.layer(url)` does not.
 - `main` creates it right after `Env.create`, from `env.vars.databaseUrl`, and pings it before it
   runs the command; a server pings before it listens. The URL stays a `Secret` until the database
   opens its pool, so it never reaches a log.
