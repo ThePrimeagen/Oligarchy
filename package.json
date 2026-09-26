@@ -3,14 +3,14 @@
   "private": true,
   "bin": {
     "client": "src/client/main.ts",
-    "ctrl": "src/ctrl/main.ts",
     "driver": "src/driver/main.ts",
     "session": "src/session/main.ts",
     "viz": "src/viz/main.ts"
   },
   "workspaces": {
     "packages": [
-      "packages/*"
+      "packages/*",
+      "apps/*"
     ],
     "catalog": {
       "@effect/platform-node": "4.0.0-rc.112",
@@ -31,14 +31,14 @@
   "scripts": {
     "client": "bun --no-env-file src/client/main.ts",
     "driver": "bun --no-env-file src/driver/main.ts",
-    "ctrl": "bun --no-env-file --preload ./packages/observability/src/instrument.ts src/ctrl/main.ts",
+    "ctrl": "bun --no-env-file --preload ./packages/observability/src/instrument.ts apps/ctrl/src/main.ts",
     "session": "bun --no-env-file src/session/main.ts",
-    "viz": "bun --no-env-file --preload ./src/viz/preload.ts src/viz/main.ts",
-    "qemu-server": "bun --no-env-file --preload ./packages/observability/src/instrument.ts src/qemu-server/main.ts",
-    "qemu-reverse-proxy": "bun --no-env-file --preload ./packages/observability/src/instrument.ts src/qemu-reverse-proxy/main.ts",
-    "automation-server": "bun --no-env-file --preload ./packages/observability/src/instrument.ts src/automation-server/main.ts",
-    "automation-client": "bun --no-env-file --preload ./packages/observability/src/instrument.ts src/automation-client/main.ts",
-    "dev": "wrangler dev --remote --env local",
+    "viz": "bun --no-env-file --preload ./apps/viz/src/preload.ts apps/viz/src/main.ts",
+    "qemu-server": "bun --no-env-file --preload ./packages/observability/src/instrument.ts apps/qemu-server/src/main.ts",
+    "qemu-reverse-proxy": "bun --no-env-file --preload ./packages/observability/src/instrument.ts apps/qemu-reverse-proxy/src/main.ts",
+    "automation-server": "bun --no-env-file --preload ./packages/observability/src/instrument.ts apps/automation-server/src/main.ts",
+    "automation-client": "bun --no-env-file --preload ./packages/observability/src/instrument.ts apps/automation-client/src/main.ts",
+    "dev": "bun run --cwd apps/dashboard dev",
     "check:lint": "oxlint --deny-warnings .",
     "check:format": "oxfmt --check .",
     "format": "oxfmt .",
@@ -56,39 +56,28 @@
     "@effect/platform-node": "catalog:",
     "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
-    "@oligarchy/fleet": "workspace:*",
     "@oligarchy/http": "workspace:*",
-    "@oligarchy/jobs": "workspace:*",
     "@oligarchy/linear": "workspace:*",
     "@oligarchy/log": "workspace:*",
     "@oligarchy/observability": "workspace:*",
     "@oligarchy/shared": "workspace:*",
-    "@opentui/core": "0.5.11",
-    "@opentui/solid": "0.5.11",
-    "@sentry/cloudflare": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
-    "hono": "^4.13.5",
-    "pg": "catalog:",
-    "solid-js": "1.9.12"
+    "pg": "catalog:"
   },
   "devDependencies": {
-    "@babel/core": "7.28.0",
-    "@babel/preset-typescript": "7.27.1",
     "@effect/tsgo": "0.41.0",
     "@effect/vitest": "catalog:",
+    "@oligarchy/dashboard": "workspace:*",
     "@oligarchy/testing": "workspace:*",
     "@testcontainers/postgresql": "^11.14.0",
-    "@types/babel__core": "7.20.5",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
-    "babel-preset-solid": "1.9.12",
     "oxfmt": "0.66.0",
     "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2001",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "wrangler": "^4.127.1"
+    "vitest": "catalog:"
   },
   "overrides": {
     "@effect/platform-node": "4.0.0-rc.112",

@@ -7,11 +7,10 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/**/*.tsx",
     "test/**/*.ts",
-    "test/**/*.tsx",
     "vitest.config.ts",
     "vitest.global-setup.ts",
-    "vitest.d.ts"
+    "vitest.d.ts",
+    "apps/dashboard/src/text-modules.d.ts"
   ]
 }

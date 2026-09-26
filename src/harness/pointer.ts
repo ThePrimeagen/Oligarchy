@@ -1,5 +1,5 @@
 import { Option, Result } from "effect";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 import * as Intent from "./intent.ts";
 
 // The model places the pointer with a move, looks at it on the next image, and only then

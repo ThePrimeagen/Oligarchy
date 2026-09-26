@@ -1,2 +1,2 @@
 #!/bin/sh
-exec bun --no-env-file --preload "$(dirname "$0")/packages/observability/src/instrument.ts" "$(dirname "$0")/src/qemu-reverse-proxy/main.ts" "$@"
+exec bun --no-env-file --preload "$(dirname "$0")/packages/observability/src/instrument.ts" "$(dirname "$0")/apps/qemu-reverse-proxy/src/main.ts" "$@"

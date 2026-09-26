@@ -1,7 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import {
-  Context,
   Deferred,
   Effect,
   Exit,
@@ -10,28 +9,24 @@ import {
   Layer,
   Option,
   Redacted,
+  Schema,
   Scope,
   Stdio,
 } from "effect";
+import { TestClock } from "effect/testing";
+import { HttpClient, HttpClientError } from "effect/unstable/http";
 import * as Automation from "@oligarchy/db/automation";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
-import * as Config from "@oligarchy/env/config";
-import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as LinearErrors from "@oligarchy/linear/errors";
-import * as Log from "@oligarchy/log/log";
+import * as TestingFs from "@oligarchy/testing/fs";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingLinear from "@oligarchy/testing/linear";
-import * as TestingStores from "@oligarchy/testing/stores";
-import * as Errors from "../src/errors.ts";
-import { TestClock } from "effect/testing";
-import { HttpClient, HttpClientError, HttpRouter } from "effect/unstable/http";
-import { NodeHttpServer } from "@effect/platform-node";
-import * as AutomationClient from "../src/client.ts";
-import * as Worker from "../src/worker.ts";
-import * as TestingFs from "@oligarchy/testing/fs";
-import * as TestingSpawner from "@oligarchy/testing/spawner";
 import * as TestingLog from "@oligarchy/testing/log";
+import * as TestingStores from "@oligarchy/testing/stores";
+import * as AutomationClient from "../src/client.ts";
+import * as Errors from "../src/errors.ts";
+import * as Worker from "../src/worker.ts";
 
 const URL = "http://127.0.0.1:55333";
 const TOKEN = "test-token";

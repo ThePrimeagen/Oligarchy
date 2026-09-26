@@ -1,2 +1,2 @@
 #!/bin/sh
-exec bun --no-env-file --preload "$(dirname "$0")/packages/observability/src/instrument.ts" "$(dirname "$0")/src/qemu-server/main.ts" "$@"
+exec bun --no-env-file --preload "$(dirname "$0")/packages/observability/src/instrument.ts" "$(dirname "$0")/apps/qemu-server/src/main.ts" "$@"

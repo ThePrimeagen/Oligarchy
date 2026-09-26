@@ -1,0 +1,141 @@
+import { Effect, Option, Schema } from "effect";
+import * as CliError from "effect/unstable/cli/CliError";
+import * as Command from "effect/unstable/cli/Command";
+import * as Flag from "effect/unstable/cli/Flag";
+import type * as HttpServerError from "effect/unstable/http/HttpServerError";
+import * as Client from "@oligarchy/db/client";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as Config from "@oligarchy/env/config";
+import * as EnvFile from "@oligarchy/env/env-file";
+import * as ExternalFailure from "@oligarchy/log/external-failure";
+import * as Log from "@oligarchy/log/log";
+import * as Render from "@oligarchy/log/render";
+import * as Domain from "@oligarchy/shared/domain";
+import * as Args from "./qemu/args.ts";
+import * as Qemu from "./qemu/qemu.ts";
+import * as Errors from "./errors.ts";
+
+const DEFAULT_PORT = 42069;
+
+// What main.ts hands the command: the host check, and the server for a display, an automation
+// flag, how many sessions it runs at once, a port, the url it announces itself under (none: it
+// stays out of the fleet) and the directory its iso cache and minted disks live in, serving until
+// it is stopped or fails.
+export type QemuServer<RHost, RServe> = {
+  readonly missingHostRequirements: (
+    display: Domain.QemuDisplay,
+  ) => Effect.Effect<ReadonlyArray<string>, never, RHost>;
+  readonly serve: (
+    display: Domain.QemuDisplay,
+    automation: boolean,
+    maxJobs: number,
+    name: string,
+    port: number,
+    url: Option.Option<string>,
+    dataDir: string,
+  ) => Effect.Effect<never, HttpServerError.ServeError | DbErrors.DatabaseError, RServe>;
+};
+
+type StartupError =
+  | Errors.HostRequirementsMissing
+  | DbErrors.DatabaseError
+  | HttpServerError.ServeError;
+
+// A ServeError says nothing itself; the bind or accept error it wraps does.
+const detail = (error: StartupError): string =>
+  error._tag === "ServeError" ? Render.errorDetail(error.cause) : Render.errorDetail(error);
+
+export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, RServe>) =>
+  Command.make(
+    "qemu-server",
+    {
+      display: Flag.choice("display", Args.QEMU_DISPLAYS).pipe(
+        Flag.optional,
+        Flag.withDescription(
+          "QEMU display backend for every session; none captures without showing a window",
+        ),
+      ),
+      automation: Flag.boolean("automation").pipe(
+        Flag.withDefault(false),
+        Flag.withDescription("Force the automation QEMU profile for every session"),
+      ),
+      // No default: how many machines a host runs at once is the operator's knowledge of that
+      // host, and a guess would under-use a large one or overload a small one.
+      maxJobs: Flag.integer("max-jobs").pipe(
+        Flag.withSchema(Domain.MaxJobs),
+        Flag.withDescription(
+          "How many sessions this server runs at once; a reserve past it is refused with 503",
+        ),
+      ),
+      // No default: the fleet and the process series know this machine by the name the
+      // operator gave it, which is nothing this process can invent.
+      name: Flag.string("name").pipe(
+        Flag.withSchema(Domain.ServerName),
+        Flag.withDescription("Name this machine on the fleet and on each process reading"),
+      ),
+      port: Flag.integer("port").pipe(
+        Flag.withDefault(DEFAULT_PORT),
+        Flag.withDescription("Listen port"),
+      ),
+      // No default: the fleet knows a server by the address the qemu reverse proxy reaches it at (a
+      // tunnel's local port, say), which is nothing this process can see. Without it the server
+      // announces nothing and is not on the dashboard: a development server stays out of the fleet.
+      url: Flag.string("url").pipe(
+        Flag.withSchema(Domain.ServerUrl),
+        Flag.optional,
+        Flag.withDescription(
+          "Announce this server to the fleet under this url, every 30 seconds, and delete the row on shutdown",
+        ),
+      ),
+      // Flag, then OLIGARCHY_DATA_DIR, then ~/.oligarchy: several servers on one machine each
+      // get a cache and minted disks of their own by pointing this elsewhere.
+      dataDir: Flag.string("data-dir").pipe(
+        Flag.withSchema(Schema.NonEmptyString),
+        Flag.withFallbackConfig(Config.dataDir),
+        Flag.withDefault(Qemu.dataDir),
+        Flag.withDescription(
+          "Where this server keeps its iso cache and minted disks; OLIGARCHY_DATA_DIR when omitted, else ~/.oligarchy",
+        ),
+      ),
+    },
+    ({ display, automation, maxJobs, name, port, url, dataDir }) =>
+      Effect.gen(function* () {
+        if (automation && Option.isSome(display)) {
+          return yield* new CliError.UserError({
+            cause: new Error("--automation is exclusive"),
+            userMessage: "--automation is exclusive",
+          });
+        }
+        const resolved = Option.getOrElse(display, (): Domain.QemuDisplay => "none");
+        const log = yield* Log.Log;
+        const database = yield* Client.Database;
+        const startup = Effect.gen(function* () {
+          const missing = yield* server.missingHostRequirements(resolved);
+          if (missing.length > 0) {
+            return yield* Errors.HostRequirementsMissing.make({ missing });
+          }
+          // Fail at startup, not on the first request, if the control-plane DB is unreachable.
+          yield* database.ping.pipe(
+            Effect.mapError((error) =>
+              DbErrors.DatabaseError.make({
+                operation: "ping",
+                message: `database unreachable: ${Render.errorDetail(ExternalFailure.causeOf(error))}`,
+                cause: error,
+              }),
+            ),
+          );
+          return yield* server.serve(resolved, automation, maxJobs, name, port, url, dataDir);
+        });
+        return yield* startup.pipe(
+          Effect.tapError((error) =>
+            log.fatal(`qemu server: ${detail(error)}`, {
+              location: Log.Locations.server,
+              cause: error,
+            }),
+          ),
+        );
+      }),
+  ).pipe(
+    Command.withDescription("The qemu server: boots QEMU sessions and drives them over QMP"),
+    EnvFile.withEnvFile,
+  );

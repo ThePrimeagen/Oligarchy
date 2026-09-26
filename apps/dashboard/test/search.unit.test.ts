@@ -118,7 +118,7 @@ class Element {
 
 const document = new Element("document");
 vm.runInContext(
-  readFileSync("public/dashboard.js", "utf8"),
+  readFileSync(new URL("../../../public/dashboard.js", import.meta.url), "utf8"),
   vm.createContext({ document, Element }),
   {
     filename: "public/dashboard.js",

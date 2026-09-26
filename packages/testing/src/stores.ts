@@ -1057,7 +1057,7 @@ export const fakeStores = () => {
   const debugLogs = fakeDebugLogStore();
   const diagnosis = fakeDiagnosisStore();
   const servers = fakeServerStore();
-  const process = fakeProcessStatsStore();
+  const processStats = fakeProcessStatsStore();
   return {
     sessions,
     actions,
@@ -1067,7 +1067,7 @@ export const fakeStores = () => {
     debugLogs,
     diagnosis,
     servers,
-    process,
+    process: processStats,
     layer: Layer.mergeAll(
       sessions.layer,
       actions.layer,
@@ -1077,7 +1077,7 @@ export const fakeStores = () => {
       debugLogs.layer,
       diagnosis.layer,
       servers.layer,
-      process.layer,
+      processStats.layer,
     ),
   };
 };

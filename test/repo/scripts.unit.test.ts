@@ -67,11 +67,11 @@ const app = (name: string, preloads: ReadonlyArray<string>): Process => ({
   entry: `apps/${name}/src/main.ts`,
   preloads,
 });
-const script = (name: string): Process => ({ entry: `src/${name}/main.ts`, preloads: [] });
+const rootScript = (name: string): Process => ({ entry: `src/${name}/main.ts`, preloads: [] });
 const PROCESSES: Readonly<Record<string, Process>> = {
-  client: script("client"),
-  driver: script("driver"),
-  session: script("session"),
+  client: rootScript("client"),
+  driver: rootScript("driver"),
+  session: rootScript("session"),
   viz: app("viz", [SOLID_JSX]),
   ctrl: app("ctrl", [INSTRUMENT]),
   "qemu-server": app("qemu-server", [INSTRUMENT]),

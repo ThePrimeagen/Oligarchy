@@ -15,6 +15,6 @@
     "prompts/**",
     "**/*.md",
     "bun.lock",
-    "wrangler.jsonc"
+    "**/wrangler.jsonc"
   ]
 }

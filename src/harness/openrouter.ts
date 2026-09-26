@@ -8,7 +8,7 @@ import * as Sse from "effect/unstable/encoding/Sse";
 import type * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as History from "./history.ts";
 import type * as Tools from "./tools.ts";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 // One streaming chat completion. The header timeout is the wait for a status line, the chunk
 // timeout the wait for the next body chunk: OpenRouter's own stream has neither, which is what

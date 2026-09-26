@@ -148,7 +148,7 @@ class DOMParser {
   }
 }
 
-const script = readFileSync("public/dashboard.js", "utf8");
+const script = readFileSync(new URL("../../../public/dashboard.js", import.meta.url), "utf8");
 
 type Boot = {
   readonly document: Element;

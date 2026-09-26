@@ -167,15 +167,17 @@ const sources = (): ReadonlyArray<string> =>
 const isEntry = (path: string): boolean =>
   /^apps\/[^/]+\/src\/main\.ts$/.test(path) || /^src\/[^/]+\/main\.ts$/.test(path);
 
-// An app is built from packages: its relative imports stay inside the app, and it names no other
-// app, so nothing an app holds is another's to reach for, and no app reaches into the root.
+// An app is built from packages: its relative imports of code stay inside the app, and it names
+// no other app, so nothing an app holds is another's to reach for, and no app reaches into the
+// root's code. A document is not code: the dashboard bundles the driving agent's guides and the
+// ticket template from the repo root as its ticket text.
 const appImportProblems = (path: string, source: string): ReadonlyArray<string> => {
   const app = path.split("/").slice(0, 2).join("/");
   const apps = workspacePackages.filter((pkg) => pkg.dir.startsWith("apps/"));
   const self = apps.find((pkg) => pkg.dir === app)?.name;
   return importSpecifiers(source).filter((specifier) =>
     specifier.startsWith(".")
-      ? !join(dirname(path), specifier).startsWith(`${app}/`)
+      ? /\.tsx?$/.test(specifier) && !join(dirname(path), specifier).startsWith(`${app}/`)
       : apps.some(
           (pkg) =>
             pkg.name !== self && (specifier === pkg.name || specifier.startsWith(`${pkg.name}/`)),
@@ -695,6 +697,7 @@ describe("workspace packages", () => {
           'import * as Handlers from "@oligarchy/qemu-server/handlers";',
           'import * as Client from "../../automation-server/src/client.ts";',
           'import * as Image from "../../../src/session/image.ts";',
+          'import clientMd from "../../../client.md";',
         ].join("\n"),
       ),
     ).toEqual([

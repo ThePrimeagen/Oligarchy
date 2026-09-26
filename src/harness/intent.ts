@@ -1,5 +1,5 @@
 import { Result } from "effect";
-import * as Errors from "../shared/errors.ts";
+import * as Errors from "./errors.ts";
 
 const fail = (message: string): Result.Result<never, Errors.ToolError> =>
   Result.fail(Errors.ToolError.make({ message }));
