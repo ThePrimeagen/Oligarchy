@@ -22,3 +22,20 @@ export const repeat = <A extends readonly unknown[], T, E>(
     return result;
   };
 };
+
+// Calls fn after every interval milliseconds. Cancel clears the pending timeout.
+export const tick = (fn: () => unknown, interval: number): (() => void) => {
+  let timer: ReturnType<typeof setTimeout>;
+  function run() {
+    try {
+      fn();
+    } catch {
+      // A throw stays in this turn.
+    }
+    timer = setTimeout(run, interval);
+  }
+  timer = setTimeout(run, interval);
+  return () => {
+    clearTimeout(timer);
+  };
+};
