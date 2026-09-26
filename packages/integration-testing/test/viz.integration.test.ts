@@ -3,12 +3,20 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { stripAnsi } from "../support/fake-tty.ts";
 import * as Postgres from "../support/postgres.ts";
 
-const ROOT = resolve(import.meta.dirname, "../..");
-const VIZ = resolve(ROOT, "viz");
 const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+// CSI sequences, kitty graphics commands and OSC strings.
+const ANSI = new RegExp(
+  `${ESC}\\[[0-9;?]*[A-Za-z]|${ESC}_G[^${ESC}]*${ESC}\\\\|${ESC}\\][^${BEL}]*${BEL}`,
+  "g",
+);
+
+const stripAnsi = (text: string): string => text.replace(ANSI, "");
+
+const ROOT = resolve(import.meta.dirname, "../../..");
+const VIZ = resolve(ROOT, "viz");
 const ALT_SCREEN_ON = `${ESC}[?1049h`;
 const ALT_SCREEN_OFF = `${ESC}[?1049l`;
 const TOO_SMALL = "viz needs a terminal of at least 135×37 (columns×rows); this one is 100×24";

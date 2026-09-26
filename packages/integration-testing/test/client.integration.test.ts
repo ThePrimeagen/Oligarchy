@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as StubProxy from "../support/stub-proxy.ts";
 
 // The root wrapper.
-const CLIENT = fileURLToPath(new URL("../../client", import.meta.url));
+const CLIENT = fileURLToPath(new URL("../../../client", import.meta.url));
 const EXIT_WITHIN_MS = 30_000;
 const SESSION = "session-1";
 const AGENT = "agent-1";
@@ -772,7 +772,7 @@ describe("./client unhappy path", () => {
 // source is newer; when the build fails it says so and runs the sources as they are.
 describe("./client bundle cache", () => {
   const CACHE = fileURLToPath(
-    new URL("../../node_modules/.cache/oligarchy/client", import.meta.url),
+    new URL("../../../node_modules/.cache/oligarchy/client", import.meta.url),
   );
   const BUNDLE = join(CACHE, "main.js");
   const BYTECODE = join(CACHE, "main.js.jsc");
@@ -811,7 +811,7 @@ describe("./client bundle cache", () => {
   // edit to it.
   it("rebuilds when a source of a workspace package the client imports is newer", async () => {
     const HTTP_SOURCE = fileURLToPath(
-      new URL("../../packages/http/src/proxy-client.ts", import.meta.url),
+      new URL("../../../packages/http/src/proxy-client.ts", import.meta.url),
     );
     await runClient(["--help"]);
     const built = await stat(BYTECODE);

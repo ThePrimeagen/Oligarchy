@@ -15,7 +15,7 @@ import * as DbClient from "@oligarchy/db/client";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Postgres from "../support/postgres.ts";
 
-const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", import.meta.url));
+const AUTOMATION_CLIENT = fileURLToPath(new URL("../../../automation-client", import.meta.url));
 const TOKEN = "t";
 const UNREACHABLE = "postgres://user:sentinel-pw@127.0.0.1:1/oligarchy";
 const EXIT_WITHIN_MS = 60_000;
