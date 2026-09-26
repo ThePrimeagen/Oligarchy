@@ -22,6 +22,7 @@ export SUPER_RUN_SERVER_URL='${SUPER_RUN_SERVER_URL:-https://oligarchy-server.tr
 export SUPER_RUN_ISO='$ISO'
 export SUPER_RUN_VERSION='${SUPER_RUN_VERSION:-4.0.2}'
 export SUPER_RUN_TEST='${SUPER_RUN_TEST:-lock-screen}'
+export SUPER_RUN_COUNT='${SUPER_RUN_COUNT:-100}'
 export OLIGARCHY_SESSIONS_DIR='${OLIGARCHY_SESSIONS_DIR:-$HOME/personal/oligarchy-tmp}'
 export OLIGARCHY_DATA_ROOT='$DATA'
 export SUPER_RUN_ISO_CACHE='$CACHE'

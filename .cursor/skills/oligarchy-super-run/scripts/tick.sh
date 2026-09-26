@@ -16,9 +16,19 @@ if [ -f "$INDEX" ]; then
 fi
 ACTIVE=0
 [ -s "$DEST/active" ] && ACTIVE=$(grep -c . "$DEST/active")
-REMAIN=$((100 - COUNTED))
+# Super-run install sets 10. Minted-run sets 100. Unset stays 100 so an
+# older minted env still drains a hundred.
+TARGET=${SUPER_RUN_COUNT:-100}
+case "$TARGET" in
+  *[!0-9]*) echo "tick.sh: SUPER_RUN_COUNT must be a positive integer (got '$TARGET')" >&2; exit 1 ;;
+esac
+if [ "$TARGET" -lt 1 ]; then
+  echo "tick.sh: SUPER_RUN_COUNT must be a positive integer (got '$TARGET')" >&2
+  exit 1
+fi
+REMAIN=$((TARGET - COUNTED))
 [ "$REMAIN" -lt 0 ] && REMAIN=0
-NEED=$((100 - COUNTED - ACTIVE))
+NEED=$((TARGET - COUNTED - ACTIVE))
 [ "$NEED" -lt 0 ] && NEED=0
 N_DRIVE=$(psql "$DBURL" -X -A -t -c "select count(*) from automation_jobs where action='drive' and status in ('running','pending')" || echo "?")
 MEM=$(free -g | awk 'NR==2{print $7}')
@@ -26,7 +36,7 @@ REFILL=no
 if [ "$NEED" -gt 0 ] && [ "$N_DRIVE" != "?" ] && [ "$N_DRIVE" -lt 2 ] && [ "${MEM:-0}" -ge 4 ]; then
   REFILL=yes
 fi
-echo "LEDGER counted=$COUNTED active=$ACTIVE remaining=$REMAIN need=$NEED drive_queue=$N_DRIVE mem_avail=${MEM}G refill=$REFILL"
+echo "LEDGER counted=$COUNTED active=$ACTIVE remaining=$REMAIN need=$NEED target=$TARGET drive_queue=$N_DRIVE mem_avail=${MEM}G refill=$REFILL"
 [ -s "$DEST/active" ] || exit 0
 VALS=$(awk -F'|' 'NF>=5{printf "%s(%s,'\''%s'\'', '\''%s'\''::uuid, '\''%s'\'', '\''%s'\'')", sep, $1, $2, $3, $4, $5; sep=","}' "$DEST/active")
 [ -n "$VALS" ] || exit 0

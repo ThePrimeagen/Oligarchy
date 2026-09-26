@@ -20,8 +20,11 @@ Used by `linear-state.sh`. Re-check if the workspace workflow changes.
 `/tmp/superrun/active` — one line: `N|DIR|RID|TICKET|CREATED`
 
 `automation-super-run-logs/index.tsv` — one row per retire. Column 2 is
-`COUNTED` or `INFRA`. Target is 100 COUNTED. INFRA is recorded and
-replaced. `tick.sh` prints `LEDGER counted=… remaining=… refill=…`.
+`COUNTED` or `INFRA`. Target is `SUPER_RUN_COUNT` COUNTED rows. This
+fleet's `install.sh` sets that to 10 (spawn the lock-screen ticket five
+times, then refill through all ten). The minted-run fleet sets 100.
+INFRA is recorded and replaced. `tick.sh` prints
+`LEDGER counted=… remaining=… target=… refill=…`.
 
 `retire.sh <n> COUNTED|INFRA [note]` records then deletes that N from
 `active`. Look N up from `active` by ticket; never guess.
@@ -73,21 +76,29 @@ billed truth.
 
 ## Disks, every batch
 
-Always, before `start_fleet`, including when a previous batch already minted:
+Always, before `start_fleet`, including when a previous batch already minted.
+Clear every known temporary, including ISOs. `reset.sh` does not touch disks,
+session dirs, or the ISO cache.
 
-- Delete `<iso>.qcow2` and `<iso>.OVMF_VARS.fd` under
-  `$OLIGARCHY_DATA_ROOT/qemu-server-4/isos` and `qemu-server-3/isos`
-  (`OLIGARCHY_DATA_ROOT` defaults to `$HOME/personal/oligarchy-data`).
 - Delete session directories under `OLIGARCHY_SESSIONS_DIR`.
-- Keep the ISO. `reset.sh` does not touch disks or session dirs.
+- Delete `$OLIGARCHY_DATA_ROOT/qemu-1` and `qemu-2` entirely
+  (`OLIGARCHY_DATA_ROOT` defaults to `$HOME/personal/oligarchy-data`).
+- Delete the previous fleet's data dirs `qemu-server-4` and `qemu-server-3`.
+- Delete the ISO cache `SUPER_RUN_ISO_CACHE` (default `~/.oligarchy/isos`).
 
-Do not run `./ctrl mint`. A `--resume` against a server with room and no disk
-makes the proxy insert a `setup_requests` row and a mint ticket. Claim order
-is mint, then diagnose, then drive, so the mint job runs first and drives
-stay pending (`deferred; setup needed`) until that server's disk exists.
-One mint at a time: the least-busy unminted server with room. The other
-server is ticketed only after every server that holds the disk is at
-`--max-jobs`.
+Then download the latest ISO twice, one copy into each of `qemu-1/isos` and
+`qemu-2/isos` (cache file name + `manifest.json`). Then two minting sessions:
+`./ctrl mint` once, one ticket per server. Lock-screen tickets start only
+after both disks exist. They `--resume`. Do not leave a lock-screen to mint
+the server itself.
+
+## Fleet
+
+Two qemu servers, width one, two data dirs: `qemu-1` `:55332` `--max-jobs 1`
+`$OLIGARCHY_DATA_ROOT/qemu-1`, `qemu-2` `:55333` `--max-jobs 1`
+`$OLIGARCHY_DATA_ROOT/qemu-2`. Two clients, two jobs each:
+`automation-client-2a` `:52222` `--max-jobs 2`, `automation-client-2b`
+`:52223` `--max-jobs 2`. Proxy `:55555`. Automation server `:54321`.
 
 ## Env the six processes need
 

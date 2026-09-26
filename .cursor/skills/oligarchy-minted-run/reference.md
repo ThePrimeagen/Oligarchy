@@ -4,6 +4,8 @@ Read from SKILL.md only when you need IDs, incidents, or queries. Linear state I
 the recorded run file, token usage, and the incident list are the super-run's:
 `.cursor/skills/oligarchy-super-run/reference.md`. Everything there holds here; the helper scripts
 are the same files, installed under `/tmp/mintedrun` with this fleet's ports in `SUPER_RUN_PORTS`.
+The batch size does not carry over: this fleet counts 100 (`SUPER_RUN_COUNT=100` in its env).
+The super-run fleet counts 10.
 
 ## This fleet
 
