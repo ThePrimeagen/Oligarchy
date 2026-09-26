@@ -1697,7 +1697,7 @@ describe("resume", () => {
           FakeQemu.fakeQemu().layer,
           FakeQemu.fakeIso().layer,
           minted.layer,
-          FakeQemu.fakeStats,
+          FakeQemu.fakeHost,
           Stores.fakeSessionStore().layer,
           Stores.fakeActionStore().layer,
           Stores.fakeDebugLogStore().layer,

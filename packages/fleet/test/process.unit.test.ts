@@ -1,10 +1,21 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Context, Effect, Exit, Fiber, Layer } from "effect";
+import {
+  Cause,
+  Context,
+  Effect,
+  Exit,
+  FileSystem,
+  Fiber,
+  Layer,
+  PlatformError,
+  Sink,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
-import * as ProcessUsage from "../../src/shared/process-usage.ts";
-import * as FakeFs from "../support/fake-fs.ts";
-import * as FakeSpawner from "../support/fake-spawner.ts";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ProcessUsage from "../src/process.ts";
 
 // pid (comm) then fields 3..13, then utime (14) and stime (15). comm may contain spaces.
 const stat = (comm: string, utime: number, stime: number): string =>
@@ -115,51 +126,53 @@ describe("ProcessUsage.collect unhappy path", () => {
   );
 });
 
-const procFs = (statText: string | undefined, statusText: string | undefined) =>
-  FakeFs.recordingFs(
-    {
-      ...(statText === undefined ? {} : { "/proc/self/stat": "File" }),
-      ...(statusText === undefined ? {} : { "/proc/self/status": "File" }),
-    },
-    {
-      contents: {
-        ...(statText === undefined
-          ? {}
-          : { "/proc/self/stat": new TextEncoder().encode(statText) }),
-        ...(statusText === undefined
-          ? {}
-          : { "/proc/self/status": new TextEncoder().encode(statusText) }),
-      },
-    },
-  );
+const notFound = (method: string, path: string): PlatformError.PlatformError =>
+  PlatformError.systemError({
+    _tag: "NotFound",
+    module: "FileSystem",
+    method,
+    pathOrDescriptor: path,
+  });
 
-// The Linux source over a scripted /proc, whatever host the test runs on.
-const onLinux = (fs: FakeFs.RecordingFs) =>
-  Layer.effect(ProcessUsage.ProcessUsage)(
-    Effect.flatMap(ProcessUsage.procSource, ProcessUsage.ProcessUsage.make),
-  ).pipe(Layer.provide(fs.layer));
-
-const collectThrough = (statText: string | undefined, statusText: string | undefined) =>
-  Effect.gen(function* () {
-    const usage = yield* ProcessUsage.ProcessUsage;
-    return yield* usage.collect;
-  }).pipe(Effect.provide(onLinux(procFs(statText, statusText))));
-
-const treeFs = (spec: {
+// A /proc of the given files and directories, recording which methods were called; a directory
+// lists the entries directly under it.
+const procFs = (spec: {
   readonly files: Readonly<Record<string, string>>;
   readonly directories?: ReadonlyArray<string>;
 }) => {
-  const entries: Record<string, "File" | "Directory"> = {};
-  const contents: Record<string, Uint8Array> = {};
-  for (const dir of spec.directories ?? []) {
-    entries[dir] = "Directory";
-  }
-  for (const [path, text] of Object.entries(spec.files)) {
-    entries[path] = "File";
-    contents[path] = new TextEncoder().encode(text);
-  }
-  return FakeFs.recordingFs(entries, { contents });
+  const methods: Array<string> = [];
+  const directories = spec.directories ?? [];
+  const entries = [...directories, ...Object.keys(spec.files)];
+  const layer = FileSystem.layerNoop({
+    readFileString: (path) =>
+      Effect.suspend(() => {
+        methods.push("readFileString");
+        const text = spec.files[path];
+        return text === undefined
+          ? Effect.fail(notFound("readFileString", path))
+          : Effect.succeed(text);
+      }),
+    readDirectory: (path) =>
+      Effect.suspend(() => {
+        methods.push("readDirectory");
+        return directories.includes(path)
+          ? Effect.succeed(
+              entries
+                .filter((entry) => entry.startsWith(`${path}/`))
+                .map((entry) => entry.slice(path.length + 1))
+                .filter((name) => !name.includes("/")),
+            )
+          : Effect.fail(notFound("readDirectory", path));
+      }),
+  });
+  return { methods, layer };
 };
+
+// The Linux source over a scripted /proc, whatever host the test runs on.
+const onLinux = (fs: ReturnType<typeof procFs>) =>
+  Layer.effect(ProcessUsage.ProcessUsage)(
+    Effect.flatMap(ProcessUsage.procSource, ProcessUsage.ProcessUsage.make),
+  ).pipe(Layer.provide(fs.layer));
 
 const collectTree = (spec: {
   readonly files: Readonly<Record<string, string>>;
@@ -168,15 +181,25 @@ const collectTree = (spec: {
   Effect.gen(function* () {
     const usage = yield* ProcessUsage.ProcessUsage;
     return yield* usage.collect;
-  }).pipe(Effect.provide(onLinux(treeFs(spec))));
+  }).pipe(Effect.provide(onLinux(procFs(spec))));
+
+const collectThrough = (statText: string | undefined, statusText: string | undefined) =>
+  collectTree({
+    files: {
+      ...(statText === undefined ? {} : { "/proc/self/stat": statText }),
+      ...(statusText === undefined ? {} : { "/proc/self/status": statusText }),
+    },
+  });
 
 describe("ProcessUsage.procSource happy path (Linux)", () => {
   it.effect("reads /proc/self/stat and /proc/self/status without sudo", () => {
-    const fs = procFs(stat("node", 0, 0), status(4));
+    const fs = procFs({
+      files: { "/proc/self/stat": stat("node", 0, 0), "/proc/self/status": status(4) },
+    });
     return Effect.gen(function* () {
       const usage = yield* ProcessUsage.ProcessUsage;
       expect(yield* usage.collect).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
-      expect(FakeFs.methods(fs)).toEqual(["readFileString", "readFileString", "readDirectory"]);
+      expect(fs.methods).toEqual(["readFileString", "readFileString", "readDirectory"]);
     }).pipe(Effect.provide(onLinux(fs)));
   });
 
@@ -371,7 +394,6 @@ describe("ProcessUsage.procSource unhappy path (Linux)", () => {
 });
 
 const PID = 500;
-// The fake spawner numbers its processes from 4000, so the first ps a test runs is 4000.
 const PS_PID = 4000;
 
 // Synthetic: laid out as macOS prints `ps -A -o pid= -o ppid= -o rss=`, rss in KiB.
@@ -380,30 +402,31 @@ const psRow = (pid: number, ppid: number, kb: number): string =>
 
 type CpuUsage = { readonly user: number; readonly system: number };
 
-const listing = (rows: ReadonlyArray<string>): FakeSpawner.Script =>
-  FakeSpawner.byCommand({ "/bin/ps": { exitCode: 0, stdout: rows.join("") } });
+// The listing a ps printed, as the reader is handed it.
+const listed = (rows: ReadonlyArray<string>): Effect.Effect<ProcessUsage.Listing> =>
+  Effect.succeed({ text: rows.join(""), ps: PS_PID });
 
-// The macOS source over a scripted ps and getrusage, whatever host the test runs on.
+// The macOS source over a listing and getrusage, whatever host the test runs on.
 const onMac = (
-  spawner: FakeSpawner.FakeSpawner,
+  list: Effect.Effect<ProcessUsage.Listing, ProcessUsage.PsFailed>,
   cpu: () => CpuUsage = () => ({ user: 0, system: 0 }),
 ) =>
   Layer.effect(ProcessUsage.ProcessUsage)(
-    Effect.flatMap(ProcessUsage.psSource(PID, cpu), ProcessUsage.ProcessUsage.make),
-  ).pipe(Layer.provide(spawner.layer));
+    ProcessUsage.ProcessUsage.make(ProcessUsage.psSource(PID, cpu, list)),
+  );
 
-const collectOnMac = (script: FakeSpawner.Script) =>
+const collectOnMac = (list: Effect.Effect<ProcessUsage.Listing, ProcessUsage.PsFailed>) =>
   Effect.gen(function* () {
     const usage = yield* ProcessUsage.ProcessUsage;
     return yield* usage.collect;
-  }).pipe(Effect.provide(onMac(FakeSpawner.fakeSpawner(script))));
+  }).pipe(Effect.provide(onMac(list)));
 
 describe("ProcessUsage.psSource happy path (macOS)", () => {
   it.effect("sums ps's rss of this pid and every descendant, KiB as bytes, and no one else", () =>
     Effect.gen(function* () {
       expect(
         yield* collectOnMac(
-          listing([
+          listed([
             psRow(1, 0, 9_000),
             psRow(PID, 1, 100),
             psRow(600, PID, 20),
@@ -421,7 +444,7 @@ describe("ProcessUsage.psSource happy path (macOS)", () => {
     Effect.gen(function* () {
       expect(
         yield* collectOnMac(
-          listing([psRow(PID, 1, 100), psRow(PS_PID, PID, 1_500), psRow(600, PID, 20)]),
+          listed([psRow(PID, 1, 100), psRow(PS_PID, PID, 1_500), psRow(600, PID, 20)]),
         ),
       ).toEqual({ memoryBytes: 120 * 1024, cpuPercent: 0 });
     }),
@@ -443,103 +466,164 @@ describe("ProcessUsage.psSource happy path (macOS)", () => {
       expect((yield* usage.collect).cpuPercent).toBe(100);
       yield* TestClock.adjust("30 seconds");
       expect((yield* usage.collect).cpuPercent).toBe(50);
-    }).pipe(Effect.provide(onMac(FakeSpawner.fakeSpawner(listing([psRow(PID, 1, 1)])), cpu)));
-  });
-});
-
-describe("ProcessUsage.psSource unhappy path (macOS)", () => {
-  it.effect(
-    "a ps that cannot start fails collect with CliFailed, and the next collect reads",
-    () => {
-      let runs = 0;
-      const script = FakeSpawner.byCommand({
-        "/bin/ps": () => {
-          runs += 1;
-          return runs === 1
-            ? { spawnError: "spawn /bin/ps EAGAIN" }
-            : { exitCode: 0, stdout: psRow(PID, 1, 4) };
-        },
-      });
-      return Effect.gen(function* () {
-        const usage = yield* ProcessUsage.ProcessUsage;
-        const error = yield* Effect.flip(usage.collect);
-        expect(error).toMatchObject({
-          _tag: "CliFailed",
-          command: "/bin/ps",
-          message: "spawn /bin/ps EAGAIN",
-        });
-        expect(yield* usage.collect).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
-      }).pipe(Effect.provide(onMac(FakeSpawner.fakeSpawner(script))));
-    },
-  );
-
-  it.effect("a listing that does not name this pid fails collect with CliFailed", () =>
-    Effect.gen(function* () {
-      for (const answer of [
-        { exitCode: 1, stdout: "" },
-        { exitCode: 0, stdout: psRow(1, 0, 9_000) + psRow(600, 1, 20) },
-      ]) {
-        const error = yield* Effect.flip(
-          collectOnMac(FakeSpawner.byCommand({ "/bin/ps": answer })),
-        );
-        expect(error, answer.stdout).toMatchObject({
-          _tag: "CliFailed",
-          command: "/bin/ps",
-          message: "ps did not list this process (pid 500)",
-        });
-      }
-    }),
-  );
-
-  it.effect(
-    "a ps that never answers fails collect with CliFailed after ten seconds, and is killed",
-    () => {
-      const spawner = FakeSpawner.fakeSpawner(FakeSpawner.byCommand({ "/bin/ps": {} }));
-      return Effect.gen(function* () {
-        const usage = yield* ProcessUsage.ProcessUsage;
-        const collecting = yield* Effect.forkChild(Effect.flip(usage.collect));
-        const ps = yield* spawner.nextSpawn;
-        yield* TestClock.adjust("9 seconds");
-        expect(collecting.pollUnsafe()).toBeUndefined();
-        yield* TestClock.adjust("1 second");
-        expect(yield* Fiber.join(collecting)).toMatchObject({
-          _tag: "CliFailed",
-          command: "/bin/ps",
-          message: "ps did not answer within 10 seconds",
-        });
-        expect(ps.kills).toEqual(["SIGTERM"]);
-        expect(yield* ps.isRunning).toBe(false);
-      }).pipe(Effect.provide(onMac(spawner)));
-    },
-  );
-
-  it.effect("a wedged ps that ignores SIGTERM is killed a second later, so the tick ends", () => {
-    const spawner = FakeSpawner.fakeSpawner(
-      FakeSpawner.byCommand({ "/bin/ps": { ignoreTerm: true } }),
-    );
-    return Effect.gen(function* () {
-      const usage = yield* ProcessUsage.ProcessUsage;
-      const collecting = yield* Effect.forkChild(Effect.flip(usage.collect));
-      const ps = yield* spawner.nextSpawn;
-      yield* TestClock.adjust("10 seconds");
-      expect(collecting.pollUnsafe()).toBeUndefined();
-      expect(ps.kills).toEqual(["SIGTERM"]);
-      yield* TestClock.adjust("1 second");
-      expect(yield* Fiber.join(collecting)).toMatchObject({
-        _tag: "CliFailed",
-        message: "ps did not answer within 10 seconds",
-      });
-      expect(ps.kills).toEqual(["SIGTERM", "SIGKILL"]);
-    }).pipe(Effect.provide(onMac(spawner)));
+    }).pipe(Effect.provide(onMac(listed([psRow(PID, 1, 1)]), cpu)));
   });
 
   it.effect("a header or a blank line is not a process, and the rows after it still count", () =>
     Effect.gen(function* () {
       expect(
         yield* collectOnMac(
-          listing(["  PID  PPID    RSS\n", "\n", psRow(PID, 1, 100), "   \n", psRow(600, PID, 20)]),
+          listed(["  PID  PPID    RSS\n", "\n", psRow(PID, 1, 100), "   \n", psRow(600, PID, 20)]),
         ),
       ).toEqual({ memoryBytes: 120 * 1024, cpuPercent: 0 });
     }),
+  );
+});
+
+describe("ProcessUsage.psSource unhappy path (macOS)", () => {
+  it.effect(
+    "a listing that fails fails collect with its PsFailed, and the next collect reads",
+    () =>
+      Effect.gen(function* () {
+        let runs = 0;
+        const refused = ProcessUsage.PsFailed.make({ message: "spawn /bin/ps EAGAIN" });
+        const list = Effect.suspend(() => {
+          runs += 1;
+          return runs === 1 ? Effect.fail(refused) : listed([psRow(PID, 1, 4)]);
+        });
+        yield* Effect.gen(function* () {
+          const usage = yield* ProcessUsage.ProcessUsage;
+          expect(yield* Effect.flip(usage.collect)).toBe(refused);
+          expect(yield* usage.collect).toEqual({ memoryBytes: 4 * 1024, cpuPercent: 0 });
+        }).pipe(Effect.provide(onMac(list)));
+      }),
+  );
+
+  it.effect("a listing that does not name this pid fails collect with PsFailed", () =>
+    Effect.gen(function* () {
+      for (const rows of [[], [psRow(1, 0, 9_000), psRow(600, 1, 20)]]) {
+        const error = yield* Effect.flip(collectOnMac(listed(rows)));
+        expect(error, rows.join("")).toMatchObject({
+          _tag: "PsFailed",
+          message: "ps did not list this process (pid 500)",
+        });
+      }
+    }),
+  );
+});
+
+// A spawner that hands ps the scripted stdout, recording the command it was given and whether
+// the handle's scope was released (the real spawner's release is what signals the process).
+const psSpawner = (
+  answer: { readonly stdout: string | "never" } | { readonly spawnError: string },
+) => {
+  const commands: Array<ChildProcess.StandardCommand> = [];
+  let released = false;
+  const spawn: ChildProcessSpawner.ChildProcessSpawner["Service"]["spawn"] = (command) =>
+    Effect.gen(function* () {
+      if (!ChildProcess.isStandardCommand(command)) {
+        return yield* Effect.die("psSpawner: piped commands are not scripted");
+      }
+      commands.push(command);
+      if ("spawnError" in answer) {
+        return yield* Effect.fail(
+          PlatformError.systemError({
+            _tag: "Unknown",
+            module: "ChildProcess",
+            method: "spawn",
+            pathOrDescriptor: command.command,
+            cause: new Error(answer.spawnError),
+          }),
+        );
+      }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          released = true;
+        }),
+      );
+      const stdout =
+        answer.stdout === "never"
+          ? Stream.never
+          : Stream.make(new TextEncoder().encode(answer.stdout));
+      return ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(PS_PID),
+        exitCode: Effect.never,
+        isRunning: Effect.succeed(true),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        stdout,
+        stderr: Stream.empty,
+        all: stdout,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void),
+      });
+    });
+  return {
+    commands,
+    released: () => released,
+    layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(ChildProcessSpawner.make(spawn)),
+  };
+};
+
+describe("ProcessUsage.listProcesses happy path", () => {
+  it.effect(
+    "runs /bin/ps for every pid's parent and rss and answers what it printed with its pid",
+    () => {
+      const spawner = psSpawner({ stdout: psRow(PID, 1, 100) });
+      return Effect.gen(function* () {
+        expect(yield* ProcessUsage.listProcesses).toEqual({
+          text: psRow(PID, 1, 100),
+          ps: PS_PID,
+        });
+        expect(spawner.commands.map((command) => [command.command, command.args])).toEqual([
+          ["/bin/ps", ["-A", "-o", "pid=", "-o", "ppid=", "-o", "rss="]],
+        ]);
+        expect(spawner.released()).toBe(true);
+      }).pipe(Effect.provide(spawner.layer));
+    },
+  );
+
+  // The spawner's release signals the process with the command's own settings: SIGTERM, then
+  // SIGKILL a second later for a ps that ignores it, so a wedged ps never holds the tick.
+  it.effect("asks for SIGTERM, then SIGKILL a second later, when the listing is abandoned", () => {
+    const spawner = psSpawner({ stdout: "" });
+    return Effect.gen(function* () {
+      yield* ProcessUsage.listProcesses;
+      expect(spawner.commands[0]?.options).toMatchObject({
+        killSignal: "SIGTERM",
+        forceKillAfter: "1 second",
+      });
+    }).pipe(Effect.provide(spawner.layer));
+  });
+});
+
+describe("ProcessUsage.listProcesses unhappy path", () => {
+  it.effect("a ps that cannot start fails with PsFailed naming the platform's reason", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(ProcessUsage.listProcesses).pipe(
+        Effect.provide(psSpawner({ spawnError: "spawn /bin/ps EAGAIN" }).layer),
+      );
+      expect(error).toMatchObject({ _tag: "PsFailed", message: "spawn /bin/ps EAGAIN" });
+    }),
+  );
+
+  it.effect(
+    "a listing that never answers fails with PsFailed after ten seconds, and its process is released",
+    () => {
+      const spawner = psSpawner({ stdout: "never" });
+      return Effect.gen(function* () {
+        const listing = yield* Effect.forkChild(Effect.flip(ProcessUsage.listProcesses));
+        yield* TestClock.adjust("9 seconds");
+        expect(listing.pollUnsafe()).toBeUndefined();
+        expect(spawner.released()).toBe(false);
+        yield* TestClock.adjust("1 second");
+        expect(yield* Fiber.join(listing)).toMatchObject({
+          _tag: "PsFailed",
+          message: "ps did not answer within 10 seconds",
+        });
+        expect(spawner.released()).toBe(true);
+      }).pipe(Effect.provide(spawner.layer));
+    },
   );
 });

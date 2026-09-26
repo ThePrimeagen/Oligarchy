@@ -8,6 +8,7 @@
         "@effect/platform-node": "catalog:",
         "@oligarchy/db": "workspace:*",
         "@oligarchy/env": "workspace:*",
+        "@oligarchy/fleet": "workspace:*",
         "@oligarchy/jobs": "workspace:*",
         "@oligarchy/linear": "workspace:*",
         "@oligarchy/log": "workspace:*",
@@ -71,6 +72,23 @@
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/fleet": {
+      "name": "@oligarchy/fleet",
+      "dependencies": {
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -446,6 +464,8 @@
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
+
+    "@oligarchy/fleet": ["@oligarchy/fleet@workspace:packages/fleet"],
 
     "@oligarchy/jobs": ["@oligarchy/jobs@workspace:packages/jobs"],
 

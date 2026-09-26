@@ -5,16 +5,13 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Stream } from "effect";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as ProcessUsage from "../../src/shared/process-usage.ts";
+import * as ProcessUsage from "../src/process.ts";
 
 // A child holding this much, so a reading that missed the descendants would be off by far more
 // than the two readings may drift apart.
 const HELD_BYTES = 64 * 1024 * 1024;
 // This process allocates between the two readings (ps's pipes, the samples themselves).
 const DRIFT_BYTES = 4 * 1024 * 1024;
-
-const sampler = (source: Effect.Effect<ProcessUsage.Source>) =>
-  Effect.flatMap(source, ProcessUsage.ProcessUsage.make);
 
 // Both sources run on Linux, where both ps and /proc exist; macOS has no /proc to compare with.
 describe.skipIf(!existsSync("/proc/self/stat"))("ps and /proc on one host", () => {
@@ -37,11 +34,14 @@ describe.skipIf(!existsSync("/proc/self/stat"))("ps and /proc on one host", () =
         Stream.take(1),
         Stream.runDrain,
       );
-      const proc = yield* sampler(Effect.provide(ProcessUsage.procSource, NodeServices.layer));
-      const ps = yield* sampler(
-        Effect.provide(
-          ProcessUsage.psSource(process.pid, () => process.cpuUsage()),
-          NodeServices.layer,
+      const proc = yield* Effect.flatMap(ProcessUsage.procSource, ProcessUsage.ProcessUsage.make);
+      const ps = yield* ProcessUsage.ProcessUsage.make(
+        ProcessUsage.psSource(
+          process.pid,
+          () => process.cpuUsage(),
+          ProcessUsage.listProcesses.pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          ),
         ),
       );
 

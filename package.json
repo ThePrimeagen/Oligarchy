@@ -56,6 +56,7 @@
     "@effect/platform-node": "catalog:",
     "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
+    "@oligarchy/fleet": "workspace:*",
     "@oligarchy/jobs": "workspace:*",
     "@oligarchy/linear": "workspace:*",
     "@oligarchy/log": "workspace:*",

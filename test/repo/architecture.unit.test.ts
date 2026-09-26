@@ -66,6 +66,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/linear": 3,
   "@oligarchy/jobs": 4,
   "@oligarchy/observability": 4,
+  "@oligarchy/fleet": 5,
   "@oligarchy/routes": 5,
   "@oligarchy/testing": TOP,
 };
@@ -229,10 +230,11 @@ const BOUNDARY_FILES = new Set([
   "src/qmp/socket.ts",
   "src/qemu-server/main.ts",
   "src/session/readline.ts",
-  "src/qemu/stats.ts",
   "src/qemu/qemu.ts",
+  // The host's cpu times and memory, read from node:os.
+  "packages/fleet/src/host.ts",
   // This process's own cpu and pid, and which host it is on: macOS has no /proc to read them.
-  "src/shared/process-usage.ts",
+  "packages/fleet/src/process.ts",
   "packages/observability/src/instrument.ts",
   // Whether stdout takes colour: the tty's depth and FORCE_COLOR, decided once for the process.
   "packages/env/src/colors.ts",

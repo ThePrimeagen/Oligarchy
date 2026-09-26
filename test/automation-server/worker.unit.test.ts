@@ -152,7 +152,7 @@ const seedDiagnose = (automation: TestingStores.FakeAutomationStore, resultId = 
   seedJob(automation, "drive", resultId, "completed");
 };
 
-const seedLiveClient = (servers: Stores.FakeServerStore, url = URL) => {
+const seedLiveClient = (servers: TestingStores.FakeServerStore, url = URL) => {
   const id = crypto.randomUUID();
   servers.servers.push({ id, url, name: null, type: "automation-client" });
   servers.heartbeats.push({ url, type: "automation-client", name: "garage", stats: STATS });
@@ -185,7 +185,7 @@ const verdictMoves = (linear: TestingLinear.FakeLinear) =>
 
 type Harness = {
   readonly automation: TestingStores.FakeAutomationStore;
-  readonly servers: Stores.FakeServerStore;
+  readonly servers: TestingStores.FakeServerStore;
   readonly sessions: Stores.FakeSessionStore;
   readonly diagnosis: Stores.FakeDiagnosisStore;
   readonly tests: TestingStores.FakeTestStore;
@@ -199,7 +199,7 @@ const harness = (
   automation: TestingStores.FakeAutomationStore = TestingStores.fakeAutomationStore(),
 ): Harness => ({
   automation,
-  servers: Stores.fakeServerStore(),
+  servers: TestingStores.fakeServerStore(),
   sessions: Stores.fakeSessionStore(),
   diagnosis: Stores.fakeDiagnosisStore(),
   tests: TestingStores.fakeTestStore(),

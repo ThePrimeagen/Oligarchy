@@ -15,6 +15,7 @@ import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as Api from "@oligarchy/routes/api";
 import * as Contract from "@oligarchy/routes/contract";
+import * as TestingStores from "@oligarchy/testing/stores";
 import * as Handlers from "../../src/qemu-reverse-proxy/handlers.ts";
 import * as Router from "../../src/qemu-reverse-proxy/router.ts";
 import * as Setup from "../../src/qemu-reverse-proxy/setup.ts";
@@ -89,7 +90,7 @@ const answering =
   };
 
 type Fixture = {
-  readonly store: Stores.FakeServerStore;
+  readonly store: TestingStores.FakeServerStore;
   readonly sessions: Stores.FakeSessionStore;
   readonly upstream: FakeHttp.Recorder;
   readonly log: FakeLog.FakeLog;
@@ -98,7 +99,7 @@ type Fixture = {
 };
 
 const fixture = (respond: FakeHttp.Respond = fleet, overrides: Partial<Fixture> = {}): Fixture => ({
-  store: Stores.fakeServerStore(),
+  store: TestingStores.fakeServerStore(),
   sessions: Stores.fakeSessionStore(),
   upstream: FakeHttp.recordRequests(respond),
   log: FakeLog.fakeLog(),
@@ -673,7 +674,7 @@ describe("registration refusals", () => {
         cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
       });
       const fixed = fixture(fleet, {
-        store: Stores.fakeServerStore({ addServer: () => Effect.fail(failure) }),
+        store: TestingStores.fakeServerStore({ addServer: () => Effect.fail(failure) }),
       });
       yield* Effect.gen(function* () {
         const api = yield* qemuReverseProxyClient;
@@ -1438,7 +1439,7 @@ describe("placement", () => {
               ? FakeHttp.json({ ok: "true" })
               : fleet(request, url),
           {
-            store: Stores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }),
+            store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }),
           },
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
@@ -1486,7 +1487,7 @@ describe("placement", () => {
           }
           return url.pathname === "/reserve" ? FakeHttp.json({ ok: "true" }) : fleet(request, url);
         },
-        { store: Stores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
+        { store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
       );
       fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
       yield* Effect.gen(function* () {
@@ -1533,7 +1534,7 @@ describe("placement", () => {
               ? FakeHttp.json({ ok: "true" })
               : fleet(request, url),
           {
-            store: Stores.fakeServerStore({
+            store: TestingStores.fakeServerStore({
               routeAgent: (agentId, url) =>
                 Effect.gen(function* () {
                   agents.set(agentId, url);
@@ -1580,7 +1581,7 @@ describe("placement", () => {
               ? FakeHttp.json({ ok: "true" })
               : fleet(request, url);
           },
-          { store: Stores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
+          { store: TestingStores.fakeServerStore({ routeAgent: () => Effect.fail(failure) }) },
         );
         fixed.store.servers.push(qemu(SERVER_A), qemu(SERVER_B));
         yield* Effect.gen(function* () {
@@ -1983,7 +1984,7 @@ describe("placement", () => {
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
         const fixed = fixture(fleet, {
-          store: Stores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
+          store: TestingStores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
         });
         fixed.store.servers.push(qemu(SERVER_A));
         fixed.sessions.agentRuns.push({
@@ -2172,7 +2173,7 @@ describe("placement", () => {
           cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
         });
         const fixed = fixture(placing(), {
-          store: Stores.fakeServerStore({ routeSession: () => Effect.fail(failure) }),
+          store: TestingStores.fakeServerStore({ routeSession: () => Effect.fail(failure) }),
         });
         fixed.store.servers.push(qemu(SERVER_A));
         fixed.store.agents.set(AGENT_ID, SERVER_A);
@@ -2211,7 +2212,7 @@ describe("placement", () => {
               })
             : fleet(request, url),
         {
-          store: Stores.fakeServerStore({
+          store: TestingStores.fakeServerStore({
             routeSession: (id, url) => Deferred.succeed(recorded, `${id} ${url}`),
           }),
         },
@@ -2640,7 +2641,7 @@ describe("forwarding refusals", () => {
   it.effect("an id that is not a uuid is 404 unknown session without reading the store", () =>
     Effect.gen(function* () {
       const fixed = fixture(fleet, {
-        store: Stores.fakeServerStore({
+        store: TestingStores.fakeServerStore({
           serverForSession: () => Effect.die("Unexpected ServerStore.serverForSession"),
         }),
       });
@@ -2767,7 +2768,7 @@ describe("forwarding refusals", () => {
         cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
       });
       const fixed = fixture(fleet, {
-        store: Stores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
+        store: TestingStores.fakeServerStore({ serverForSession: () => Effect.fail(failure) }),
       });
       yield* Effect.gen(function* () {
         const api = yield* qemuServerClient;

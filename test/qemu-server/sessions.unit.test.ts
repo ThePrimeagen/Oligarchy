@@ -132,7 +132,7 @@ const harness = (options: Options = {}) => {
         qemu.layer,
         iso.layer,
         minted.layer,
-        FakeQemu.fakeStats,
+        FakeQemu.fakeHost,
         sessions.layer,
         actions.layer,
         debugLogs.layer,
@@ -3004,7 +3004,7 @@ describe("restart", () => {
 // ---------------------------------------------------------------------------
 
 describe("stats", () => {
-  it.effect("reports the number of running machines", () =>
+  it.effect("reports the number of running machines with the host sampler's values", () =>
     Effect.gen(function* () {
       const h = harness();
       yield* h.run(
@@ -3015,7 +3015,11 @@ describe("stats", () => {
           const { live } = yield* start();
           yield* start(OTHER_AGENT);
           expect(yield* sessions.stats).toEqual(
-            Contract.Stats.make({ qemus: 2, ...FakeQemu.ZERO_STATS }),
+            Contract.Stats.make({
+              qemus: 2,
+              memory: Contract.Memory.make(FakeQemu.HOST_STATS.memory),
+              cpu: Contract.Cpu.make(FakeQemu.HOST_STATS.cpu),
+            }),
           );
           expect(yield* qemus(sessions)).toBe(2);
           yield* sessions.stop(live, undefined, undefined);

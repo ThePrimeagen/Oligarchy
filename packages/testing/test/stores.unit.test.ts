@@ -2,6 +2,9 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, Exit, Option } from "effect";
 import * as Automation from "@oligarchy/db/automation";
+import * as DbErrors from "@oligarchy/db/errors";
+import * as ProcessStats from "@oligarchy/db/process-stats";
+import * as Servers from "@oligarchy/db/servers";
 import * as Tests from "@oligarchy/db/tests";
 import * as Stores from "../src/stores.ts";
 
@@ -212,6 +215,104 @@ describe("fakeAutomationStore unhappy path", () => {
         expect(yield* store.finish(job.id, "completed", null)).toBe(false);
       }).pipe(Effect.provide(fake.layer));
       expect(fake.jobs.map((job) => [job.status, job.reason])).toEqual([["aborted", "aborted"]]);
+    }),
+  );
+});
+
+const URL = "http://127.0.0.1:55332";
+const ROW_STATS = {
+  qemus: 1,
+  memory: { totalBytes: 16_000, usedBytes: 4_000 },
+  cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
+};
+
+describe("fakeServerStore happy path", () => {
+  it.effect("a url registers once, and a heartbeat registers the url with its kind and name", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeServerStore();
+      yield* Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        yield* store.addServer(URL, "qemu");
+        yield* store.addServer(URL, "qemu");
+        expect(fake.servers).toEqual([
+          { id: expect.any(String), url: URL, name: null, type: "qemu" },
+        ]);
+        yield* store.heartbeat("http://127.0.0.1:1", "automation-client", "attic", ROW_STATS);
+        expect(yield* store.listServers("automation-client")).toEqual(["http://127.0.0.1:1"]);
+        expect(yield* store.listLiveServers("qemu")).toEqual([]);
+      }).pipe(Effect.provide(fake.layer));
+      expect(fake.heartbeats).toEqual([
+        { url: "http://127.0.0.1:1", type: "automation-client", name: "attic", stats: ROW_STATS },
+      ]);
+    }),
+  );
+
+  it.effect("removing a server answers whether its row was there", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeServerStore();
+      yield* Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        yield* store.heartbeat(URL, "qemu", "garage", ROW_STATS);
+        expect(yield* store.removeServer(URL)).toBe(true);
+        expect(yield* store.removeServer(URL)).toBe(false);
+      }).pipe(Effect.provide(fake.layer));
+      expect(fake.servers).toEqual([]);
+    }),
+  );
+});
+
+describe("fakeServerStore unhappy path", () => {
+  it.effect("a second route for one session is the primary key's DatabaseError", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeServerStore();
+      const error = yield* Effect.gen(function* () {
+        const store = yield* Servers.ServerStore;
+        yield* store.routeSession(SERVER, URL);
+        return yield* Effect.flip(store.routeSession(SERVER, "http://127.0.0.1:1"));
+      }).pipe(Effect.provide(fake.layer));
+      expect(error).toMatchObject({ _tag: "DatabaseError", operation: "routeSession" });
+      expect(fake.routes).toEqual(new Map([[SERVER, URL]]));
+    }),
+  );
+});
+
+describe("fakeProcessStatsStore happy path", () => {
+  it.effect("keeps every report and answers the newest per process, qemu servers first", () =>
+    Effect.gen(function* () {
+      const fake = Stores.fakeProcessStatsStore();
+      const sample = (jobs: number) => ({ jobs, memoryBytes: 1_024, cpuPercent: 1.5 });
+      const series = yield* Effect.gen(function* () {
+        const store = yield* ProcessStats.ProcessStatsStore;
+        yield* store.report("attic", "automation-client", sample(0));
+        yield* store.report("garage", "qemu", sample(1));
+        yield* store.report("garage", "qemu", sample(2));
+        return yield* store.listSeries(1);
+      }).pipe(Effect.provide(fake.layer));
+      expect(fake.reports).toHaveLength(3);
+      expect(series).toEqual([
+        { name: "garage", type: "qemu", samples: [sample(2)] },
+        { name: "attic", type: "automation-client", samples: [sample(0)] },
+      ]);
+    }),
+  );
+});
+
+describe("fakeProcessStatsStore unhappy path", () => {
+  it.effect("an overridden report fails as told and records nothing", () =>
+    Effect.gen(function* () {
+      const refused = DbErrors.DatabaseError.make({
+        operation: "reportProcess",
+        message: "Failed query: insert into process_stats",
+      });
+      const fake = Stores.fakeProcessStatsStore({ report: () => Effect.fail(refused) });
+      const error = yield* Effect.gen(function* () {
+        const store = yield* ProcessStats.ProcessStatsStore;
+        return yield* Effect.flip(
+          store.report("garage", "qemu", { jobs: 0, memoryBytes: 0, cpuPercent: 0 }),
+        );
+      }).pipe(Effect.provide(fake.layer));
+      expect(error).toBe(refused);
+      expect(fake.reports).toEqual([]);
     }),
   );
 });

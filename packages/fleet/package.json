@@ -1,0 +1,30 @@
+{
+  "name": "@oligarchy/fleet",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./host": "./src/host.ts",
+    "./member": "./src/member.ts",
+    "./process": "./src/process.ts",
+    "./sweep": "./src/sweep.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run --project unit",
+    "test:integration": "bun --bun vitest run --project integration"
+  },
+  "dependencies": {
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@oligarchy/testing": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
