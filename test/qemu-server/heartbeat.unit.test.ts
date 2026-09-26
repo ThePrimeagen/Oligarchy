@@ -51,7 +51,7 @@ const start = (
     yield* Heartbeat.announce(URL, NAME).pipe(
       Effect.provide(
         Layer.mergeAll(
-          FakeSessions.fakeSessions({ jobs: Effect.succeed(2) }).layer,
+          FakeSessions.fakeSessions({ qemus: Effect.succeed(3), jobs: Effect.succeed(2) }).layer,
           FakeQemu.fakeHost,
           Layer.succeed(ProcessUsage.ProcessUsage)(
             ProcessUsage.ProcessUsage.of({ collect: options.usage ?? Effect.succeed(SAMPLE) }),
@@ -79,7 +79,7 @@ describe("qemu-server heartbeat happy path", () => {
             type: "qemu",
             name: NAME,
             stats: {
-              qemus: FakeSessions.STATS.qemus,
+              qemus: 3,
               memory: { totalBytes: 16_000, usedBytes: 4_000 },
               cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },
             },

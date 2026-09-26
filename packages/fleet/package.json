@@ -16,7 +16,6 @@
   "dependencies": {
     "@oligarchy/db": "workspace:*",
     "@oligarchy/log": "workspace:*",
-    "@oligarchy/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

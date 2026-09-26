@@ -199,9 +199,8 @@ const line = (h: Harness, prefix: string): FakeLog.Line | undefined =>
 const collect = (stream: Stream.Stream<Domain.FollowEvent>, n: number) =>
   Stream.runCollect(Stream.take(stream, n));
 
-// How many machines the qemu server holds, as /stats reports it.
-const qemus = (sessions: { readonly stats: Effect.Effect<Contract.Stats> }) =>
-  Effect.map(sessions.stats, (stats) => stats.qemus);
+// How many machines the qemu server holds, as its heartbeat reports it.
+const qemus = (sessions: { readonly qemus: Effect.Effect<number> }) => sessions.qemus;
 
 const failure = (operation: string, detail: string): DbErrors.DatabaseError =>
   DbErrors.DatabaseError.make({

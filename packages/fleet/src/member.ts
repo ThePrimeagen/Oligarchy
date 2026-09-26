@@ -48,7 +48,8 @@ export type Member<RReport, EReport, RJoin, EJoin, RLeave, ELeave> = {
 // is a server that stopped without a chance to leave. The same tick inserts a `process_stats`
 // row: its jobs, this process's memory (VmRSS of it and every child that still answers, or ps's
 // rss on macOS) and its cpu busy over the last thirty seconds. Each failure is one error line
-// under the member's attribution, and the rest of the tick and the next tick still run. A
+// under the member's attribution; a failed join or write leaves the rest of the tick to run, a
+// failed report leaves nothing to write, and the next tick runs either way. A
 // shutdown deletes the servers row only: the readings stay so they can be graphed later.
 // Registered before the loop so the fiber is interrupted first; a write in flight finishes (the
 // write is uninterruptible). A delete that fails is one `unannounce failed` line; the process

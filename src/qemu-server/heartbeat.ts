@@ -16,8 +16,7 @@ export const announce = (url: string, name: string) =>
     attribution: { location: Log.Locations.server },
     report: Effect.gen(function* () {
       const sessions = yield* Sessions.Sessions;
-      const stats = yield* sessions.stats;
-      return { qemus: stats.qemus, jobs: yield* sessions.jobs };
+      return { qemus: yield* sessions.qemus, jobs: yield* sessions.jobs };
     }),
     onJoin: Effect.gen(function* () {
       const setups = yield* SetupRequests.SetupRequestStore;

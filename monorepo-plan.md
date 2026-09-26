@@ -145,7 +145,7 @@ Declared dependencies, which is what the architecture test reads:
 | `linear` | `effect`, `env`, `log`, `shared` |
 | `jobs` | `effect`, `db`, `linear`, `env`, `log`, `shared` |
 | `observability` | `effect`, `@sentry/bun`, `@sentry/effect`, `db`, `log`, `shared` |
-| `fleet` | `effect`, `db`, `log`, `shared` (dev: `@effect/platform-node` for its integration lane) |
+| `fleet` | `effect`, `db`, `log` (dev: `@effect/platform-node` for its integration lane) |
 | `http` | `effect`, `@effect/platform-node`, `env`, `log`, `shared` |
 | `routes` (phases 2 to 9, then renamed to `http`) | `effect`, `shared`; it sits in `http`'s slot of the layer list |
 | an app | any package; never another app, never the root's `src/` |
@@ -873,6 +873,9 @@ What phase 9 decided that the checklist left open, and what it found:
   attribution, `report`, and qemu-server's `onJoin`) and calls `Member.announce`, so each app's
   heartbeat test still has a source to mirror. The loop, the rows, the failure lines, the
   interval and the delete are fleet's.
+- qemu-server's `report` reads a new `sessions.qemus`, the machine count alone: reading
+  `sessions.stats` would sample the host a second time each tick, and a defect there would have
+  cost the tick its process row, which the old heartbeat still wrote.
 - A failed `report` is `report failed: <detail>` and writes neither row; a failed `onJoin` is
   `join failed: <detail>` and the tick still writes; a failed `onLeave` is `leave failed:
   <detail>` and the row is still deleted. qemu-server's setup removal used to fail as `setup
@@ -898,6 +901,11 @@ What phase 9 decided that the checklist left open, and what it found:
 - `test/support/fake-qemu.ts`'s `fakeStats` is `fakeHost`, answering `HOST_STATS`, non-zero plain
   values, so the sessions test shows them reaching `/stats` beside the machine count.
 - The phase 1 test boxes are ticked: both tests landed with PR #236 and were never checked off.
+- The integration lane, run here with Docker and `OLIGARCHY_REQUIRE_DATABASE=1`: 313 passed and
+  the two that fail on `master` too (NEED_FIXING item 11) failed; fleet's own lane passed. With
+  QEMU installed as well, all fifteen cases of `qemu-server.integration.test.ts` passed,
+  including the one that reads the server's row and its process row back and sees the row go on
+  SIGTERM.
 
 **Phase 10: `@oligarchy/http`**
 
@@ -1344,7 +1352,8 @@ How a server measures itself, announces itself, and how the fleet forgets a dead
   (from `src/shared/process-usage.ts`: this process's RSS and CPU, `/proc` or `ps`), `member.ts`
   (the announce loop, from the two `heartbeat.ts` files) and `sweep.ts` (from
   `src/shared/stale-servers.ts`).
-- **Depends on** db (`ServerStore`, `ProcessStatsStore`), log and shared. Not on http: the wire
+- **Depends on** db (`ServerStore`, `ProcessStatsStore`) and log; nothing of shared's is used.
+  Not on http: the wire
   `Memory`, `Cpu` and `Stats` schemas stay in the contract, and the apps build `Contract.Stats`
   from fleet's values plus their machine count. `stats.ts` imports the contract today; that
   import goes in the same change as the move, or fleet and http share a layer with an edge.
@@ -1359,8 +1368,9 @@ How a server measures itself, announces itself, and how the fleet forgets a dead
   the sampler was not allowed a `Log`. It is not needed.
 - **The process reader already returns values.** Its error becomes fleet's own `PsFailed`, a
   `Schema.TaggedError`, instead of the shared `CliFailed`. The `ps` seam narrows: the reader takes
-  "list the processes" as a value, so its unit tests pass a string. The real listing keeps the
-  ten-second timeout and the SIGTERM, then SIGKILL a second later.
+  "list the processes" as a value (`psSource(pid, cpuUsage, list)`, `list` answering the listing's
+  text and the ps pid), so its unit tests pass a listing. The real listing, `listProcesses`,
+  keeps the ten-second timeout and the SIGTERM, then SIGKILL a second later.
 - **One tick interval, in fleet.** Both heartbeats and the sweep are separate `"30 seconds"`
   strings today. The staleness thresholds the sweep applies are SQL in `db/servers.ts` and stay
   there.
@@ -1393,7 +1403,7 @@ Read from the four `main.ts` files. Three lifecycles stack:
 | role | member | member | reader | reader |
 | joins as | `qemu` if `--url` | `automation-client` if `--url` | — | — |
 | each tick (30 s) | servers row, process_stats row | servers row, process_stats row | — | — |
-| host values from | `sessions.stats`, which calls `collect(map.size)` | `collect(0)` | — | — |
+| host values from | fleet's `Host.collect`; `report` reads `sessions.qemus` (was `sessions.stats`, which called `collect(map.size)`) | fleet's `Host.collect`; `report` says `qemus: 0` (was `collect(0)`) | — | — |
 | `jobs` from | its slot count | `sessions.jobs` | — | — |
 | once on join | remove this url's stale setup requests, retried each tick until it lands | — | — | — |
 | on leave | delete the servers row | delete the servers row | — | — |
@@ -1426,7 +1436,10 @@ export type Member<RReport, EReport, RJoin, EJoin, RLeave, ELeave> = {
   readonly onLeave?: Effect.Effect<void, ELeave, RLeave>;
 };
 
-export const announce: <RReport, EReport, RJoin, EJoin, RLeave, ELeave>(
+// Defaults of never: a hook left out would otherwise infer unknown requirements.
+export const announce: <
+  RReport = never, EReport = never, RJoin = never, EJoin = never, RLeave = never, ELeave = never,
+>(
   member: Member<RReport, EReport, RJoin, EJoin, RLeave, ELeave>,
 ) => Effect.Effect<
   void,

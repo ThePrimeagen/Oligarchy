@@ -172,6 +172,8 @@ export type SessionsService = {
     ApiErrors.UnknownSession | ApiErrors.Conflict | ApiErrors.Internal
   >;
   readonly stats: Effect.Effect<Contract.Stats>;
+  // How many machines are running now: the guests its heartbeat reports.
+  readonly qemus: Effect.Effect<number>;
   // Whether this machine holds the iso's minted disk, by the name a start would give.
   readonly minted: (iso: string) => Effect.Effect<boolean>;
   // How many jobs this process currently holds against --max-jobs: reserved plus running.
@@ -1414,6 +1416,7 @@ const make = (maxJobs: number, selfUrl?: string) =>
           }),
         ),
       ),
+      qemus: Effect.map(Ref.get(sessions), (map) => map.size),
       minted: (name) => Effect.map(minted.find(name), Option.isSome),
       jobs: Effect.map(Ref.get(slots), (held) => held.count),
     };

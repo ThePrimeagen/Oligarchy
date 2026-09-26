@@ -4,9 +4,9 @@ import type { Scope } from "effect";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 
-export const SAMPLE_INTERVAL_MS = 5_000;
+const SAMPLE_INTERVAL_MS = 5_000;
 // 60 samples x 5s ticks = a 5 minute window.
-export const MAX_SAMPLES = 60;
+const MAX_SAMPLES = 60;
 // 12 samples x 5s ticks = a minute: the newest 12, 24 and 36 are the three shorter means.
 const SAMPLES_PER_MINUTE = 60_000 / SAMPLE_INTERVAL_MS;
 

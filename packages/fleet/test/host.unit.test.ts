@@ -5,6 +5,10 @@ import { TestClock } from "effect/testing";
 import * as Log from "@oligarchy/log/log";
 import * as Host from "../src/host.ts";
 
+// The sampler reads every five seconds and keeps the newest sixty readings: a five-minute window.
+const TICK_MS = 5_000;
+const WINDOW = 60;
+
 type Line = { readonly level: string; readonly text: string; readonly cause: unknown };
 
 // A Log that keeps every line instead of writing it.
@@ -102,7 +106,7 @@ describe("Host happy path", () => {
         snapshot(2, 60, 200),
       ]);
       const { host } = yield* build(source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS - 1);
+      yield* TestClock.adjust(TICK_MS - 1);
       expect(calls()).toBe(1);
       yield* TestClock.adjust(1);
       expect(calls()).toBe(2);
@@ -117,7 +121,7 @@ describe("Host happy path", () => {
         p75: 50,
         p90: 50,
       });
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS);
+      yield* TestClock.adjust(TICK_MS);
       expect((yield* host.collect).cpu).toEqual({
         cores: 4,
         mean: 70,
@@ -135,7 +139,7 @@ describe("Host happy path", () => {
   it.effect("a clean tick logs nothing", () =>
     Effect.gen(function* () {
       const { log } = yield* build(scripted([snapshot(1, 0, 0), snapshot(1, 5, 10)]).source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS * 3);
+      yield* TestClock.adjust(TICK_MS * 3);
       expect(log.lines).toEqual([]);
     }),
   );
@@ -145,12 +149,12 @@ describe("Host happy path", () => {
       // Sample i is exactly i% busy: 100 ms of cpu time per tick, i of them not idle.
       const snapshots: Array<Host.CpuTimes> = [snapshot(1, 0, 0)];
       let idle = 0;
-      for (let i = 1; i <= Host.MAX_SAMPLES + 1; i++) {
+      for (let i = 1; i <= WINDOW + 1; i++) {
         idle += 100 - i;
         snapshots.push(snapshot(1, idle, 100 * i));
       }
       const { host } = yield* build(scripted(snapshots).source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS * (Host.MAX_SAMPLES + 1));
+      yield* TestClock.adjust(TICK_MS * (WINDOW + 1));
       const { cpu } = yield* host.collect;
       // Samples 1..61 were taken; the window holds 2..61.
       expect(cpu.mean).toBe(31.5);
@@ -165,12 +169,12 @@ describe("Host happy path", () => {
       // the newest 36 26..61, while the whole window is 2..61.
       const snapshots: Array<Host.CpuTimes> = [snapshot(1, 0, 0)];
       let idle = 0;
-      for (let i = 1; i <= Host.MAX_SAMPLES + 1; i++) {
+      for (let i = 1; i <= WINDOW + 1; i++) {
         idle += 100 - i;
         snapshots.push(snapshot(1, idle, 100 * i));
       }
       const { host } = yield* build(scripted(snapshots).source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS * (Host.MAX_SAMPLES + 1));
+      yield* TestClock.adjust(TICK_MS * (WINDOW + 1));
       const { cpu } = yield* host.collect;
       expect(cpu.mean).toBe(31.5);
       expect(cpu.mean1m).toBe(55.5);
@@ -190,7 +194,7 @@ describe("Host happy path", () => {
           snapshot(1, 210, 300),
         ]).source,
       );
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS * 3);
+      yield* TestClock.adjust(TICK_MS * 3);
       const { cpu } = yield* host.collect;
       expect(cpu.mean).toBe(30);
       expect(cpu.mean1m).toBe(30);
@@ -208,7 +212,7 @@ describe("Host happy path", () => {
         snapshot(4, 20, 200),
       ]);
       const { host } = yield* build(source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS * 3);
+      yield* TestClock.adjust(TICK_MS * 3);
       expect((yield* host.collect).cpu.mean).toBe(90);
     }),
   );
@@ -217,10 +221,10 @@ describe("Host happy path", () => {
     Effect.gen(function* () {
       const { source, calls } = scripted([snapshot(1, 0, 0), snapshot(1, 5, 10)]);
       const { scope } = yield* build(source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS);
+      yield* TestClock.adjust(TICK_MS);
       expect(calls()).toBe(2);
       yield* Scope.close(scope, Exit.void);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS * 3);
+      yield* TestClock.adjust(TICK_MS * 3);
       expect(calls()).toBe(2);
     }),
   );
@@ -234,13 +238,13 @@ describe("Host unhappy path", () => {
         const boom = new Error("cpus unavailable");
         const { source } = scripted([snapshot(2, 0, 0), boom, snapshot(2, 50, 100)]);
         const { host, log } = yield* build(source);
-        yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS);
+        yield* TestClock.adjust(TICK_MS);
         expect(log.lines).toEqual([
           { level: "error", text: "failed to sample cpu usage: cpus unavailable", cause: boom },
         ]);
         expect((yield* host.collect).cpu.mean).toBe(0);
         // 50 of 100 ms busy since the first reading: the throw did not become the baseline.
-        yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS);
+        yield* TestClock.adjust(TICK_MS);
         expect((yield* host.collect).cpu.mean).toBe(50);
         expect(log.lines).toHaveLength(1);
       }),
@@ -261,7 +265,7 @@ describe("Host unhappy path", () => {
         memory: () => ({ totalBytes: 1, freeBytes: 1 }),
       };
       const { log } = yield* build(source);
-      yield* TestClock.adjust(Host.SAMPLE_INTERVAL_MS);
+      yield* TestClock.adjust(TICK_MS);
       expect(log.lines).toEqual([
         { level: "error", text: "failed to sample cpu usage: no cpus", cause: "no cpus" },
       ]);

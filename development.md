@@ -262,7 +262,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   when its scope closes. Each app's `heartbeat.ts` is only its member; the proxy and the
   automation server, which read a kind, call `forget` for it. The wire's `Stats` is the host's
   values and a machine count, so the apps build it and fleet knows no contract. It imports
-  `effect`, `@oligarchy/db`, `@oligarchy/log`, `@oligarchy/shared` and its own files. Its
+  `effect`, `@oligarchy/db`, `@oligarchy/log` and its own files. Its
   admission rule: measuring this host or process, and the fleet's membership rows; a member
   reports its counts and fleet never starts, stops or reads a session or a job; refused are HTTP
   and anything about what a member does. `packages/routes/src/` holds `api.ts`, `contract.ts` and
