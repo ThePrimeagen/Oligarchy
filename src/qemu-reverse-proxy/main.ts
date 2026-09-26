@@ -1,10 +1,5 @@
-import { createServer } from "node:http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
-import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
-import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import { Cause, Effect, Exit, Layer, type Runtime } from "effect";
 import * as Client from "@oligarchy/db/client";
 import * as Logs from "@oligarchy/db/logs";
 import * as Servers from "@oligarchy/db/servers";
@@ -19,7 +14,8 @@ import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
+import * as Serve from "@oligarchy/http/serve";
 import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
@@ -27,19 +23,14 @@ import * as Setup from "./setup.ts";
 
 const HOST = "127.0.0.1";
 
-// The platform drops its error listener once the server is up; a later error still needs the
-// fatal line and exit 1. Only the first counts.
-const server = createServer();
-const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-server.on("error", (cause) => {
-  Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
-});
-
 // The API behind the bearer on `port`; the fleet page is the dashboard's (oligarchy.trm.sh/servers).
 // The sweep starts once the listener is up, in the same scope: a port refusal sweeps nothing.
 const ServerLive = (port: number) =>
-  Layer.effectDiscard(
-    Effect.gen(function* () {
+  Serve.serve({
+    port,
+    routes: Handlers.routes,
+    services: Router.Router.layer.pipe(Layer.provideMerge(Setup.Setup.layer)),
+    listening: Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(`qemu reverse proxy listening on ${HOST}:${String(port)}`, {
         location: Log.Locations.server,
@@ -59,17 +50,7 @@ const ServerLive = (port: number) =>
       );
       yield* Sweep.forget("qemu");
     }),
-  ).pipe(
-    Layer.provide(
-      HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
-        Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port })),
-      ),
-    ),
-    Layer.provide(Router.Router.layer),
-    Layer.provide(Setup.Setup.layer),
-    // As on the qemu server: no http.server span reaches Sentry.
-    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
-  );
+  });
 
 const DatabaseLive = Layer.unwrap(
   Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
@@ -99,7 +80,6 @@ const MainLive = Layer.mergeAll(
 
 const command = QemuReverseProxyCommand.makeQemuReverseProxyCommand({
   serve: ServerLive,
-  serverFailed,
 });
 
 // SIGINT and SIGTERM interrupt the program and exit 0; nothing of this process's own is stopping.

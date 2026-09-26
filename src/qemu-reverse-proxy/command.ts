@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
@@ -12,11 +12,9 @@ import * as Render from "@oligarchy/log/render";
 // One above the qemu server's, so both run on one host in development.
 const DEFAULT_PORT = 42070;
 
-// What main.ts hands the command: the listener as a layer for its port, and the signal a server
-// error raises after listen.
+// What main.ts hands the command: the server for its port, serving until it is stopped or fails.
 export type QemuReverseProxyServer<RServe> = {
-  readonly serve: (port: number) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
-  readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
+  readonly serve: (port: number) => Effect.Effect<never, HttpServerError.ServeError, RServe>;
 };
 
 type StartupError = DbErrors.DatabaseError | HttpServerError.ServeError;
@@ -49,10 +47,7 @@ export const makeQemuReverseProxyCommand = <RServe>(server: QemuReverseProxyServ
               }),
             ),
           );
-          return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port)),
-            Deferred.await(server.serverFailed),
-          );
+          return yield* server.serve(port);
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>

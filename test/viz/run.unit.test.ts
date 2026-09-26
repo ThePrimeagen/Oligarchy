@@ -12,10 +12,10 @@ import type * as Servers from "@oligarchy/db/servers";
 import * as Config from "@oligarchy/env/config";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
 import * as Run from "../../src/viz/run.ts";
 import * as View from "../../src/viz/view.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import { type FakeRenderer, fakeRenderer, rows, spans } from "../support/fake-renderer.ts";
 import { byCommand, type FakeSpawner, fakeSpawner } from "../support/fake-spawner.ts";
 import * as Stores from "../support/stores.ts";
@@ -113,7 +113,7 @@ const live = (
         ),
         screen.layer,
         (extra.spawner ?? fakeSpawner()).layer,
-        extra.http ?? FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+        extra.http ?? TestingHttp.respondWith(() => new Response(null, { status: 404 })),
         Config.fromValues(extra.env ?? ABORT_ENV),
       ),
     ),
@@ -149,7 +149,7 @@ const until = (
 
 // A qemu server whose /follow answers with these events and then ends; anything else is refused.
 const following = (events: ReadonlyArray<Domain.FollowEvent>): Layer.Layer<HttpClient.HttpClient> =>
-  FakeHttp.respondWith((_request, url) =>
+  TestingHttp.respondWith((_request, url) =>
     url.pathname === "/follow"
       ? new Response(events.map(Domain.encodeFollowLine).join(""), { status: 200 })
       : new Response(null, { status: 404 }),
@@ -478,7 +478,7 @@ describe("run happy path", () => {
                 storesLayer(),
                 slow,
                 fakeSpawner().layer,
-                FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+                TestingHttp.respondWith(() => new Response(null, { status: 404 })),
               ),
             ),
           ),
@@ -744,7 +744,7 @@ describe("run unhappy path", () => {
               storesLayer({ machines }),
               failing,
               fakeSpawner().layer,
-              FakeHttp.respondWith(() => new Response(null, { status: 404 })),
+              TestingHttp.respondWith(() => new Response(null, { status: 404 })),
             ),
           ),
         ),
@@ -1084,7 +1084,7 @@ describe("run follow unhappy path", () => {
           {},
           {
             actions: seeded(),
-            http: FakeHttp.never,
+            http: TestingHttp.never,
           },
         );
         setup.mockInput.pressKey("j");
@@ -1178,7 +1178,7 @@ describe("run follow unhappy path", () => {
   it.effect("a refused follow stream leaves the peek up and puts the reason on the footer", () =>
     Effect.gen(function* () {
       const screen = fakeRenderer();
-      const http = FakeHttp.respondWith(
+      const http = TestingHttp.respondWith(
         () =>
           new Response(JSON.stringify({ error: 'session "x" has already completed (succeeded)' }), {
             status: 409,
@@ -1206,16 +1206,16 @@ const POPUP = `│  ${View.CANNOT_ABORT}  │`;
 
 // An automation server whose /abort answers as scripted, every request recorded; anything else
 // is refused.
-const aborting = (respond: () => Response): FakeHttp.Recorder =>
-  FakeHttp.recordRequests((_request, url) =>
+const aborting = (respond: () => Response): TestingHttp.Recorder =>
+  TestingHttp.recordRequests((_request, url) =>
     url.pathname === "/abort" ? respond() : new Response(null, { status: 404 }),
   );
 
 // The selected ticket's session also calls this client. An abort assertion counts POST /abort.
-const abortsOf = (server: FakeHttp.Recorder) =>
+const abortsOf = (server: TestingHttp.Recorder) =>
   server.requests.filter((request) => request.method === "POST" && request.url.endsWith("/abort"));
 
-const OVER = () => FakeHttp.json({ error: 'ticket "OLI-61" has no drive to abort' }, 400);
+const OVER = () => TestingHttp.json({ error: 'ticket "OLI-61" has no drive to abort' }, 400);
 
 // A asks first: the question, yes, enter.
 const confirmAbort = (setup: TestRendererSetup): void => {
@@ -1232,7 +1232,7 @@ describe("run abort happy path", () => {
     () =>
       Effect.gen(function* () {
         const screen = fakeRenderer();
-        const server = aborting(() => FakeHttp.json({ ok: "true" }));
+        const server = aborting(() => TestingHttp.json({ ok: "true" }));
         const { fiber, setup } = yield* started(screen, {}, { http: server.layer });
         setup.mockInput.pressKey("j");
         setup.mockInput.pressKey("a");
@@ -1278,14 +1278,14 @@ describe("run abort happy path", () => {
         const board = { queue: QUEUE };
         const jobs = () => Effect.sync(() => board.queue);
         // The server closes the job named: the next read no longer lists it.
-        const server: FakeHttp.Recorder = aborting(() => {
+        const server: TestingHttp.Recorder = aborting(() => {
           const named: { ticket: string } = JSON.parse(abortsOf(server).at(-1)?.body ?? "{}");
           board.queue = {
             ...board.queue,
             running: board.queue.running.filter((row) => row.ticket !== named.ticket),
             pending: board.queue.pending.filter((row) => row.ticket !== named.ticket),
           };
-          return FakeHttp.json({ ok: "true" });
+          return TestingHttp.json({ ok: "true" });
         });
         const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
         setup.mockInput.pressKey("j");
@@ -1382,7 +1382,7 @@ describe("run abort unhappy path", () => {
     () =>
       Effect.gen(function* () {
         const screen = fakeRenderer();
-        const server = aborting(() => FakeHttp.json({ ok: "true" }));
+        const server = aborting(() => TestingHttp.json({ ok: "true" }));
         const spawner = fakeSpawner(byCommand({ "xdg-open": { exitCode: 0 } }));
         const { fiber, setup } = yield* started(
           screen,
@@ -1426,7 +1426,7 @@ describe("run abort unhappy path", () => {
 
   it.effect("A with no job selected, or a job without a ticket, says so and asks nothing", () =>
     Effect.gen(function* () {
-      const server = aborting(() => FakeHttp.json({ ok: "true" }));
+      const server = aborting(() => TestingHttp.json({ ok: "true" }));
       const onHeader = fakeRenderer();
       const byHeader = yield* started(onHeader, {}, { http: server.layer });
       byHeader.setup.mockInput.pressKey("l");
@@ -1462,7 +1462,7 @@ describe("run abort unhappy path", () => {
     "A without AUTOMATION_SERVER_URL, or without OLIGARCHY_TOKEN, says which is not set and asks nothing",
     () =>
       Effect.gen(function* () {
-        const server = aborting(() => FakeHttp.json({ ok: "true" }));
+        const server = aborting(() => TestingHttp.json({ ok: "true" }));
         const noUrl = fakeRenderer();
         const byNoUrl = yield* started(
           noUrl,
@@ -1500,7 +1500,7 @@ describe("run abort unhappy path", () => {
       const byUnauthorized = yield* started(
         unauthorized,
         {},
-        { http: aborting(() => FakeHttp.json({ error: "unauthorized" }, 401)).layer },
+        { http: aborting(() => TestingHttp.json({ error: "unauthorized" }, 401)).layer },
       );
       byUnauthorized.setup.mockInput.pressKey("j");
       confirmAbort(byUnauthorized.setup);
@@ -1517,7 +1517,7 @@ describe("run abort unhappy path", () => {
       const byFailing = yield* started(
         failing,
         {},
-        { http: aborting(() => FakeHttp.json({ error: detail }, 500)).layer },
+        { http: aborting(() => TestingHttp.json({ error: detail }, 500)).layer },
       );
       byFailing.setup.mockInput.pressKey("j");
       confirmAbort(byFailing.setup);
@@ -1531,7 +1531,7 @@ describe("run abort unhappy path", () => {
   it.effect("an automation server that cannot be reached says so on the footer", () =>
     Effect.gen(function* () {
       const screen = fakeRenderer();
-      const http = FakeHttp.respondWith((request) =>
+      const http = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
@@ -1561,7 +1561,7 @@ describe("run abort unhappy path", () => {
     () =>
       Effect.gen(function* () {
         const screen = fakeRenderer();
-        const { fiber, setup } = yield* started(screen, {}, { http: FakeHttp.never });
+        const { fiber, setup } = yield* started(screen, {}, { http: TestingHttp.never });
         setup.mockInput.pressKey("l");
         setup.mockInput.pressTab();
         setup.mockInput.pressKey("j");
@@ -1587,9 +1587,9 @@ describe("run abort unhappy path", () => {
         const screen = fakeRenderer();
         const board = { queue: QUEUE };
         const jobs = () => Effect.sync(() => board.queue);
-        const server = FakeHttp.recordRequests((_request, url) =>
+        const server = TestingHttp.recordRequests((_request, url) =>
           url.pathname === "/abort"
-            ? Effect.as(Deferred.await(gate), FakeHttp.json({ ok: "true" }))
+            ? Effect.as(Deferred.await(gate), TestingHttp.json({ ok: "true" }))
             : new Response(null, { status: 404 }),
         );
         const { fiber, setup } = yield* started(screen, { jobs }, { http: server.layer });
@@ -1755,7 +1755,7 @@ describe("definition and ticket information", () => {
   it.effect("shift-a does not ask to abort (unhappy)", () =>
     Effect.gen(function* () {
       const screen = fakeRenderer();
-      const server = aborting(() => FakeHttp.json({ ok: "true" }));
+      const server = aborting(() => TestingHttp.json({ ok: "true" }));
       const { fiber, setup } = yield* started(screen, {}, { http: server.layer });
       setup.mockInput.pressKey("a", { shift: true });
       yield* settle;
@@ -1807,7 +1807,7 @@ describe("selected session", () => {
           listIntents: () =>
             Effect.succeed([{ text: "intent start; Click Lock.", createdAt: ago(30) }]),
         });
-        const http = FakeHttp.recordRequests(() => new Response(null, { status: 404 }));
+        const http = TestingHttp.recordRequests(() => new Response(null, { status: 404 }));
         const { fiber, setup } = yield* started(screen, {}, { actions, logs, http: http.layer });
         const first = yield* until(setup, shows("Click Lock."));
         expect(first.some((row) => row.includes("screendump"))).toBe(true);

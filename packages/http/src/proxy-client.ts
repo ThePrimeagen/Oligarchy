@@ -6,12 +6,21 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as UrlParams from "effect/unstable/http/UrlParams";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
-import * as Errors from "../shared/errors.ts";
+import * as Api from "./api.ts";
+import * as Contract from "./contract.ts";
+import * as ApiErrors from "./errors.ts";
 
-export type Failure = Errors.ProxyRefusal | Errors.ProxyUnreachable;
+// The proxy answered with a refusal: its status and the `error` its body carried.
+export class ProxyRefusal extends Schema.TaggedError<ProxyRefusal>(
+  "@oligarchy/shared/errors/ProxyRefusal",
+)("ProxyRefusal", { status: Schema.Int, message: Schema.String }) {}
+
+// The proxy could not be reached, or answered with something that is not its contract.
+export class ProxyUnreachable extends Schema.TaggedError<ProxyUnreachable>(
+  "@oligarchy/shared/errors/ProxyUnreachable",
+)("ProxyUnreachable", { message: Schema.String, cause: Schema.Defect() }) {}
+
+export type Failure = ProxyRefusal | ProxyUnreachable;
 
 export type ProxyClientService = {
   readonly reserve: (body: Contract.ReserveAgentBody) => Effect.Effect<void, Failure>;
@@ -33,7 +42,7 @@ export type ProxyClientService = {
   readonly save: (body: Contract.SaveBody) => Effect.Effect<void, Failure>;
   readonly follow: (
     id: string,
-  ) => Effect.Effect<Stream.Stream<Uint8Array, Errors.ProxyUnreachable>, Failure>;
+  ) => Effect.Effect<Stream.Stream<Uint8Array, ProxyUnreachable>, Failure>;
 };
 
 export type ConnectOptions = {
@@ -60,20 +69,20 @@ const requestUrl = (request: HttpClientRequest.HttpClientRequest): string => {
   return query === "" ? request.url : `${request.url}?${query}`;
 };
 
-const unreachable = (error: HttpClientError.HttpClientError): Errors.ProxyUnreachable =>
-  Errors.ProxyUnreachable.make({
+const unreachable = (error: HttpClientError.HttpClientError): ProxyUnreachable =>
+  ProxyUnreachable.make({
     message: `${error.reason.request.method} ${requestUrl(error.reason.request)} failed`,
     cause: error.reason.cause ?? error,
   });
 
 const refusal = (
   response: HttpClientResponse.HttpClientResponse,
-): Effect.Effect<never, Errors.ProxyRefusal> =>
+): Effect.Effect<never, ProxyRefusal> =>
   response.text.pipe(
     // The status alone is the refusal; an unreadable body only loses its text.
     Effect.orElseSucceed(() => ""),
     Effect.flatMap((text) =>
-      Errors.ProxyRefusal.make({ status: response.status, message: apiError(text) }),
+      ProxyRefusal.make({ status: response.status, message: apiError(text) }),
     ),
   );
 
@@ -100,10 +109,10 @@ const run = <A>(
       }
       // A success body the contract cannot decode is not the proxy's answer to the request.
       if (error._tag === "SchemaError") {
-        return Effect.fail(Errors.ProxyUnreachable.make({ message: label, cause: error }));
+        return Effect.fail(ProxyUnreachable.make({ message: label, cause: error }));
       }
       return Effect.fail(
-        Errors.ProxyRefusal.make({ status: ApiErrors.apiStatus(error), message: error.message }),
+        ProxyRefusal.make({ status: ApiErrors.apiStatus(error), message: error.message }),
       );
     }),
   );
@@ -160,7 +169,7 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
       Effect.timeoutOrElse({
         duration: START_TIMEOUT,
         orElse: () =>
-          Errors.ProxyUnreachable.make({
+          ProxyUnreachable.make({
             message: "start: no response within timeout",
             cause: null,
           }),

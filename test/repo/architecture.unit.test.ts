@@ -25,7 +25,7 @@ const workspaceNames = (deps: Readonly<Record<string, string>> | undefined) =>
   Object.keys(deps ?? {}).filter((dep) => dep.startsWith("@oligarchy/"));
 
 // Each workspace package with the specifiers its exports answer (`./api` is
-// `@oligarchy/routes/api`) and the workspace packages its dependencies and devDependencies name.
+// `@oligarchy/http/api`) and the workspace packages its dependencies and devDependencies name.
 const workspacePackages = readdirSync(join(root, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map(({ name: dir }) => {
@@ -57,7 +57,7 @@ const TOP = 7;
 // env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6, the dev-only
 // testing on top). A package's dependencies name only packages on a strictly lower layer, so the
 // graph reads one way and a loop cannot hide in it. A package joins the list in the phase that
-// creates it; routes holds http's slot until it is renamed.
+// creates it.
 const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
   "@oligarchy/log": 1,
@@ -67,7 +67,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/jobs": 4,
   "@oligarchy/observability": 4,
   "@oligarchy/fleet": 5,
-  "@oligarchy/routes": 5,
+  "@oligarchy/http": 5,
   "@oligarchy/testing": TOP,
 };
 
@@ -151,7 +151,11 @@ const SHARED_SOURCES = "packages/shared/src/";
 const LOG_SOURCES = "packages/log/src/";
 const LINEAR_SOURCES = "packages/linear/src/";
 const JOBS_SOURCES = "packages/jobs/src/";
-const ROUTES_SOURCES = "packages/routes/src/";
+const HTTP_SOURCES = "packages/http/src/";
+// The contract every client bundles: what the wire carries, and nothing that serves or calls it.
+const CONTRACT_FILES: ReadonlyArray<string> = ["api.ts", "contract.ts", "errors.ts"].map(
+  (file) => `${HTTP_SOURCES}${file}`,
+);
 
 const importSpecifiers = (source: string): ReadonlyArray<string> =>
   [...source.matchAll(/^import\s(?:[^;]*?\sfrom\s+)?"([^"]+)";?$/gm)].map((m) => m[1] ?? "");
@@ -196,9 +200,18 @@ const jobsImportProblems = confinedImportProblems(
   /^(?:effect(?:\/|$)|@oligarchy\/(?:shared|log|env|db|linear)\/)/,
 );
 
-// The routes package is the HTTP contract alone: Effect's schemas, the shared vocabularies its
-// bodies carry, and its own modules.
-const routesImportProblems = confinedImportProblems(ROUTES_SOURCES, EFFECT_AND_SHARED);
+// The contract files are the HTTP contract alone: Effect's schemas, the shared vocabularies its
+// bodies carry, and each other. The rest of http serves and calls it, and may take Node, the
+// platform, env and log; a contract file reaching one of those siblings would bundle them too.
+const contractImportProblems = (path: string, source: string): ReadonlyArray<string> => [
+  ...confinedImportProblems(HTTP_SOURCES, EFFECT_AND_SHARED)(path, source),
+  ...importSpecifiers(source).filter(
+    (specifier) =>
+      specifier.startsWith(".") &&
+      join(dirname(path), specifier).startsWith(HTTP_SOURCES) &&
+      !CONTRACT_FILES.includes(join(dirname(path), specifier)),
+  ),
+];
 
 // The main package imports a workspace package the way it imports its own modules, as a
 // namespace, and only by a specifier the package exports: a relative path into packages/ would
@@ -240,6 +253,8 @@ const BOUNDARY_FILES = new Set([
   "packages/env/src/colors.ts",
   // The entry runner: the one NodeRuntime.runMain, the stdout and stderr error listeners.
   "packages/env/src/run.ts",
+  // The one node:http server every process listens on, and its error listener.
+  "packages/http/src/serve.ts",
   "packages/db/src/client.ts",
 ]);
 
@@ -416,10 +431,10 @@ describe("CLI flags", () => {
 });
 
 describe("HttpApi ownership", () => {
-  it("endpoints, groups and the api are declared only in packages/routes/src/api.ts", () => {
+  it("endpoints, groups and the api are declared only in packages/http/src/api.ts", () => {
     expect(
       violations((path, source) =>
-        path === `${ROUTES_SOURCES}api.ts`
+        path === `${HTTP_SOURCES}api.ts`
           ? []
           : [
               ...stripStringsAndComments(source).matchAll(
@@ -446,7 +461,7 @@ describe("workspace packages", () => {
           'import * as Errors from "./errors.ts";',
           'import { readFileSync } from "node:fs";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
-          'import * as Contract from "@oligarchy/routes/contract";',
+          'import * as Contract from "@oligarchy/http/contract";',
           'import * as Log from "../../../src/shared/errors.ts";',
           "const home = process.env.HOME;",
           'const tag = "process.env in a string is not a read";',
@@ -455,7 +470,7 @@ describe("workspace packages", () => {
     ).toEqual([
       "node:fs",
       "@effect/platform-node/NodeServices",
-      "@oligarchy/routes/contract",
+      "@oligarchy/http/contract",
       "../../../src/shared/errors.ts",
       "process.env",
     ]);
@@ -537,7 +552,7 @@ describe("workspace packages", () => {
           'import * as Linear from "@oligarchy/linear/client";',
           'import * as Close from "./close.ts";',
           'import * as AutomationClient from "../../../src/automation-server/client.ts";',
-          'import * as Api from "@oligarchy/routes/api";',
+          'import * as Api from "@oligarchy/http/api";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
           'import * as Observability from "@oligarchy/observability/log";',
           "const url = process.env.AUTOMATION_SERVER_URL;",
@@ -545,23 +560,22 @@ describe("workspace packages", () => {
       ),
     ).toEqual([
       "../../../src/automation-server/client.ts",
-      "@oligarchy/routes/api",
+      "@oligarchy/http/api",
       "@effect/platform-node/NodeServices",
       "@oligarchy/observability/log",
       "process.env",
     ]);
   });
 
-  it("the routes package imports only effect, shared and its own modules (happy)", () => {
-    expect(filesUnder(ROUTES_SOURCES).length).toBeGreaterThan(0);
-    expect(violationsIn(filesUnder(ROUTES_SOURCES), routesImportProblems)).toEqual([]);
+  it("the contract files import only effect, shared and each other (happy)", () => {
+    expect(CONTRACT_FILES.every((path) => filesUnder(HTTP_SOURCES).includes(path))).toBe(true);
+    expect(violationsIn(CONTRACT_FILES, contractImportProblems)).toEqual([]);
   });
 
-  it("names a routes import of the main package, a platform, Node or a driver (unhappy)", () => {
-    const path = `${ROUTES_SOURCES}contract.ts`;
+  it("names a contract import of Node, a platform, log, a serving sibling or the main package (unhappy)", () => {
     expect(
-      routesImportProblems(
-        path,
+      contractImportProblems(
+        `${HTTP_SOURCES}contract.ts`,
         [
           'import { Schema } from "effect";',
           'import * as HttpApi from "effect/unstable/httpapi/HttpApi";',
@@ -570,8 +584,8 @@ describe("workspace packages", () => {
           'import * as Log from "../../../src/shared/errors.ts";',
           'import * as NodeServices from "@effect/platform-node/NodeServices";',
           'import { readFileSync } from "node:fs";',
-          'import pg from "pg";',
-          'import "./side-effect.ts";',
+          'import * as Render from "@oligarchy/log/render";',
+          'import * as Serve from "./serve.ts";',
           'import "../test/setup.ts";',
         ].join("\n"),
       ),
@@ -579,8 +593,9 @@ describe("workspace packages", () => {
       "../../../src/shared/errors.ts",
       "@effect/platform-node/NodeServices",
       "node:fs",
-      "pg",
+      "@oligarchy/log/render",
       "../test/setup.ts",
+      "./serve.ts",
     ]);
   });
 
@@ -610,12 +625,12 @@ describe("workspace packages", () => {
           'import * as Errors from "./errors.ts";',
           'import * as Render from "@oligarchy/log/render";',
           'import * as DbErrors from "@oligarchy/db/errors";',
-          'import * as Api from "@oligarchy/routes/api";',
+          'import * as Api from "@oligarchy/http/api";',
         ].join("\n"),
       ),
     ).toEqual([
       '"@oligarchy/db/errors" is its own package; import it by relative path',
-      '"@oligarchy/routes/api" is not a dependency of @oligarchy/db',
+      '"@oligarchy/http/api" is not a dependency of @oligarchy/db',
     ]);
   });
 
@@ -697,20 +712,20 @@ describe("workspace packages", () => {
       workspaceImportProblems(
         "src/client/actions.ts",
         [
-          'import * as Api from "@oligarchy/routes/api";',
-          'import type * as Contract from "@oligarchy/routes/contract";',
+          'import * as Api from "@oligarchy/http/api";',
+          'import type * as Contract from "@oligarchy/http/contract";',
           'import * as Errors from "../shared/errors.ts";',
-          'import * as Errors from "../../packages/routes/src/errors.ts";',
-          'import { QemuServerApi } from "@oligarchy/routes/api";',
-          'import * as Routes from "@oligarchy/routes";',
-          'import * as Source from "@oligarchy/routes/src/api.ts";',
+          'import * as Errors from "../../packages/http/src/errors.ts";',
+          'import { QemuServerApi } from "@oligarchy/http/api";',
+          'import * as Http from "@oligarchy/http";',
+          'import * as Source from "@oligarchy/http/src/api.ts";',
         ].join("\n"),
       ),
     ).toEqual([
-      '"../../packages/routes/src/errors.ts" reaches into packages/',
-      'import { QemuServerApi } from "@oligarchy/routes/api"',
-      '"@oligarchy/routes" is not an exported module',
-      '"@oligarchy/routes/src/api.ts" is not an exported module',
+      '"../../packages/http/src/errors.ts" reaches into packages/',
+      'import { QemuServerApi } from "@oligarchy/http/api"',
+      '"@oligarchy/http" is not an exported module',
+      '"@oligarchy/http/src/api.ts" is not an exported module',
     ]);
   });
 });

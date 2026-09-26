@@ -1,13 +1,12 @@
 import { Effect, Layer, Stream } from "effect";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
+import * as Middleware from "@oligarchy/http/middleware";
 import * as Domain from "@oligarchy/shared/domain";
 import type * as Qemu from "../qemu/qemu.ts";
-import * as Middleware from "./middleware.ts";
 import * as Sessions from "./sessions.ts";
 
 const encoder = new TextEncoder();
@@ -272,15 +271,11 @@ export const SessionsLive = (display: Domain.QemuDisplay, automation: boolean) =
       ),
   );
 
-const notFound = HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 });
-
-export const NotFoundRoute = HttpRouter.add("*", "*", notFound);
-
 export const routes = (display: Domain.QemuDisplay, automation: boolean) =>
   Layer.mergeAll(
     HttpApiBuilder.layer(Api.QemuServerApi).pipe(
       Layer.provide(SessionsLive(display, automation)),
       Layer.provide(Layer.mergeAll(Middleware.BearerAuthLive, Middleware.ApiBoundaryLive)),
     ),
-    NotFoundRoute,
+    Middleware.NotFoundRoute,
   );

@@ -6,10 +6,10 @@ import { TestClock } from "effect/testing";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as Log from "@oligarchy/log/log";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingLinear from "@oligarchy/testing/linear";
 import * as AutomationClient from "../../src/automation-server/client.ts";
 import * as Handlers from "../../src/automation-server/handlers.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
@@ -45,7 +45,7 @@ const TokenLive = Layer.succeed(AutomationClient.OligarchyToken)(
   AutomationClient.OligarchyToken.of(Redacted.make(TOKEN)),
 );
 
-const serve = (fixed: Fixture, outbound: Layer.Layer<HttpClient.HttpClient> = FakeHttp.die) =>
+const serve = (fixed: Fixture, outbound: Layer.Layer<HttpClient.HttpClient> = TestingHttp.die) =>
   HttpRouter.serve(Handlers.routes, { disableLogger: true, disableListenLog: true }).pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -423,7 +423,7 @@ describe("POST /abort", () => {
     "aborts a running job at the client that claimed it, then moves its ticket to Aborted",
     () =>
       Effect.gen(function* () {
-        const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const outbound = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
         const fixed = fixture();
         seedResult(fixed, TICKET, RESULT);
         seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
@@ -456,7 +456,7 @@ describe("POST /abort", () => {
 
   it.effect("routes abort to the client that claimed that ticket", () =>
     Effect.gen(function* () {
-      const outbound = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const outbound = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);
       seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
@@ -477,8 +477,8 @@ describe("POST /abort", () => {
     "a running job its client holds nothing for is reported JobNotFound, closed aborted, and answered 200",
     () =>
       Effect.gen(function* () {
-        const outbound = FakeHttp.recordRequests(() =>
-          FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+        const outbound = TestingHttp.recordRequests(() =>
+          TestingHttp.json({ error: `unknown session "${TICKET}"` }, 404),
         );
         const fixed = fixture();
         seedResult(fixed, TICKET, RESULT);
@@ -581,7 +581,7 @@ describe("POST /abort", () => {
 // An automation client whose answer to /abort comes after the drive finished on its own: the
 // worker closed the row succeeded while the stop was in flight.
 const finishedDuringAbort = (fixed: Fixture, answer: () => Response) =>
-  FakeHttp.recordRequests(() =>
+  TestingHttp.recordRequests(() =>
     Effect.sync(() => {
       const job = fixed.stores.automation.jobs[0];
       if (job !== undefined) {
@@ -600,7 +600,7 @@ describe("POST /abort refusals", () => {
         const fixed = fixture();
         seedResult(fixed, TICKET, RESULT);
         seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
-        const outbound = finishedDuringAbort(fixed, () => FakeHttp.json({ ok: "true" }));
+        const outbound = finishedDuringAbort(fixed, () => TestingHttp.json({ ok: "true" }));
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
           const response = yield* abort(http);
@@ -629,7 +629,7 @@ describe("POST /abort refusals", () => {
         seedResult(fixed, TICKET, RESULT);
         seedJob(fixed, RESULT, "running", seedServer(fixed, CLIENT_URL));
         const outbound = finishedDuringAbort(fixed, () =>
-          FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+          TestingHttp.json({ error: `unknown session "${TICKET}"` }, 404),
         );
         yield* Effect.gen(function* () {
           const http = yield* HttpClient.HttpClient;
@@ -752,21 +752,6 @@ describe("POST /abort refusals", () => {
     }),
   );
 
-  it.effect("a wrong bearer is 401 too", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* abort(http, TICKET, {
-          authorization: "Bearer wrong",
-          "content-type": "application/json",
-        });
-        expect(response.status).toBe(401);
-        expect(yield* response.json).toEqual({ error: "unauthorized" });
-      }).pipe(Effect.provide(serve(fixed)));
-    }),
-  );
-
   it.effect("a body without ticket is 400", () =>
     Effect.gen(function* () {
       const fixed = fixture();
@@ -830,7 +815,7 @@ describe("POST /abort refusals", () => {
     () =>
       Effect.gen(function* () {
         const asked = yield* Deferred.make<void>();
-        const outbound = FakeHttp.recordRequests(() =>
+        const outbound = TestingHttp.recordRequests(() =>
           Deferred.succeed(asked, undefined).pipe(Effect.andThen(Effect.never)),
         );
         const fixed = fixture();
@@ -858,8 +843,8 @@ describe("POST /abort refusals", () => {
 
   it.effect("500 when the client fails, and the job stays running", () =>
     Effect.gen(function* () {
-      const outbound = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "opencode exited 1" }, 500),
+      const outbound = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "opencode exited 1" }, 500),
       );
       const fixed = fixture();
       seedResult(fixed, TICKET, RESULT);

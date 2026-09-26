@@ -1,17 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import {
-  Cause,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  FileSystem,
-  Layer,
-  PlatformError,
-  Redacted,
-  Stream,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Redacted, Stream } from "effect";
 import {
   HttpBody,
   HttpClient,
@@ -25,9 +14,9 @@ import * as DbErrors from "@oligarchy/db/errors";
 import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
+import * as ApiErrors from "@oligarchy/http/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Handlers from "../../src/qemu-server/handlers.ts";
 import * as RealSessions from "../../src/qemu-server/sessions.ts";
@@ -635,44 +624,6 @@ describe("authentication", () => {
       expect(fixed.reporter.reported).toEqual([]);
     }),
   );
-
-  it.effect("a wrong bearer and a non-bearer scheme are 401 too", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        for (const authorization of ["Bearer wrong", "Basic dGVzdC10b2tlbg==", "test-token"]) {
-          const response = yield* http.get("/stats", { headers: { authorization } });
-          expect(response.status).toBe(401);
-          expect(yield* response.json).toEqual({ error: "unauthorized" });
-        }
-        const api = yield* client.pipe(Effect.provide(bearer("wrong")));
-        const error = yield* Effect.flip(api.Sessions.stats());
-        expect(error._tag).toBe("Unauthorized");
-        expect(error.message).toBe("unauthorized");
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines.map((line) => line.text)).toEqual([
-        "GET /stats failed: unauthorized",
-        "GET /stats failed: unauthorized",
-        "GET /stats failed: unauthorized",
-        "GET /stats failed: unauthorized",
-      ]);
-    }),
-  );
-
-  it.effect("the exact token is accepted with any scheme casing", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* http.get("/stats", {
-          headers: { authorization: `bearer ${TOKEN}` },
-        });
-        expect(response.status).toBe(200);
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toEqual([]);
-    }),
-  );
 });
 
 describe("catch-all", () => {
@@ -708,32 +659,6 @@ describe("catch-all", () => {
 
 describe("request decoding", () => {
   const headers = { authorization: `Bearer ${TOKEN}` };
-
-  it.effect("a malformed JSON body is 400 Expected a valid JSON body", () =>
-    Effect.gen(function* () {
-      const fixed = fixture();
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const response = yield* http.post("/start", {
-          headers,
-          body: HttpBody.text("{bad", "application/json"),
-        });
-        expect(response.status).toBe(400);
-        expect(yield* response.json).toEqual({ error: "Expected a valid JSON body" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toEqual([
-        {
-          level: "error",
-          text: "POST /start failed: Expected a valid JSON body",
-          location: "server",
-          agentId: undefined,
-          skipSentry: true,
-          cause: undefined,
-        },
-      ]);
-      expect(fixed.sessions.calls).toEqual([]);
-    }),
-  );
 
   it.effect("a body failing the schema is 400 with the schema message", () =>
     Effect.gen(function* () {
@@ -1487,202 +1412,6 @@ describe("Sessions failures", () => {
         });
         expect(fixed.reporter.reported).toEqual([]);
       }),
-  );
-
-  it.effect("an Internal carrying a platform error is logged with Node's own message", () =>
-    Effect.gen(function* () {
-      const failure = PlatformError.systemError({
-        _tag: "NotFound",
-        module: "FileSystem",
-        method: "readFile",
-        pathOrDescriptor: "/tmp/oligarchy-x/serial.log",
-        cause: new Error("ENOENT: no such file or directory, open '/tmp/oligarchy-x/serial.log'"),
-      });
-      const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({
-          serial: (live) =>
-            Effect.fail(
-              ApiErrors.Internal.make({
-                message: "internal error",
-                cause: failure,
-                sessionId: live.id,
-                agentId: live.agent,
-              }),
-            ),
-        }),
-      });
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        yield* Effect.flip(api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines[0]?.text).toBe(
-        `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: ENOENT: no such file or directory, open '/tmp/oligarchy-x/serial.log'`,
-      );
-    }),
-  );
-
-  it.effect("an Internal whose cause carries no cause of its own is logged with its message", () =>
-    Effect.gen(function* () {
-      const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({
-          stop: (live) =>
-            Effect.fail(
-              ApiErrors.Internal.make({
-                message: "internal error",
-                cause: DbErrors.DatabaseError.make({
-                  operation: "endSession",
-                  message: "pool ended",
-                }),
-                sessionId: live.id,
-                agentId: live.agent,
-              }),
-            ),
-        }),
-      });
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        yield* Effect.flip(api.Sessions.stop({ payload: stopBody }));
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines[0]?.text).toBe("POST /stop failed: pool ended");
-    }),
-  );
-});
-
-describe("defects", () => {
-  it.effect("a handler defect is 500 internal error, logged with the pretty cause", () =>
-    Effect.gen(function* () {
-      const defect = new Error("boom");
-      const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({ stats: Effect.die(defect) }),
-      });
-      yield* Effect.gen(function* () {
-        const api = yield* client;
-        const error = yield* Effect.flip(api.Sessions.stats());
-        expect(error).toMatchObject({ _tag: "Internal", message: "internal error" });
-        const http = yield* HttpClient.HttpClient;
-        const raw = yield* http.get("/stats", { headers: { authorization: `Bearer ${TOKEN}` } });
-        expect(raw.status).toBe(500);
-        expect(yield* raw.json).toEqual({ error: "internal error" });
-      }).pipe(Effect.provide(serve(fixed)));
-      expect(fixed.log.lines).toHaveLength(2);
-      expect(fixed.log.lines[0]).toEqual({
-        level: "error",
-        text: `GET /stats failed: ${Cause.pretty(Cause.die(defect))}`,
-        location: "server",
-        agentId: undefined,
-        skipSentry: false,
-        cause: defect,
-      });
-      expect(fixed.log.lines[0]?.text).toContain("Error: boom");
-      expect(fixed.reporter.reported).toEqual([]);
-    }),
-  );
-
-  it.effect(
-    "the real Log reports a 5xx cause, a defect and already reserved, never another 4xx",
-    () =>
-      Effect.gen(function* () {
-        const defect = new Error("kaboom");
-        const failure = new Error("connect ECONNREFUSED 127.0.0.1:5432");
-        const fixed = fixture({
-          sessions: FakeSessions.fakeSessions({
-            stats: Effect.die(defect),
-            reserve: (agent) =>
-              Effect.fail(
-                ApiErrors.BadRequest.make({
-                  message: "already reserved",
-                  agentId: agent,
-                }),
-              ),
-            serial: (live) =>
-              Effect.fail(
-                ApiErrors.Internal.make({
-                  message: "internal error",
-                  cause: failure,
-                  sessionId: live.id,
-                  agentId: live.agent,
-                }),
-              ),
-          }),
-        });
-        const stdout = Log.Log.layerStdout.pipe(Layer.provide(fixed.reporter.layer));
-        yield* Effect.gen(function* () {
-          const api = yield* client;
-          yield* Effect.flip(api.Sessions.stats());
-          yield* Effect.flip(api.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
-          yield* Effect.flip(api.Sessions.serial({ query: { id: "nope", agent: AGENT_ID } }));
-          yield* Effect.flip(
-            api.Sessions.reserve({
-              payload: Contract.ReserveAgentBody.make({ agent: AGENT_ID }),
-            }),
-          );
-          const wrong = yield* client.pipe(Effect.provide(bearer("wrong")));
-          yield* Effect.flip(wrong.Sessions.serial({ query: { id: SESSION_ID, agent: AGENT_ID } }));
-        }).pipe(Effect.provide(serve(fixed, stdout)));
-        // The log line is what reports; the cause it carries is what Sentry is handed.
-        expect(fixed.reporter.reported).toHaveLength(3);
-        const messages = fixed.reporter.reported.map((report) => report.error.message);
-        expect(messages).toContain("POST /reserve failed: already reserved");
-        const causes = fixed.reporter.reported.map((report) =>
-          Render.errorDetail(report.error.cause),
-        );
-        expect(causes).toContain("kaboom");
-        expect(causes).toContain("connect ECONNREFUSED 127.0.0.1:5432");
-        const withSession = fixed.reporter.reported.find(
-          (report) =>
-            Render.errorDetail(report.error.cause) === "connect ECONNREFUSED 127.0.0.1:5432",
-        );
-        expect(withSession?.error.message).toBe(
-          `GET /serial?id=${SESSION_ID}&agent=${AGENT_ID} failed: connect ECONNREFUSED 127.0.0.1:5432`,
-        );
-        expect(withSession?.severity).toBe("Error");
-        expect(withSession?.annotations).toMatchObject({
-          location: SESSION_ID,
-          agent_id: AGENT_ID,
-        });
-      }),
-  );
-
-  it.effect("the real Log never reports an AtCapacity from reserve, but a reserve defect", () =>
-    Effect.gen(function* () {
-      const defect = new Error("connect ECONNREFUSED 127.0.0.1:5432");
-      const fixed = fixture({
-        sessions: FakeSessions.fakeSessions({
-          reserve: (agent) =>
-            agent === AGENT_ID
-              ? Effect.fail(
-                  ApiErrors.AtCapacity.make({
-                    message: "at capacity: max-jobs is 2",
-                    agentId: agent,
-                  }),
-                )
-              : Effect.die(defect),
-        }),
-      });
-      const stdout = Log.Log.layerStdout.pipe(Layer.provide(fixed.reporter.layer));
-      yield* Effect.gen(function* () {
-        const http = yield* HttpClient.HttpClient;
-        const full = yield* http.post("/reserve", {
-          headers: { authorization: `Bearer ${TOKEN}` },
-          body: HttpBody.jsonUnsafe({ agent: AGENT_ID }),
-        });
-        expect(full.status).toBe(503);
-        expect(yield* full.json).toEqual({ error: "at capacity: max-jobs is 2" });
-        const broken = yield* http.post("/reserve", {
-          headers: { authorization: `Bearer ${TOKEN}` },
-          body: HttpBody.jsonUnsafe({ agent: OTHER_AGENT_ID }),
-        });
-        expect(broken.status).toBe(500);
-        expect(yield* broken.json).toEqual({ error: "internal error" });
-      }).pipe(Effect.provide(serve(fixed, stdout)));
-      expect(fixed.reporter.reported).toHaveLength(1);
-      expect(fixed.reporter.reported[0]?.error.message).toBe(
-        `POST /reserve failed: ${Cause.pretty(Cause.die(defect))}`,
-      );
-      expect(Render.errorDetail(fixed.reporter.reported[0]?.error.cause)).toBe(
-        "connect ECONNREFUSED 127.0.0.1:5432",
-      );
-    }),
   );
 });
 

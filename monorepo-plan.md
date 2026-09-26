@@ -5,7 +5,8 @@ workspace and `@oligarchy/routes`), so is phase 1 ([PR
 #236](https://github.com/ThePrimeagen/Oligarchy/pull/236): the cycle checks), and so are phase 2
 (`@oligarchy/shared`), phase 3 (`@oligarchy/log`), phase 4 (`@oligarchy/env`), phase 5
 (`@oligarchy/db`), phase 6 (`@oligarchy/observability`), phase 7 (`@oligarchy/linear`), phase 8
-(`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`) and phase 9 (`@oligarchy/fleet`). The rest of this file is the plan for
+(`@oligarchy/jobs`, with the dev-only `@oligarchy/testing`), phase 9 (`@oligarchy/fleet`) and
+phase 10 (`@oligarchy/http`). The rest of this file is the plan for
 the remaining phases and the reasoning behind each choice; a phase's checklist is ticked as it
 lands.
 
@@ -147,7 +148,7 @@ Declared dependencies, which is what the architecture test reads:
 | `observability` | `effect`, `@sentry/bun`, `@sentry/effect`, `db`, `log`, `shared` |
 | `fleet` | `effect`, `db`, `log` (dev: `@effect/platform-node` for its integration lane) |
 | `http` | `effect`, `@effect/platform-node`, `env`, `log`, `shared` |
-| `routes` (phases 2 to 9, then renamed to `http`) | `effect`, `shared`; it sits in `http`'s slot of the layer list |
+| `routes` (phases 2 to 9, then renamed to `http` in phase 10) | `effect`, `shared` |
 | an app | any package; never another app, never the root's `src/` |
 | `testing` | the packages whose services it fakes (`db`, `linear` first; `log`, `http`, `fleet` as fakes arrive); dev only; a `devDependency` of the packages and apps that use it |
 | `integration-testing` | any package; the dashboard's Worker entry; dev only |
@@ -456,21 +457,21 @@ container and stay in the root's integration project until phase 12.
 
 **Phase 10: `@oligarchy/http`**
 
-- [ ] TEST (alter) every test importing `@oligarchy/routes/*` imports `@oligarchy/http/*`,
+- [x] TEST (alter) every test importing `@oligarchy/routes/*` imports `@oligarchy/http/*`,
       keeping the `Api`, `Contract` and `ApiErrors` aliases.
-- [ ] TEST (alter) `test/repo/architecture.unit.test.ts`: `api`, `contract` and `errors` import
+- [x] TEST (alter) `test/repo/architecture.unit.test.ts`: `api`, `contract` and `errors` import
       only `effect` and `@oligarchy/shared`. Unhappy: a Node, platform or `log` import there is
       named.
-- [ ] TEST (move) the bearer-auth and boundary middleware cases, which live in the apps' HTTP
+- [x] TEST (move) the bearer-auth and boundary middleware cases, which live in the apps' HTTP
       tests today (`test/qemu-server/http.unit.test.ts` and the others), to
       `packages/http/test/middleware.unit.test.ts`. Each app keeps one case proving the
       middleware is wired in.
-- [ ] TEST (move) `test/client/proxy-client.unit.test.ts` to `packages/http/test/`.
-- [ ] TEST (new) `packages/http/test/serve.unit.test.ts`: a server listens and serves its
+- [x] TEST (move) `test/client/proxy-client.unit.test.ts` to `packages/http/test/`.
+- [x] TEST (new) `packages/http/test/serve.unit.test.ts`: a server listens and serves its
       routes. A port already in use fails with `HttpServerError.ServeError`. A later server error
       runs the caller's `onError` once, then ends the program once with one fatal line; a second
       error runs nothing.
-- [ ] TEST (alter) `test/integration/client.integration.test.ts`: the bundle rebuilds when an
+- [x] TEST (alter) `test/integration/client.integration.test.ts`: the bundle rebuilds when an
       http-package source is newer.
 
 **Phase 11: the seven apps**
@@ -909,12 +910,53 @@ What phase 9 decided that the checklist left open, and what it found:
 
 **Phase 10: `@oligarchy/http`**
 
-- [ ] Rename `packages/routes` to `packages/http` (`@oligarchy/http`).
-- [ ] Move in the middleware, `NotFoundRoute` and the proxy client. Add `serve` with its
+- [x] Rename `packages/routes` to `packages/http` (`@oligarchy/http`).
+- [x] Move in the middleware, `NotFoundRoute` and the proxy client. Add `serve` with its
       `onError` hook.
-- [ ] Remove the hand-rolled listen code from the four servers; qemu-server passes
+- [x] Remove the hand-rolled listen code from the four servers; qemu-server passes
       `onError: (cause) => MutableRef.set(shutdown.reason, ...)`.
-- [ ] Run `wrangler deploy --dry-run` as a build check (not a test).
+- [x] Run `wrangler deploy --dry-run` as a build check (not a test).
+
+What phase 10 decided that the checklist left open, and what it found:
+
+- `serve` is an effect, not a layer: `serve({ port, routes, services, listening, onError? })`
+  binds the port, builds `services`, serves `routes`, runs `listening` in that scope, and runs
+  until the scope ends or the server fails. A built layer cannot fail later, and racing the
+  launch against the server's first error is what `serve` is for, so the effect owns the race and
+  the commands `yield*` it. The commands lost `serverFailed`; `main.ts` no longer creates a
+  server. `serveOn(server)` is the same over a given `node:http` server, the seam its test raises
+  a later error through, a factory seam as `Host.make(source)` is. `onError` runs before the
+  deferred that ends the serve is completed, so a shutdown reads what it wrote; it runs for a bind
+  error too, as qemu-server's listener always did.
+- `services` is built after the port is bound in all four servers, as qemu-server already did;
+  the proxy, automation-client and automation-server used to build theirs first. A port refusal
+  now builds none of a server's own services (the graph under the command exists already). The
+  price, qemu-server's before and now all four's: a request that reaches the port before the
+  routes are attached waits unanswered, so readiness is the listen line, as every process test
+  already waits for it. `services` is required (`Layer.empty` for automation-server): an optional
+  one widened to a union the requirements could not be subtracted from.
+- `NotFoundRoute` lives in `middleware.ts` beside the bearer and the boundaries: every app's
+  routes are built from those four. `layerClient` in the design below was never in
+  `qemu-server/middleware.ts`; the proxy client keeps its own bearer layer.
+- `ProxyRefusal` and `ProxyUnreachable` are declared in `proxy-client.ts`, identifiers unchanged,
+  and left `src/shared/errors.ts`.
+- The HTTP client fake (`test/support/fake-http.ts`) had its second kind of consumer in the proxy
+  client's test, so it moved to `@oligarchy/testing/http-client` (imported as `TestingHttp`),
+  with its own cases and module-path imports now that it is a package source.
+- The middleware cases were rebuilt in `packages/http/test/middleware.unit.test.ts` over the
+  automation client's api with scripted routes: the bearer (any scheme casing; missing, wrong,
+  other scheme, bare token), schema and JSON errors, a declared refusal's status and Sentry
+  policy, `AtCapacity`, `already reserved`, `Internal`'s reason one level down, a defect,
+  attribution, and the catch-all. qemu-server's copies of those went; each app keeps its
+  missing-bearer case. The proxy keeps its two `RouteBoundary` cases, which are its only proof
+  that tag is served.
+- `serve.unit.test.ts` opens real loopback sockets, as `NodeHttpServer.layerTest` does for every
+  HTTP unit test; a port in use is pinned in Bun's words ("Is port N in use?").
+- The integration lane, with Docker, QEMU and `OLIGARCHY_REQUIRE_DATABASE=1`: 319 passed, and the
+  two that fail on `master` too (NEED_FIXING item 11) failed the same way. All four servers'
+  process tests passed on `serve`, qemu-server's fifteen included, and the client bundle rebuilt
+  on an http-package edit.
+
 
 **Phase 11: the seven apps**
 
@@ -1478,13 +1520,12 @@ How we speak HTTP: one way to serve, one way to call the proxy, one set of API e
   - `NotFoundRoute` from `qemu-server/handlers.ts`, used by the same three;
   - the proxy client from `client/proxy-client.ts` (with `ProxyRefusal` and `ProxyUnreachable`),
     used by automation-client, the proxy and the client script;
-  - `serve(routes, { port, onError? })`, the listen code every server writes by hand today
-    (`createServer`, the first-error `Deferred`, `HttpRouter.serve` with the logger and listen
-    log off, `NodeHttpServer.layer`, `TracerDisabledWhen`, and racing the launch against the
-    server failing). It returns a `Layer`, built with `Layer.effectDiscard` and
-    `Layer.provide(NodeHttpServer.layer(...))` the way the four mains do, and runs `onError` once
-    on the first server error before the fatal line, which is how qemu-server sets
-    `shutdown.reason`.
+  - `serve({ port, routes, services, listening, onError? })`, the listen code every server wrote
+    by hand (`createServer`, the first-error `Deferred`, `HttpRouter.serve` with the logger and
+    listen log off, `NodeHttpServer.layer`, `TracerDisabledWhen`, and racing the launch against
+    the server failing). It is an effect that runs until its scope ends or the server fails (phase
+    10's notes say why not a layer), and runs `onError` once on the first server error before the
+    fatal line, which is how qemu-server sets `shutdown.reason`.
 - **It does not take** the announce loop or the stale-server sweep (fleet), or
   `automation-server/client.ts`. That client has one consumer, declares `OligarchyToken` under
   an automation-server service key and raises `AutomationClientError`, an app error. It stays in

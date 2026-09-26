@@ -71,8 +71,8 @@ exist.
   the Linear API, `@oligarchy/jobs`, a job and its actions (both under Layout, below),
   `@oligarchy/observability`, where lines, failures and spans go once written (Log and Sentry,
   below), `@oligarchy/fleet`, how a server measures itself, announces itself and how the fleet
-  forgets a dead one (under Layout, below), `@oligarchy/routes`, the HTTP contract (HttpApi
-  server, below), and
+  forgets a dead one (under Layout, below), `@oligarchy/http`, the HTTP contract, serving it
+  and calling the proxy (HttpApi server, below), and
   `@oligarchy/testing`, the fakes more than one package's tests use, which nothing but a test
   may import. A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
@@ -102,8 +102,8 @@ exist.
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
   `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` and `@oligarchy/linear` at 3,
-  `@oligarchy/jobs` and `@oligarchy/observability` at 4, `@oligarchy/fleet` at 5 and
-  `@oligarchy/routes` beside it, holding `http`'s slot, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
+  `@oligarchy/jobs` and `@oligarchy/observability` at 4, `@oligarchy/fleet` and
+  `@oligarchy/http` at 5, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
   it). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
@@ -234,7 +234,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   platform module and an app. Stopping a driver at its automation client is transport, so
   `Reclaim.reclaim` takes the app's `stop` and `Abort.running` closes a row its app has stopped.
   `packages/testing/src/` is dev-only: `stores.ts` (`fakeTestStore`, `fakeAutomationStore`,
-  `fakeServerStore`, `fakeProcessStatsStore`, fakes that answer the way the Postgres stores do) and `linear.ts` (`fakeLinear`, its ids and
+  `fakeServerStore`, `fakeProcessStatsStore`, fakes that answer the way the Postgres stores do),
+  `http-client.ts` (an `HttpClient` answered by a script, a recorder or an app, no socket) and `linear.ts` (`fakeLinear`, its ids and
   `ticketFor`). It imports `effect`, `@oligarchy/db`, `@oligarchy/linear` and its own files, and
   sits above every layer, so a package or the root may only dev-depend on it. Its admission rule:
   a fake that a package's tests and an app's tests both use; a fake with one consumer stays with
@@ -265,9 +266,17 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `effect`, `@oligarchy/db`, `@oligarchy/log` and its own files. Its
   admission rule: measuring this host or process, and the fleet's membership rows; a member
   reports its counts and fleet never starts, stops or reads a session or a job; refused are HTTP
-  and anything about what a member does. `packages/routes/src/` holds `api.ts`, `contract.ts` and
-  `errors.ts` and imports nothing but `effect`, `@oligarchy/shared` and its own files, so the
-  contract can be read, and depended on, without the processes that serve it. What only one side
+  and anything about what a member does. `packages/http/src/` is how the processes speak HTTP:
+  `api.ts`, `contract.ts` and `errors.ts` are the contract and import nothing but `effect`,
+  `@oligarchy/shared` and each other, so it can be read, and bundled by every client, without
+  what serves it; `middleware.ts` (`bearerAuth`, `BearerAuthLive`, `ApiBoundaryLive`,
+  `RouteBoundaryLive`, and `NotFoundRoute`, the catch-all), `proxy-client.ts` (`connect`,
+  `minted`, `apiError`, `ProxyRefusal`, `ProxyUnreachable`) and `serve.ts` (`serve`, a boundary
+  file: the one `node:http` server a process listens on) serve and call it. The package imports
+  `effect`, `@effect/platform-node`, `@oligarchy/env`, `@oligarchy/log`, `@oligarchy/shared` and
+  its own files. Its admission rule: the contract, serving it, calling the proxy, guarding a
+  route; refused are a store, a loop and a client with one consumer
+  (`automation-server/client.ts` stays in its app). What only one side
   knows (QEMU, the database, the harness) stays in `src/`, and so does an error until the
   package that raises it exists: `src/shared/errors.ts` holds those (the app errors) and shrinks
   as each package is created, re-exporting nothing.
@@ -304,8 +313,10 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   side-effect and asset imports are exempt. No barrels, no re-exports, no `export ... from`.
 - Import a workspace package the same way, as a namespace of one exported subpath, never by a
   relative path into `packages/` and never from an index (there is none):
-  `import * as Api from "@oligarchy/routes/api"`, `import * as Contract from
-  "@oligarchy/routes/contract"`, `import * as ApiErrors from "@oligarchy/routes/errors"`,
+  `import * as Api from "@oligarchy/http/api"`, `import * as Contract from
+  "@oligarchy/http/contract"`, `import * as ApiErrors from "@oligarchy/http/errors"`,
+  `import * as Middleware from "@oligarchy/http/middleware"`, `import * as ProxyClient from
+  "@oligarchy/http/proxy-client"`, `import * as Serve from "@oligarchy/http/serve"`,
   `import * as Domain from "@oligarchy/shared/domain"`, `import * as SharedErrors from
   "@oligarchy/shared/errors"`, `import * as Steps from "@oligarchy/shared/steps"`, `import * as
   Log from "@oligarchy/log/log"`, `import * as Render from "@oligarchy/log/render"`, `import *
@@ -345,7 +356,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   (`@oligarchy/shared/errors/BadRequest`, `@oligarchy/qemu-server/sessions/Shutdown`) and
   `@oligarchy/<dir>/<Service>` for services (`@oligarchy/db/Database`, `@oligarchy/qemu-server/Sessions`).
   An identifier is text a caller reads: a decode failure names it, an error's `name` is it, and
-  Sentry groups on it. So a schema that moves keeps its identifier, and the routes package's are
+  Sentry groups on it. So a schema that moves keeps its identifier, and the http package's are
   still `@oligarchy/shared/...`.
 - Only the boundary files may import `node:*`, read `process.*`, or use `setTimeout`,
   `setInterval`, `new Promise` or `async`: every `src/**/main.ts` and the files named in
@@ -373,7 +384,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   view); a failure there is a `Result`, a thrown value from a library wrapped in one `try`.
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
-  (`Database.make(url)`, `Host.make(source)`, `makeQemuServerCommand(server)`,
+  (`Database.make(url)`, `Host.make(source)`, `Serve.serveOn(server)`, `makeQemuServerCommand(server)`,
   `makeQemuReverseProxyCommand(server)`, `makeAutomationServerCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
@@ -451,7 +462,7 @@ The variable lookup, the CLI's output and config, `Log.Colors` and the platform 
   `class X extends Schema.TaggedError<X>("@oligarchy/shared/errors/X")("X", fields, annotations?)`
   in `packages/shared/src/errors.ts` when more than one package or app raises it, in the one
   that raises it otherwise (in `src/shared/errors.ts` until that package exists), or, when an
-  HTTP API declares it (an `ApiError`), in `packages/routes/src/errors.ts` beside its wire
+  HTTP API declares it (an `ApiError`), in `packages/http/src/errors.ts` beside its wire
   codec; never `Data.TaggedError`, never a bare `Error` in an error channel.
 - The class name equals the `_tag`; no `Error` suffix unless the concept is the error (`QmpError`,
   `DatabaseError`, `MissingVariable`). Never name a class `Error`.
@@ -487,7 +498,7 @@ The variable lookup, the CLI's output and config, `Log.Colors` and the platform 
   non-2xx status carried as a field, the thrown value as `cause`, and a `retryable` flag when the
   SDK can say so.
 
-`BadRequest` in `packages/routes/src/errors.ts`: status on the class, opted out of Sentry,
+`BadRequest` in `packages/http/src/errors.ts`: status on the class, opted out of Sentry,
 nothing else.
 
 ```ts
@@ -844,7 +855,7 @@ Env.run(
 
 ## HttpApi server
 
-- The contract lives in three files, the `@oligarchy/routes` package: `packages/routes/src/api.ts`
+- The contract lives in three files of the `@oligarchy/http` package: `packages/http/src/api.ts`
   (middleware tags, `HttpApiEndpoint`s, the groups, the `HttpApi`s, `VERSION`), `contract.ts`
   (`Schema.Class` DTOs, shared query field objects, and the closed vocabularies only the wire
   carries, `MintedState` today; a vocabulary domain code also uses, `SessionMode`, `StopStatus`,
@@ -895,16 +906,24 @@ Env.run(
   500 up. `detail` is the error's `message`, except for `Internal`, whose cause is a wrapper (a
   driver's `Failed query: …`, a `PlatformError`): the line carries `causeOf(error.cause)`, the
   driver's or Node's message one level down. A defect's detail is `Cause.pretty` of the die.
-- Serve with `HttpRouter.serve(routes, { disableLogger: true, disableListenLog: true })` (never
-  Effect's built-in request logger) over `NodeHttpServer.layer(() => server, { host, port })`.
-- Provide `Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)` so no `http.server` span
-  reaches Sentry and a domain span stays a root. Fail before listening when the host check or the
-  database ping fails; never fall back to another port.
+- Serve with `Serve.serve({ port, routes, services, listening, onError? })`, never by hand. It
+  binds a `node:http` server to `127.0.0.1:<port>` first, then builds `services` (so a port
+  refusal is one failure with nothing built to stop), serves `routes` through
+  `HttpRouter.serve(routes, { disableLogger: true, disableListenLog: true })` (never Effect's
+  built-in request logger), runs `listening` (the listen line, the background work) in that
+  scope, and sets `HttpMiddleware.TracerDisabledWhen` so no `http.server` span reaches Sentry and a
+  domain span stays a root. It runs until its scope ends and fails with the first server error,
+  the bind error or a later one the platform's own listener no longer sees once the server is up;
+  `onError` runs once on that error before the serve ends (qemu-server sets its drain reason
+  there). A request that reaches the port before the routes are attached waits unanswered, so a
+  server's readiness is its listen line, not an open port. Fail
+  before listening when the host check or the database ping fails; never fall back to another
+  port.
 
 `BearerAuth`, declared in `api.ts` as `HttpApiMiddleware.Service<BearerAuth>()(id, { error:
 Errors.UnauthorizedWire, security: { bearer: HttpApiSecurity.bearer }, requiredForClient: true })`
 (`Errors` there is the package's own `./errors.ts`)
-and implemented as `BearerAuthLive` in `src/qemu-server/middleware.ts`: compare, then run the request.
+and implemented as `BearerAuthLive` in `packages/http/src/middleware.ts`: compare, then run the request.
 
 ```ts
 export const BearerAuthLive: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig> = Layer.effect(
@@ -974,7 +993,7 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
   cause }` (the headline appends the cause); a `SchemaError` on a success body to the same; a
   decoded `ApiError` to a refusal with `apiStatus(error)`, never on its `_tag`.
 - Fake HTTP in tests with `HttpClient.make((request, url) => Effect.succeed(response))` provided as
-  `Layer.succeed(HttpClient.HttpClient)(fake)` (`test/support/fake-http.ts`: `respondWith`,
+  `Layer.succeed(HttpClient.HttpClient)(fake)` (`@oligarchy/testing/http-client`: `respondWith`,
   `recordRequests`, `json`, `never`, `die`); never stub `globalThis.fetch`.
 - Describe a third party's HTTP API as one `HttpClientRequest` per operation, the token set once
   on the request from its `Redacted`, the response decoded as Schema says (two phases for an
@@ -1283,11 +1302,8 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   `Effect.runPromiseExitWith(context)` re-entering Effect from a non-Effect callback after
   `const context = yield* Effect.context<R>()`; the architecture test allows them in
   `packages/db/src/client.ts` alone, nowhere else.
-- A CLI's command runs directly under the runner; a server `Layer.launch`es inside its command
-  handler, its stop condition `Effect.raceFirst(Layer.launch(serve),
-  Deferred.await(serverFailed))`, the `Deferred` completed by the Node server's `error` listener
-  in `main.ts`, where the server is created so that listener can be attached; only the first
-  error counts.
+- A CLI's command runs directly under the runner; a server's command handler runs `Serve.serve`
+  (HttpApi server, above), which ends only with the scope or the server's first failure.
 - `runMain` owns SIGINT and SIGTERM: the first signal interrupts the root fiber and scopes close in
   reverse order (work drained, the log flushed, Sentry flushed, the pool closed). Component layers
   never install signal handlers. A process that must answer signals itself uses
@@ -1339,10 +1355,10 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
   `fakeServerStore().routes`) with every unused member `Effect.die("Unexpected
   <Service>.<method>")`, kept under `test/support/`, one file per seam, plus loopback stubs for
   the process tests and `postgres.ts`. A fake that a package's tests and the apps' tests both use
-  lives in `@oligarchy/testing` instead (the test, automation, server and process-stats stores
-  and Linear today),
+  lives in `@oligarchy/testing` instead (the test, automation, server and process-stats stores,
+  Linear, and the HTTP client fake today),
   and `test/support/` builds on it. Never `vi.mock`, `vi.spyOn`, or a `fetch` stub. A service
-  that calls other HTTP servers gets `FakeHttp.recordRequests(respond)` provided to its layer
+  that calls other HTTP servers gets `TestingHttp.recordRequests(respond)` provided to its layer
   alone, so the `HttpClient` in the test's scope still points at the server under test.
 - Assert failures with `Effect.flip` and `expect(error).toMatchObject({ _tag, message })`;
   `Effect.exit` only when a defect or interruption is under test (`Cause.hasDies`). A failure test
@@ -1373,8 +1389,9 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 - Encode repository invariants oxlint cannot express as source-scanning tests in `test/repo/`: the
   boundary-file allow-list, the `node:*` exceptions and `Effect.run*` placement (each list checked
   to name files that exist), every `Flag.boolean` defaulted, HttpApi ownership, namespace imports
-  with `.ts`, the shared package importing only `effect` and itself, the log and routes packages
-  only `effect`, shared and themselves, none of the three reading `process.*`, every package's
+  with `.ts`, the shared package importing only `effect` and itself, the log package only
+  `effect`, shared and itself, the http contract files only `effect`, shared and each other, none
+  of them reading `process.*`, every package's
   sources importing only the packages its `package.json` declares and itself by relative path
   (a bare `@oligarchy/<self>/…` resolves through the root's install, which tsc and Bun both
   allow and the isolated linker means to refuse), the main package

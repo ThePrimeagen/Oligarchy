@@ -3,8 +3,8 @@ import { it } from "@effect/vitest";
 import { Effect, Layer, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError } from "effect/unstable/http";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as AutomationClient from "../../src/automation-server/client.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 
 const URL = "http://127.0.0.1:55333";
 const TOKEN = "test-token";
@@ -33,7 +33,7 @@ const abort = (http: Layer.Layer<HttpClient.HttpClient>) =>
 describe("automation client POST /reserve happy path", () => {
   it.effect("posts the ticket and the action with the bearer token and succeeds on 200", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* reserve(recorder.layer);
       expect(recorder.requests).toHaveLength(1);
       expect(recorder.requests[0]?.method).toBe("POST");
@@ -48,7 +48,7 @@ describe("automation client POST /reserve happy path", () => {
 
   it.effect("a resume drive posts the iso and a mint does not", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const iso = "https://example.com/omarchy.iso";
       yield* reserve(recorder.layer, "drive", iso);
       expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
@@ -56,7 +56,7 @@ describe("automation client POST /reserve happy path", () => {
         action: "drive",
         resume: iso,
       });
-      const mint = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const mint = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* reserve(mint.layer, "mint");
       expect(JSON.parse(mint.requests[0]?.body ?? "")).toEqual({
         ticket: TICKET,
@@ -67,7 +67,7 @@ describe("automation client POST /reserve happy path", () => {
 
   it.effect("a diagnose is posted as such, so the client takes no guest slot for it", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* reserve(recorder.layer, "diagnose");
       expect(JSON.parse(recorder.requests[0]?.body ?? "")).toEqual({
         ticket: TICKET,
@@ -80,8 +80,8 @@ describe("automation client POST /reserve happy path", () => {
 describe("automation client POST /reserve unhappy path", () => {
   it.effect("a 503 is AutomationClientError with the body's error and status 503", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "at capacity: max-jobs is 1" }, 503),
       );
       const error = yield* Effect.flip(reserve(recorder.layer));
       expect(error).toMatchObject({
@@ -98,7 +98,7 @@ describe("automation client POST /run happy path", () => {
     "posts the prompt, the ticket and the result with the bearer token and succeeds on 200",
     () =>
       Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
         yield* run(recorder.layer);
         expect(recorder.requests).toHaveLength(1);
         expect(recorder.requests[0]?.method).toBe("POST");
@@ -115,8 +115,8 @@ describe("automation client POST /run happy path", () => {
 describe("automation client POST /run unhappy path", () => {
   it.effect("a 500 is AutomationClientError with the body's error and status 500", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "opencode exited 1" }, 500),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "opencode exited 1" }, 500),
       );
       const error = yield* Effect.flip(run(recorder.layer));
       expect(error).toMatchObject({
@@ -130,7 +130,7 @@ describe("automation client POST /run unhappy path", () => {
 
   it.effect("an unreachable client has no status and carries the cause", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
@@ -152,7 +152,7 @@ describe("automation client POST /run unhappy path", () => {
 describe("automation client POST /run has no timeout", () => {
   it.effect("is still waiting after two hours", () =>
     Effect.gen(function* () {
-      const fiber = yield* Effect.forkChild(run(FakeHttp.never));
+      const fiber = yield* Effect.forkChild(run(TestingHttp.never));
       yield* TestClock.adjust("2 hours");
       expect(fiber.pollUnsafe()).toBeUndefined();
     }),
@@ -162,7 +162,7 @@ describe("automation client POST /run has no timeout", () => {
 describe("automation client POST /abort happy path", () => {
   it.effect("posts the ticket with the bearer token and succeeds on 200", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* abort(recorder.layer);
       expect(recorder.requests).toHaveLength(1);
       expect(recorder.requests[0]?.method).toBe("POST");
@@ -176,8 +176,8 @@ describe("automation client POST /abort happy path", () => {
 describe("automation client POST /abort unhappy path", () => {
   it.effect("a 404 is AutomationClientError with the body's error and status 404", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: `unknown session "${TICKET}"` }, 404),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: `unknown session "${TICKET}"` }, 404),
       );
       const error = yield* Effect.flip(abort(recorder.layer));
       expect(error).toMatchObject({
@@ -190,7 +190,7 @@ describe("automation client POST /abort unhappy path", () => {
 
   it.effect("an unreachable client has no status and carries the cause", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({

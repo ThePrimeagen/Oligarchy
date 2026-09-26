@@ -203,7 +203,7 @@ Tests:
       server the proxy could not reach or did not list is refused before any run or ticket; the
       proxy refusing the bearer is its answer; a missing `OLIGARCHY_TOKEN` is refused before the
       proxy, the database or Linear is asked; without the flag the proxy is never asked.
-- [x] `packages/routes/test/api.unit.test.ts`: `GET /minted` on both apis, the proxy's in the Servers group.
+- [x] `packages/http/test/api.unit.test.ts`: `GET /minted` on both apis, the proxy's in the Servers group.
 
 Code:
 

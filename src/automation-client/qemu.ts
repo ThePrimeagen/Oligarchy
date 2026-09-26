@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
-import type * as ProxyClient from "../client/proxy-client.ts";
+import * as Contract from "@oligarchy/http/contract";
+import * as ApiErrors from "@oligarchy/http/errors";
+import type * as ProxyClient from "@oligarchy/http/proxy-client";
 import type * as Sessions from "./sessions.ts";
 
 // The guest host, reached through the reverse proxy, as Sessions sees it: a 503 is the fleet

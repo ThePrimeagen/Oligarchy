@@ -19,10 +19,10 @@ import * as Open from "@oligarchy/jobs/open";
 import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Contract from "@oligarchy/http/contract";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as ProxyClient from "../client/proxy-client.ts";
 import * as Render from "./render.ts";
 
 // ---------------------------------------------------------------------------

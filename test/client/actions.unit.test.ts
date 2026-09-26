@@ -5,8 +5,8 @@ import * as NodePath from "@effect/platform-node/NodePath";
 import { Effect, Layer } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as Config from "@oligarchy/env/config";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as Actions from "../../src/client/actions.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
 const TOKEN = "test-token";
@@ -38,7 +38,7 @@ describe("client actions", () => {
 
   it.effect("call finds mouse click and posts that gesture", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       yield* run(
         [
           "mouse",
@@ -71,7 +71,7 @@ describe("client actions", () => {
 
   it.effect("an unknown action and an unknown flag send nothing (unhappy)", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const unknown = yield* Effect.flip(
         run(["mouse", "poke", "--agent-id", "OLI-1"], recorder.layer),
       );
@@ -84,10 +84,10 @@ describe("client actions", () => {
 
   it.effect("call parses flags the same way the client command does", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests((request) =>
+      const recorder = TestingHttp.recordRequests((request) =>
         new URL(request.url).pathname === "/start"
-          ? FakeHttp.json({ id: SESSION })
-          : FakeHttp.json({ ok: "true" }),
+          ? TestingHttp.json({ id: SESSION })
+          : TestingHttp.json({ ok: "true" }),
       );
       const shared = ["--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9"] as const;
       yield* run(["start", ...shared, "--iso", ISO, "--resume", "yes"], recorder.layer);
@@ -117,7 +117,7 @@ describe("client actions", () => {
 
   it.effect("a flag the client command would refuse sends nothing (unhappy)", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const shared = ["--agent-id", "OLI-1", "--server-url", "http://127.0.0.1:9"] as const;
       const resume = yield* Effect.flip(
         run(["start", ...shared, "--iso", ISO, "--resume=garbage"], recorder.layer),

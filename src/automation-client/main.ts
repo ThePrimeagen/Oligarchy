@@ -1,10 +1,5 @@
-import { createServer } from "node:http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
-import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Cause, Deferred, Effect, Exit, Layer, Option, type Runtime } from "effect";
-import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import { Cause, Effect, Exit, Layer, Option, type Runtime } from "effect";
 import * as Client from "@oligarchy/db/client";
 import * as Logs from "@oligarchy/db/logs";
 import * as ProcessStats from "@oligarchy/db/process-stats";
@@ -16,8 +11,9 @@ import * as ProcessUsage from "@oligarchy/fleet/process";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
-import * as Api from "@oligarchy/routes/api";
-import * as ProxyClient from "../client/proxy-client.ts";
+import * as Api from "@oligarchy/http/api";
+import * as Serve from "@oligarchy/http/serve";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -28,19 +24,23 @@ const HOST = "127.0.0.1";
 
 const automationClientAttr = Log.AutomationClientProcessAttribution;
 
-// The platform drops its error listener once the server is up; a later error still needs the
-// fatal line and exit 1. Only the first counts.
-const server = createServer();
-const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-server.on("error", (cause) => {
-  Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
-});
-
 // The heartbeat starts once the listener is up, in the same scope: a port refusal announces
 // nothing, and a shutdown deletes the row it wrote.
 const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Option<string>) =>
-  Layer.effectDiscard(
-    Effect.gen(function* () {
+  Serve.serve({
+    port,
+    routes: Handlers.routes,
+    services: Layer.unwrap(
+      Effect.gen(function* () {
+        const { token } = yield* Config.ProxyConfig;
+        const serverUrl = yield* Config.serverUrl.pipe(
+          Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
+        );
+        const proxy = yield* ProxyClient.connect({ serverUrl, token });
+        return Sessions.Sessions.layer(maxJobs, Qemu.reserve(proxy), Qemu.relinquish(proxy));
+      }),
+    ).pipe(Layer.provideMerge(Layer.mergeAll(Host.Host.layer, ProcessUsage.ProcessUsage.layer))),
+    listening: Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
         `automation client listening on ${HOST}:${String(port)}; name ${name}; max jobs ${String(maxJobs)}${Option.match(url, { onNone: () => "", onSome: (announced) => `; announcing ${announced}` })}`,
@@ -55,28 +55,7 @@ const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Opt
       const sessions = yield* Sessions.Sessions;
       yield* Effect.addFinalizer(() => sessions.shutdown());
     }),
-  ).pipe(
-    Layer.provide(
-      HttpRouter.serve(Handlers.routes, {
-        disableLogger: true,
-        disableListenLog: true,
-      }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
-    ),
-    Layer.provide(
-      Layer.unwrap(
-        Effect.gen(function* () {
-          const { token } = yield* Config.ProxyConfig;
-          const serverUrl = yield* Config.serverUrl.pipe(
-            Effect.orElseSucceed(() => Config.DEFAULT_SERVER_URL),
-          );
-          const proxy = yield* ProxyClient.connect({ serverUrl, token });
-          return Sessions.Sessions.layer(maxJobs, Qemu.reserve(proxy), Qemu.relinquish(proxy));
-        }),
-      ),
-    ),
-    Layer.provide(Layer.mergeAll(Host.Host.layer, ProcessUsage.ProcessUsage.layer)),
-    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
-  );
+  });
 
 const DatabaseLive = Layer.unwrap(
   Effect.map(Config.ProxyConfig, (config) => Client.Database.layer(config.databaseUrl)),
@@ -98,7 +77,6 @@ const MainLive = Layer.mergeAll(
 
 const command = AutomationClientCommand.makeAutomationClientCommand({
   serve: ServerLive,
-  serverFailed,
 });
 
 const teardown: Runtime.Teardown = (exit, onExit) => {

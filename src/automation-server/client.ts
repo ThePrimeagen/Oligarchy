@@ -4,8 +4,8 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Errors from "../shared/errors.ts";
 

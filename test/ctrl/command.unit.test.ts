@@ -9,11 +9,11 @@ import * as Config from "@oligarchy/env/config";
 import * as Templates from "@oligarchy/jobs/templates";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingLinear from "@oligarchy/testing/linear";
 import * as CtrlCommand from "../../src/ctrl/command.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as FakeLog from "../support/log.ts";
 import * as Reporter from "../support/reporter.ts";
 import * as Stores from "../support/stores.ts";
@@ -114,7 +114,7 @@ const ago = (seconds: number): Date => new Date(NOW - seconds * 1000);
 const harness = (
   options: {
     readonly linear?: TestingLinear.FakeLinear;
-    readonly proxy?: FakeHttp.Recorder;
+    readonly proxy?: TestingHttp.Recorder;
     // With a collector the command builds the real Log over stdout, as main.ts does, with the
     // collector installed at the root where main.ts installs Sentry's reporter.
     readonly reporter?: Reporter.Collector;
@@ -145,7 +145,7 @@ const harness = (
         Layer.mergeAll(
           NodeServices.layer,
           Config.fromValues(env),
-          options.proxy?.layer ?? FakeHttp.die,
+          options.proxy?.layer ?? TestingHttp.die,
           options.reporter?.layer ?? Layer.empty,
         ),
       ),
@@ -1137,7 +1137,7 @@ describe("mint", () => {
     const MINTED_URL = `${SERVER}/minted?iso=${encodeURIComponent(ISO)}`;
     // The reverse proxy's GET /minted answer for the fleet, as the fake HttpClient gives it.
     const proxyAnswering = (servers: ReadonlyArray<{ url: string; state: string }>) =>
-      FakeHttp.recordRequests(() => FakeHttp.json({ iso: ISO, servers }));
+      TestingHttp.recordRequests(() => TestingHttp.json({ iso: ISO, servers }));
 
     it.effect(
       "tickets only the servers the proxy reports unminted and names the minted ones it skipped (happy)",
@@ -1255,8 +1255,8 @@ describe("mint", () => {
       "the proxy refusing the bearer is the proxy's answer, and nothing is created (unhappy)",
       () =>
         Effect.gen(function* () {
-          const proxy = FakeHttp.recordRequests(() =>
-            FakeHttp.json({ error: "unauthorized" }, 401),
+          const proxy = TestingHttp.recordRequests(() =>
+            TestingHttp.json({ error: "unauthorized" }, 401),
           );
           const h = harness({ proxy });
           h.stores.tests.definitions.push(mintDefinition);

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./http-client": "./src/http-client.ts",
     "./linear": "./src/linear.ts",
     "./stores": "./src/stores.ts"
   },

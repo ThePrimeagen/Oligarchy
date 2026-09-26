@@ -3,11 +3,11 @@ import { it } from "@effect/vitest";
 import { Effect, Fiber, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError } from "effect/unstable/http";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Render from "@oligarchy/log/render";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as Qemu from "../../src/automation-client/qemu.ts";
-import * as ProxyClient from "../../src/client/proxy-client.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 
 const SERVER = "http://127.0.0.1:55555";
 const TOKEN = "test-token";
@@ -15,7 +15,7 @@ const AGENT = "OLI-42";
 
 const connect = ProxyClient.connect({ serverUrl: SERVER, token: Redacted.make(TOKEN) });
 
-const unreachable = FakeHttp.respondWith((request) =>
+const unreachable = TestingHttp.respondWith((request) =>
   Effect.fail(
     new HttpClientError.HttpClientError({
       reason: new HttpClientError.TransportError({
@@ -29,7 +29,7 @@ const unreachable = FakeHttp.respondWith((request) =>
 describe("Qemu.reserve happy path", () => {
   it.effect("posts the agent to /reserve and succeeds on 200", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* Qemu.reserve(proxy)(AGENT);
       expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
@@ -41,7 +41,7 @@ describe("Qemu.reserve happy path", () => {
 
   it.effect("posts the pinned server when the mint names one", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const pin = "http://127.0.0.1:55332";
       yield* Qemu.reserve(proxy)(AGENT, undefined, pin);
@@ -51,7 +51,7 @@ describe("Qemu.reserve happy path", () => {
 
   it.effect("a resume posts the iso and omits it when the drive is fresh", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const iso = "https://example.com/omarchy.iso";
       yield* Qemu.reserve(proxy)(AGENT, iso);
@@ -63,8 +63,8 @@ describe("Qemu.reserve happy path", () => {
 describe("Qemu.reserve unhappy path", () => {
   it.effect("a 503 is AtCapacity with the guest host's own words", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.respondWith(() =>
-        FakeHttp.json({ error: "at capacity: max-jobs is 4" }, 503),
+      const http = TestingHttp.respondWith(() =>
+        TestingHttp.json({ error: "at capacity: max-jobs is 4" }, 503),
       );
       const proxy = yield* connect.pipe(Effect.provide(http));
       const error = yield* Effect.flip(Qemu.reserve(proxy)(AGENT));
@@ -78,8 +78,8 @@ describe("Qemu.reserve unhappy path", () => {
 
   it.effect("a 409 is SetupNeeded and is not reported as an internal failure", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.respondWith(() =>
-        FakeHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
+      const http = TestingHttp.respondWith(() =>
+        TestingHttp.json({ error: "setup needed: http://10.0.0.6:42069 max-jobs is 4" }, 409),
       );
       const proxy = yield* connect.pipe(Effect.provide(http));
       const error = yield* Effect.flip(Qemu.reserve(proxy)(AGENT));
@@ -93,7 +93,9 @@ describe("Qemu.reserve unhappy path", () => {
 
   it.effect("any other refusal is Internal carrying the refusal", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.respondWith(() => FakeHttp.json({ error: "already reserved" }, 400));
+      const http = TestingHttp.respondWith(() =>
+        TestingHttp.json({ error: "already reserved" }, 400),
+      );
       const proxy = yield* connect.pipe(Effect.provide(http));
       const error = yield* Effect.flip(Qemu.reserve(proxy)(AGENT));
       expect(error).toMatchObject({ _tag: "Internal", agentId: AGENT });
@@ -117,7 +119,7 @@ describe("Qemu.reserve unhappy path", () => {
 describe("Qemu.relinquish happy path", () => {
   it.effect("posts the agent to /relinquish and succeeds on 200", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* Qemu.relinquish(proxy)(AGENT);
       expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
@@ -131,7 +133,9 @@ describe("Qemu.relinquish happy path", () => {
   // restarted): there is nothing to give back, which is what relinquish was for.
   it.effect("a 400 no reservation is nothing to give back, and succeeds", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.respondWith(() => FakeHttp.json({ error: "no reservation" }, 400));
+      const http = TestingHttp.respondWith(() =>
+        TestingHttp.json({ error: "no reservation" }, 400),
+      );
       const proxy = yield* connect.pipe(Effect.provide(http));
       yield* Qemu.relinquish(proxy)(AGENT);
     }),
@@ -141,7 +145,9 @@ describe("Qemu.relinquish happy path", () => {
 describe("Qemu.relinquish unhappy path", () => {
   it.effect("a 500 is Internal carrying the refusal", () =>
     Effect.gen(function* () {
-      const http = FakeHttp.respondWith(() => FakeHttp.json({ error: "internal error" }, 500));
+      const http = TestingHttp.respondWith(() =>
+        TestingHttp.json({ error: "internal error" }, 500),
+      );
       const proxy = yield* connect.pipe(Effect.provide(http));
       const error = yield* Effect.flip(Qemu.relinquish(proxy)(AGENT));
       expect(error).toMatchObject({ _tag: "Internal", agentId: AGENT });
@@ -162,7 +168,7 @@ describe("Qemu.relinquish unhappy path", () => {
   // proxy that never answers must not hold every later expiry behind this one.
   it.effect("a proxy that never answers is Internal after ten seconds", () =>
     Effect.gen(function* () {
-      const proxy = yield* connect.pipe(Effect.provide(FakeHttp.never));
+      const proxy = yield* connect.pipe(Effect.provide(TestingHttp.never));
       const pending = yield* Effect.forkChild(Effect.flip(Qemu.relinquish(proxy)(AGENT)));
       yield* Effect.yieldNow;
       expect(pending.pollUnsafe()).toBeUndefined();

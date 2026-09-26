@@ -53,8 +53,6 @@ describe("staged errors, each waiting for its package", () => {
     expect(Errors.QemuStartError.make({ message: "x" })._tag).toBe("QemuStartError");
     expect(Errors.IsoError.make({ message: "x" })._tag).toBe("IsoError");
     expect(Errors.KeysError.make({ message: "x" })._tag).toBe("KeysError");
-    expect(Errors.ProxyRefusal.make({ status: 409, message: "x" })._tag).toBe("ProxyRefusal");
-    expect(Errors.ProxyUnreachable.make({ message: "x", cause: 1 })._tag).toBe("ProxyUnreachable");
     expect(Errors.PngDecodeError.make({ message: "x" })._tag).toBe("PngDecodeError");
     expect(Errors.CliFailed.make({ command: "tool", message: "x" })._tag).toBe("CliFailed");
   });

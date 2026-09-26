@@ -6,7 +6,7 @@ import { TestConsole } from "effect/testing";
 import { CliError, Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import * as SessionCommand from "../../src/session/command.ts";
 import * as State from "../../src/session/state.ts";
 import * as FakeTty from "../support/fake-tty.ts";

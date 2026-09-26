@@ -4,8 +4,8 @@ import { Cause, Effect } from "effect";
 import { TestConsole } from "effect/testing";
 import { CliError } from "effect/unstable/cli";
 import * as EnvErrors from "@oligarchy/env/errors";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as Render from "@oligarchy/log/render";
-import * as Errors from "../../src/shared/errors.ts";
 
 const stderr = Effect.map(TestConsole.errorLines, (lines) => lines.map(String));
 
@@ -38,7 +38,9 @@ describe("the client's render boundary", () => {
 
   it.effect("prints a refusal as its headline, then the pretty cause", () =>
     Effect.gen(function* () {
-      const cause = Cause.fail(Errors.ProxyRefusal.make({ status: 404, message: "no session" }));
+      const cause = Cause.fail(
+        ProxyClient.ProxyRefusal.make({ status: 404, message: "no session" }),
+      );
       yield* Render.reportFailure(cause);
       const lines = yield* stderr;
       expect(lines).toHaveLength(1);
@@ -52,7 +54,7 @@ describe("the client's render boundary", () => {
   it.effect("prints a transport failure as `<METHOD> <url> failed: <cause>`", () =>
     Effect.gen(function* () {
       const cause = Cause.fail(
-        Errors.ProxyUnreachable.make({
+        ProxyClient.ProxyUnreachable.make({
           message: "POST http://127.0.0.1:42069/send-keys failed",
           cause: new Error("connect ECONNREFUSED 127.0.0.1:42069"),
         }),

@@ -4,10 +4,10 @@ import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Redacted, Stream
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
 import * as Render from "@oligarchy/log/render";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as OpenRouter from "../../src/harness/openrouter.ts";
 import type * as History from "../../src/harness/history.ts";
 import type * as Tools from "../../src/harness/tools.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 
 // Synthetic OpenRouter chat-completion frames. The shapes follow the public streaming
 // docs; they are not a captured vendor trace.
@@ -168,7 +168,7 @@ const rendered = (error: { readonly message: string }): string =>
 describe("OpenRouter client", () => {
   it.effect("streams a completion into content and tool calls", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => toolTurn());
+      const recorder = TestingHttp.recordRequests(() => toolTurn());
       const turn = yield* run(recorder.layer);
       expect(turn).toEqual({
         content: "Looking.",
@@ -204,7 +204,7 @@ describe("OpenRouter client", () => {
           ],
         },
       ];
-      const recorder = FakeHttp.recordRequests(() => doneTurn());
+      const recorder = TestingHttp.recordRequests(() => doneTurn());
       yield* run(recorder.layer, { messages: withImage });
       expect(JSON.parse(recorder.requests[0]?.body ?? "").messages).toEqual(withImage);
     }),
@@ -212,7 +212,7 @@ describe("OpenRouter client", () => {
 
   it.effect("returns the model's text when it stops calling tools", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => doneTurn());
+      const recorder = TestingHttp.recordRequests(() => doneTurn());
       const turn = yield* run(recorder.layer);
       expect(turn).toEqual({ content: "Locked.", toolCalls: [] });
     }),
@@ -220,7 +220,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a 4xx is a refused request and is not retried", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => jsonError(400, "Model not found", "30"));
+      const recorder = TestingHttp.recordRequests(() => jsonError(400, "Model not found", "30"));
       const error = yield* Effect.flip(run(recorder.layer));
       expect(error).toMatchObject({
         _tag: "OpenRouterRefusal",
@@ -234,7 +234,7 @@ describe("OpenRouter client", () => {
 
   it.effect("an empty refusal body and a raw body still name the refusal", () =>
     Effect.gen(function* () {
-      const empty = FakeHttp.recordRequests(() => new Response(null, { status: 401 }));
+      const empty = TestingHttp.recordRequests(() => new Response(null, { status: 401 }));
       const missing = yield* Effect.flip(run(empty.layer));
       expect(missing).toMatchObject({
         _tag: "OpenRouterRefusal",
@@ -242,7 +242,7 @@ describe("OpenRouter client", () => {
         message: "request failed",
       });
 
-      const raw = FakeHttp.recordRequests(() => new Response("bad request", { status: 400 }));
+      const raw = TestingHttp.recordRequests(() => new Response("bad request", { status: 400 }));
       const text = yield* Effect.flip(run(raw.layer));
       expect(text).toMatchObject({
         _tag: "OpenRouterRefusal",
@@ -255,7 +255,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a connection failure is an unreachable service", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
@@ -275,7 +275,9 @@ describe("OpenRouter client", () => {
 
   it.effect("the header timeout fails the request before the run ceiling", () =>
     Effect.gen(function* () {
-      const fiber = yield* Effect.forkScoped(run(FakeHttp.never, { header: Duration.minutes(3) }));
+      const fiber = yield* Effect.forkScoped(
+        run(TestingHttp.never, { header: Duration.minutes(3) }),
+      );
       yield* TestClock.adjust("2 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
       yield* TestClock.adjust("1 minute");
@@ -382,7 +384,9 @@ describe("OpenRouter client", () => {
 
   it.effect("a stream that closes before the completion is unreachable", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith(() => sse([frame(choice({ content: "partial" }, null))]));
+      const layer = TestingHttp.respondWith(() =>
+        sse([frame(choice({ content: "partial" }, null))]),
+      );
       const error = yield* Effect.flip(run(layer));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",
@@ -393,7 +397,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a stop with no text is the model ending the turn", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith(() => sse([frame(choice({}, "stop")), "[DONE]"]));
+      const layer = TestingHttp.respondWith(() => sse([frame(choice({}, "stop")), "[DONE]"]));
       const turn = yield* run(layer);
       expect(turn).toEqual({ content: null, toolCalls: [] });
     }),
@@ -401,7 +405,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a stream that is only the done marker is not a completion", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith(() => sse(["[DONE]"]));
+      const layer = TestingHttp.respondWith(() => sse(["[DONE]"]));
       const error = yield* Effect.flip(run(layer));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",
@@ -412,7 +416,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a chunk that is not a completion is unreachable", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith(() => sse(["not-json", "[DONE]"]));
+      const layer = TestingHttp.respondWith(() => sse(["not-json", "[DONE]"]));
       const error = yield* Effect.flip(run(layer));
       expect(error._tag).toBe("OpenRouterUnreachable");
       expect(error.message).toBe("openrouter: invalid response");
@@ -422,7 +426,7 @@ describe("OpenRouter client", () => {
 
   it.effect("retries a 429 after retry-after, and a 500 the same way", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => {
+      const recorder = TestingHttp.recordRequests(() => {
         const seen = recorder.requests.length;
         if (seen === 1) {
           return jsonError(429, "slow down", "30");
@@ -451,7 +455,7 @@ describe("OpenRouter client", () => {
 
   it.effect("does not sleep a retry-after that would pass the run ceiling", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => jsonError(429, "slow down", "7200"));
+      const recorder = TestingHttp.recordRequests(() => jsonError(429, "slow down", "7200"));
       const error = yield* Effect.flip(run(recorder.layer));
       expect(error._tag).toBe("OpenRouterUnreachable");
       expect(error.message).toBe(
@@ -464,7 +468,7 @@ describe("OpenRouter client", () => {
 
   it.effect("waits the configured default when a 429 has no retry-after", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => {
+      const recorder = TestingHttp.recordRequests(() => {
         if (recorder.requests.length === 1) {
           return jsonError(503, "unavailable");
         }
@@ -485,7 +489,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a malformed retry-after waits the configured default", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => {
+      const recorder = TestingHttp.recordRequests(() => {
         if (recorder.requests.length === 1) {
           return jsonError(429, "slow down", "soon");
         }
@@ -505,7 +509,7 @@ describe("OpenRouter client", () => {
 
   it.effect("does not sleep a configured default that would pass the run ceiling", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => jsonError(503, "unavailable"));
+      const recorder = TestingHttp.recordRequests(() => jsonError(503, "unavailable"));
       const error = yield* Effect.flip(run(recorder.layer, { defaultRetry: Duration.hours(2) }));
       expect(error._tag).toBe("OpenRouterUnreachable");
       expect(error.message).toBe(
@@ -517,7 +521,7 @@ describe("OpenRouter client", () => {
 
   it.effect("reads an HTTP-date retry-after from the clock", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => {
+      const recorder = TestingHttp.recordRequests(() => {
         if (recorder.requests.length === 1) {
           return jsonError(429, "slow down", "Thu, 01 Jan 1970 00:00:30 GMT");
         }
@@ -564,7 +568,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a tool call with a negative index is not a completion", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith(() =>
+      const layer = TestingHttp.respondWith(() =>
         sse([
           frame(
             choice(
@@ -589,7 +593,7 @@ describe("OpenRouter client", () => {
 
   it.effect("a provider error inside the stream is unreachable and is not a tool call", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith(() =>
+      const layer = TestingHttp.respondWith(() =>
         sse([frame({ error: { message: "Provider returned error", code: 502 } }), "[DONE]"]),
       );
       const error = yield* Effect.flip(run(layer));

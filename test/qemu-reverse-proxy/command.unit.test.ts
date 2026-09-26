@@ -19,7 +19,7 @@ import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Client from "@oligarchy/db/client";
 import * as DbErrors from "@oligarchy/db/errors";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import * as QemuReverseProxyCommand from "../../src/qemu-reverse-proxy/command.ts";
 import * as FakeLog from "../support/log.ts";
 
@@ -58,20 +58,18 @@ const refused = DbErrors.DatabaseError.make({
   cause: new Error("connect ECONNREFUSED 127.0.0.1:1"),
 });
 
-// The server layer and the failure signal the command is built from.
+// The server the command is built from; `serverFailed` is a server error after listen.
 const fakeServer = () => {
   const served: Array<number> = [];
   const listening = Deferred.makeUnsafe<void>();
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: QemuReverseProxyCommand.QemuReverseProxyServer<never> = {
     serve: (port) =>
-      Layer.effectDiscard(
-        Effect.gen(function* () {
-          served.push(port);
-          yield* Deferred.succeed(listening, undefined);
-        }),
-      ),
-    serverFailed,
+      Effect.gen(function* () {
+        served.push(port);
+        yield* Deferred.succeed(listening, undefined);
+        return yield* Deferred.await(serverFailed);
+      }),
   };
   return { served, listening, serverFailed, server };
 };
@@ -226,7 +224,7 @@ describe("qemu reverse proxy command startup failures", () => {
       const fake = fakeServer();
       const failing: QemuReverseProxyCommand.QemuReverseProxyServer<never> = {
         ...fake.server,
-        serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
+        serve: () => Effect.fail(new HttpServerError.ServeError({ cause })),
       };
       const log = FakeLog.fakeLog();
       const error = yield* Effect.flip(run(failing, ["--port", "42070"], log));

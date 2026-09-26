@@ -4,9 +4,9 @@ import { Cause, Effect, Fiber, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError } from "effect/unstable/http";
 import * as Render from "@oligarchy/log/render";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ProxyClient from "../../src/client/proxy-client.ts";
-import * as FakeHttp from "../support/fake-http.ts";
+import * as TestingHttp from "@oligarchy/testing/http-client";
+import * as Contract from "../src/contract.ts";
+import * as ProxyClient from "../src/proxy-client.ts";
 
 const SERVER = "http://127.0.0.1:42069";
 const TOKEN = "test-token";
@@ -15,7 +15,7 @@ const AGENT = "agent-1";
 
 const connect = ProxyClient.connect({ serverUrl: SERVER, token: Redacted.make(TOKEN) });
 
-const ok = () => FakeHttp.json({ ok: "true" });
+const ok = () => TestingHttp.json({ ok: "true" });
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -23,7 +23,7 @@ const encoder = new TextEncoder();
 const parsed = (body: string): unknown => JSON.parse(body);
 
 const expectJsonPost = (
-  recorded: FakeHttp.Recorded | undefined,
+  recorded: TestingHttp.Recorded | undefined,
   path: string,
   body: Record<string, unknown>,
 ) => {
@@ -38,7 +38,7 @@ const expectJsonPost = (
 describe("ProxyClient requests", () => {
   it.effect("sendKeys posts id, keys, encoding and agent with the bearer token", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.sendKeys(
         Contract.SendKeysBody.make({
@@ -60,7 +60,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("reserve posts the agent", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.reserve(Contract.ReserveAgentBody.make({ agent: AGENT }));
       expectJsonPost(recorder.requests[0], "/reserve", { agent: AGENT });
@@ -70,7 +70,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("relinquish posts the agent", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.relinquish(Contract.ReserveAgentBody.make({ agent: AGENT }));
       expectJsonPost(recorder.requests[0], "/relinquish", { agent: AGENT });
@@ -80,8 +80,8 @@ describe("ProxyClient requests", () => {
 
   it.effect("start posts iso and agent and leaves an absent disk out of the body", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ id: "11111111-1111-4111-8111-111111111111" }),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ id: "11111111-1111-4111-8111-111111111111" }),
       );
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const response = yield* proxy.start(
@@ -98,7 +98,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("start posts the disk when given", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ id: "x" }));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ id: "x" }));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.start(
         Contract.StartBody.make({ iso: "/iso/omarchy.iso", disk: "/disk/a.qcow2", agent: AGENT }),
@@ -113,7 +113,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("every mouse method posts its body to its own path", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const point = { id: SESSION, agent: AGENT, x: 0.5, y: 0.25 };
       yield* proxy.mouseMove(Contract.MouseMoveBody.make(point));
@@ -161,7 +161,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("intentStart and intentEnd post their bodies", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.intentStart(
         Contract.IntentStartBody.make({
@@ -184,7 +184,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("stop posts status and reason when given and neither otherwise", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.stop(
         Contract.StopBody.make({
@@ -207,7 +207,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("save posts the session and the agent", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       yield* proxy.save(Contract.SaveBody.make({ id: SESSION, agent: AGENT }));
       expectJsonPost(recorder.requests[0], "/save", { id: SESSION, agent: AGENT });
@@ -217,7 +217,7 @@ describe("ProxyClient requests", () => {
   it.effect("image gets /image?id&agent url-encoded with the token and returns the bytes", () =>
     Effect.gen(function* () {
       const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-      const recorder = FakeHttp.recordRequests(
+      const recorder = TestingHttp.recordRequests(
         () =>
           new Response(png, {
             status: 200,
@@ -239,7 +239,7 @@ describe("ProxyClient requests", () => {
 
   it.effect("serial gets /serial?id&agent and returns the bytes", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(
+      const recorder = TestingHttp.recordRequests(
         () =>
           new Response("boot log\n", { status: 200, headers: { "content-type": "text/plain" } }),
       );
@@ -259,8 +259,8 @@ describe("ProxyClient minted", () => {
 
   it.effect("gets /minted?iso url-encoded with the token and decodes every server's state", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({
           iso: ISO,
           servers: [
             { url: "http://10.0.0.5:42069", state: "minted" },
@@ -290,7 +290,9 @@ describe("ProxyClient minted", () => {
 
   it.effect("a refused bearer is ProxyRefusal 401 with the body's error (unhappy)", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ error: "unauthorized" }, 401));
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "unauthorized" }, 401),
+      );
       const error = yield* Effect.flip(
         ProxyClient.minted(options, ISO).pipe(Effect.provide(recorder.layer)),
       );
@@ -302,7 +304,7 @@ describe("ProxyClient minted", () => {
     "a 200 without the MintedServers shape is ProxyUnreachable naming the request (unhappy)",
     () =>
       Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ ok: "true" }));
+        const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ ok: "true" }));
         const error = yield* Effect.flip(
           ProxyClient.minted(options, ISO).pipe(Effect.provide(recorder.layer)),
         );
@@ -315,7 +317,7 @@ describe("ProxyClient minted", () => {
 
   it.effect("a refused connection is ProxyUnreachable with the url and its query (unhappy)", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
@@ -339,8 +341,8 @@ describe("ProxyClient minted", () => {
 describe("ProxyClient refusals", () => {
   it.effect("a declared error status decodes the body's error as the message", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: `unknown session "${SESSION}"` }, 404),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: `unknown session "${SESSION}"` }, 404),
       );
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const error = yield* Effect.flip(
@@ -357,7 +359,7 @@ describe("ProxyClient refusals", () => {
 
   it.effect('an undeclared error status still reads {"error"} from the body', () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ error: "boom" }, 409));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ error: "boom" }, 409));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const error = yield* Effect.flip(
         proxy.sendKeys(Contract.SendKeysBody.make({ id: SESSION, keys: "x", agent: AGENT })),
@@ -368,7 +370,7 @@ describe("ProxyClient refusals", () => {
 
   it.effect("a non-JSON body is the message raw", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(
+      const recorder = TestingHttp.recordRequests(
         () =>
           new Response("Bad Gateway", { status: 500, headers: { "content-type": "text/html" } }),
       );
@@ -380,7 +382,7 @@ describe("ProxyClient refusals", () => {
 
   it.effect("an empty body reads `request failed`", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() => new Response(null, { status: 500 }));
+      const recorder = TestingHttp.recordRequests(() => new Response(null, { status: 500 }));
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const error = yield* Effect.flip(proxy.serial(SESSION, AGENT));
       expect(error).toMatchObject({ _tag: "ProxyRefusal", status: 500, message: "request failed" });
@@ -391,7 +393,7 @@ describe("ProxyClient refusals", () => {
 describe("ProxyClient transport", () => {
   it.effect("a refused connection is ProxyUnreachable with `<METHOD> <url> failed: <cause>`", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
@@ -416,7 +418,7 @@ describe("ProxyClient transport", () => {
 
   it.effect("a refused GET names the full url with its query", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
@@ -438,7 +440,7 @@ describe("ProxyClient transport", () => {
 describe("ProxyClient start ceiling", () => {
   it.effect("start is still waiting after 44 minutes and fails at 45", () =>
     Effect.gen(function* () {
-      const proxy = yield* connect.pipe(Effect.provide(FakeHttp.never));
+      const proxy = yield* connect.pipe(Effect.provide(TestingHttp.never));
       const fiber = yield* Effect.forkScoped(
         proxy.start(Contract.StartBody.make({ iso: "https://example.com/x.iso", agent: AGENT })),
       );
@@ -456,7 +458,7 @@ describe("ProxyClient start ceiling", () => {
 
   it.effect("the other calls have no ceiling of their own at 45 minutes", () =>
     Effect.gen(function* () {
-      const proxy = yield* connect.pipe(Effect.provide(FakeHttp.never));
+      const proxy = yield* connect.pipe(Effect.provide(TestingHttp.never));
       const fiber = yield* Effect.forkScoped(proxy.serial(SESSION, AGENT));
       yield* TestClock.adjust("46 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
@@ -473,7 +475,7 @@ describe("ProxyClient follow", () => {
         '{"type":"action","id":1,"name":"send-keys","state":"running"}\n',
         '{"type":"session","status":"succeeded"}\n',
       ];
-      const recorder = FakeHttp.recordRequests(
+      const recorder = TestingHttp.recordRequests(
         () =>
           new Response(
             new ReadableStream<Uint8Array>({
@@ -499,8 +501,8 @@ describe("ProxyClient follow", () => {
 
   it.effect("fails ProxyRefusal on a 409 before yielding any bytes", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: `session "${SESSION}" has already completed (succeeded)` }, 409),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: `session "${SESSION}" has already completed (succeeded)` }, 409),
       );
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const error = yield* Effect.flip(proxy.follow(SESSION));
@@ -514,7 +516,7 @@ describe("ProxyClient follow", () => {
 
   it.effect("a follow whose connection is refused is ProxyUnreachable", () =>
     Effect.gen(function* () {
-      const layer = FakeHttp.respondWith((request) =>
+      const layer = TestingHttp.respondWith((request) =>
         Effect.fail(
           new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({

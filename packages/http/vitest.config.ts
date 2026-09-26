@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    name: "routes",
+    name: "http",
     environment: "node",
     include: ["test/**/*.unit.test.ts"],
     passWithNoTests: false,

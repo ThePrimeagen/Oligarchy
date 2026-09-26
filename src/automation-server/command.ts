@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
@@ -14,14 +14,13 @@ import * as SharedErrors from "@oligarchy/shared/errors";
 // The port the operator's tunnel points at; nothing else of ours is near it.
 const DEFAULT_PORT = 54321;
 
-// What main.ts hands the command: the listener as a layer for its port, the models oligarchy.json
-// names, and the signal a server error raises after listen.
+// What main.ts hands the command: the server for its port and the models oligarchy.json names,
+// serving until it is stopped or fails.
 export type AutomationServer<RServe> = {
   readonly serve: (
     port: number,
     models: Oligarchy.AppConfig["models"],
-  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
-  readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
+  ) => Effect.Effect<never, HttpServerError.ServeError, RServe>;
 };
 
 type StartupError = DbErrors.DatabaseError | SharedErrors.CommandError | HttpServerError.ServeError;
@@ -56,10 +55,7 @@ export const makeAutomationServerCommand = <RServe>(server: AutomationServer<RSe
               }),
             ),
           );
-          return yield* Effect.raceFirst(
-            Layer.launch(server.serve(port, config.models)),
-            Deferred.await(server.serverFailed),
-          );
+          return yield* server.serve(port, config.models);
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>

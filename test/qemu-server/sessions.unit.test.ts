@@ -20,8 +20,8 @@ import {
 import { TestClock } from "effect/testing";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Log from "@oligarchy/log/log";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as Contract from "@oligarchy/http/contract";
+import * as ApiErrors from "@oligarchy/http/errors";
 import * as Domain from "@oligarchy/shared/domain";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
 import type * as Qemu from "../../src/qemu/qemu.ts";

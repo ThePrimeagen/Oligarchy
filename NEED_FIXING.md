@@ -110,7 +110,7 @@ on the cause (the same shape `packages/log/src/external-failure.ts` uses) and up
   the `automation-client` location bucket `packages/log/src/log.ts` added.
 - `MAX_CLICKS = 100` in `src/qemu-server/sessions.ts` is repeated as the literal `100` in
   `src/client/flags.ts` (`clicks`), so the flag and the server can drift.
-- `packages/routes/src/api.ts` `unregister` declares `Errors.NotFoundWire` on the endpoint while its group's
+- `packages/http/src/api.ts` `unregister` declares `Errors.NotFoundWire` on the endpoint while its group's
   `RouteBoundary` already declares it; one of the two is redundant.
 
 ## 9. Duplication that will drift
@@ -126,7 +126,7 @@ logic in files that change independently:
 - `packages/jobs/src/templates.ts` (`src/ctrl/prompts.ts` until phase 8) and
   `src/automation-server/prompts.ts` repeat `read`, `fill` and `render`.
 - `src/automation-server/client.ts` repeats the same twelve-line `HttpClientError` catch in
-  `reserve`, `run` and `abort`; one `run(label, effect)` as `src/client/proxy-client.ts` has is
+  `reserve`, `run` and `abort`; one `run(label, effect)` as `packages/http/src/proxy-client.ts` has is
   what `development.md` prescribes for a client.
 
 ## 10. Job transitions and searches are spread over four processes, and nothing finds what drifted

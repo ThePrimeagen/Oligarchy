@@ -11,11 +11,11 @@ import { Command } from "effect/unstable/cli";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import * as SharedErrors from "@oligarchy/shared/errors";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as DriverCommand from "../../src/driver/command.ts";
 import * as Loop from "../../src/driver/loop.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -111,7 +111,7 @@ const run = (
         Stdio.capture().layer,
         TerminalStub,
         Path.layer,
-        FakeHttp.die,
+        TestingHttp.die,
         Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
           ChildProcessSpawner.make(() => Effect.die("unexpected spawn")),
         ),

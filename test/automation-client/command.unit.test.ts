@@ -19,7 +19,7 @@ import { HttpServerError } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Client from "@oligarchy/db/client";
 import * as DbErrors from "@oligarchy/db/errors";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import * as AutomationClientCommand from "../../src/automation-client/command.ts";
 import * as FakeLog from "../support/log.ts";
 
@@ -54,13 +54,11 @@ const fakeServer = () => {
   const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
   const server: AutomationClientCommand.AutomationClient<never> = {
     serve: (maxJobs, name, port, url) =>
-      Layer.effectDiscard(
-        Effect.gen(function* () {
-          served.push([maxJobs, name, port, url]);
-          yield* Deferred.succeed(listening, undefined);
-        }),
-      ),
-    serverFailed,
+      Effect.gen(function* () {
+        served.push([maxJobs, name, port, url]);
+        yield* Deferred.succeed(listening, undefined);
+        return yield* Deferred.await(serverFailed);
+      }),
   };
   return { served, listening, serverFailed, server };
 };
@@ -373,7 +371,7 @@ describe("automation client command startup failures", () => {
       const fake = fakeServer();
       const failing: AutomationClientCommand.AutomationClient<never> = {
         ...fake.server,
-        serve: () => Layer.effectDiscard(Effect.fail(new HttpServerError.ServeError({ cause }))),
+        serve: () => Effect.fail(new HttpServerError.ServeError({ cause })),
       };
       const log = FakeLog.fakeLog();
       const error = yield* Effect.flip(run(failing, [...REQUIRED, "--port", "54322"], log));

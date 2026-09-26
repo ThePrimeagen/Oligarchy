@@ -1,14 +1,15 @@
 import { Cause, Effect, Layer, Redacted, Schema, type Types } from "effect";
+import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiError from "effect/unstable/httpapi/HttpApiError";
 import * as Config from "@oligarchy/env/config";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Api from "@oligarchy/routes/api";
-import * as ApiErrors from "@oligarchy/routes/errors";
 import * as Domain from "@oligarchy/shared/domain";
+import * as Api from "./api.ts";
+import * as ApiErrors from "./errors.ts";
 
 // Every qemu server, qemu reverse proxy, automation-client, and automation-server /abort
 // route carries `Authorization: Bearer <OLIGARCHY_TOKEN>`; the compare is exact, as it
@@ -171,3 +172,11 @@ export const ApiBoundaryLive: Layer.Layer<Api.ApiBoundary, never, Log.Log> = Lay
 export const RouteBoundaryLive: Layer.Layer<Api.RouteBoundary, never, Log.Log> = Layer.effect(
   Api.RouteBoundary,
 )(Effect.map(boundary, (wrap) => Api.RouteBoundary.of(wrap)));
+
+// Every other method and path: a bare 404 outside the api, so no boundary logs it and no bearer is
+// asked for.
+export const NotFoundRoute = HttpRouter.add(
+  "*",
+  "*",
+  HttpServerResponse.jsonUnsafe({ error: "not found" }, { status: 404 }),
+);

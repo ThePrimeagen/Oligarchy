@@ -7,10 +7,10 @@ import { CliError, Command } from "effect/unstable/cli";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Config from "@oligarchy/env/config";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
+import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as ClientCommand from "../../src/client/command.ts";
 import * as FakeFs from "../support/fake-fs.ts";
-import * as FakeHttp from "../support/fake-http.ts";
 import * as Stdio from "../support/stdio.ts";
 
 const SERVER = "http://127.0.0.1:42069";
@@ -47,7 +47,7 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
     Effect.provide(
       Layer.mergeAll(
         Config.fromValues(options.env ?? { OLIGARCHY_TOKEN: TOKEN }),
-        options.http ?? FakeHttp.die,
+        options.http ?? TestingHttp.die,
         (options.stdio ?? Stdio.capture()).layer,
         options.fs ?? NodeFileSystem.layer,
         NodePath.layer,
@@ -57,9 +57,9 @@ const run = (args: ReadonlyArray<string>, options: Options = {}) =>
     ),
   );
 
-const ok = () => FakeHttp.json({ ok: "true" });
+const ok = () => TestingHttp.json({ ok: "true" });
 
-const startRespond: FakeHttp.Respond = () => FakeHttp.json({ id: ID });
+const startRespond: TestingHttp.Respond = () => TestingHttp.json({ id: ID });
 
 const parsed = (body: string): unknown => JSON.parse(body);
 
@@ -73,7 +73,7 @@ const showHelp = (error: unknown): CliError.ShowHelp => {
 describe("client requests", () => {
   it.effect("send-keys posts the key string with the agent and the default encoding", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["send-keys", ...shared, "--session-id", SESSION, "--keys", "hello"], {
         http: recorder.layer,
       });
@@ -93,7 +93,7 @@ describe("client requests", () => {
 
   it.effect("send-keys sends --encoding as given and accepts --flag=value", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(
         [
           "send-keys",
@@ -116,7 +116,7 @@ describe("client requests", () => {
 
   it.effect("start posts a url iso and the agent, omits the disk, and prints only the id", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(startRespond);
+      const recorder = TestingHttp.recordRequests(startRespond);
       yield* run(["start", ...shared, "--iso", "https://example.com/omarchy.iso"], {
         http: recorder.layer,
       });
@@ -133,8 +133,8 @@ describe("client requests", () => {
 
   it.effect("start without a reservation is a ProxyRefusal and does not print an id", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "no reservation" }, 400),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "no reservation" }, 400),
       );
       const error = yield* Effect.flip(
         run(["start", ...shared, "--iso", "https://example.com/omarchy.iso"], {
@@ -155,7 +155,7 @@ describe("client requests", () => {
 
   it.effect("relinquish posts the agent and prints nothing", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["relinquish", ...shared], { http: recorder.layer });
       expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
         `POST ${SERVER}/relinquish`,
@@ -168,8 +168,8 @@ describe("client requests", () => {
 
   it.effect("relinquish without a reservation is a ProxyRefusal (unhappy)", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "no reservation" }, 400),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "no reservation" }, 400),
       );
       const error = yield* Effect.flip(run(["relinquish", ...shared], { http: recorder.layer }));
       expect(error).toMatchObject({
@@ -191,7 +191,7 @@ describe("client requests", () => {
       const dir = yield* fs.makeTempDirectoryScoped();
       const iso = path.join(dir, "omarchy.iso");
       yield* fs.writeFileString(iso, "iso");
-      const recorder = FakeHttp.recordRequests(startRespond);
+      const recorder = TestingHttp.recordRequests(startRespond);
       yield* run(["start", ...shared, "--iso", iso, "--disk", "relative/disk.qcow2"], {
         http: recorder.layer,
       });
@@ -208,7 +208,7 @@ describe("client requests", () => {
 
   it.effect("start --resume posts mode resume; without it the body carries no mode", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(startRespond);
+      const recorder = TestingHttp.recordRequests(startRespond);
       const iso = "https://example.com/omarchy.iso";
       yield* run(["start", ...shared, "--iso", iso, "--resume"], { http: recorder.layer });
       yield* run(["start", ...shared, "--iso", iso], { http: recorder.layer });
@@ -227,7 +227,7 @@ describe("client requests", () => {
     () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        const recorder = FakeHttp.recordRequests(startRespond);
+        const recorder = TestingHttp.recordRequests(startRespond);
         yield* run(["start", ...shared, "--iso", "gone/omarchy.iso", "--resume"], {
           http: recorder.layer,
         });
@@ -241,7 +241,7 @@ describe("client requests", () => {
 
   it.effect("start --resume with --disk is a UserError that sends nothing", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(startRespond);
+      const recorder = TestingHttp.recordRequests(startRespond);
       const error = yield* Effect.flip(
         run(
           [
@@ -267,7 +267,7 @@ describe("client requests", () => {
 
   it.effect("mouse move posts the point; mouse click posts the point and the button", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const session = ["--session-id", SESSION];
       yield* run(["mouse", "move", ...shared, ...session, "--x", "0", "--y", "1"], {
         http: recorder.layer,
@@ -321,7 +321,7 @@ describe("client requests", () => {
 
   it.effect("mouse scroll, drag, hold and release post their own bodies", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const session = ["--session-id", SESSION];
       yield* run(
         [
@@ -445,7 +445,7 @@ describe("client requests", () => {
 
   it.effect("intent start and intent end post kebab-case flags as the wire's snake_case", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(
         [
           "intent",
@@ -478,7 +478,7 @@ describe("client requests", () => {
 
   it.effect("stop posts the verdict and reason, and a bare stop posts neither", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const base = ["stop", ...shared, "--session-id", SESSION];
       yield* run([...base, "--status", "failed", "--reason", "installer hung"], {
         http: recorder.layer,
@@ -503,7 +503,7 @@ describe("client requests", () => {
 
   it.effect("reserve posts the agent, and the server pin when given, printing nothing", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["reserve", ...shared], { http: recorder.layer });
       yield* run(["reserve", ...shared, "--server", "http://127.0.0.1:55331"], {
         http: recorder.layer,
@@ -523,7 +523,7 @@ describe("client requests", () => {
 
   it.effect("reserve refuses a --server that is not an http(s) url before any request", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const error = yield* Effect.flip(
         run(["reserve", ...shared, "--server", "qemu-a:55331"], { http: recorder.layer }),
       );
@@ -534,8 +534,8 @@ describe("client requests", () => {
 
   it.effect("a reserve the proxy refuses is its refusal", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: "no server http://127.0.0.1:1" }, 404),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: "no server http://127.0.0.1:1" }, 404),
       );
       const error = yield* Effect.flip(
         run(["reserve", ...shared, "--server", "http://127.0.0.1:1"], { http: recorder.layer }),
@@ -550,7 +550,7 @@ describe("client requests", () => {
 
   it.effect("save posts the session and the agent and prints saved", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["save", ...shared, "--session-id", SESSION], { http: recorder.layer });
       expect(recorder.requests[0]?.url).toBe(`${SERVER}/save`);
       expect(parsed(recorder.requests[0]?.body ?? "")).toEqual({ id: SESSION, agent: AGENT });
@@ -560,7 +560,7 @@ describe("client requests", () => {
 
   it.effect("save without --session-id is a usage error that sends nothing", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const error = yield* Effect.flip(run(["save", ...shared], { http: recorder.layer }));
       expect(showHelp(error).errors).toMatchObject([
         { _tag: "MissingOption", option: "session-id" },
@@ -574,7 +574,7 @@ describe("client requests", () => {
   it.effect("a save the server fails is its refusal, and nothing prints saved", () =>
     Effect.gen(function* () {
       const message = "guest did not power off within 2 minutes";
-      const recorder = FakeHttp.recordRequests(() => FakeHttp.json({ error: message }, 502));
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ error: message }, 502));
       const error = yield* Effect.flip(
         run(["save", ...shared, "--session-id", SESSION], { http: recorder.layer }),
       );
@@ -587,7 +587,7 @@ describe("client requests", () => {
     "stop rejects a verdict outside succeeded|failed|aborted|completed, errored included",
     () =>
       Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(ok);
+        const recorder = TestingHttp.recordRequests(ok);
         for (const status of ["done", "errored"]) {
           const error = yield* Effect.flip(
             run(["stop", ...shared, "--session-id", SESSION, "--status", status], {
@@ -618,7 +618,7 @@ describe("client output", () => {
       const path = yield* Path.Path;
       const dir = yield* fs.makeTempDirectoryScoped();
       const output = path.join(dir, "shot.png");
-      const recorder = FakeHttp.recordRequests(image);
+      const recorder = TestingHttp.recordRequests(image);
       const stdio = Stdio.capture();
       yield* run(["get-image", ...shared, "--session-id", SESSION, "-o", output], {
         http: recorder.layer,
@@ -641,7 +641,7 @@ describe("client output", () => {
       const dir = yield* fs.makeTempDirectoryScoped();
       const output = path.join(dir, "shot.png");
       yield* run(["get-image", ...shared, "--session-id", SESSION, "--output", output], {
-        http: FakeHttp.respondWith(image),
+        http: TestingHttp.respondWith(image),
       });
       expect([...(yield* fs.readFile(output))]).toEqual([...png]);
     }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer))),
@@ -651,7 +651,7 @@ describe("client output", () => {
     Effect.gen(function* () {
       const stdio = Stdio.capture();
       yield* run(["get-image", ...shared, "--session-id", SESSION], {
-        http: FakeHttp.respondWith(image),
+        http: TestingHttp.respondWith(image),
         stdio,
       });
       expect(stdio.stdout).toHaveLength(1);
@@ -666,7 +666,7 @@ describe("client output", () => {
       const path = yield* Path.Path;
       const dir = yield* fs.makeTempDirectoryScoped();
       const output = path.join(dir, "serial.log");
-      const recorder = FakeHttp.recordRequests(
+      const recorder = TestingHttp.recordRequests(
         () =>
           new Response("boot log\n", { status: 200, headers: { "content-type": "text/plain" } }),
       );
@@ -693,7 +693,7 @@ describe("client output", () => {
         '{"type":"session","status":"succeeded"}\n',
       ];
       const encoder = new TextEncoder();
-      const recorder = FakeHttp.recordRequests(
+      const recorder = TestingHttp.recordRequests(
         () =>
           new Response(
             new ReadableStream<Uint8Array>({
@@ -718,8 +718,8 @@ describe("client output", () => {
 
   it.effect("follow fails with the proxy's refusal and writes nothing", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(() =>
-        FakeHttp.json({ error: `session "${SESSION}" has already completed (succeeded)` }, 409),
+      const recorder = TestingHttp.recordRequests(() =>
+        TestingHttp.json({ error: `session "${SESSION}" has already completed (succeeded)` }, 409),
       );
       const stdio = Stdio.capture();
       const error = yield* Effect.flip(
@@ -739,7 +739,9 @@ describe("client output", () => {
     Effect.gen(function* () {
       const error = yield* Effect.flip(
         run(["send-keys", ...shared, "--session-id", SESSION, "--keys", "hello"], {
-          http: FakeHttp.respondWith(() => FakeHttp.json({ error: "no session session-1" }, 404)),
+          http: TestingHttp.respondWith(() =>
+            TestingHttp.json({ error: "no session session-1" }, 404),
+          ),
         }),
       );
       expect(error).toMatchObject({
@@ -837,7 +839,7 @@ describe("client parse failures", () => {
     "--env-file is accepted and the request still uses the process environment (happy)",
     () =>
       Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(ok);
+        const recorder = TestingHttp.recordRequests(ok);
         yield* run(["relinquish", ...shared, "--env-file", ".prod-env"], { http: recorder.layer });
         expect(recorder.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
           `POST ${SERVER}/relinquish`,
@@ -849,7 +851,7 @@ describe("client parse failures", () => {
 
   it.effect("--env-file without a path is a usage error and makes no request (unhappy)", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const error = yield* Effect.flip(
         run(["relinquish", ...shared, "--env-file"], { http: recorder.layer }),
       );
@@ -915,7 +917,7 @@ describe("client parse failures", () => {
 
   it.effect("a mouse coordinate outside 0..1 is refused before any request", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const error = yield* Effect.flip(
         run(["mouse", "click", ...shared, "--session-id", SESSION, "--x", "2", "--y", "0.5"], {
           http: recorder.layer,
@@ -932,7 +934,7 @@ describe("client parse failures", () => {
 
   it.effect("mouse scroll --ticks outside 1..100 is refused before any request", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const error = yield* Effect.flip(
         run(
           [
@@ -966,7 +968,7 @@ describe("client parse failures", () => {
     "mouse drag --to-x outside 0..1, a missing --to-y and an unknown --modifier are refused before any request",
     () =>
       Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(ok);
+        const recorder = TestingHttp.recordRequests(ok);
         const drag = [
           "mouse",
           "drag",
@@ -1021,7 +1023,7 @@ describe("client local checks", () => {
     "start with a missing local iso is a CommandError with the ENOENT message before any request",
     () =>
       Effect.gen(function* () {
-        const recorder = FakeHttp.recordRequests(ok);
+        const recorder = TestingHttp.recordRequests(ok);
         const error = yield* Effect.flip(
           run(["start", ...shared, "--iso", "missing.iso"], { http: recorder.layer }),
         );
@@ -1035,7 +1037,7 @@ describe("client local checks", () => {
 
   it.effect("start defaults --iso to omarchy.iso in the working directory", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const fs = FileSystem.layerNoop({
         stat: (path) => Effect.fail(FakeFs.notFound("stat", path)),
       });
@@ -1050,7 +1052,7 @@ describe("client local checks", () => {
 
   it.effect("a missing OLIGARCHY_TOKEN fails before any request, even before the iso check", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       const keys = yield* Effect.flip(
         run(["send-keys", ...shared, "--session-id", SESSION, "--keys", "hello"], {
           env: {},
@@ -1076,7 +1078,7 @@ describe("client local checks", () => {
 describe("client server url", () => {
   it.effect("takes SERVER_URL when --server-url is omitted", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["send-keys", "--agent-id", AGENT, "--session-id", SESSION, "--keys", "hello"], {
         env: { OLIGARCHY_TOKEN: TOKEN, SERVER_URL: "http://proxy.test:1234" },
         http: recorder.layer,
@@ -1087,7 +1089,7 @@ describe("client server url", () => {
 
   it.effect("falls back to the default when SERVER_URL is empty", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["send-keys", "--agent-id", AGENT, "--session-id", SESSION, "--keys", "hello"], {
         env: { OLIGARCHY_TOKEN: TOKEN, SERVER_URL: "" },
         http: recorder.layer,
@@ -1098,7 +1100,7 @@ describe("client server url", () => {
 
   it.effect("the flag beats the environment", () =>
     Effect.gen(function* () {
-      const recorder = FakeHttp.recordRequests(ok);
+      const recorder = TestingHttp.recordRequests(ok);
       yield* run(["send-keys", ...shared, "--session-id", SESSION, "--keys", "hello"], {
         env: { OLIGARCHY_TOKEN: TOKEN, SERVER_URL: "http://proxy.test:1234" },
         http: recorder.layer,

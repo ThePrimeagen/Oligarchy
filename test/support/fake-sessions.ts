@@ -9,8 +9,8 @@ import {
   Stream,
   type Tracer,
 } from "effect";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as Contract from "@oligarchy/http/contract";
+import * as ApiErrors from "@oligarchy/http/errors";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Sessions from "../../src/qemu-server/sessions.ts";
 

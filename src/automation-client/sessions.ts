@@ -15,7 +15,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as ApiErrors from "@oligarchy/http/errors";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Child from "./child.ts";
 import * as Driver from "./driver.ts";

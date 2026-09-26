@@ -8,11 +8,10 @@ import * as Board from "@oligarchy/jobs/board";
 import * as Find from "@oligarchy/jobs/find";
 import * as Ready from "@oligarchy/jobs/ready";
 import * as Log from "@oligarchy/log/log";
-import * as Api from "@oligarchy/routes/api";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
-import * as QemuServerHandlers from "../qemu-server/handlers.ts";
-import * as Middleware from "../qemu-server/middleware.ts";
+import * as Api from "@oligarchy/http/api";
+import * as Contract from "@oligarchy/http/contract";
+import * as ApiErrors from "@oligarchy/http/errors";
+import * as Middleware from "@oligarchy/http/middleware";
 import * as Errors from "../shared/errors.ts";
 import * as AbortWait from "./abort-wait.ts";
 import * as AutomationClient from "./client.ts";
@@ -205,5 +204,5 @@ export const routes = Layer.mergeAll(
     Layer.provide(AbortLive),
     Layer.provide(Layer.mergeAll(BearerAuthLive, Middleware.ApiBoundaryLive)),
   ),
-  QemuServerHandlers.NotFoundRoute,
+  Middleware.NotFoundRoute,
 );
