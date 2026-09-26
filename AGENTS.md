@@ -1,6 +1,8 @@
 Two kinds of agent work here.
 
-- A developing agent changes the code. Read [development.md](development.md). A UI test asserts
+- A developing agent changes the code. Read [development.md](development.md). v2, the Effect-free
+  workspace under `v2/`, follows [v2/development.md](v2/development.md) instead, and does not import
+  Effect. A UI test asserts
   business logic only. Never add a presentational test: one that fails because a font, a size, a
   color, spacing, CSS, an icon, or the visual order of page chrome changed. Those test nothing
   real. What a page shows, what a search finds, and what a control does are the logic. Finding,
