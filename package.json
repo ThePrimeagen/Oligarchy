@@ -4,8 +4,7 @@
   "bin": {
     "client": "src/client/main.ts",
     "driver": "src/driver/main.ts",
-    "session": "src/session/main.ts",
-    "viz": "src/viz/main.ts"
+    "session": "src/session/main.ts"
   },
   "workspaces": {
     "packages": [

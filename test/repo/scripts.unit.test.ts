@@ -105,6 +105,13 @@ const unregistered = (input: {
   return [...names].filter((name) => !(name in PROCESSES)).sort();
 };
 
+const binProblems = (dir: string, bins: Readonly<Record<string, string>>): ReadonlyArray<string> =>
+  Object.entries(bins).flatMap(([name, path]) => {
+    const target = join(dir, path);
+    const entry = PROCESSES[name]?.entry;
+    return target === entry ? [] : [`${name} -> ${target} is not ${entry ?? "a registered entry"}`];
+  });
+
 const rootWrappers = (): Readonly<Record<string, string>> =>
   Object.fromEntries(
     readdirSync(root, { withFileTypes: true })
@@ -127,10 +134,26 @@ describe("package.json scripts", () => {
     expect(unregistered({ bin, scripts, wrappers: rootWrappers() })).toEqual([]);
   });
 
-  // An app's command is its own: its bin lives in its package.json and names its own entry.
-  it("ctrl's bin is the app's own, naming apps/ctrl's entry, and the root has none (happy)", () => {
-    expect(rootBin.ctrl).toBeUndefined();
-    expect(decodePackageJson(read("apps/ctrl/package.json")).bin).toEqual({ ctrl: "src/main.ts" });
+  // An app's command is its own: its bin lives in its package.json. Every bin, the root's or an
+  // app's, names the entry PROCESSES gives that process, from its own package's directory.
+  it("every bin names its process's entry from its own package (happy)", () => {
+    expect(binProblems(".", rootBin)).toEqual([]);
+    for (const dir of WORKSPACES) {
+      expect(
+        binProblems(dir, decodePackageJson(read(`${dir}/package.json`)).bin ?? {}),
+        dir,
+      ).toEqual([]);
+    }
+    expect(Object.keys(rootBin).toSorted()).toEqual(["client", "driver", "session"]);
+  });
+
+  it("names a bin that points at another file, or at an app's entry from the root (unhappy)", () => {
+    expect(binProblems(".", { viz: "src/viz/main.ts", client: "src/client/main.ts" })).toEqual([
+      "viz -> src/viz/main.ts is not apps/viz/src/main.ts",
+    ]);
+    expect(binProblems("apps/ctrl", { ctrl: "src/cli.ts" })).toEqual([
+      "ctrl -> apps/ctrl/src/cli.ts is not apps/ctrl/src/main.ts",
+    ]);
   });
 
   it("names a bin, an entry script or a wrapper that PROCESSES does not know (unhappy)", () => {

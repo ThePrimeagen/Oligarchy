@@ -1,6 +1,9 @@
 {
   "name": "@oligarchy/viz",
   "private": true,
+  "bin": {
+    "viz": "src/main.ts"
+  },
   "type": "module",
   "exports": {},
   "scripts": {

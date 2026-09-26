@@ -975,7 +975,9 @@ What phase 10 decided that the checklist left open, and what it found:
       `@types/babel__core` in its `package.json`. Add `terminal.ts` with `speaksKitty`, viz's own
       copy of the four-line predicate in `session/image.ts`; `image.ts` stays with `session`.
 - [x] Drop `jsx` and `jsxImportSource` from the root tsconfig, and both JSX plugins from the root
-      `vitest.config.ts`. Remove the moved dependencies from the root `package.json`.
+      `vitest.config.ts`. Remove the moved dependencies from the root `package.json`. (The Solid
+      plugin and the dependencies went; hono's JSX settings and the text-module loader stay until
+      phase 12 moves the dashboard's system test; see the notes below.)
 - [x] Move ctrl into `apps/ctrl/` (`main.ts`, `command.ts`, `render.ts`), with the instrument
       preload from `@oligarchy/observability` in its script and wrapper. Its `bin` entry moves to
       the app's `package.json`. The agent docs it reads (`ctrl.md`, `ctrl-linear.md`,
@@ -991,9 +993,11 @@ What phase 11 decided that the checklist left open, and what it found:
   `@sentry/cloudflare`, wrangler, `@oligarchy/fleet`, `@oligarchy/jobs`) and dev-depends on
   `@oligarchy/dashboard` for the one system test that imports the Worker entry, until phase 12
   moves that test.
-- The root tsconfig keeps hono's JSX settings and names `apps/dashboard/src/text-modules.d.ts`,
-  for the same reason: `dashboard.integration.test.ts` imports `@oligarchy/dashboard/worker`, and
-  the root type-checks it until phase 12. Both JSX plugins left the root vitest config.
+- Not done yet, and left for phase 12 on purpose: the root tsconfig keeps hono's JSX settings and
+  names `apps/dashboard/src/text-modules.d.ts`, and the root vitest config keeps the text-module
+  loader, because `dashboard.integration.test.ts` imports `@oligarchy/dashboard/worker` (which
+  imports the ticket template as a string) and runs in the root until phase 12. The Solid babel
+  plugin, the one JSX plugin, left the root vitest config.
 - qemu-server keeps `src/qemu/` and `src/qmp/` as directories inside the app, so their tests
   keep `test/qemu/` and `test/qmp/` and their relative imports.
 - Each app declares its own errors in `src/errors.ts` (qemu-server the QMP and QEMU errors,
@@ -1024,6 +1028,10 @@ What phase 11 decided that the checklist left open, and what it found:
   new depth (the second was a runtime path, caught by its unit test).
 - `automation-client.integration.test.ts` spells the driver's arguments now (phase 12's item),
   so the root imports nothing from an app's sources.
+- The integration lane, with Docker, QEMU and `OLIGARCHY_REQUIRE_DATABASE=1`: the root's 299
+  passed and the two that fail on `master` too (NEED_FIXING item 11) failed the same way; every
+  process test started its app from `apps/<name>/src/main.ts` through its wrapper. qemu-server's
+  own lane (its QEMU process and QMP socket tests, twenty) and fleet's passed.
 - `follow.tsx` already took `stepsOf` and `placeOf` from `@oligarchy/shared/steps` (phase 2); the
   follow test needed no change. The ctrl command test keeps `TestingLinear`, the shared fake four
   apps and jobs use.
