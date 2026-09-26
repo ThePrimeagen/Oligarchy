@@ -331,21 +331,30 @@ container and stay in the root's integration project until phase 12.
       exercise `openRun` to `packages/jobs/test/open.unit.test.ts`. Happy: `Jobs.open` for the
       suite creates one run, one result per definition but mint in its newest wording, one
       ticket each, sets each result's Linear id, and returns the run and its tickets; for one
-      name it creates one; nothing is printed. Unhappy: a ticket that fails rolls the run back
-      (`failRun`) and fails with the cause; an unknown name is refused. The ctrl command test
+      name it creates one; nothing is printed. Unhappy: a ticket that fails fails the run and
+      every result with the reason, naming the tickets created (`failRun`), and fails with the
+      cause; a run that will not take that failure is a line and the cause still goes on; an
+      unknown name is refused. The ctrl command test
       keeps one case per command proving it calls `Jobs.open` with its flags and prints what came
       back as JSON.
 - [x] TEST (new) `packages/jobs/test/open.unit.test.ts`: `Jobs.openMint` (from the proxy's
       `setup.ts`) creates the mint result and its ticket from the mint template. Unhappy: a
       second mint for the same setup is refused by the store and files no ticket.
+- [x] TEST (new, from review) `packages/jobs/test/open.unit.test.ts`: `Open.openMints` opens one
+      pinned run, result and ticket per server with the team asked for once, and nothing for no
+      servers. Unhappy: Linear refusing the team opens no run (for `openMint` too); a failure on
+      the second server fails that run and names the ticket before it; a description that fails
+      names the ticket left in Backlog and reaches no later server. ctrl's `mint` keeps its happy
+      case, its refusals and one failure case.
 - [x] TEST (move) the `closeJob`, `reportErrored`, `moveTicket` and `reportDiagnosis` cases of
       `test/automation-server/worker.unit.test.ts` to `packages/jobs/test/close.unit.test.ts`.
       Happy: `Jobs.close(action, outcome)` finishes the row, then moves the ticket to Succeeded,
       Failed or Needs Review by the outcome, and answers true when this call closed it;
-      `Jobs.fail(action, reason)` errors the result (not for a diagnose), then moves the ticket
-      to Errored with `<action> errored; <reason>`. Unhappy: a row write that fails three times is
-      one line and the ticket still moves; a ticket that will not move after three attempts is
-      one line and the row stays closed; a second `close` of a closed row answers false and moves
+      `Jobs.fail(action, ticket, reason)` errors the result (not for a diagnose), then moves the
+      ticket to Errored with `<action> errored; <reason>`. Unhappy: a `close` whose row write fails
+      three times is one line, answers false and moves nothing; a `fail` whose result write fails
+      three times is one line and the ticket still moves; a ticket that will not move after three
+      attempts is one line and the row stays closed; a second `close` of a closed row answers false and moves
       nothing (a board that will not move does not reopen a job); an action without a ticket
       writes the row and moves nothing.
 - [x] TEST (move) `test/automation-server/ready.unit.test.ts` to `packages/jobs/test/ready.unit.test.ts`:
@@ -356,8 +365,8 @@ container and stay in the root's integration project until phase 12.
       Happy: Automation Needed is a drive, unless the result is the mint definition, then a mint;
       Needs Review is a diagnose; `Jobs.enqueue(ticket)` inserts the pending action for the
       ticket's result. Unhappy: a ticket without a result is not a job; a second insert for the
-      same (result, action) is named by the status the unique index kept; any other column is
-      no action. The automation-server tests keep one case each that the watch loop and the
+      same (result, action) is named by the status the unique index kept; any other column asks
+      nothing (`Board.asks`), before any lookup. The automation-server tests keep one case each that the watch loop and the
       webhook handler call these.
 - [x] TEST (new) `packages/jobs/test/abort.unit.test.ts`: `Jobs.abort(ticket, action)` aborts the
       pending action row and moves the ticket to Aborted, in that order. Unhappy: no pending
@@ -771,8 +780,9 @@ Decided while working the phase:
   worker: its row write, retries and lines are pinned by the worker tests, and only its
   ticket half goes through `Close.fail`.
 - `Find.isDiagnosable` is `Find.diagnosable`, which answers `ready`, `held` (the drive or mint is
-  still pending or running) or `never` with the reason, because the watch and the webhook each
-  treat the three differently; a boolean would have made each ask again.
+  still pending or running) or `never` with the reason, because its one caller, the worker's
+  `place`, treats the three differently: ready dispatches the diagnose, held leaves it pending,
+  never closes it aborted with the reason. A boolean would have made it ask again.
 - `Find.inherited()` lists every running row, not only another server's: it runs once at
   startup, before this server dispatches anything, so no running row can be its own, and
   `automation_jobs.server_id` names the automation client, not the server.
@@ -792,11 +802,22 @@ Decided while working the phase:
   refused by the setup store's insert before `openMint` runs, which stays the proxy's and its
   test's. The proxy no longer writes the result's pin itself: `openMint` pins it before the
   ticket reaches Automation Needed, once.
-- `ctrl mint`, one run over many servers, keeps building its run and uses `Open.mintDefinition`,
-  `Open.team`, `Open.ticket` and `Open.failRun` rather than calling `openMint` once per server,
-  which would have been one run per server. ctrl's other store calls (`test start`,
-  `test-results`, the session and automation reads) are the driver's and the operator's
-  commands, not transitions of a job's row and ticket together.
+- `ctrl mint` opens through `Open.openMints({ iso, serverUrl, definition, servers })`: one run
+  per server, as it made before, the team asked for once, each server's job and ticket through
+  the private `mintJob` that `openMint` uses too, with a pin that writes nothing (ctrl has no
+  setup row). ctrl still reads the definition first and the fleet second, so both refusals come
+  before any run. `team`, `ticket`, `failRun` and `withReason` stay private to `open.ts`.
+  ctrl's other store calls (`test start`, `test-results`, the session and automation reads) are
+  the driver's and the operator's commands, not transitions of a job's row and ticket together.
+- `openMint` asks for the team before it creates the run, as `openMints` does, so Linear
+  refusing the team leaves no failed run behind. `open` still creates its run first and fails
+  it on that refusal: its tests pin that the suite's rows say why.
+- A run that will not take its failure (`failRun`'s write refused) is `failRun failed; <run>:
+  <detail>`, and the failure that stopped the run is still the one the caller gets, as the
+  proxy had it before; ctrl used to report the write's error instead.
+- The proxy's `setup ticket failed` line names the failure as `openMint` words it (`mint: ...`
+  for a missing definition), and a ticket left in Backlog is `ticket trapped in Backlog`, the
+  same line `open` writes; the proxy test pins both.
 - The worker's `place` still reads `driveFacts` and `resumeIso`: those are dispatch inputs (what
   the automation client is sent), not a search for a job.
 - The dashboard's suite runtime reads `LINEAR_API_TOKEN` and `LINEAR_TEAM` through
@@ -806,7 +827,16 @@ Decided while working the phase:
   (`test/integration/dashboard.integration.test.ts`) and automation-server's in
   `test/automation-server/http.unit.test.ts`, not the files the checklist names; they were
   altered where they were. `POST /suites/abort` still aborts pending rows and moves tickets
-  itself (NEED_FIXING item 10).
+  itself (NEED_FIXING item 10), but no longer moves a ticket whose job automation-server
+  answered 200 to abort: `Abort.running` has already moved it.
+- Aborting a pending diagnose while its ticket's drive still runs moves the ticket to Aborted,
+  as the dashboard's abort did on `master`; the move is automation-server's now.
+- A duplicate enqueue is named by the status the unique index kept, `Board.already`, in the
+  webhook as in the board watch (`drive already running`); the webhook used to say `already
+  queued` whatever it hit. `Board.asks` is a type guard, so `actionFor` only takes a column that
+  asks and always answers an action.
+- A `Close.close` whose row write fails three times is a line naming the status the row should
+  have, and moves no ticket.
 - `@oligarchy/testing` sits above every layer (`TOP` in the architecture test), so any
   dependency on it is an upward edge and only a dev edge is allowed; a dev edge may not loop
   back, so a fake of a package's own store stays in that package's `test/`. The app tests
@@ -1190,38 +1220,43 @@ the one place to get it right.
   names.
 - **Holds:**
   - `open.ts`: `open` (from `ctrl/command.ts`'s `openRun`: the run, one result per definition in
-    its newest wording, one ticket each from the template, `setLinearId`, `failRun` if a ticket
-    fails) and `openMint` (from the proxy's `setup.ts`). Both return what they made and print
-    nothing; `ctrl` prints.
+    its newest wording, one ticket each from the template, `setLinearId`, the run failed with
+    the tickets named if a ticket fails), `openMint` (from the proxy's `setup.ts`) and
+    `openMints` (`ctrl mint`: one mint run per server), the last two over one private `mintJob`.
+    Each returns what it made and prints nothing; `ctrl` prints.
   - `close.ts`: `close(action, outcome)` finishes the row, then moves the ticket to Succeeded,
-    Failed or Needs Review, and answers whether this call closed it; `fail(action, reason)`
-    errors the result (not for a diagnose), then moves the ticket to Errored with
-    `<action> errored; <reason>`; the diagnosis verdict (passed is Succeeded, failed is Failed).
-    From `worker.ts`'s `closeJob`, `reportErrored`, `reportDiagnosis`, `moveTicket`.
-  - `ready.ts`: `ready` (one attempt inside Linear's five-second webhook deadline, a miss is a
+    Failed or Needs Review, and answers whether this call closed it; `fail(action, ticket,
+    reason)` errors the result (not for a diagnose), then moves the ticket to Errored with
+    `<action> errored; <reason>`; `judge(action)`, what a clean driver exit means; the diagnosis
+    verdict (passed is Succeeded, failed is Failed). From `worker.ts`'s `closeJob`,
+    `reportErrored`, `reportDiagnosis`, `moveTicket`.
+  - `ready.ts`: `mark` (one attempt inside Linear's five-second webhook deadline, a miss is a
     line) and `release` (two immediate retries; a closed row is never reopened). From
     `automation-server/ready.ts`.
-  - `board.ts`: `actionFor(column, result)`: Automation Needed is a drive, unless the result is
-    the mint definition, then a mint; Needs Review is a diagnose; anything else is no action.
-    `enqueue(ticket)`: look the result up by ticket, insert the pending action, name a duplicate
-    by the status the unique index kept. Today's three copies (`backlog.ts`, `enqueue.ts`,
-    `webhook.ts`) become one.
-  - `abort.ts`: `abort(ticket, action)`: abort the pending row, then move the ticket to Aborted.
-    Today the dashboard moves the ticket with its own client and closes the row through
+  - `board.ts`: `asks(column)`, whether a column asks anything, before any lookup;
+    `actionFor(column, job)` for a column that asks: Automation Needed is a drive, unless the
+    job is the mint definition, then a mint; Needs Review is a diagnose. `enqueue(job, action)`:
+    insert the pending action, name a duplicate by the status the unique index kept, in the
+    words of `already`. Today's three copies (`backlog.ts`, `enqueue.ts`, `webhook.ts`) become
+    one.
+  - `abort.ts`: `abort(ticket, action)`: abort the pending row, then move the ticket to Aborted;
+    `running(ticket, action)` does the same for a running row its app has stopped. Today the
+    dashboard moves the ticket with its own client and closes the row through
     automation-server's `/abort`: two processes, two clients, one job.
   - `find.ts`: every search for a job or an action, named for what the caller means rather than
-    for the table: `byTicket(identifier)` (the job behind a ticket, or none), `nextPending(skip)`
-    (the next action to dispatch), `running()` (every action in flight), `inherited()` (the
-    running actions this process did not start: the previous automation server's), `status(job,
-    action)`, `hasPending(job, action)`, `isDiagnosable(job)` (a drive or mint that ran to its
-    end and has not been judged). From `worker.ts`'s `diagnosable`, `isOpen` and the
-    `store.nextPending`/`listRunning`/`jobStatus` calls, and `backlog.ts`'s
-    `findResultByLinearId` lookups.
-  - `reclaim.ts`: `reclaim(action)`, from `worker.ts`'s `closeInherited`: an inherited action
-    whose result its driver already closed is judged and closed as the dead server's fiber would
-    have closed it; every other inherited action is failed with `restarted` and its ticket moved
-    to Errored. Stopping the driver at its automation client first is transport and stays in the
-    app: the app calls the client, then `Jobs.reclaim`.
+    for the table: `byTicket(identifier)` (the job behind a ticket, or none), `ofAction(action)`
+    (the job an action belongs to), `nextPending(skip)` (the next action to dispatch),
+    `running(job)` (the one action of that job in flight), `inherited()` (every action running
+    when this process starts: the previous automation server's), `status(job, action)`,
+    `hasPending(job, action)`, `diagnosable(job)` (ready, held while the drive or mint is still
+    pending or running, or never, with the reason) and `isOpen(job)`. From `worker.ts`'s
+    `diagnosable`, `isOpen` and the `store.nextPending`/`listRunning`/`jobStatus` calls, and
+    `backlog.ts`'s `findResultByLinearId` lookups.
+  - `reclaim.ts`: `reclaim(action, stop)`, from `worker.ts`'s `closeInherited`: an inherited
+    action whose result its driver already closed is judged and closed as the dead server's
+    fiber would have closed it; every other inherited action is stopped with the app's `stop`,
+    then errored with `restarted` and its ticket moved to Errored. Stopping the driver at its
+    automation client is transport and stays in the app, which hands it in as `stop`.
   - `templates.ts` (from `ctrl/prompts.ts`, with `PromptError`): the test and mint ticket
     bodies, filled from `prompts/*.html`. A job's ticket text is the job's.
   - **One policy.** Three attempts on a row write, three on a ticket move, one log line per
@@ -1236,12 +1271,14 @@ the one place to get it right.
   (row-and-ticket pairs whose states disagree, actions running for a dead server, tickets in a
   working column with no open action) and the transitions that settle each are `jobs`' to
   offer and the automation server's to schedule.
-- **Used by** ctrl (`open`, `find`), qemu-reverse-proxy (`openMint`), automation-server
-  (`close`, `fail`, `ready`, `release`, `actionFor`, `enqueue`, `abort`, `find`, `reclaim`) and
-  the dashboard (`open`; its abort forwards to automation-server; its read model may adopt
-  `find` later, out of scope here).
-- **Depends on** db (`TestStore`, `AutomationStore`, `ServerStore` for `inherited`), linear,
-  env, log and shared. Not on http: a job never talks to an automation client.
+- **Used by** ctrl (`open`, `openMints`), qemu-reverse-proxy (`openMint`), automation-server
+  (`close`, `fail`, `judge`, `mark`, `asks`, `actionFor`, `enqueue`, `already`, `abort`,
+  `running`, `find`, `reclaim`) and the dashboard (`open`; its abort forwards to
+  automation-server; its read model may adopt `find` later, out of scope here).
+- **Depends on** db (`TestStore`, `AutomationStore`, `SetupRequestStore` for `openMint`'s pin,
+  `ServerStore` for `reclaim`'s client lookup, `SessionStore` and `DiagnosisStore` for the
+  verdict), linear, log and shared. Not on env: every value it needs arrives through a service.
+  Not on http: a job never talks to an automation client.
 - **Admission rule.** A transition of a job (its row and its ticket together), a search for
   jobs or actions, the rule that keeps row and ticket consistent, or the text of its ticket.
   Refused: the transport (HTTP to an automation client: `dispatch`, `place`, `abortAt`, the

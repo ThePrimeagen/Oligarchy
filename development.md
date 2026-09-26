@@ -63,13 +63,16 @@ exist.
   the wrappers, the scripts and the workflow to Bun. Local runs use a local Postgres migrated with
   `bun run db:migrate`, which reads `DATABASE_MIGRATION_URL`, never the app `DATABASE_URL`.
 - The repo is a Bun workspace. The root `package.json` is the main package (every process, the
-  dashboard, the tests); `packages/*` are its libraries, today six: `@oligarchy/shared`, the
+  dashboard, the tests); `packages/*` are its libraries, today nine: `@oligarchy/shared`, the
   vocabulary every process speaks, `@oligarchy/log`, how a failure and a line read as text and
   the service a line is written through (Log, below), `@oligarchy/env`, what a process is given
   from outside and the runner that installs it (Config and Runtime entry, below),
-  `@oligarchy/db`, the whole database (Database and Migrations, below),
+  `@oligarchy/db`, the whole database (Database and Migrations, below), `@oligarchy/linear`,
+  the Linear API, `@oligarchy/jobs`, a job and its actions (both under Layout, below),
   `@oligarchy/observability`, where lines, failures and spans go once written (Log and Sentry,
-  below), and `@oligarchy/routes`, the HTTP contract (HttpApi server, below). A workspace package is source-first: its `exports` map each
+  below), `@oligarchy/routes`, the HTTP contract (HttpApi server, below), and
+  `@oligarchy/testing`, the fakes more than one package's tests use, which nothing but a test
+  may import. A workspace package is source-first: its `exports` map each
   subpath to a `.ts` file, with no build step and no `dist`, because Bun, tsc (`nodenext` reads
   `exports`), vitest and wrangler all load the TypeScript as written. The main package depends on
   it as `"workspace:*"`. A version two packages share (`effect`, `@effect/platform-node`,
@@ -92,9 +95,10 @@ exist.
   `test/repo/architecture.unit.test.ts` reads every `packages/*/package.json` and checks each
   `dependencies` edge against `LAYERS`, the layer number of every package as `monorepo-plan.md`'s
   picture numbers them (`shared` 0 up to the apps at 6; today `@oligarchy/shared` at 0,
-  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` at 3, `@oligarchy/observability`
-  at 4 and `@oligarchy/routes` at 5, holding `http`'s
-  slot). A package missing from the list, an upward
+  `@oligarchy/log` at 1, `@oligarchy/env` at 2, `@oligarchy/db` and `@oligarchy/linear` at 3,
+  `@oligarchy/jobs` and `@oligarchy/observability` at 4 and `@oligarchy/routes` at 5, holding
+  `http`'s slot, with `@oligarchy/testing` at `TOP`, above them all, so only a dev edge may reach
+  it). A package missing from the list, an upward
   edge and a same-layer edge are each
   named, and a loop among listed packages is always one of the last two, so the one check names
   loops too. Why a repo test and not the lint rule alone: a package loop need not contain a file
@@ -207,9 +211,12 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   jobs'. `packages/jobs/src/` is a job and its actions: a job is a test result and its Linear
   ticket, which move together, and an action is one of its `automation_jobs` rows (a drive, mint
   or diagnose). It holds `open.ts` (`open` for `./ctrl test run` and the dashboard's suite,
-  `openMint` for the proxy's setup, `failRun`, `MINT_DEFINITION`), `close.ts` (`close`, `fail`,
+  `openMint` for the proxy's setup, `openMints` for `./ctrl mint`, `mintDefinition`,
+  `MINT_DEFINITION`; a failure fails the run it was opening and names the tickets created, and a
+  run that will not take that failure is a line), `close.ts` (`close`, `fail`,
   `judge`, `moveTicket`: three attempts, then a line, the one retry policy), `ready.ts` (`mark`,
-  `release`), `board.ts` (which column asks for which action: `asks`, `actionFor`, `enqueue`),
+  `release`), `board.ts` (which column asks for which action: `asks`, `actionFor`, `enqueue`,
+  and `already`, the words for a duplicate),
   `abort.ts` (`abort` for a pending action, `running` for one its app already stopped),
   `find.ts` (`byTicket`, `ofAction`, `nextPending`, `running`, `inherited`, `status`,
   `hasPending`, `diagnosable`, `isOpen`), `reclaim.ts` (what a new automation server does with
@@ -256,8 +263,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   closes the row and moves the ticket through `Abort.abort`), and Linear's GraphQL: the suite
   opened above, and `POST /suites/abort`, which moves each aborted result's ticket to the board's
   `Aborted` status through `@oligarchy/linear`'s `moveToAborted` on a `ManagedRuntime` built per
-  call over `FetchHttpClient`; both urls are Cloudflare vars so the integration lane
-  points them at stubs, and the tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
+  call over `FetchHttpClient`, but for a ticket whose job automation-server answered 200 to
+  abort, which that abort already moved. `AUTOMATION_SERVER_URL` and the suite abort's
+  `LINEAR_API_URL` are Cloudflare vars so the integration lane points them at stubs; the suite
+  open calls Linear at its default url, as ctrl does, and its tests replace the runner. The
+  tokens (`OLIGARCHY_TOKEN`, `LINEAR_API_TOKEN`) are wrangler
   secrets, as is `LINEAR_TEAM`: the team `POST /create-test-suite-run` files tickets on, with no
   default, so a local worker and production can name different teams. A dashboard var would be
   deleted on the next deploy.

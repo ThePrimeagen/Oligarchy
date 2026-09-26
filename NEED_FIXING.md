@@ -21,10 +21,10 @@ Three decisions, each defended on its own, together make the queue fragile.
   unreachable or answers 5xx, and close the job `failed` only when every client refused.
 - `packages/db/src/schema.ts` `automation_jobs` has `uniqueIndex(result_id, action)`, and
   `packages/jobs/src/board.ts` (`Board.enqueue`) turns the duplicate-key `DatabaseError` into a
-  duplicate named by the status of the row the index kept, which
-  `src/automation-server/handlers.ts` still logs as `linear webhook ignored; drive already queued`.
-  Moving a ticket back into *Automation Needed* after a failed drive therefore logs that line for
-  a job that is terminal and never enqueues another. A failed drive cannot be rerun from the
+  duplicate named by the status of the row the index kept, in `Board.already`'s words. Moving a
+  ticket back into *Automation Needed* after a failed drive therefore logs
+  `linear webhook ignored; drive already failed` (`src/automation-server/handlers.ts`) for a job
+  that is terminal and never enqueues another. A failed drive cannot be rerun from the
   board. Allow a new row when the existing one is terminal (drop the unique index in favour of
   "one non-terminal job per (result, action)", enforced in `Board.enqueue`).
 - `src/automation-client/main.ts` reads `SERVER_URL` with
@@ -140,13 +140,15 @@ them looked for the cases where the two halves have come apart. Phase 8 made `@o
 the one owner of the transitions and searches the automation server, `ctrl` and the proxy use;
 this item is what is left outside it, and what that package should grow into.
 
-- **Where the transitions are.** `packages/jobs/src/`: `open.ts` (`open`, `openMint`, `failRun`),
-  `close.ts` (`close`, `fail`, `judge`, `moveTicket`, one "three attempts, then a line" policy),
-  `ready.ts` (`mark`, `release`), `board.ts` (`actionFor`, `asks`, `enqueue`), `abort.ts` and
-  `reclaim.ts`. What is still outside: the dashboard's `POST /suites/abort`
-  (`src/dashboard/dashboard.tsx`) aborts a suite's pending rows through `src/dashboard/query.ts`
-  and moves each ticket to Aborted with its own `Linear` layer, instead of asking the automation
-  server to call `Abort.abort` per job. The dashboard's `POST /abort` only forwards since phase 8.
+- **Where the transitions are.** `packages/jobs/src/`: `open.ts` (`open`, `openMint`,
+  `openMints`), `close.ts` (`close`, `fail`, `judge`, `moveTicket`, one "three attempts, then a
+  line" policy), `ready.ts` (`mark`, `release`), `board.ts` (`asks`, `actionFor`, `enqueue`,
+  `already`), `abort.ts` and `reclaim.ts`. What is still outside: the dashboard's
+  `POST /suites/abort` (`src/dashboard/dashboard.tsx`) aborts a suite's pending rows through
+  `src/dashboard/query.ts` and moves their tickets to Aborted with its own `Linear` layer,
+  instead of asking the automation server to call `Abort.abort` per job; only a running job's
+  ticket, when automation-server answered its forward with 200, is left to that server's
+  `Abort.running`. The dashboard's `POST /abort` only forwards since phase 8.
 - **Where the searches are.** `packages/jobs/src/find.ts` (`byTicket`, `ofAction`,
   `nextPending`, `running`, `inherited`, `status`, `hasPending`, `diagnosable`, `isOpen`).
   `src/dashboard/query.ts` keeps its own read model over the same tables, and its suite abort
