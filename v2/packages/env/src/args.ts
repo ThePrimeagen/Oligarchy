@@ -4,7 +4,7 @@ import * as z from "zod";
 // Every flag any oligarchy program takes, declared once. A flag's export is named for its key and
 // its key is its spelling: `sessionId` is `--session-id`. Where one spelling means different things
 // in different commands, each meaning has an export of its own and the command keys it by the
-// spelling: `name: machineName()`, `status: stopStatus(false)`.
+// spelling: `name: machineName()`, `status: resultStatus()`.
 
 export type Flag<S extends z.ZodType = z.ZodType, R extends boolean = boolean> = {
   // Decodes the text. A bare `--flag` is "true" and must decode to a boolean.
@@ -37,8 +37,6 @@ const words = z.string().min(1, "must not be empty");
 const httpUrl = z.url({ protocol: /^https?$/, error: "must be an http or https url" });
 const number = z.coerce.number({ error: "must be a number" });
 const atLeastOne = number.int("must be a whole number").min(1, "must be at least 1");
-// A share of the screenshot's width or height from its top-left corner.
-const fraction = number.min(0, "must be in 0..1").max(1, "must be in 0..1");
 const toggle = z.stringbool({ error: "must be true or false" }).default(false);
 const errorTypeKey = z
   .string()
@@ -145,114 +143,13 @@ export const debugLog = flag({
 });
 
 // ---------------------------------------------------------------------------
-// client, and the session REPL that runs it
+// session
 // ---------------------------------------------------------------------------
-
-export const iso = flag({
-  schema: words.default("omarchy.iso"),
-  description: "ISO path or http(s) url",
-});
-
-export const disk = flag({
-  schema: words,
-  description: "Existing qcow2 path; omit for a fresh disk",
-});
-
-export const server = flag({
-  schema: httpUrl,
-  description: "Reserve on this qemu server (its registered url) instead of the best-ranked one",
-});
-
-export const resume = flag({
-  schema: toggle,
-  description:
-    "Boot the machine's minted disk of this iso instead of the iso; refused when there is none",
-});
 
 export const output = flag({
   schema: words,
   description: "Write it to this file instead of stdout",
 });
-
-export const keys = flag({
-  schema: words,
-  description: 'Key string to type, e.g. "hello<ENTER>"',
-});
-
-// The one encoding the qemu server reads.
-export const encoding = flag({
-  schema: z.enum(["oligarchy"]).default("oligarchy"),
-  description: "Key string encoding",
-});
-
-export const x = flag({
-  schema: fraction,
-  description: "Fraction of the screenshot from the left, 0..1",
-});
-
-export const y = flag({
-  schema: fraction,
-  description: "Fraction of the screenshot from the top, 0..1",
-});
-
-export const fromX = flag({
-  schema: fraction,
-  description: "Where the button goes down, fraction from the left, 0..1",
-});
-
-export const fromY = flag({
-  schema: fraction,
-  description: "Where the button goes down, fraction from the top, 0..1",
-});
-
-export const toX = flag({
-  schema: fraction,
-  description: "Where the button comes up, fraction from the left, 0..1",
-});
-
-export const toY = flag({
-  schema: fraction,
-  description: "Where the button comes up, fraction from the top, 0..1",
-});
-
-export const button = flag({
-  schema: z.enum(["left", "middle", "right"]).default("left"),
-  description: "left, middle or right; left when omitted",
-});
-
-// One flag holds them all, because a repeated flag keeps only its last value.
-export const modifier = flag({
-  schema: z
-    .string()
-    .transform((text) => text.split(","))
-    .pipe(z.array(z.enum(["shift", "ctrl", "alt", "super"])).max(4))
-    .default([]),
-  description: "Hold these keys around the gesture, comma separated: shift,ctrl",
-});
-
-export const direction = flag({
-  schema: z.enum(["up", "down", "left", "right"]),
-  description: "Which way the wheel turns",
-});
-
-export const ticks = flag({
-  schema: number
-    .int("must be a whole number")
-    .min(1, "must be in 1..100")
-    .max(100, "must be in 1..100")
-    .default(1),
-  description: "How many wheel clicks, 1..100; 1 when omitted",
-});
-
-export const message = flag({ schema: words, description: "What you are about to do" });
-
-// client stop's --status.
-export const stopStatus = flag({
-  schema: z.enum(["succeeded", "failed", "aborted", "completed"]),
-  description: "Verdict; omit to abort",
-});
-
-export const reason = flag({ schema: words, description: "Why the verdict is what it is" });
 
 export const imageId = flag({
   schema: words,
@@ -285,8 +182,8 @@ export const proof = flag({
   description: "What must be on screen for the test to pass",
 });
 
-// ctrl's --iso: every server downloads it, so it is an https url and never a path.
-export const isoUrl = flag({
+// Every server downloads it, so it is an https url and never a path.
+export const iso = flag({
   schema: z.url({ protocol: /^https$/, error: "must be an https url" }),
   description: "HTTPS URL of the ISO",
 });
@@ -313,6 +210,8 @@ export const resultStatus = flag({
     .transform((status): "passed" | "failed" => (status === "success" ? "passed" : "failed")),
   description: "Whether the test succeeded",
 });
+
+export const reason = flag({ schema: words, description: "Why the test passed or failed" });
 
 export const count = flag({
   schema: atLeastOne.default(10),
