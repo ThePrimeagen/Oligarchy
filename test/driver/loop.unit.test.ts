@@ -9,7 +9,6 @@ import {
   Fiber,
   FileSystem,
   Layer,
-  Option,
   PlatformError,
   Redacted,
 } from "effect";
@@ -966,16 +965,14 @@ describe("driver loop", () => {
   );
 
   it.effect(
-    "a run that fails with a step's intent open sends no intent end; the stop cancels it (unhappy)",
+    "a run that ends failed with a step's intent open sends no intent end; the stop cancels it (unhappy)",
     () =>
       Effect.gen(function* () {
         const recorder = routed(
           answers(sendKeys("press the key", 1), notACall(), notACall(), notACall()),
         );
-        const error = yield* Effect.flip(
-          run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
-        );
-        expect(error._tag).toBe("CommandError");
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(stopped).toEqual({ reason: "limit-reached" });
         expect(guestPaths(recorder.requests)).toEqual([
           "/start",
           "/intent/start",
@@ -1045,11 +1042,10 @@ describe("driver loop", () => {
       Effect.gen(function* () {
         const recorder = routed(
           () =>
-            sse([
-              frame({ choices: [{ delta: { content: "hello" }, finish_reason: null }] }),
-              frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
-              "[DONE]",
-            ]),
+            new Response(JSON.stringify({ error: { message: "no credits" } }), {
+              status: 402,
+              headers: { "content-type": "application/json" },
+            }),
           (url) => {
             if (url.pathname === "/start") {
               return TestingHttp.json({ id: SESSION });
@@ -1063,11 +1059,7 @@ describe("driver loop", () => {
         const error = yield* Effect.flip(
           run(config(), recorder.layer, () => ({ exitCode: 0 }), log),
         );
-        expect(error._tag).toBe("CommandError");
-        if (error._tag === "CommandError") {
-          expect(error.message).toContain("reply:");
-          expect(error.message).not.toContain("guest already gone");
-        }
+        expect(error).toMatchObject({ _tag: "OpenRouterRefusal", message: "no credits" });
         expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
         expect(log.join("")).toContain("test-results");
         expect(log.join("")).toContain("--status");
@@ -1119,21 +1111,18 @@ describe("driver loop", () => {
   );
 
   it.effect(
-    "three replies in a row that are not one tool call fail the loop, name the replies, and stop the session (unhappy)",
+    "three replies in a row that are not one tool call fail the test, name the replies, and stop the session (unhappy)",
     () =>
       Effect.gen(function* () {
         const recorder = routed(notACall);
         const log: Array<string> = [];
-        const error = yield* Effect.flip(
-          run(config(), recorder.layer, () => ({ exitCode: 0 }), log),
-        );
-        expect(error._tag).toBe("CommandError");
-        if (error._tag === "CommandError") {
-          expect(error.message).toContain("model could not respond correctly");
-          expect(error.message).toContain("3 bad replies in a row");
-          expect(error.message).toContain("reply:");
-          expect(error.message).toContain("hello");
-        }
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+        expect(stopped).toEqual({ reason: "limit-reached" });
+        const failure = events(log).find((event) => event.kind === "failure");
+        expect(failure?.text).toContain("model could not respond correctly");
+        expect(failure?.text).toContain("3 bad replies in a row");
+        expect(failure?.text).toContain("reply:");
+        expect(failure?.text).toContain("hello");
         expect(modelRequests(recorder.requests)).toHaveLength(3);
         expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
         expect(JSON.parse(guestRequests(recorder.requests)[2]?.body ?? "{}")).toMatchObject({
@@ -1145,6 +1134,51 @@ describe("driver loop", () => {
         );
         expect(closed?.text).toContain('"failed"');
         expect(closed?.text).toContain("model could not respond correctly");
+      }),
+  );
+
+  it.effect(
+    "a mint whose model sends three bad replies stops failed and never saves (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(notACall);
+        const { stopped, spawner } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          [],
+          {
+            seed: { name: "mint", serverUrl: "" },
+          },
+        );
+        expect(stopped).toEqual({ reason: "limit-reached" });
+        const paths = guestPaths(recorder.requests);
+        expect(paths).not.toContain("/save");
+        expect(paths.at(-1)).toBe("/stop");
+        expect(spawner.spawned.at(-1)?.args).toEqual(
+          expect.arrayContaining(["--status", "failed"]),
+        );
+      }),
+  );
+
+  it.effect(
+    "three bad replies whose result will not close are still the run's failure (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(notACall);
+        const error = yield* Effect.flip(
+          run(
+            config(),
+            recorder.layer,
+            (_command, args) =>
+              args[0] === "test-results"
+                ? { exitCode: 1, stderr: "database unreachable" }
+                : { exitCode: 0 },
+            [],
+          ),
+        );
+        expect(error._tag).toBe("CommandError");
+        expect(guestPaths(recorder.requests)).toContain("/stop");
       }),
   );
 
@@ -1239,18 +1273,18 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect("three refused commands in a row fail the loop and name each refusal (unhappy)", () =>
+  it.effect("three refused commands in a row fail the test and name each refusal (unhappy)", () =>
     Effect.gen(function* () {
       const recorder = routed(
         answers(speak("boot", "start --resume"), intentCall(), speak("halt", "stop")),
       );
-      const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), []));
-      expect(error._tag).toBe("CommandError");
-      if (error._tag === "CommandError") {
-        expect(error.message).toContain("model could not respond correctly");
-        expect(error.message).toContain("the harness starts and stops the session");
-        expect(error.message).toContain("the harness opens and closes intents");
-      }
+      const log: Array<string> = [];
+      const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+      expect(stopped).toEqual({ reason: "limit-reached" });
+      const failure = events(log).find((event) => event.kind === "failure")?.text;
+      expect(failure).toContain("model could not respond correctly");
+      expect(failure).toContain("the harness starts and stops the session");
+      expect(failure).toContain("the harness opens and closes intents");
       expect(modelRequests(recorder.requests)).toHaveLength(3);
       expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
     }),
@@ -1263,16 +1297,14 @@ describe("driver loop", () => {
         const recorder = routed(
           answers(notACall(), speak("spin", "frobnicate"), speak("press", "send-keys --nope")),
         );
-        const error = yield* Effect.flip(
-          run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
-        );
-        expect(error._tag).toBe("CommandError");
-        if (error._tag === "CommandError") {
-          expect(error.message).toContain("model could not respond correctly");
-          expect(error.message).toContain("hello");
-          expect(error.message).toContain("unknown action frobnicate");
-          expect(error.message).toContain("unknown flag --nope");
-        }
+        const log: Array<string> = [];
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+        expect(stopped).toEqual({ reason: "limit-reached" });
+        const failure = events(log).find((event) => event.kind === "failure")?.text;
+        expect(failure).toContain("model could not respond correctly");
+        expect(failure).toContain("hello");
+        expect(failure).toContain("unknown action frobnicate");
+        expect(failure).toContain("unknown flag --nope");
         expect(modelRequests(recorder.requests)).toHaveLength(3);
         expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       }),
@@ -1328,25 +1360,80 @@ describe("driver loop", () => {
     }),
   );
 
-  it.effect("the step limit is a loop failure after the counted calls, and the session stops", () =>
+  // The model ran out of steps: that is the test's verdict, not the system failing. The guest
+  // stops failed, the result closes failed with the reason, and the drive ends so it is judged.
+  it.effect("the step limit fails the test: the guest stops failed, the result closes failed", () =>
     Effect.gen(function* () {
       const recorder = routed(answers(sendKeys()));
+      const closed: Array<ReadonlyArray<string>> = [];
       const log: Array<string> = [];
-      const error = yield* Effect.flip(
-        run(config({ stepLimit: 1 }), recorder.layer, () => ({ exitCode: 0 }), log),
+      const ran = yield* run(
+        config({ stepLimit: 1 }),
+        recorder.layer,
+        (_command, args) => {
+          if (args[0] === "test-results") {
+            closed.push(args);
+          }
+          return { exitCode: 0 };
+        },
+        log,
       );
-      expect(error._tag).toBe("CommandError");
-      if (error._tag === "CommandError") {
-        expect(error.message).toContain("step limit");
-        expect(error.message).toContain("1");
-      }
+      expect(ran.stopped).toEqual({ reason: "limit-reached" });
       expect(modelRequests(recorder.requests)).toHaveLength(1);
-      expect(guestPaths(recorder.requests)).toContain("/stop");
+      const paths = guestPaths(recorder.requests);
+      expect(paths.at(-1)).toBe("/stop");
+      expect(JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}")).toMatchObject({
+        status: "failed",
+        reason: "step limit of 1 reached",
+      });
+      expect(closed).toHaveLength(1);
+      expect(closed[0]).toEqual(
+        expect.arrayContaining(["--status", "failed", "--reason", "step limit of 1 reached"]),
+      );
       expect(events(log).some((event) => event.kind === "failure")).toBe(true);
     }),
   );
 
-  it.effect("the run ceiling is a loop failure and names the ceiling", () =>
+  it.effect("a mint that hits the step limit stops failed and never saves the disk", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(sendKeys()));
+      const { stopped, spawner } = yield* run(
+        config({ stepLimit: 1 }),
+        recorder.layer,
+        () => ({ exitCode: 0 }),
+        [],
+        { seed: { name: "mint", serverUrl: "" } },
+      );
+      expect(stopped).toEqual({ reason: "limit-reached" });
+      const paths = guestPaths(recorder.requests);
+      expect(paths).not.toContain("/save");
+      expect(paths.at(-1)).toBe("/stop");
+      expect(spawner.spawned.at(-1)?.args).toEqual(
+        expect.arrayContaining(["--status", "failed", "--reason", "step limit of 1 reached"]),
+      );
+    }),
+  );
+
+  it.effect("a step limit whose result will not close is still the run's failure (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = routed(answers(sendKeys()));
+      const error = yield* Effect.flip(
+        run(
+          config({ stepLimit: 1 }),
+          recorder.layer,
+          (_command, args) =>
+            args[0] === "test-results"
+              ? { exitCode: 1, stderr: "database unreachable" }
+              : { exitCode: 0 },
+          [],
+        ),
+      );
+      expect(error._tag).toBe("CommandError");
+      expect(guestPaths(recorder.requests)).toContain("/stop");
+    }),
+  );
+
+  it.effect("the run ceiling fails the test the same way and names the ceiling", () =>
     Effect.gen(function* () {
       // Start returns at once. The clock moves while ./ctrl test start is still running,
       // so the model is never asked, and the harness still stops the session it opened.
@@ -1386,11 +1473,10 @@ describe("driver loop", () => {
       const marked = yield* spawner.nextSpawn;
       yield* TestClock.setTime(2_000);
       yield* marked.exit(0);
-      const error = yield* Effect.flip(Fiber.join(fiber));
-      expect(error._tag).toBe("CommandError");
-      if (error._tag === "CommandError") {
-        expect(error.message).toContain("run ceiling");
-      }
+      expect(yield* Fiber.join(fiber)).toEqual({ reason: "limit-reached" });
+      expect(JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}").reason).toContain(
+        "run ceiling",
+      );
       expect(modelRequests(recorder.requests)).toHaveLength(0);
       expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(log.join("")).not.toContain(TOKEN);
@@ -1843,15 +1929,13 @@ describe("driver loop", () => {
     );
 
     it.effect(
-      "three clicks in a row before any mouse move fail the loop as bad replies (unhappy)",
+      "three clicks in a row before any mouse move fail the test as bad replies (unhappy)",
       () =>
         Effect.gen(function* () {
           const recorder = routed(answers(click(), click(), click(), done()));
           const exit = yield* driven(recorder);
-          const error = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
-          expect(Option.getOrUndefined(error)).toMatchObject({
-            _tag: "CommandError",
-            message: expect.stringContaining("model could not respond correctly"),
+          expect(Exit.isSuccess(exit) ? exit.value.stopped : undefined).toEqual({
+            reason: "limit-reached",
           });
           expect(modelRequests(recorder.requests)).toHaveLength(3);
           expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([]);
@@ -2083,7 +2167,7 @@ describe("driver loop", () => {
             return TestingHttp.json({ error: "exchange failed" }, 502);
           }
           return url.pathname === "/save"
-            ? TestingHttp.json({ error: "guest did not power off within 2 minutes" }, 500)
+            ? TestingHttp.json({ error: "minted: could not keep the disk" }, 502)
             : TestingHttp.json({ ok: "true" });
         });
         const log: Array<string> = [];
@@ -2094,14 +2178,113 @@ describe("driver loop", () => {
         );
         expect(error._tag).toBe("CommandError");
         if (error._tag === "CommandError") {
-          expect(error.message).toContain("guest did not power off within 2 minutes");
+          expect(error.message).toContain("minted: could not keep the disk");
         }
         expect(modelRequests(recorder.requests)).toHaveLength(2);
         const closed = events(log).find(
           (event) => event.kind === "command" && event.text.startsWith('./ctrl "test-results"'),
         );
         expect(closed?.text).toContain('"failed"');
-        expect(closed?.text).toContain("guest did not power off within 2 minutes");
+        expect(closed?.text).toContain("minted: could not keep the disk");
+      }),
+  );
+
+  it.effect(
+    "a mint whose model calls Done before the guest is off, and whose save is refused, is the model's failure",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), done()), (url) => {
+          if (url.pathname === "/start") {
+            return TestingHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/image") {
+            return screenshot();
+          }
+          return url.pathname === "/save"
+            ? TestingHttp.json({ error: "guest did not power off within 2 minutes" }, 409)
+            : TestingHttp.json({ ok: "true" });
+        });
+        const closed: Array<ReadonlyArray<string>> = [];
+        const log: Array<string> = [];
+        const { stopped } = yield* run(
+          config(),
+          recorder.layer,
+          (_command, args) => {
+            if (args[0] === "test-results") {
+              closed.push(args);
+            }
+            return { exitCode: 0 };
+          },
+          log,
+          { seed: { name: "mint", serverUrl: "" } },
+        );
+        expect(stopped).toEqual({ reason: "not-powered-off" });
+        expect(guestPaths(recorder.requests).at(-1)).toBe("/save");
+        expect(closed).toHaveLength(1);
+        expect(closed[0]).toEqual(expect.arrayContaining(["--status", "failed"]));
+        expect(closed[0]?.join(" ")).toContain("guest did not power off within 2 minutes");
+        expect(events(log).at(-1)).toMatchObject({ kind: "stop", text: "not-powered-off" });
+      }),
+  );
+
+  it.effect(
+    "a mint whose save fails for its disk after a Done with no failed image is still the run's failure (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), done()), (url) => {
+          if (url.pathname === "/start") {
+            return TestingHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/image") {
+            return screenshot();
+          }
+          return url.pathname === "/save"
+            ? TestingHttp.json({ error: "minted: could not keep the disk" }, 502)
+            : TestingHttp.json({ ok: "true" });
+        });
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+            seed: { name: "mint", serverUrl: "" },
+          }),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("minted: could not keep the disk");
+        }
+      }),
+  );
+
+  it.effect(
+    "a mint that never powered off whose result will not close is still the run's failure (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), done()), (url) => {
+          if (url.pathname === "/start") {
+            return TestingHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/image") {
+            return screenshot();
+          }
+          return url.pathname === "/save"
+            ? TestingHttp.json({ error: "guest did not power off within 2 minutes" }, 409)
+            : TestingHttp.json({ ok: "true" });
+        });
+        const error = yield* Effect.flip(
+          run(
+            config(),
+            recorder.layer,
+            (_command, args) =>
+              args[0] === "test-results"
+                ? { exitCode: 1, stderr: "database unreachable" }
+                : { exitCode: 0 },
+            [],
+            { seed: { name: "mint", serverUrl: "" } },
+          ),
+        );
+        expect(error._tag).toBe("CommandError");
+        if (error._tag === "CommandError") {
+          expect(error.message).toContain("database unreachable");
+        }
       }),
   );
 

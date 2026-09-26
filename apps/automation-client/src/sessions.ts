@@ -282,7 +282,7 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               map.get(ticket) === handle ? mapWithout(map, ticket) : map,
             ).pipe(Effect.andThen(Ref.update(aborts, (map) => mapWithout(map, ticket)))),
           );
-          const exit = yield* Effect.exit(Child.awaitExit(bin, handle));
+          const exit = yield* Effect.exit(Child.awaitExit(bin, handle, { headline: !diagnose }));
           const stopping = (yield* Ref.get(aborts)).get(ticket);
           if (stopping !== undefined && (yield* Deferred.await(stopping))) {
             return yield* ApiErrors.RunAborted.make({ agentId: ticket });

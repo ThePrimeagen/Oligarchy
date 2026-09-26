@@ -128,20 +128,20 @@ export type SessionsService = {
     live: LiveSession,
   ) => Effect.Effect<
     { readonly png: Uint8Array; readonly imageId: string },
-    ApiErrors.ExchangeFailed | ApiErrors.Internal
+    ApiErrors.ExchangeFailed | ApiErrors.Conflict | ApiErrors.Internal
   >;
   readonly serial: (live: LiveSession) => Effect.Effect<Uint8Array, ApiErrors.Internal>;
   readonly sendKeys: (
     live: LiveSession,
     keys: string,
     encoding: string | undefined,
-  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.ExchangeFailed>;
+  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.ExchangeFailed | ApiErrors.Conflict>;
   // One mouse operation; a point off the screenshot or a tick count out of range is BadRequest
   // before any exchange.
   readonly mouse: (
     live: LiveSession,
     gesture: Qemu.MouseGesture,
-  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.ExchangeFailed>;
+  ) => Effect.Effect<void, ApiErrors.BadRequest | ApiErrors.ExchangeFailed | ApiErrors.Conflict>;
   readonly intentStart: (
     live: LiveSession,
     testResultId: string,
@@ -163,7 +163,11 @@ export type SessionsService = {
     live: LiveSession,
   ) => Effect.Effect<
     void,
-    ApiErrors.BadRequest | ApiErrors.SaveFailed | ApiErrors.Internal | ApiErrors.UnknownSession
+    | ApiErrors.BadRequest
+    | ApiErrors.Conflict
+    | ApiErrors.SaveFailed
+    | ApiErrors.Internal
+    | ApiErrors.UnknownSession
   >;
   readonly follow: (
     id: string,
@@ -196,6 +200,9 @@ export const Shutdown = Context.Reference<Shutdown>("@oligarchy/qemu-server/sess
 });
 
 const isDatabaseError = Schema.is(DbErrors.DatabaseError);
+const isQmpClosed = Schema.is(Errors.QmpClosed);
+// How long a closed QMP socket waits for the guest's exit to be published.
+const EXIT_GRACE = "2 seconds";
 
 // Drizzle buries the reason (ECONNREFUSED etc.) in the cause; its own message is the failed SQL.
 const detail = (error: unknown): string =>
@@ -806,7 +813,10 @@ const make = (maxJobs: number, selfUrl?: string) =>
         );
         return { png, imageId };
       });
-      return yield* followed(live, "get-image", work).pipe(Effect.tapError(() => endIfGone(live)));
+      return yield* followed(live, "get-image", work).pipe(
+        Effect.catchTag("ExchangeFailed", refuseWhenOff(live)),
+        Effect.tapError(() => endIfGone(live)),
+      );
     });
 
     const serial = Effect.fn("Sessions.serial")(function* (live: LiveSession) {
@@ -845,7 +855,10 @@ const make = (maxJobs: number, selfUrl?: string) =>
         live.qemu
           .sendKeys(chords, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
-      ).pipe(Effect.tapError(() => endIfGone(live)));
+      ).pipe(
+        Effect.catchTag("ExchangeFailed", refuseWhenOff(live)),
+        Effect.tapError(() => endIfGone(live)),
+      );
       return yield* log.info(
         `sent ${String(chords.length)} chords in ${yield* elapsed(started)}ms`,
         {
@@ -884,7 +897,10 @@ const make = (maxJobs: number, selfUrl?: string) =>
         live.qemu
           .mouse(gesture, recorder(live))
           .pipe(Effect.mapError((error) => exchangeFailed(error, live))),
-      ).pipe(Effect.tapError(() => endIfGone(live)));
+      ).pipe(
+        Effect.catchTag("ExchangeFailed", refuseWhenOff(live)),
+        Effect.tapError(() => endIfGone(live)),
+      );
       return yield* log.info(
         `mouse ${gesture._tag} ${describeGesture(gesture)} in ${yield* elapsed(started)}ms`,
         { location: live.id, agentId: live.agent },
@@ -960,6 +976,31 @@ const make = (maxJobs: number, selfUrl?: string) =>
     // driver's verdict, so the session ends errored here and its driver's next request is 404.
     // The caller still gets the exchange's own failure. A fresh guest that exited 0 powered itself
     // off, the way a mint shuts Omarchy down before save; that session stays for save or stop.
+    // A fresh guest that powered itself off (a mint's last act) has no screen or keyboard left:
+    // an exchange with it is refused as a conflict, not failed as the machine breaking. A
+    // resumed guest that exits, or one that exits nonzero, is still the exchange failing. The
+    // QMP socket can close before the exit is published (that waits for stderr to drain), so a
+    // closed socket on a running guest waits a moment for the exit. Runs before endIfGone, so
+    // an exit published during that wait still ends the session.
+    const refuseWhenOff =
+      (live: LiveSession) =>
+      (
+        error: ApiErrors.ExchangeFailed,
+      ): Effect.Effect<never, ApiErrors.ExchangeFailed | ApiErrors.Conflict> =>
+        Effect.gen(function* () {
+          if ((yield* live.qemu.running) && !isQmpClosed(error.cause)) {
+            return yield* error;
+          }
+          const code = yield* live.qemu.exited.pipe(Effect.timeoutOption(EXIT_GRACE));
+          if (live.mode === "resume" || Option.isNone(code) || code.value !== 0) {
+            return yield* error;
+          }
+          return yield* ApiErrors.Conflict.make({
+            message: "guest is powered off",
+            sessionId: live.id,
+          });
+        });
+
     const endIfGone = (live: LiveSession): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (yield* live.qemu.running) {
@@ -1092,8 +1133,11 @@ const make = (maxJobs: number, selfUrl?: string) =>
 
     // A clean shutdown makes a clean disk: the power button, then QEMU's exit, then the copy. A
     // guest the driver already shut down needs no button, and a socket closing under the button
-    // is a guest already on its way out.
-    const powerOff = (live: LiveSession): Effect.Effect<void, ApiErrors.SaveFailed> =>
+    // is a guest already on its way out. A guest that stays up is its state refusing the save,
+    // not the server failing it.
+    const powerOff = (
+      live: LiveSession,
+    ): Effect.Effect<void, ApiErrors.SaveFailed | ApiErrors.Conflict> =>
       Effect.gen(function* () {
         if (yield* live.qemu.running) {
           yield* live.qemu.powerdown(recorder(live)).pipe(
@@ -1104,7 +1148,10 @@ const make = (maxJobs: number, selfUrl?: string) =>
         yield* live.qemu.exited.pipe(
           Effect.timeoutOrElse({
             duration: SAVE_POWEROFF,
-            orElse: () => Effect.fail(saveFailed(SAVE_POWEROFF_REASON, live)),
+            orElse: () =>
+              Effect.fail(
+                ApiErrors.Conflict.make({ message: SAVE_POWEROFF_REASON, sessionId: live.id }),
+              ),
           }),
         );
       });
@@ -1138,10 +1185,12 @@ const make = (maxJobs: number, selfUrl?: string) =>
       );
       if (Result.isFailure(kept)) {
         const error = kept.failure;
+        // A guest that stayed up is the drive's failure; anything else is the system's.
+        const status = error._tag === "Conflict" ? "failed" : "errored";
         const captured = yield* captureDebugLog(live);
         yield* killLogged(live, "save cleanup failed", live.agent);
         // Best effort: the caller's error is what matters once the save has failed.
-        yield* sessionStore.endSession(live.id, "errored", error.message).pipe(
+        yield* sessionStore.endSession(live.id, status, error.message).pipe(
           Effect.catch((failure) =>
             log.error(`db: recording a failed save failed too: ${failure.message}`, {
               location: live.id,
@@ -1150,9 +1199,9 @@ const make = (maxJobs: number, selfUrl?: string) =>
             }),
           ),
         );
-        yield* log.info(`stopped; errored; ${error.message}`, attribution(live.id, live.agent));
+        yield* log.info(`stopped; ${status}; ${error.message}`, attribution(live.id, live.agent));
         yield* saveDebugLog(live, captured);
-        yield* finishLiveSession(live, "errored");
+        yield* finishLiveSession(live, status);
         return yield* Effect.fail(error);
       }
       const captured = yield* captureDebugLog(live);

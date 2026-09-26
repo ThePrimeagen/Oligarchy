@@ -2549,7 +2549,7 @@ describe("forwarding", () => {
 
   it.effect("a save the server fails passes through as its 502 and is not logged here", () =>
     Effect.gen(function* () {
-      const message = "guest did not power off within 2 minutes";
+      const message = "minted: could not keep the disk";
       const fixed = fixture(() => TestingHttp.json({ error: message }, 502));
       fixed.store.routes.set(SESSION_ID, SERVER_A);
       yield* Effect.gen(function* () {

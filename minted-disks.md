@@ -45,7 +45,8 @@ lets every later session boot a throwaway copy of that disk in seconds.
   wait up to two minutes for QEMU to exit, copy the firmware file and `qemu-img convert` the disk,
   both staged as `<target>.partial-<pid>` and only then renamed over whatever is there, firmware
   first and disk last; row `succeeded` with `saved; minted <iso>`. A guest that will not power off
-  or a disk that cannot be kept ends the row `failed` with a debug log and answers 502
+  ends the row `failed` with a debug log and answers 409 `Conflict`: the drive did not finish.
+  A disk that cannot be kept ends the row `errored` with a debug log and answers 502
   `SaveFailed`. One save at a time per process.
 - `qemu-server --data-dir` / `OLIGARCHY_DATA_DIR` (#139): where the iso cache and minted disks
   live, `~/.oligarchy` by default, so one machine runs several servers with a cache each.
@@ -164,7 +165,8 @@ from the files, and the proxy ranks those answers.
 | qemu server `/start` | `--resume`, not minted here | 500 `internal error`; Sentry is told `no minted disk for <iso> on this machine`; reservation stands |
 | qemu server `/start` | `--resume` with `--disk` | 400 `a resume boots the minted disk; --disk cannot be given` |
 | qemu server `/save` | session was started with `--resume` | 400 `a resumed session cannot save; its disk is a view of the minted one`, session runs on |
-| qemu server `/save` | guest did not power off, copy or convert failed | 502 `SaveFailed`, row `failed`, debug log |
+| qemu server `/save` | guest did not power off | 409 `Conflict`, row `failed`, debug log |
+| qemu server `/save` | copy or convert failed | 502 `SaveFailed`, row `errored`, debug log |
 | qemu server `/save` | racing the sweep | 404 `UnknownSession` |
 | proxy `/reserve` | `resume` set, a server holds the disk and has room | 200, least-busy of those |
 | proxy `/reserve` | `resume` set, none of those can, a live server has room and no disk | 409 `setup needed: <url> max-jobs is N`, nothing routed |

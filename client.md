@@ -328,7 +328,7 @@ Ends the session keeping its disk: the machine's power button is pressed and, on
 
 - `--session-id <id>` — the session.
 
-A guest that does not power off within two minutes (`guest did not power off within 2 minutes`: the desktop ignored the button and was not shut down from inside), or a disk that cannot be kept, fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept. A session started with `--resume` cannot save (400 `a resumed session cannot save; its disk is a view of the minted one`); it keeps running, and `stop` ends it as usual.
+A guest that does not power off within two minutes (409 `guest did not power off within 2 minutes`: the desktop ignored the button and was not shut down from inside) fails with the reason as the headline and exits 1; the session is then over, ended `failed`, and nothing was kept. A disk that cannot be kept fails the same way with a 502, and the session ends `errored`. A session started with `--resume` cannot save (400 `a resumed session cannot save; its disk is a view of the minted one`); it keeps running, and `stop` ends it as usual.
 
 ```bash
 ./client save --agent-id OLI-42 --server-url https://qemu.example.com --session-id 6f1c...e2a9

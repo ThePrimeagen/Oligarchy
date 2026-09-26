@@ -30,7 +30,9 @@ REMAIN=$((TARGET - COUNTED))
 [ "$REMAIN" -lt 0 ] && REMAIN=0
 NEED=$((TARGET - COUNTED - ACTIVE))
 [ "$NEED" -lt 0 ] && NEED=0
-N_DRIVE=$(psql "$DBURL" -X -A -t -c "select count(*) from automation_jobs where action='drive' and status in ('running','pending')" || echo "?")
+# Drives waiting for a guest. A running one is not counted: with the board poll queueing a new
+# ticket minutes late, the next one has to be waiting before a guest frees.
+N_DRIVE=$(psql "$DBURL" -X -A -t -c "select count(*) from automation_jobs where action='drive' and status = 'pending'" || echo "?")
 # Active tickets the automation server has not queued yet. The drive queue does not count them,
 # so they count beside it: with only the board poll queueing, a ticket waits a few minutes.
 UNQUEUED=0
@@ -70,13 +72,13 @@ psql "$DBURL" -X -A -t -F'|' -c "
     continue
   fi
   case "$DIAG" in
-    failed|aborted)
+    failed|aborted|errored|timed_out)
       echo "STUCK $N|$DIR|$RID|$TICKET diagnose=$DIAG no-diagnosis-row — ./ctrl diagnose or retire INFRA"
       echo "ANALYZE $N|$DIR|$RID|$TICKET diagnose=$DIAG"
       ;;
   esac
   case "$DRIVE" in
-    failed|aborted)
+    failed|aborted|errored|timed_out)
       echo "STUCK $N|$DIR|$RID|$TICKET drive=$DRIVE result=$RSTATUS — close result / abort guest / diagnose or INFRA"
       echo "ANALYZE $N|$DIR|$RID|$TICKET drive=$DRIVE result=$RSTATUS"
       ;;

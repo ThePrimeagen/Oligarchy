@@ -64,7 +64,12 @@ export const start = HttpApiEndpoint.post("start", "/start", {
 export const image = HttpApiEndpoint.get("image", "/image", {
   query: Contract.SessionQuery,
   success: HttpApiSchema.WithHeaders(png, { "x-image-url": Schema.String }),
-  error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.ExchangeFailedWire],
+  error: [
+    Errors.ForbiddenWire,
+    Errors.UnknownSessionWire,
+    Errors.ExchangeFailedWire,
+    Errors.ConflictWire,
+  ],
 });
 
 export const serial = HttpApiEndpoint.get("serial", "/serial", {
@@ -97,21 +102,38 @@ export const stop = HttpApiEndpoint.post("stop", "/stop", {
   error: [Errors.ForbiddenWire, Errors.UnknownSessionWire],
 });
 
-// Ends the session keeping its disk as the machine's minted disk for the iso it booted.
+// Ends the session keeping its disk as the machine's minted disk for the iso it booted. A guest
+// that does not power off is refused as a conflict; a disk that cannot be kept fails the save.
 export const save = HttpApiEndpoint.post("save", "/save", {
   payload: Contract.SaveBody,
   success: Contract.Ok,
-  error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.SaveFailedWire],
+  error: [
+    Errors.ForbiddenWire,
+    Errors.UnknownSessionWire,
+    Errors.ConflictWire,
+    Errors.SaveFailedWire,
+  ],
 });
 
 export const sendKeys = HttpApiEndpoint.post("sendKeys", "/send-keys", {
   payload: Contract.SendKeysBody,
   success: Contract.Ok,
-  error: [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.ExchangeFailedWire],
+  error: [
+    Errors.ForbiddenWire,
+    Errors.UnknownSessionWire,
+    Errors.ExchangeFailedWire,
+    Errors.ConflictWire,
+  ],
 });
 
 // The mouse, one endpoint per operation, all answering as a driving action does.
-const driving = [Errors.ForbiddenWire, Errors.UnknownSessionWire, Errors.ExchangeFailedWire];
+// 409: a fresh guest that powered itself off, as a mint's last act does.
+const driving = [
+  Errors.ForbiddenWire,
+  Errors.UnknownSessionWire,
+  Errors.ExchangeFailedWire,
+  Errors.ConflictWire,
+];
 
 export const mouseMove = HttpApiEndpoint.post("mouseMove", "/mouse/move", {
   payload: Contract.MouseMoveBody,

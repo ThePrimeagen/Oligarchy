@@ -155,6 +155,45 @@ describe("Child.run unhappy path", () => {
       }),
   );
 
+  // The driver's failure is its headline, then the cause's stack traces: past the tail, the
+  // headline would be cut away and the message would open mid-frame.
+  it.effect("a failure longer than the tail keeps its first line ahead of the tail", () =>
+    Effect.gen(function* () {
+      const headline = "guest did not power off within 2 minutes";
+      const frames = "    at Driver.runClient (/driver/main.js:33362:26)\n".repeat(200);
+      const spawner = TestingSpawner.fakeSpawner(() => ({
+        exitCode: 1,
+        stderr: `${headline}\n${frames}@oligarchy/shared/errors/CommandError: ${headline}\n`,
+      }));
+      const error = yield* Effect.flip(
+        Child.run("./driver", ["--action", "mint"], {}, { headline: true }).pipe(
+          Effect.provide(spawner.layer),
+        ),
+      );
+      expect(error.message.startsWith(`${headline}\n`)).toBe(true);
+      expect(error.message.endsWith(`CommandError: ${headline}`)).toBe(true);
+      expect(error.message.length).toBeLessThanOrEqual(Child.STDERR_TAIL);
+    }),
+  );
+
+  // opencode's stderr opens with its own log lines, which would make a worse title than the tail.
+  it.effect("a command that did not ask for its headline keeps the plain tail (unhappy)", () =>
+    Effect.gen(function* () {
+      const noise = "INFO  2026-09-26 service=bus type=session.updated";
+      const lines = "INFO  service=tool type=bash status=ok\n".repeat(200);
+      const spawner = TestingSpawner.fakeSpawner(() => ({
+        exitCode: 1,
+        stderr: `${noise}\n${lines}Error: diagnose failed\n`,
+      }));
+      const error = yield* Effect.flip(
+        Child.run("opencode", ["run"]).pipe(Effect.provide(spawner.layer)),
+      );
+      expect(error.message.startsWith(noise)).toBe(false);
+      expect(error.message.endsWith("Error: diagnose failed")).toBe(true);
+      expect(error.message.length).toBe(Child.STDERR_TAIL);
+    }),
+  );
+
   // The drain keeps a bounded buffer; NUL bytes are dropped as they arrive, so a binary blob after
   // the message cannot push it out of the buffer.
   it.effect("keeps the message when a NUL blob larger than the buffer follows it", () =>

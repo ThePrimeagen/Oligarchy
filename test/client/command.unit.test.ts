@@ -573,12 +573,24 @@ describe("client requests", () => {
 
   it.effect("a save the server fails is its refusal, and nothing prints saved", () =>
     Effect.gen(function* () {
-      const message = "guest did not power off within 2 minutes";
+      const message = "minted: could not keep the disk";
       const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ error: message }, 502));
       const error = yield* Effect.flip(
         run(["save", ...shared, "--session-id", SESSION], { http: recorder.layer }),
       );
       expect(error).toMatchObject({ _tag: "ProxyRefusal", status: 502, message });
+      expect(yield* TestConsole.logLines).toEqual([]);
+    }),
+  );
+
+  it.effect("a save refused for a guest that stayed up is its 409, and nothing prints saved", () =>
+    Effect.gen(function* () {
+      const message = "guest did not power off within 2 minutes";
+      const recorder = TestingHttp.recordRequests(() => TestingHttp.json({ error: message }, 409));
+      const error = yield* Effect.flip(
+        run(["save", ...shared, "--session-id", SESSION], { http: recorder.layer }),
+      );
+      expect(error).toMatchObject({ _tag: "ProxyRefusal", status: 409, message });
       expect(yield* TestConsole.logLines).toEqual([]);
     }),
   );

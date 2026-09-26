@@ -105,8 +105,9 @@ export class ExchangeFailed extends Schema.TaggedError<ExchangeFailed>(
   override readonly [ErrorReporter.ignore] = true;
 }
 
-// A save the machine did not carry through: the guest would not power off, or its disk could not
-// be kept. 502 as StartFailed: the machine, not the caller, failed the request.
+// A save the machine did not carry through: the guest's disk could not be kept. 502 as
+// StartFailed: the machine, not the caller, failed the request. A guest that would not power off
+// is a Conflict instead: the drive did not finish.
 export class SaveFailed extends Schema.TaggedError<SaveFailed>(
   "@oligarchy/shared/errors/SaveFailed",
 )(
@@ -198,8 +199,8 @@ export class AtCapacity extends Schema.TaggedError<AtCapacity>(
 
 // A resume reserve on a machine that has room and does not hold this iso's minted disk.
 // 409, not 503: the machine is not full, and a 503 is placed elsewhere. The message names
-// the slots setting it up would add. Not Conflict: that one belongs to /follow and requires
-// a session id.
+// the slots setting it up would add. Not Conflict: that one is a refusal on a live session and
+// requires a session id.
 export class SetupNeeded extends Schema.TaggedError<SetupNeeded>(
   "@oligarchy/shared/errors/SetupNeeded",
 )(

@@ -25,6 +25,15 @@ const columns = {
   driveStatus: DbSchema.automationJobs.status,
 };
 
+// A setup row whose result is pending or running and whose mint job has not ended: a mint in
+// flight holds the server. Mirrors decide's "keep" in the proxy's setup watcher.
+const heldByLiveMint = sql`exists (select 1 from ${DbSchema.testResults} where ${DbSchema.testResults.id} = ${DbSchema.setupRequests.resultId} and ${DbSchema.testResults.status} in ('pending', 'running') and not exists (select 1 from ${DbSchema.automationJobs} where ${DbSchema.automationJobs.resultId} = ${DbSchema.setupRequests.resultId} and ${DbSchema.automationJobs.action} = 'mint' and ${DbSchema.automationJobs.status} not in ('pending', 'running')))`;
+
+// A setup row the proxy's watcher would release, read at the moment of the delete: no result
+// yet, a result that ended without passing, or an open result whose mint job ended. Mirrors
+// decide's "release". A passed result, or one retention swept, keeps its row ("done").
+const releasable = sql`(${DbSchema.setupRequests.resultId} is null or exists (select 1 from ${DbSchema.testResults} where ${DbSchema.testResults.id} = ${DbSchema.setupRequests.resultId} and (${DbSchema.testResults.status} in ('failed', 'errored', 'aborted', 'timed_out', 'completed') or (${DbSchema.testResults.status} in ('pending', 'running') and exists (select 1 from ${DbSchema.automationJobs} where ${DbSchema.automationJobs.resultId} = ${DbSchema.setupRequests.resultId} and ${DbSchema.automationJobs.action} = 'mint' and ${DbSchema.automationJobs.status} not in ('pending', 'running'))))))`;
+
 export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
   "@oligarchy/db/SetupRequestStore",
   {
@@ -87,9 +96,8 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
 
       // An operator's mint: the lock and its result in one write, where the proxy's insert and
       // setResult are two under its own hold. True when the lock is now this result's. A held
-      // lock stays: one with no result yet is a proxy create still talking to Linear, and one
-      // whose result is pending or running is a mint in flight. A finished or swept holder's is
-      // taken, so a server can be minted again.
+      // lock stays: one with no result yet is a proxy create still talking to Linear, and one a
+      // live mint holds. A finished or swept holder's is taken, so a server can be minted again.
       const claim = Effect.fn("db.claimSetupRequest")(function* (
         iso: string,
         serverUrl: string,
@@ -102,24 +110,29 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
             .onConflictDoUpdate({
               target: [DbSchema.setupRequests.iso, DbSchema.setupRequests.serverUrl],
               set: { resultId },
-              setWhere: sql`${DbSchema.setupRequests.resultId} is not null and not exists (select 1 from ${DbSchema.testResults} where ${DbSchema.testResults.id} = ${DbSchema.setupRequests.resultId} and ${DbSchema.testResults.status} in ('pending', 'running'))`,
+              setWhere: sql`${DbSchema.setupRequests.resultId} is not null and not ${heldByLiveMint}`,
             })
             .returning({ iso: DbSchema.setupRequests.iso }),
         );
         return rows.length > 0;
       });
 
+      // True when the row is gone. Only a releasable row goes: since the caller read it, an
+      // operator's claim may have put a live mint on it, or its mint may have passed.
       const remove = Effect.fn("db.removeSetupRequest")(function* (iso: string, serverUrl: string) {
-        yield* database.run("removeSetupRequest", (db) =>
+        const rows = yield* database.run("removeSetupRequest", (db) =>
           db
             .delete(DbSchema.setupRequests)
             .where(
               and(
                 eq(DbSchema.setupRequests.iso, iso),
                 eq(DbSchema.setupRequests.serverUrl, serverUrl),
+                releasable,
               ),
-            ),
+            )
+            .returning({ iso: DbSchema.setupRequests.iso }),
         );
+        return rows.length > 0;
       });
 
       // Every row of this server, when it comes online. Other servers stay.

@@ -108,6 +108,14 @@ const chatCompletionsUrl = (baseUrl: string): string => {
 const payloadMessage = (payload: typeof ErrorPayload.Type): string =>
   typeof payload === "string" ? payload : payload.message;
 
+// A stream error's `code` as a status: a number, or digits in a string. A named code has none.
+const statusOf = (code: unknown): number | undefined => {
+  if (typeof code === "number") {
+    return code;
+  }
+  return typeof code === "string" && /^\d+$/.test(code) ? Number(code) : undefined;
+};
+
 // The statuses a response is retried for: a 429 or a 5xx.
 const retryable = (status: number): boolean =>
   Number.isInteger(status) && (status === 429 || (status >= 500 && status < 600));
@@ -223,10 +231,12 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       };
 
       // A 429 or 5xx after the 200 is the same failure as that status before it: sent again.
-      const failPayload = (payload: typeof ErrorPayload.Type) =>
-        typeof payload !== "string" && typeof payload.code === "number" && retryable(payload.code)
-          ? waitOrGiveUp(options.defaultRetry, payload.message)
+      const failPayload = (payload: typeof ErrorPayload.Type) => {
+        const status = typeof payload === "string" ? undefined : statusOf(payload.code);
+        return status !== undefined && retryable(status)
+          ? waitOrGiveUp(options.defaultRetry, payloadMessage(payload))
           : Effect.fail(unreachable(`openrouter: ${payloadMessage(payload)}`, null));
+      };
 
       const apply = (chunkText: string) =>
         Effect.gen(function* () {

@@ -88,7 +88,7 @@ const cases: ReadonlyArray<WireCase> = [
     name: "SaveFailed",
     wire: Errors.SaveFailedWire,
     error: Errors.SaveFailed.make({
-      message: "guest did not power off within 2 minutes",
+      message: "minted: could not keep the disk",
       sessionId: SESSION_ID,
       agentId: AGENT_ID,
     }),

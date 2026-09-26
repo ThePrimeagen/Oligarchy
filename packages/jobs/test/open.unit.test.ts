@@ -2,7 +2,7 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
-import { TestConsole } from "effect/testing";
+import { TestClock, TestConsole } from "effect/testing";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as LinearErrors from "@oligarchy/linear/errors";
@@ -116,6 +116,99 @@ const runStaysOpen = DbErrors.DatabaseError.make({
 });
 const unfailable = () =>
   TestingStores.fakeTestStore({}, { failRun: () => Effect.fail(runStaysOpen) });
+
+describe("Open.open asks Linear again when it did not answer", () => {
+  it.effect("a team lookup that got no answer once is asked again, and the run opens", () =>
+    Effect.gen(function* () {
+      let asked = 0;
+      const h = H.harness({
+        linear: TestingLinear.fakeLinear({
+          overrides: {
+            teamId: Effect.suspend(() => {
+              asked += 1;
+              return asked === 1
+                ? Effect.fail(
+                    LinearErrors.LinearError.make({
+                      operation: "teamId",
+                      message: "linear: request failed: no answer within 10 seconds",
+                      retryable: true,
+                    }),
+                  )
+                : Effect.succeed(TestingLinear.TEAM_ID);
+            }),
+          },
+        }),
+      });
+      h.tests.definitions.push(terminal);
+      const fiber = yield* Effect.forkChild(
+        Open.open(named("Open a terminal")).pipe(Effect.provide(services(h))),
+      );
+      yield* TestClock.adjust("2 seconds");
+      const opened = yield* Fiber.join(fiber);
+      expect(opened.tests).toHaveLength(1);
+      expect(h.tests.runs[0]?.status).toBe("pending");
+      expect(asked).toBe(2);
+    }),
+  );
+
+  // Looking up the label can create it, so a lost answer is not safe to replay.
+  it.effect("a label lookup that got no answer is not asked again (unhappy)", () =>
+    Effect.gen(function* () {
+      let asked = 0;
+      const h = H.harness({
+        linear: TestingLinear.fakeLinear({
+          overrides: {
+            labelIds: () =>
+              Effect.suspend(() => {
+                asked += 1;
+                return Effect.fail(
+                  LinearErrors.LinearError.make({
+                    operation: "labelIds",
+                    message: "linear: request failed: no answer within 10 seconds",
+                    retryable: true,
+                  }),
+                );
+              }),
+          },
+        }),
+      });
+      h.tests.definitions.push(terminal);
+      const error = yield* Effect.flip(
+        Open.open(named("Open a terminal")).pipe(Effect.provide(services(h))),
+      );
+      expect(error).toMatchObject({ _tag: "LinearError", operation: "labelIds" });
+      expect(asked).toBe(1);
+    }),
+  );
+
+  it.effect("a team lookup Linear refused is not asked again (unhappy)", () =>
+    Effect.gen(function* () {
+      let asked = 0;
+      const h = H.harness({
+        linear: TestingLinear.fakeLinear({
+          overrides: {
+            teamId: Effect.suspend(() => {
+              asked += 1;
+              return Effect.fail(
+                LinearErrors.LinearError.make({
+                  operation: "teamId",
+                  status: 401,
+                  message: "linear: request failed (401): unauthorized",
+                }),
+              );
+            }),
+          },
+        }),
+      });
+      h.tests.definitions.push(terminal);
+      const error = yield* Effect.flip(
+        Open.open(named("Open a terminal")).pipe(Effect.provide(services(h))),
+      );
+      expect(error).toMatchObject({ _tag: "LinearError", status: 401 });
+      expect(asked).toBe(1);
+    }),
+  );
+});
 
 describe("Open.open happy path", () => {
   it.effect(
@@ -907,14 +1000,14 @@ describe("Open.openMints unhappy path", () => {
           Effect.provide(mintServices(h, setup)),
           Effect.flip,
         );
-        const reason = `${QEMU_A} is held by a mint still in flight; created OLI-42`;
+        const reason = `${QEMU_A} is held by a mint still being created or run; created OLI-42`;
         expect(error).toMatchObject({ _tag: "SetupHeld", message: reason });
         expect(h.tests.runs.map((run) => [run.status, run.reason])).toEqual([["failed", reason]]);
         expect(methods(h)).toEqual(["teamId", "labelIds", "assigneeId", "stateIds", "createIssue"]);
         expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
           [
             "error",
-            `ticket trapped in Backlog; ${QEMU_A} is held by a mint still in flight`,
+            `ticket trapped in Backlog; ${QEMU_A} is held by a mint still being created or run`,
             "OLI-42",
           ],
         ]);

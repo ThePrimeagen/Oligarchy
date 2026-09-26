@@ -1,9 +1,11 @@
-import { Cause, Effect, Option, Schedule } from "effect";
+import { Cause, Effect, Option, Schedule, Schema } from "effect";
 import * as Servers from "@oligarchy/db/servers";
 import * as Board from "@oligarchy/jobs/board";
 import * as JobsErrors from "@oligarchy/jobs/errors";
 import * as Find from "@oligarchy/jobs/find";
+import * as Retry from "@oligarchy/jobs/retry";
 import * as Linear from "@oligarchy/linear/client";
+import * as LinearErrors from "@oligarchy/linear/errors";
 import * as Log from "@oligarchy/log/log";
 
 const POLL_INTERVAL = "30 seconds";
@@ -38,6 +40,26 @@ const tracking = (watch: string, seen: ReadonlyArray<Seen>): string =>
         `${ticket.identifier} ${pings(rounds)}${settled ? " (handled)" : ""}`,
     )
     .join(", ")}`;
+
+const isLinearError = Schema.is(LinearErrors.LinearError);
+
+// A ticket's step the next poll repeats. A Linear call Linear says is worth asking again is that
+// poll's to send, so it is a warning; anything else is the watch failing.
+const missed = (watch: string, ticket: string, error: unknown) =>
+  Effect.gen(function* () {
+    const log = yield* Log.Log;
+    const where = { location: Log.Locations.automation, agentId: ticket };
+    if (isLinearError(error) && error.retryable === true) {
+      return yield* log.warning(
+        `${watch} watch will try again: ${JobsErrors.detail(error)}`,
+        where,
+      );
+    }
+    return yield* log.error(`${watch} watch failed: ${JobsErrors.detail(error)}`, {
+      ...where,
+      cause: error,
+    });
+  });
 
 // The result is looked up first, so a missing one, retried every poll and logged once per
 // snapshot, never says it is being processed. Then that result is enqueued, through the same
@@ -85,15 +107,7 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     return adopted;
   }).pipe(
     // Keep the landed enqueue when the label or the move fails, so a new job still spends the check.
-    Effect.catch((error) =>
-      log
-        .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
-          location: Log.Locations.automation,
-          agentId: ticket.identifier,
-          cause: error,
-        })
-        .pipe(Effect.as(adopted)),
-    ),
+    Effect.catch((error) => missed("backlog", ticket.identifier, error).pipe(Effect.as(adopted))),
   );
 });
 
@@ -240,7 +254,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
     yield* guard(
       "backlog",
       Effect.gen(function* () {
-        const tickets = yield* linear.listBacklog.pipe(
+        const tickets = yield* Retry.linearRead(linear.listBacklog).pipe(
           Effect.catch((error) =>
             log
               .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
@@ -280,13 +294,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           // the list, and a move that did not is retried. A defect still fails the column.
           const outcome = yield* processBacklog(ticket, rounds).pipe(
             Effect.catch((error) =>
-              log
-                .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
-                  location: Log.Locations.automation,
-                  agentId: ticket.identifier,
-                  cause: error,
-                })
-                .pipe(Effect.as("failed" as const)),
+              missed("backlog", ticket.identifier, error).pipe(Effect.as("failed" as const)),
             ),
           );
           if (outcome === "queued") {
@@ -304,7 +312,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
     yield* guard(
       "automation needed",
       Effect.gen(function* () {
-        const tickets = yield* linear.listAutomationNeeded.pipe(
+        const tickets = yield* Retry.linearRead(linear.listAutomationNeeded).pipe(
           Effect.catch((error) =>
             log
               .error(`automation needed watch failed: ${JobsErrors.detail(error)}`, {
@@ -341,13 +349,9 @@ export const watch = Effect.fn("watchBoard")(function* () {
           }
           const outcome = yield* processAutomationNeeded(ticket, rounds).pipe(
             Effect.catch((error) =>
-              log
-                .error(`automation needed watch failed: ${JobsErrors.detail(error)}`, {
-                  location: Log.Locations.automation,
-                  agentId: ticket.identifier,
-                  cause: error,
-                })
-                .pipe(Effect.as("failed" as const)),
+              missed("automation needed", ticket.identifier, error).pipe(
+                Effect.as("failed" as const),
+              ),
             ),
           );
           if (outcome === "queued" || outcome === "duplicate") {
@@ -372,7 +376,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
     yield* guard(
       "needs review",
       Effect.gen(function* () {
-        const tickets = yield* linear.listNeedsReview.pipe(
+        const tickets = yield* Retry.linearRead(linear.listNeedsReview).pipe(
           Effect.catch((error) =>
             log
               .error(`needs review watch failed: ${JobsErrors.detail(error)}`, {
@@ -409,13 +413,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
           }
           const outcome = yield* processNeedsReview(ticket, rounds).pipe(
             Effect.catch((error) =>
-              log
-                .error(`needs review watch failed: ${JobsErrors.detail(error)}`, {
-                  location: Log.Locations.automation,
-                  agentId: ticket.identifier,
-                  cause: error,
-                })
-                .pipe(Effect.as("failed" as const)),
+              missed("needs review", ticket.identifier, error).pipe(Effect.as("failed" as const)),
             ),
           );
           if (outcome === "queued" || outcome === "duplicate") {

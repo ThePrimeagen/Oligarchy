@@ -353,6 +353,24 @@ describe("Close.judge unhappy path", () => {
       }),
   );
 
+  it.effect(
+    "a mint whose guest never powered off is completed: its session failed, not errored",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        H.seedResult(h.tests, { status: "failed", sessionId: H.SESSION });
+        h.sessions.set(
+          H.SESSION,
+          H.session(H.SESSION, "failed", "guest did not power off within 2 minutes"),
+        );
+        const action = H.seedAction(h.automation, { status: "running", action: "mint" });
+        expect(yield* Close.judge(action).pipe(Effect.provide(h.layer))).toEqual({
+          status: "completed",
+          reason: null,
+        });
+      }),
+  );
+
   it.effect("a result that vanished during the drive is a defect", () =>
     Effect.gen(function* () {
       const h = H.harness();

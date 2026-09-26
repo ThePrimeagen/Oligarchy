@@ -1295,7 +1295,92 @@ describe("sendKeys", () => {
   );
 
   it.effect(
-    "a fresh guest that powered itself off fails the image but stays for save, which keeps its disk",
+    "a fresh guest that powered itself off refuses the image and stays for save, which keeps its disk",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          script: {
+            screendump: () =>
+              Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+            mouse: () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, id, live } = yield* start();
+            yield* h.qemu.exit(id, 0);
+            // A mint's last act is the power off: the image is refused, not the machine failing.
+            expect(yield* Effect.flip(sessions.image(live))).toMatchObject({
+              _tag: "Conflict",
+              message: "guest is powered off",
+              sessionId: id,
+            });
+            expect(
+              yield* Effect.flip(
+                sessions.mouse(live, { _tag: "click", x: 0.5, y: 0.5, button: "left" }),
+              ),
+            ).toMatchObject({ _tag: "Conflict", message: "guest is powered off" });
+            expect(h.sessions.sessions[0]).toMatchObject({ id, status: "running" });
+            expect(yield* sessions.lookup(id, AGENT)).toBe(live);
+            yield* sessions.save(live);
+            expect(h.minted.saves).toHaveLength(1);
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "succeeded",
+              reason: `saved; minted ${ISO}`,
+            });
+          }),
+        );
+      }),
+  );
+
+  // The QMP socket can close before the process exit is published (it waits for stderr to drain).
+  it.effect("a fresh guest whose socket closed just before it exited 0 is still refused", () =>
+    Effect.gen(function* () {
+      const closed = () => Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" }));
+      const h = harness({ script: { screendump: closed, sendKey: closed } });
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          const shot = yield* Effect.forkChild(Effect.flip(sessions.image(live)));
+          yield* TestClock.adjust("1 second");
+          yield* h.qemu.exit(id, 0);
+          yield* TestClock.adjust("1 second");
+          expect(yield* Fiber.join(shot)).toMatchObject({
+            _tag: "Conflict",
+            message: "guest is powered off",
+          });
+          expect(yield* Effect.flip(sessions.sendKeys(live, "a", undefined))).toMatchObject({
+            _tag: "Conflict",
+          });
+        }),
+      );
+    }),
+  );
+
+  it.effect(
+    "a fresh guest whose socket closed but that never exits still fails the exchange (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          script: {
+            screendump: () =>
+              Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const { sessions, live } = yield* start();
+            const shot = yield* Effect.forkChild(Effect.flip(sessions.image(live)));
+            yield* TestClock.adjust("3 seconds");
+            expect(yield* Fiber.join(shot)).toMatchObject({ _tag: "ExchangeFailed" });
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a fresh guest whose socket closed just before it exited 1 ends errored (unhappy)",
     () =>
       Effect.gen(function* () {
         const h = harness({
@@ -1307,16 +1392,56 @@ describe("sendKeys", () => {
         yield* h.run(
           Effect.gen(function* () {
             const { sessions, id, live } = yield* start();
-            yield* h.qemu.exit(id, 0);
-            expect((yield* Effect.flip(sessions.image(live)))._tag).toBe("ExchangeFailed");
-            expect(h.sessions.sessions[0]).toMatchObject({ id, status: "running" });
-            expect(yield* sessions.lookup(id, AGENT)).toBe(live);
-            yield* sessions.save(live);
-            expect(h.minted.saves).toHaveLength(1);
+            const shot = yield* Effect.forkChild(Effect.flip(sessions.image(live)));
+            yield* TestClock.adjust("1 second");
+            yield* h.qemu.exit(id, 1);
+            yield* TestClock.adjust("1 second");
+            expect((yield* Fiber.join(shot))._tag).toBe("ExchangeFailed");
             expect(h.sessions.sessions[0]).toMatchObject({
               id,
-              status: "succeeded",
-              reason: `saved; minted ${ISO}`,
+              status: "errored",
+              reason: "qemu exited 1",
+            });
+            expect(yield* Effect.flip(sessions.lookup(id, AGENT))).toMatchObject({
+              _tag: "UnknownSession",
+            });
+          }),
+        );
+      }),
+  );
+
+  it.effect(
+    "a resumed guest whose socket closed just before it exited 0 ends errored (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const h = harness({
+          minted: {
+            find: () => Option.some({ disk: `${URL_ISO}.qcow2`, vars: `${URL_ISO}.OVMF_VARS.fd` }),
+          },
+          script: {
+            screendump: () =>
+              Effect.fail(Errors.QmpClosed.make({ message: "qemu: socket closed" })),
+          },
+        });
+        yield* h.run(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions.Sessions;
+            yield* sessions.reserve(AGENT);
+            const id = yield* sessions.start(
+              Contract.StartBody.make({ iso: URL_ISO, agent: AGENT, mode: "resume" }),
+              "none",
+              false,
+            );
+            const live = yield* sessions.lookup(id, AGENT);
+            const shot = yield* Effect.forkChild(Effect.flip(sessions.image(live)));
+            yield* TestClock.adjust("1 second");
+            yield* h.qemu.exit(id, 0);
+            yield* TestClock.adjust("1 second");
+            expect((yield* Fiber.join(shot))._tag).toBe("ExchangeFailed");
+            expect(h.sessions.sessions[0]).toMatchObject({
+              id,
+              status: "errored",
+              reason: "qemu exited 0",
             });
           }),
         );
@@ -1528,7 +1653,11 @@ describe("mouse", () => {
       yield* h.run(
         Effect.gen(function* () {
           const { sessions, live } = yield* start();
-          const error = yield* Effect.flip(sessions.mouse(live, { _tag: "move", x: 0.5, y: 0.5 }));
+          const moved = yield* Effect.forkChild(
+            Effect.flip(sessions.mouse(live, { _tag: "move", x: 0.5, y: 0.5 })),
+          );
+          yield* TestClock.adjust("2 seconds");
+          const error = yield* Fiber.join(moved);
           expect(error).toMatchObject({ _tag: "ExchangeFailed", message: "qemu: socket closed" });
           expect(line(h, "mouse")).toBeUndefined();
         }),
@@ -2174,7 +2303,7 @@ describe("save", () => {
   );
 
   it.effect(
-    "a guest that does not power off within two minutes is killed, the row errors and nothing is kept",
+    "a guest that does not power off within two minutes is killed, the row fails and nothing is kept",
     () =>
       Effect.gen(function* () {
         const h = harness({ script: { powersOff: false } });
@@ -2186,16 +2315,15 @@ describe("save", () => {
             yield* TestClock.adjust("2 minutes");
             const error = yield* Fiber.join(saving);
             expect(error).toMatchObject({
-              _tag: "SaveFailed",
+              _tag: "Conflict",
               message: "guest did not power off within 2 minutes",
               sessionId: id,
-              agentId: AGENT,
             });
             expect(h.minted.saves).toEqual([]);
             expect(tags(h)).toEqual(["prepare", "start", "powerdown", "stderrTail", "stop"]);
             expect(h.sessions.sessions[0]).toMatchObject({
               id,
-              status: "errored",
+              status: "failed",
               reason: "guest did not power off within 2 minutes",
             });
             expect(h.debugLogs.saves).toEqual([{ sessionId: id, serial: "", qemu: "" }]);
@@ -2205,11 +2333,11 @@ describe("save", () => {
               { type: "session", status: "running" },
               { type: "action", id: 1, name: "save", state: "running" },
               { type: "action", id: 1, state: "failed" },
-              { type: "session", status: "errored" },
+              { type: "session", status: "failed" },
             ]);
             expect(endedWith(spanNamed(h, AGENT))).toBe("internal_error");
             expect(line(h, "stopped")).toMatchObject({
-              text: "stopped; errored; guest did not power off within 2 minutes",
+              text: "stopped; failed; guest did not power off within 2 minutes",
               location: id,
               agentId: AGENT,
             });

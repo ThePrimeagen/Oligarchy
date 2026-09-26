@@ -8,6 +8,7 @@ import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Errors from "./errors.ts";
+import * as Retry from "./retry.ts";
 import * as Templates from "./templates.ts";
 
 // The one definition a mint installs from, and the label its tickets carry beside the agent test
@@ -70,12 +71,14 @@ type Team = {
   readonly states: Linear.WorkflowStateIds;
 };
 
+// The lookups are asked again once when Linear did not answer. The labels are not: a missing one
+// is created, and a create whose answer was lost is not safe to send twice.
 const team = Effect.fn("Open.team")(function* (label: string) {
   const linear = yield* Linear.Linear;
-  const teamId = yield* linear.teamId;
+  const teamId = yield* Retry.linearRead(linear.teamId);
   const labelIds = yield* linear.labelIds(teamId, label);
-  const assigneeId = yield* linear.assigneeId;
-  const states = yield* linear.stateIds(teamId);
+  const assigneeId = yield* Retry.linearRead(linear.assigneeId);
+  const states = yield* Retry.linearRead(linear.stateIds(teamId));
   const found: Team = { teamId, labelIds, assigneeId, states };
   return found;
 });
@@ -381,7 +384,10 @@ export const openMints = Effect.fn("Open.openMints")(function* (input: {
         setups.claim(input.iso, pinned, result).pipe(
           Effect.filterOrFail(
             (claimed) => claimed,
-            () => Errors.SetupHeld.make({ message: `${pinned} is held by a mint still in flight` }),
+            () =>
+              Errors.SetupHeld.make({
+                message: `${pinned} is held by a mint still being created or run`,
+              }),
           ),
           Effect.asVoid,
         ),

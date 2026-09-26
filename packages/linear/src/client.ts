@@ -193,6 +193,9 @@ const Envelope = Schema.Struct({
 
 const decodeEnvelope = HttpClientResponse.schemaBodyJson(Envelope);
 
+// What Linear answers a label removal from a ticket that does not carry it.
+const NOT_LABELED = "linear: Label not on issue";
+
 const invalidResponse = (operation: string, cause?: unknown): Errors.LinearError =>
   cause === undefined
     ? Errors.LinearError.make({ operation, message: "linear: invalid response" })
@@ -272,17 +275,24 @@ const makeLinear = (
               Errors.LinearError.make({
                 operation,
                 message: "linear: request failed",
+                retryable: true,
                 cause: error,
               }),
             ),
           );
         if (response.status < 200 || response.status >= 300) {
           const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
-          return yield* Errors.LinearError.make({
-            operation,
-            status: response.status,
-            message: `linear: request failed (${String(response.status)})${text === "" ? "" : `: ${text}`}`,
-          });
+          const busy = response.status === 429 || (response.status >= 500 && response.status < 600);
+          return yield* Errors.LinearError.make(
+            Object.assign(
+              {
+                operation,
+                status: response.status,
+                message: `linear: request failed (${String(response.status)})${text === "" ? "" : `: ${text}`}`,
+              },
+              busy ? { retryable: true } : undefined,
+            ),
+          );
         }
         const envelope = yield* decodeEnvelope(response).pipe(
           Effect.mapError((cause) => invalidResponse(operation, cause)),
@@ -306,6 +316,7 @@ const makeLinear = (
             Errors.LinearError.make({
               operation,
               message: `linear: request failed: no answer within ${REQUEST_TIMEOUT}`,
+              retryable: true,
             }),
         }),
       );
@@ -614,6 +625,7 @@ const makeLinear = (
       );
     });
 
+    // A ticket whose label never landed is already clear.
     const clearReady = Effect.fn("Linear.clearReady")(function* (identifier: string) {
       const id = yield* readyLabelId();
       yield* setReady(
@@ -621,6 +633,11 @@ const makeLinear = (
         identifier,
         { removedLabelIds: [id] },
         `linear: clearing ${identifier} ready failed`,
+      ).pipe(
+        Effect.catchIf(
+          (error) => error.message === NOT_LABELED,
+          () => Effect.void,
+        ),
       );
     });
 

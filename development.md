@@ -225,7 +225,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `assigneeId`, `stateIds`, `createIssue`, `describeIssue`, `moveIssue`, `markReady`,
   `clearReady`, the `moveTo*` family, `listBacklog`, `listAutomationNeeded`, `listNeedsReview`;
   the board vocabulary `BACKLOG_STATE` ... `ABORTED_STATE`, `READY_LABEL`, `AGENT_TEST_LABEL`;
-  `LinearTicket`, `LinearBacklogTicket`) and `errors.ts` (`LinearError`). It imports `effect`,
+  `LinearTicket`, `LinearBacklogTicket`) and `errors.ts` (`LinearError`, `retryable` on no answer,
+  no connection, a 429 or a 5xx; the client itself never retries). It imports `effect`,
   `@oligarchy/env` and its own files. Every `moveTo*` but one finds its state by name on the
   configured team; `moveToAborted` finds it on the ticket's own team, because its callers (jobs'
   abort and the dashboard's suite abort) know the ticket and not the board, and a ticket Linear
@@ -238,7 +239,8 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   `openMint` for the proxy's setup, `openMints` for `./ctrl mint`, `mintDefinition`,
   `MINT_DEFINITION`; a failure fails the run it was opening and names the tickets created, and a
   run that will not take that failure is a line), `close.ts` (`close`, `fail`,
-  `judge`, `moveTicket`: three attempts, then a line, the one retry policy), `ready.ts` (`mark`,
+  `judge`, `moveTicket`: three attempts, then a line), `retry.ts` (`linearRead`: a Linear read
+  asked once more, two seconds later, when its `LinearError` is `retryable`; never a write), `ready.ts` (`mark`,
   `release`), `board.ts` (which column asks for which action: `asks`, `actionFor`, `enqueue`,
   and `already`, the words for a duplicate),
   `abort.ts` (`abort` for a pending action, `running` for one its app already stopped),
@@ -749,10 +751,16 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   the harness closed the result. A bad reply goes back to the model as a past step and it is
   asked again: one that is not that one tool call, a command the harness refuses (`start`,
   `stop`, `save`, `intent`), or one the client refuses before any request (an unknown action,
-  flag, or value). Three in a row fail the loop with `model could not respond correctly`,
+  flag, or value). Three in a row end the test failed with `model could not respond correctly`,
   quoting each reply and its reason; a command that reaches the guest, even one the guest
-  refuses, starts the count again. An OpenRouter failure, three bad replies, the step limit, or
-  the run ceiling exits 1 and the reason is the failure. A ticket with no
+  refuses, starts the count again. An OpenRouter failure exits 1 and the reason is the failure.
+  Three bad replies, the step limit or the run ceiling is the test's failure, not the
+  system's: the guest stops failed, the result closes failed with the limit as its reason, and
+  the driver prints `limit-reached` and exits 0, so the drive completes and the diagnosis judges
+  it (a close that fails still exits 1). A mint whose save the qemu server refuses because the
+  guest never powered off (a 409; the session ends failed) is the test's failure the same way:
+  the result closes failed with save's reason and the driver prints `not-powered-off` and exits
+  0. Any other save failure is still the run's. A ticket with no
   result, or a result with no definition, fails before start and does not ask the model. The
   action itself is the client function for that action (`mouse click` is `mouseClick`), called in
   this process. The driver does not run the client CLI and does not spawn `./client`. Intents

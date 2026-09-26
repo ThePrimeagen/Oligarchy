@@ -779,6 +779,32 @@ describe("OpenRouter client", () => {
       const fiber = yield* Effect.forkScoped(run(recorder.layer));
       yield* TestClock.adjust("1 second");
       expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a 502 written as a string inside the stream is sent again", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        recorder.requests.length === 1
+          ? sse([frame({ error: { message: "error code: 502", code: "502" } })])
+          : doneTurn(),
+      );
+      const fiber = yield* Effect.forkScoped(run(recorder.layer));
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a named code inside the stream is not retried (unhappy)", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        sse([frame({ error: { message: "Provider disconnected", code: "server_error" } })]),
+      );
+      const error = yield* Effect.flip(run(recorder.layer));
+      expect(error.message).toBe("openrouter: Provider disconnected");
+      expect(recorder.requests).toHaveLength(1);
     }),
   );
 

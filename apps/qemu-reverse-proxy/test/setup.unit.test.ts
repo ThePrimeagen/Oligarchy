@@ -36,6 +36,8 @@ const memory = () => {
   let removed = 0;
   let failInsert = false;
   let failRemove = false;
+  // The store's answer when a live mint holds the row: it stays, and remove says so.
+  let held = false;
   const key = (iso: string, serverUrl: string) =>
     rows.find((row) => row.iso === iso && row.serverUrl === serverUrl);
   const layer = Layer.succeed(SetupRequests.SetupRequestStore)(
@@ -72,11 +74,16 @@ const memory = () => {
         failRemove
           ? Effect.die(new Error("unlock failed"))
           : Effect.sync(() => {
-              const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
-              if (index >= 0) {
-                rows.splice(index, 1);
-                removed += 1;
+              if (held) {
+                return false;
               }
+              const index = rows.findIndex((row) => row.iso === iso && row.serverUrl === serverUrl);
+              if (index < 0) {
+                return false;
+              }
+              rows.splice(index, 1);
+              removed += 1;
+              return true;
             }),
       removeServer: (serverUrl) =>
         Effect.sync(() => {
@@ -112,6 +119,9 @@ const memory = () => {
     },
     set failRemove(value: boolean) {
       failRemove = value;
+    },
+    set held(value: boolean) {
+      held = value;
     },
     layer,
   };
@@ -578,6 +588,34 @@ describe("the setup timer", () => {
           expect(h.log.lines.map((line) => line.text)).toContain(
             `setup released; ${SERVER}; ${ISO}; pending`,
           );
+        }),
+      );
+    },
+  );
+
+  it.effect(
+    "a lock a live mint took after the check is kept, and the watcher does not call it released (unhappy)",
+    () => {
+      const h = harness();
+      return h.run(
+        Effect.gen(function* () {
+          const setup = yield* Setup.Setup;
+          yield* setup.install();
+          yield* setup.open(ISO, SERVER, PROXY);
+          const row = h.store.rows[0];
+          if (row !== undefined) {
+            row.resultStatus = "failed";
+          }
+          h.store.held = true;
+          yield* TestClock.adjust("30 seconds");
+          expect(h.store.rows).toHaveLength(1);
+          const texts = h.log.lines.map((line) => line.text);
+          expect(texts).toContain(`setup not released; ${SERVER}; ${ISO}; held or already gone`);
+          expect(texts.some((text) => text.startsWith("setup released"))).toBe(false);
+          // The watcher is still on it: once that mint ends, the next check releases the lock.
+          h.store.held = false;
+          yield* TestClock.adjust("30 seconds");
+          expect(h.store.rows).toHaveLength(0);
         }),
       );
     },

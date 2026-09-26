@@ -140,17 +140,34 @@ describe("driver command", () => {
       const failed: Seen = { input: undefined };
       const error = yield* Effect.flip(
         run(FLAGS, failed, {
-          outcome: Effect.fail(
-            SharedErrors.CommandError.make({ message: "step limit of 1 reached" }),
-          ),
+          outcome: Effect.fail(SharedErrors.CommandError.make({ message: "debug log: EACCES" })),
         }),
       );
-      expect(error).toMatchObject({ _tag: "CommandError", message: "step limit of 1 reached" });
+      expect(error).toMatchObject({
+        _tag: "CommandError",
+        message: "debug log: EACCES",
+      });
       expect(yield* TestConsole.logLines).toEqual([]);
 
       const closed: Seen = { input: undefined };
       yield* run(FLAGS, closed, { outcome: Effect.succeed({ reason: "result-closed" }) });
       expect(yield* TestConsole.logLines).toEqual(["result-closed"]);
+    }),
+  );
+
+  it.effect("a limit the model reached is a normal end that prints limit-reached", () =>
+    Effect.gen(function* () {
+      const limited: Seen = { input: undefined };
+      yield* run(FLAGS, limited, { outcome: Effect.succeed({ reason: "limit-reached" }) });
+      expect(yield* TestConsole.logLines).toEqual(["limit-reached"]);
+    }),
+  );
+
+  it.effect("a mint the model never powered off is a normal end that prints not-powered-off", () =>
+    Effect.gen(function* () {
+      const unfinished: Seen = { input: undefined };
+      yield* run(FLAGS, unfinished, { outcome: Effect.succeed({ reason: "not-powered-off" }) });
+      expect(yield* TestConsole.logLines).toEqual(["not-powered-off"]);
     }),
   );
 

@@ -2880,6 +2880,20 @@ Postgres.describeWithDatabase("database", () => {
         return created.map((run) => run.results[0].id);
       });
 
+    // A job the worker has finished, as it leaves the row.
+    const endJob = (resultId: string, action: "mint", status: "failed" | "errored") =>
+      Effect.gen(function* () {
+        const database = yield* Client.Database;
+        yield* database.run("endJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({ status })
+            .where(
+              sql`${DbSchema.automationJobs.resultId} = ${resultId} and ${DbSchema.automationJobs.action} = ${action}`,
+            ),
+        );
+      });
+
     scoped.effect(
       "a claim takes a free lock, and one whose mint has ended or whose result is gone",
       () =>
@@ -2928,6 +2942,85 @@ Postgres.describeWithDatabase("database", () => {
           expect(yield* setups.serverForResult(pending)).toEqual(Option.some(inFlight));
           expect(yield* setups.serverForResult(mine)).toEqual(Option.none());
         }),
+    );
+
+    scoped.effect("a claim takes a lock whose result is open but whose mint job has ended", () =>
+      Effect.gen(function* () {
+        const setups = yield* SetupRequests.SetupRequestStore;
+        const jobs = yield* Automation.AutomationStore;
+        const [stale, mine] = yield* mintResults(2);
+        const iso = `https://example.com/${uuid()}.iso`;
+        const server = setupServer();
+        expect(yield* setups.claim(iso, server, stale)).toBe(true);
+        yield* jobs.enqueue({ resultId: stale, action: "mint" });
+        yield* endJob(stale, "mint", "failed");
+        expect(yield* setups.claim(iso, server, mine)).toBe(true);
+        expect(yield* setups.serverForResult(mine)).toEqual(Option.some(server));
+      }),
+    );
+
+    scoped.effect(
+      "remove deletes a lock with no result, one whose mint has ended, and one whose job has",
+      () =>
+        Effect.gen(function* () {
+          const setups = yield* SetupRequests.SetupRequestStore;
+          const tests = yield* Tests.TestStore;
+          const jobs = yield* Automation.AutomationStore;
+          const [failed, ended] = yield* mintResults(2);
+          const iso = `https://example.com/${uuid()}.iso`;
+          const creating = setupServer();
+          expect(yield* setups.insert(iso, creating)).toBe(true);
+          expect(yield* setups.remove(iso, creating)).toBe(true);
+
+          const done = setupServer();
+          expect(yield* setups.claim(iso, done, failed)).toBe(true);
+          yield* tests.closeResult(failed, "failed", "install hung", null);
+          expect(yield* setups.remove(iso, done)).toBe(true);
+
+          const jobEnded = setupServer();
+          expect(yield* setups.claim(iso, jobEnded, ended)).toBe(true);
+          yield* jobs.enqueue({ resultId: ended, action: "mint" });
+          yield* endJob(ended, "mint", "errored");
+          expect(yield* setups.remove(iso, jobEnded)).toBe(true);
+
+          expect((yield* setups.list()).filter((row) => row.iso === iso)).toEqual([]);
+        }),
+    );
+
+    scoped.effect(
+      "remove leaves a lock whose mint passed, and one whose result is gone (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const setups = yield* SetupRequests.SetupRequestStore;
+          const tests = yield* Tests.TestStore;
+          const [passed] = yield* mintResults(1);
+          const iso = `https://example.com/${uuid()}.iso`;
+          const minted = setupServer();
+          expect(yield* setups.claim(iso, minted, passed)).toBe(true);
+          yield* tests.closeResult(passed, "passed", null, null);
+          expect(yield* setups.remove(iso, minted)).toBe(false);
+          expect(yield* setups.serverForResult(passed)).toEqual(Option.some(minted));
+
+          const swept = setupServer();
+          const gone = uuid();
+          expect(yield* setups.claim(iso, swept, gone)).toBe(true);
+          expect(yield* setups.remove(iso, swept)).toBe(false);
+          expect(yield* setups.serverForResult(gone)).toEqual(Option.some(swept));
+        }),
+    );
+
+    scoped.effect("remove leaves a lock a live mint holds (unhappy)", () =>
+      Effect.gen(function* () {
+        const setups = yield* SetupRequests.SetupRequestStore;
+        const jobs = yield* Automation.AutomationStore;
+        const [live] = yield* mintResults(1);
+        const iso = `https://example.com/${uuid()}.iso`;
+        const server = setupServer();
+        expect(yield* setups.claim(iso, server, live)).toBe(true);
+        yield* jobs.enqueue({ resultId: live, action: "mint" });
+        expect(yield* setups.remove(iso, server)).toBe(false);
+        expect(yield* setups.serverForResult(live)).toEqual(Option.some(server));
+      }),
     );
 
     scoped.effect("a claim whose result already locks another server is refused (unhappy)", () =>

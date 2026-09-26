@@ -172,8 +172,9 @@ describe("QemuServerApi", () => {
     );
     expect(byIdentifier(Api.QemuServerApi, "relinquish").errors).toEqual(sessions);
     expect(byIdentifier(Api.QemuServerApi, "start").errors).toEqual([...sessions, 502]);
+    // 409 on the guest's exchanges: a fresh guest that powered itself off, a mint's last act.
     expect(byIdentifier(Api.QemuServerApi, "image").errors).toEqual(
-      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+      [...sessions, 403, 404, 409, 502].sort((a, b) => a - b),
     );
     expect(byIdentifier(Api.QemuServerApi, "serial").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
@@ -185,16 +186,16 @@ describe("QemuServerApi", () => {
     expect(byIdentifier(Api.QemuServerApi, "stop").errors).toEqual(
       [...sessions, 403, 404].sort((a, b) => a - b),
     );
-    // 502: the guest did not power off, or its disk could not be kept.
+    // 409: the guest did not power off. 502: its disk could not be kept.
     expect(byIdentifier(Api.QemuServerApi, "save").errors).toEqual(
-      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+      [...sessions, 403, 404, 409, 502].sort((a, b) => a - b),
     );
     expect(byIdentifier(Api.QemuServerApi, "sendKeys").errors).toEqual(
-      [...sessions, 403, 404, 502].sort((a, b) => a - b),
+      [...sessions, 403, 404, 409, 502].sort((a, b) => a - b),
     );
     for (const mouse of MOUSE_ENDPOINTS) {
       expect(byIdentifier(Api.QemuServerApi, mouse).errors, mouse).toEqual(
-        [...sessions, 403, 404, 502].sort((a, b) => a - b),
+        [...sessions, 403, 404, 409, 502].sort((a, b) => a - b),
       );
     }
     expect(byIdentifier(Api.QemuServerApi, "intentStart").errors).toEqual(
@@ -281,15 +282,17 @@ describe("QemuReverseProxyApi", () => {
     expect(byIdentifier(reverse, "reserve").errors).toEqual(ascending([...boundary, 409]));
     expect(byIdentifier(reverse, "relinquish").errors).toEqual(boundary);
     expect(byIdentifier(reverse, "start").errors).toEqual(boundary);
-    expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "image").errors).toEqual(ascending([...boundary, 403, 409]));
     expect(byIdentifier(reverse, "serial").errors).toEqual(ascending([...boundary, 403]));
     expect(byIdentifier(reverse, "follow").errors).toEqual(ascending([...boundary, 409]));
     expect(byIdentifier(reverse, "stop").errors).toEqual(ascending([...boundary, 403]));
     // save's own 502 is the boundary's 502 too: one status, declared once.
-    expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403]));
-    expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403]));
+    expect(byIdentifier(reverse, "save").errors).toEqual(ascending([...boundary, 403, 409]));
+    expect(byIdentifier(reverse, "sendKeys").errors).toEqual(ascending([...boundary, 403, 409]));
     for (const mouse of MOUSE_ENDPOINTS) {
-      expect(byIdentifier(reverse, mouse).errors, mouse).toEqual(ascending([...boundary, 403]));
+      expect(byIdentifier(reverse, mouse).errors, mouse).toEqual(
+        ascending([...boundary, 403, 409]),
+      );
     }
     expect(byIdentifier(reverse, "intentStart").errors).toEqual(ascending([...boundary, 403]));
     expect(byIdentifier(reverse, "intentEnd").errors).toEqual(ascending([...boundary, 403]));

@@ -648,6 +648,34 @@ describe("Linear happy path", () => {
   );
 });
 
+describe("Linear says which failures are worth asking again", () => {
+  const list = Effect.flatMap(Linear.Linear, (client) => client.listNeedsReview);
+
+  it.effect("a 503 or a 429 is marked retryable, and the client sends it once", () =>
+    Effect.gen(function* () {
+      for (const status of [503, 429]) {
+        const http = FakeHttp.recordRequests(() => new Response("busy", { status }));
+        const error = yield* failureOf(list).pipe(Effect.provide(http.layer));
+        expect(error).toMatchObject({ status, retryable: true });
+        expect(http.requests).toHaveLength(1);
+      }
+    }),
+  );
+
+  it.effect("a refusal and a GraphQL error are not retryable (unhappy)", () =>
+    Effect.gen(function* () {
+      const refused = FakeHttp.recordRequests(() => new Response("unauthorized", { status: 401 }));
+      const rejected = FakeHttp.recordRequests(() =>
+        FakeHttp.json({ errors: [{ message: "API key has no access" }] }),
+      );
+      for (const http of [refused, rejected]) {
+        const error = yield* failureOf(list).pipe(Effect.provide(http.layer));
+        expect(error.retryable).toBeUndefined();
+      }
+    }),
+  );
+});
+
 describe("Linear unhappy path", () => {
   it.effect("a request Linear never answers fails after ten seconds, naming the operation", () =>
     Effect.gen(function* () {
@@ -661,6 +689,7 @@ describe("Linear unhappy path", () => {
         _tag: "LinearError",
         operation: "teamId",
         message: "linear: request failed: no answer within 10 seconds",
+        retryable: true,
       });
     }),
   );
@@ -813,6 +842,62 @@ describe("Linear unhappy path", () => {
         message: "linear: labeling OLI-45 ready failed",
       });
     }),
+  );
+
+  it.effect("clearReady on a ticket that does not carry the label is done", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ errors: [{ message: "Label not on issue" }] })
+          : happyLinear(body),
+      );
+      yield* Effect.flatMap(Linear.Linear, (client) => client.clearReady("OLI-45")).pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+      );
+      expect(http.requests.filter((request) => request.body.includes("issueUpdate"))).toHaveLength(
+        1,
+      );
+    }),
+  );
+
+  it.effect("clearReady still fails on any other answer Linear refuses it with (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("issueUpdate")
+          ? FakeHttp.json({ errors: [{ message: "Entity not found: Issue" }] })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) => client.clearReady("OLI-45")),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "clearReady",
+        message: "linear: Entity not found: Issue",
+      });
+    }),
+  );
+
+  it.effect(
+    "clearReady still fails when Linear sends another error beside the missing label (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const http = withHttp((body) =>
+          body.query.includes("issueUpdate")
+            ? FakeHttp.json({
+                errors: [{ message: "Label not on issue" }, { message: "Rate limited" }],
+              })
+            : happyLinear(body),
+        );
+        const error = yield* failureOf(
+          Effect.flatMap(Linear.Linear, (client) => client.clearReady("OLI-45")),
+        ).pipe(Effect.provide(http.layer));
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "clearReady",
+          message: "linear: Label not on issue; Rate limited",
+        });
+      }),
   );
 
   it.effect("clearReady reports a label update that did not succeed", () =>
@@ -1324,6 +1409,7 @@ describe("Linear unhappy path", () => {
       expect(error.operation).toBe("teamId");
       expect(error.status).toBeUndefined();
       expect(error.message).toBe("linear: request failed");
+      expect(error.retryable).toBe(true);
       expect(error.cause).toMatchObject({
         message:
           "Transport: connect ECONNREFUSED 127.0.0.1:1 (POST https://api.linear.app/graphql)",

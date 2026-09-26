@@ -587,6 +587,106 @@ describe("backlog watch unhappy path", () => {
       }),
   );
 
+  it.effect("a column Linear answers busy once is read again and the poll logs no failure", () =>
+    Effect.gen(function* () {
+      const busy = LinearErrors.LinearError.make({
+        operation: "listNeedsReview",
+        message: "linear: request failed (503): busy",
+        status: 503,
+        retryable: true,
+      });
+      let reads = 0;
+      const stores = TestingStores.fakeStores();
+      const log = TestingLog.fakeLog();
+      const linear = TestingLinear.fakeLinear({
+        overrides: {
+          listNeedsReview: Effect.suspend(() => {
+            reads += 1;
+            return reads === 1 ? Effect.fail(busy) : Effect.succeed([]);
+          }),
+        },
+      });
+      announceClient(stores.servers);
+      const scope = yield* Scope.make();
+      yield* Backlog.watch().pipe(
+        Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+        Scope.provide(scope),
+      );
+      yield* TestClock.adjust("2 seconds");
+      expect(reads).toBe(2);
+      expect(log.lines.filter((line) => line.level === "error")).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a move Linear does not answer is a warning, not a failure, and the next poll moves it",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = LinearErrors.LinearError.make({
+          operation: "moveIssue",
+          message: "linear: request failed: no answer within 10 seconds",
+          retryable: true,
+        });
+        let fail = true;
+        const moved: Array<Move> = [];
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, log } = yield* start(board, (issue, stateId) =>
+          Effect.suspend(() => {
+            if (fail) {
+              return Effect.fail(unanswered);
+            }
+            moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+            return Effect.void;
+          }),
+        );
+        seedResult(stores.tests, TICKET);
+        yield* TestClock.adjust("90 seconds");
+        expect(moved).toEqual([]);
+        expect(errors(log)).toEqual([]);
+        expect(log.lines.filter((line) => line.level === "warning")).toEqual([
+          expect.objectContaining({
+            text: "backlog watch will try again: linear: request failed: no answer within 10 seconds",
+            location: "automation",
+            agentId: TICKET,
+          }),
+        ]);
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "a move that landed but whose answer was lost is not sent again: the ticket left Backlog (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = LinearErrors.LinearError.make({
+          operation: "moveIssue",
+          message: "linear: request failed: no answer within 10 seconds",
+          retryable: true,
+        });
+        let sends = 0;
+        const board = [ticket(TICKET, SEEN)];
+        const { stores, log } = yield* start(board, (issue) =>
+          Effect.suspend(() => {
+            sends += 1;
+            const index = board.findIndex((item) => item.identifier === issue.identifier);
+            if (index !== -1) {
+              board.splice(index, 1);
+            }
+            return Effect.fail(unanswered);
+          }),
+        );
+        seedResult(stores.tests, TICKET);
+        yield* TestClock.adjust("90 seconds");
+        yield* TestClock.adjust("60 seconds");
+        expect(sends).toBe(1);
+        expect(stores.automation.jobs).toHaveLength(1);
+        expect(errors(log)).toEqual([]);
+      }),
+  );
+
   it.effect("a failed move keeps the queued job and retries the move on the next poll", () =>
     Effect.gen(function* () {
       const refused = LinearErrors.LinearError.make({
@@ -1419,6 +1519,58 @@ describe("automation needed and needs review watch unhappy path", () => {
       ]);
       expect(linear.calls.filter((call) => call.method === "markReady")).toEqual([ready(TICKET)]);
     }),
+  );
+
+  it.effect(
+    "a ready label Linear does not answer after the queue is a warning, and the next poll labels the pending row",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = LinearErrors.LinearError.make({
+          operation: "markReady",
+          message: "linear: request failed: no answer within 10 seconds",
+          retryable: true,
+        });
+        let fail = true;
+        const board = [ticket(TICKET, SEEN)];
+        const stores = TestingStores.fakeStores();
+        const log = TestingLog.fakeLog();
+        const labeled: Array<string> = [];
+        const linear = TestingLinear.fakeLinear({
+          overrides: {
+            listAutomationNeeded: Effect.sync(() => [...board]),
+            markReady: (identifier) =>
+              fail
+                ? Effect.fail(unanswered)
+                : Effect.sync(() => {
+                    labeled.push(identifier);
+                  }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        announceClient(stores.servers);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("90 seconds");
+        expect(stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId: RESULT, action: "drive", status: "pending" }),
+        ]);
+        expect(labeled).toEqual([]);
+        expect(errors(log)).toEqual([]);
+        expect(log.lines.filter((line) => line.level === "warning")).toEqual([
+          expect.objectContaining({
+            text: "automation needed watch will try again: linear: request failed: no answer within 10 seconds",
+            location: "automation",
+            agentId: TICKET,
+          }),
+        ]);
+        fail = false;
+        yield* TestClock.adjust("30 seconds");
+        expect(labeled).toEqual([TICKET]);
+        expect(stores.automation.jobs).toHaveLength(1);
+      }),
   );
 
   it.effect(

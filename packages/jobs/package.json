@@ -11,6 +11,7 @@
     "./open": "./src/open.ts",
     "./ready": "./src/ready.ts",
     "./reclaim": "./src/reclaim.ts",
+    "./retry": "./src/retry.ts",
     "./templates": "./src/templates.ts"
   },
   "scripts": {

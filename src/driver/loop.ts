@@ -46,8 +46,22 @@ export type Input = {
 };
 
 export type Stopped = {
-  readonly reason: "model-stopped" | "machine-off" | "result-closed";
+  readonly reason:
+    | "model-stopped"
+    | "machine-off"
+    | "result-closed"
+    | "limit-reached"
+    | "not-powered-off";
 };
+
+// The step limit, the run ceiling or three bad replies in a row: the model did not finish in its
+// budget. That is the test's failure, not the system's: the guest stops failed, the result closes failed with `why`, and
+// the drive ends so the diagnosis judges it.
+type Limited = { readonly reason: "limit-reached"; readonly why: string };
+
+// How the loop itself ends. A limit is only ever a Limited, carrying its reason, so the release
+// can never read a bare limit as a clean end and save a half-minted disk.
+type Ended = { readonly reason: "model-stopped" | "machine-off" };
 
 export type Failure =
   | SharedErrors.CommandError
@@ -160,6 +174,10 @@ const sessionGone = (output: string): string | undefined => {
   return headline.startsWith("unknown session") ? headline : undefined;
 };
 
+// The qemu server refusing a save because the guest stayed up: the model ended the mint before
+// shutting it down. Any other save failure is the system's.
+const notPoweredOff = (why: string): boolean => why.startsWith("guest did not power off");
+
 // Three in a row: the model cannot answer in the tool's shape, and asking again only spends
 // the run. A command that reaches the guest, even one the guest refuses, starts the count again.
 const BAD_REPLY_LIMIT = 3;
@@ -233,6 +251,9 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   let pointer: Option.Option<Pointer.Point> = Option.none();
   // A mint's image failed: the guest is off. The model gets one turn to call Done.
   let machineOff = false;
+  // A mint whose save the guest refused by staying up: the model did not finish the install,
+  // which is the test's failure and not the system's.
+  let unfinished = false;
   // Step N's intent is the Nth ActionList line. Step 1 opens with the session, and only a reply
   // naming another step ends it and opens that one; the stop or save closes the last.
   const steps = Steps.stepsOf(facts.instruction);
@@ -252,7 +273,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   // acquireUseRelease keeps the stop uninterruptible: an interrupt during the model
   // loop still stops the session start already opened. A start that never prints an id
   // fails the acquire, so nothing is stopped.
-  yield* Effect.acquireUseRelease(
+  const used = yield* Effect.acquireUseRelease(
     Effect.gen(function* () {
       const stamped = Intent.owned(
         ["start", "--iso", facts.iso, ...(facts.resume ? ["--resume"] : [])],
@@ -357,14 +378,16 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           return failed;
         });
 
+        // The third bad reply in a row is the model spending its chances, as a limit is: the
+        // loop ends the test failed with it.
         const miss = Effect.fn("Driver.miss")(function* (turn: number, why: string, reply: string) {
           misses.push(`${why} (replied ${brief(reply).slice(0, QUOTED_REPLY)})`);
           if (misses.length < BAD_REPLY_LIMIT) {
-            return yield* Effect.void;
+            return undefined;
           }
           const message = `model could not respond correctly: ${String(BAD_REPLY_LIMIT)} bad replies in a row: ${misses.join("; ")}`;
           yield* log(input, turn, "failure", message);
-          return yield* Effect.fail(commandError(message));
+          return { reason: "limit-reached", why: message } satisfies Limited;
         });
 
         const first = yield* openStep(0);
@@ -377,12 +400,12 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           if (turns >= input.config.stepLimit) {
             const message = `step limit of ${String(input.config.stepLimit)} reached`;
             yield* log(input, turns, "failure", message);
-            return yield* Effect.fail(commandError(message));
+            return { reason: "limit-reached", why: message } satisfies Limited;
           }
           if (Duration.Order(Duration.millis(now - startedAt), input.config.runCeiling) >= 0) {
             const message = `run ceiling of ${Duration.format(input.config.runCeiling)} passed`;
             yield* log(input, turns, "failure", message);
-            return yield* Effect.fail(commandError(message));
+            return { reason: "limit-reached", why: message } satisfies Limited;
           }
 
           const turn = turns + 1;
@@ -433,22 +456,25 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             // Nothing is left to drive, so any reply ends it, as Done would.
             if (machineOff) {
               yield* log(input, turn, "stop", "machine-off");
-              return { reason: "machine-off" } satisfies Stopped;
+              return { reason: "machine-off" } satisfies Ended;
             }
             const why = parsed.failure.message;
             yield* log(input, turn, "refusal", why);
             decisions.push(decision("reply refused", `${why}: ${text}`));
-            yield* miss(turn, why, text);
+            const limited = yield* miss(turn, why, text);
+            if (limited !== undefined) {
+              return limited;
+            }
             continue;
           }
           const reply = parsed.success;
           if (reply._tag === "Done") {
             yield* log(input, turn, "stop", "model-stopped");
-            return { reason: "model-stopped" } satisfies Stopped;
+            return { reason: "model-stopped" } satisfies Ended;
           }
           if (machineOff) {
             yield* log(input, turn, "stop", "machine-off");
-            return { reason: "machine-off" } satisfies Stopped;
+            return { reason: "machine-off" } satisfies Ended;
           }
 
           // The model is asked fresh each turn, so the past steps carry the number it repeats.
@@ -457,14 +483,20 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           if (Result.isFailure(planned)) {
             yield* log(input, turn, "refusal", planned.failure.message);
             decisions.push(decision(said, planned.failure.message));
-            yield* miss(turn, planned.failure.message, text);
+            const limited = yield* miss(turn, planned.failure.message, text);
+            if (limited !== undefined) {
+              return limited;
+            }
             continue;
           }
           if (HARNESS_OWNED.has(planned.success.args[0] ?? "")) {
             const message = "client: the harness starts and stops the session";
             yield* log(input, turn, "refusal", message);
             decisions.push(decision(said, message));
-            yield* miss(turn, message, text);
+            const limited = yield* miss(turn, message, text);
+            if (limited !== undefined) {
+              return limited;
+            }
             continue;
           }
           turns = turn;
@@ -476,14 +508,20 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           if (Result.isFailure(owned)) {
             yield* log(input, turn, "refusal", owned.failure.message);
             decisions.push(decision(said, owned.failure.message));
-            yield* miss(turn, owned.failure.message, text);
+            const limited = yield* miss(turn, owned.failure.message, text);
+            if (limited !== undefined) {
+              return limited;
+            }
             continue;
           }
           const pointed = Pointer.placed(owned.success, pointer);
           if (Result.isFailure(pointed)) {
             yield* log(input, turn, "refusal", pointed.failure.message);
             decisions.push(decision(said, pointed.failure.message));
-            yield* miss(turn, pointed.failure.message, text);
+            const limited = yield* miss(turn, pointed.failure.message, text);
+            if (limited !== undefined) {
+              return limited;
+            }
             continue;
           }
           const guest = { bin: planned.success.bin, args: pointed.success };
@@ -534,7 +572,10 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           }
           decisions.push(decision(said, outcome));
           if (ran.malformed) {
-            yield* miss(turn, firstLine(printed), text);
+            const limited = yield* miss(turn, firstLine(printed), text);
+            if (limited !== undefined) {
+              return limited;
+            }
           } else {
             misses = [];
           }
@@ -543,14 +584,18 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
     (booted, exit) =>
       Effect.gen(function* () {
         const failed = Exit.isFailure(exit);
-        const reason = failed ? Render.headline(Cause.squash(exit.cause)) : undefined;
-        const save = !failed && facts.mint;
+        const limited =
+          Exit.isSuccess(exit) && exit.value.reason === "limit-reached"
+            ? exit.value.why
+            : undefined;
+        const reason = failed ? Render.headline(Cause.squash(exit.cause)) : limited;
+        const save = !failed && limited === undefined && facts.mint;
         const endArgs = save
           ? ["save"]
           : [
               "stop",
               "--status",
-              failed ? "failed" : "succeeded",
+              failed || limited !== undefined ? "failed" : "succeeded",
               ...(reason === undefined || reason === "" ? [] : ["--reason", reason]),
             ];
         const stamped = Intent.owned(endArgs, {
@@ -631,6 +676,11 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         const ended = yield* Effect.exit(stopGuest);
         if (Exit.isFailure(ended)) {
           const why = Render.headline(Cause.squash(ended.cause));
+          if (save && notPoweredOff(why)) {
+            yield* closeResult(false, why);
+            unfinished = true;
+            return yield* log(input, 0, "stop", "not-powered-off");
+          }
           yield* closeResult(false, why).pipe(
             Effect.catch((error) =>
               log(input, 0, "failure", `test-results: ${Render.headline(error)}`),
@@ -639,9 +689,19 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           );
           return yield* Effect.failCause(ended.cause);
         }
-        yield* closeResult(true, undefined);
-        return yield* log(input, 0, "stop", "result-closed");
+        yield* closeResult(limited === undefined, limited);
+        return yield* log(
+          input,
+          0,
+          "stop",
+          limited === undefined ? "result-closed" : "limit-reached",
+        );
       }),
   );
-  return { reason: "result-closed" } satisfies Stopped;
+  if (unfinished) {
+    return { reason: "not-powered-off" } satisfies Stopped;
+  }
+  return {
+    reason: used.reason === "limit-reached" ? "limit-reached" : "result-closed",
+  } satisfies Stopped;
 });

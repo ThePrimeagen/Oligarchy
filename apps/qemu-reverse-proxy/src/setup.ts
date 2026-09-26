@@ -98,14 +98,21 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
 
     const logged = (text: string) => log.error(text, { location: Log.Locations.server });
 
+    // True when the row is gone. One a live mint took since it was read (an operator's claim)
+    // stays, as does one already deleted; either way nothing was released.
     const release = (iso: string, serverUrl: string, why: string) =>
-      store.remove(iso, serverUrl).pipe(
-        Effect.andThen(
-          log.info(`setup released; ${serverUrl}; ${iso}; ${why}`, {
-            location: Log.Locations.server,
-          }),
-        ),
-      );
+      store
+        .remove(iso, serverUrl)
+        .pipe(
+          Effect.tap((removed) =>
+            log.info(
+              removed
+                ? `setup released; ${serverUrl}; ${iso}; ${why}`
+                : `setup not released; ${serverUrl}; ${iso}; held or already gone`,
+              { location: Log.Locations.server },
+            ),
+          ),
+        );
 
     const drop = (iso: string, serverUrl: string, why: string) =>
       store.remove(iso, serverUrl).pipe(
@@ -206,13 +213,13 @@ export class Setup extends Context.Service<Setup>()("@oligarchy/qemu-reverse-pro
           continue;
         }
         if (action === "release" && Option.isSome(fresh)) {
-          // A delete that fails is still in flight: the timer stays up and tries next interval.
+          // A delete that fails, or that a live mint refused, is still in flight: the timer stays
+          // up and looks again next interval.
           const deleted = yield* release(
             key.iso,
             key.serverUrl,
             fresh.value.resultStatus ?? "no result",
           ).pipe(
-            Effect.as(true),
             Effect.catchCause((cause) =>
               logged(
                 `setup release failed; ${key.serverUrl}; ${key.iso}: ${Render.errorDetail(Cause.squash(cause))}`,
