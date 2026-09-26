@@ -15,6 +15,7 @@ describe("driver env", () => {
       throw result.error;
     }
     const env = result.value;
+    expectTypeOf(env.command).toEqualTypeOf<"">();
     expectTypeOf(env.flags.action).toEqualTypeOf<"drive" | "mint">();
     expectTypeOf(env.flags.debugLog).toEqualTypeOf<string | undefined>();
     expectTypeOf(env.vars).toEqualTypeOf<{

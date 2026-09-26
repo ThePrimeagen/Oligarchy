@@ -1,5 +1,6 @@
 import * as jarl from "jarl";
-import * as Cli from "./cli.ts";
+import * as Args from "./args.ts";
+import type * as Cli from "./cli.ts";
 import * as Dotenv from "./dotenv.ts";
 import * as Errors from "./errors.ts";
 import type * as Io from "./io.ts";
@@ -7,12 +8,13 @@ import type * as Io from "./io.ts";
 export type Vars = Readonly<Record<string, string>>;
 
 // One place variables come from. A source brings the flags it reads, so an app that leaves a
-// source out also refuses its flag.
+// source out also refuses its flag. Its flags are read before any variable exists, so none of them
+// falls back to one, and the program never receives them.
 export type Source = {
   readonly flags: Cli.Spec;
   readonly load: (
     io: Io.Io,
-    raw: Cli.Raw,
+    flags: Readonly<Record<string, unknown>>,
   ) => Promise<jarl.Result<Vars, Errors.FileMissing | Errors.FileUnreadable | Errors.Unexpected>>;
 };
 
@@ -48,19 +50,10 @@ export const optionalFile = (path: string): Source => ({
 });
 
 export const envFileFlag: Source = {
-  flags: {
-    envFile: Cli.optional(
-      Cli.string({
-        description:
-          "Also read this env file: the process environment wins, then this file, then .env",
-      }),
-    ),
-  },
+  flags: { envFile: Args.envFile(false) },
   load: jarl.fn(
-    async (io: Io.Io, raw: Cli.Raw): Promise<Vars> => {
-      const path = raw.get("env-file");
-      return path === undefined ? {} : jarl.unwrap(readVars(io, path));
-    },
+    async (io: Io.Io, flags: Readonly<Record<string, unknown>>): Promise<Vars> =>
+      typeof flags.envFile === "string" ? jarl.unwrap(readVars(io, flags.envFile)) : {},
     Errors.keep(Errors.FileMissing, Errors.FileUnreadable),
   ),
 };

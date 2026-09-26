@@ -21,7 +21,6 @@
       "dependencies": {
         "@oligarchy/env": "workspace:*",
         "jarl": "catalog:",
-        "zod": "catalog:",
       },
       "devDependencies": {
         "@types/node": "catalog:",
