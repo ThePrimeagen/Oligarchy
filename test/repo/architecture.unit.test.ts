@@ -195,6 +195,8 @@ const devEdgeProblems = (graph: PackageGraph, devGraph: PackageGraph): ReadonlyA
 // The dashboard is a Hono Worker, not Effect, and keeps its own rules.
 const sources = (): ReadonlyArray<string> =>
   ["src", ...workspacePackages.map((pkg) => `${pkg.dir}/src`)]
+    // The system tests are tests only, with no src/.
+    .filter((dir) => existsSync(join(root, dir)))
     .flatMap(filesUnder)
     .filter((path) => !path.startsWith("apps/dashboard/"));
 
@@ -679,11 +681,13 @@ describe("workspace packages", () => {
 
   it("every package's sources import only the packages it declares, and itself by relative path (happy)", () => {
     expect(
-      workspacePackages.flatMap((pkg) =>
-        violationsIn(filesUnder(`${pkg.dir}/src`), (_, source) =>
-          packageImportProblems(pkg, source),
+      workspacePackages
+        .filter((pkg) => existsSync(join(root, pkg.dir, "src")))
+        .flatMap((pkg) =>
+          violationsIn(filesUnder(`${pkg.dir}/src`), (_, source) =>
+            packageImportProblems(pkg, source),
+          ),
         ),
-      ),
     ).toEqual([]);
   });
 

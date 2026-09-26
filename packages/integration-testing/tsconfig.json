@@ -1,0 +1,15 @@
+{
+  "$schema": "../../node_modules/@effect/tsgo/schema.json",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
+  },
+  "include": [
+    "test/**/*.ts",
+    "vitest.config.ts",
+    "vitest.global-setup.ts",
+    "vitest.d.ts",
+    "../../apps/dashboard/src/text-modules.d.ts"
+  ]
+}

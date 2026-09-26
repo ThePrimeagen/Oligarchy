@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);

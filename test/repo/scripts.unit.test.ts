@@ -208,13 +208,14 @@ describe("package.json scripts", () => {
   // workers must run on the runtime the wrappers run.
   it("forces vitest onto bun in both lanes", () => {
     expect(scripts["test:unit"]).toMatch(/^bun --bun vitest run /);
-    expect(scripts["test:integration"]).toMatch(/^bun --bun vitest run /);
   });
 
   // check:fast is what CI runs: a package whose types and tests it never ran would go stale.
+  // --if-present for the system tests alone, which have no unit lane; laneProblems holds every
+  // other workspace to its own.
   it("check:types and test:unit run the root's own lane, then every workspace package's", () => {
     expect(scripts["check:types"]).toMatch(/ && bun run --workspaces check:types$/);
-    expect(scripts["test:unit"]).toMatch(/ && bun run --workspaces test:unit$/);
+    expect(scripts["test:unit"]).toMatch(/ && bun run --workspaces --if-present test:unit$/);
   });
 
   // The Worker is the dashboard app's: the root's dev runs the app's own dev script.
@@ -450,8 +451,15 @@ describe("fleet starters", () => {
 // A workspace package owns its lanes, and check:fast reaches them through `bun run --workspaces`,
 // so each names both, and runs vitest on bun as the root does. A package whose tests need the
 // real OS adds a test:integration lane, on bun too.
-const laneProblems = (scripts: Readonly<Record<string, string>>): ReadonlyArray<string> => [
-  ...["check:types", "test:unit"].filter((name) => scripts[name] === undefined),
+// The system tests have no unit tests: their one lane is test:integration.
+const SYSTEM_TESTS = "packages/integration-testing";
+const laneProblems = (
+  scripts: Readonly<Record<string, string>>,
+  dir = "",
+): ReadonlyArray<string> => [
+  ...["check:types", dir === SYSTEM_TESTS ? "test:integration" : "test:unit"].filter(
+    (name) => scripts[name] === undefined,
+  ),
   ...["test:unit", "test:integration"]
     .filter(
       (name) => scripts[name] !== undefined && !/^bun --bun vitest run\b/.test(scripts[name] ?? ""),
@@ -487,12 +495,18 @@ describe("workspace packages", () => {
   it("each has its own check:types and test:unit lanes on bun (happy)", () => {
     expect(WORKSPACES.length).toBeGreaterThan(0);
     for (const dir of WORKSPACES) {
-      expect(laneProblems(decodePackageJson(read(`${dir}/package.json`)).scripts), dir).toEqual([]);
+      expect(
+        laneProblems(decodePackageJson(read(`${dir}/package.json`)).scripts, dir),
+        dir,
+      ).toEqual([]);
     }
   });
 
   it("names a missing lane, vitest off bun and a script on node (unhappy)", () => {
     expect(laneProblems({})).toEqual(["check:types", "test:unit"]);
+    expect(laneProblems({ "check:types": "tsc --noEmit" }, SYSTEM_TESTS)).toEqual([
+      "test:integration",
+    ]);
     expect(laneProblems({ "check:types": "npx tsc --noEmit", "test:unit": "vitest run" })).toEqual([
       "test:unit does not run vitest on bun",
       "check:types names another runtime",

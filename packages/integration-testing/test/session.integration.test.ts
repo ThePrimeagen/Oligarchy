@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
-import * as StubProxy from "../support/stub-proxy.ts";
+import * as Postgres from "./support/postgres.ts";
+import * as StubProxy from "./support/stub-proxy.ts";
 
 const ROOT = resolve(import.meta.dirname, "../../..");
 const SESSION = resolve(ROOT, "session");

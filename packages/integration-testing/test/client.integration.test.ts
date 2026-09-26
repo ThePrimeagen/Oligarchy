@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import * as StubProxy from "../support/stub-proxy.ts";
+import * as StubProxy from "./support/stub-proxy.ts";
 
 // The root wrapper.
 const CLIENT = fileURLToPath(new URL("../../../client", import.meta.url));

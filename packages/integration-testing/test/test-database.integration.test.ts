@@ -3,7 +3,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import { describe, expect, inject, it } from "vitest";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 // Whatever DATABASE_URL the machine carries, a test and every process it spawns see the test
 // database instead: this file's copy in the container, or a local port nothing listens on when

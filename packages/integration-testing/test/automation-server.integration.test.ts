@@ -17,7 +17,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 const AUTOMATION_SERVER = fileURLToPath(new URL("../../../automation-server", import.meta.url));
 const AUTOMATION_CLIENT = fileURLToPath(new URL("../../../automation-client", import.meta.url));

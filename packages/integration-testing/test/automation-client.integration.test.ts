@@ -13,7 +13,7 @@ import { it } from "@effect/vitest";
 import { Effect, Schedule } from "effect";
 import * as DbClient from "@oligarchy/db/client";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 const AUTOMATION_CLIENT = fileURLToPath(new URL("../../../automation-client", import.meta.url));
 const TOKEN = "t";

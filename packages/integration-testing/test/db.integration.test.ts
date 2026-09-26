@@ -19,7 +19,7 @@ import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 // Selects the next pending job and marks it running, which is what a placement does once a
 // client has reserved. The row nextPending returns is still pending.

@@ -19,7 +19,7 @@ import { it } from "@effect/vitest";
 import { Effect, Schedule } from "effect";
 import * as Client from "@oligarchy/db/client";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 const QEMU_SERVER = fileURLToPath(new URL("../../../qemu-server", import.meta.url));
 const TOKEN = "t";
