@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { spawnSync } from "node:child_process";
 import { writeSync } from "node:fs";
 import * as Env from "@oligarchy/env/run";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import * as Image from "../session/image.ts";
 import * as VizCommand from "./command.ts";
 import * as Run from "./run.ts";

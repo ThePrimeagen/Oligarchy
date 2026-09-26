@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer, Runtime } from "effect";
 import * as Env from "@oligarchy/env/run";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
 import * as SessionCommand from "./command.ts";
 import * as Image from "./image.ts";
 import * as Readline from "./readline.ts";

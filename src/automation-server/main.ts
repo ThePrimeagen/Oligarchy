@@ -1,10 +1,5 @@
-import { createServer } from "node:http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
-import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Cause, Deferred, Effect, Exit, Layer, type Runtime } from "effect";
-import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerError from "effect/unstable/http/HttpServerError";
+import { Cause, Effect, Exit, Layer, type Runtime } from "effect";
 import * as Automation from "@oligarchy/db/automation";
 import * as Client from "@oligarchy/db/client";
 import * as Diagnosis from "@oligarchy/db/diagnosis";
@@ -20,7 +15,8 @@ import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
-import * as Api from "@oligarchy/routes/api";
+import * as Api from "@oligarchy/http/api";
+import * as Serve from "@oligarchy/http/serve";
 import * as Backlog from "./backlog.ts";
 import * as AutomationClient from "./client.ts";
 import * as AutomationServerCommand from "./command.ts";
@@ -34,19 +30,14 @@ const automationAttr = {
   agentId: Log.AutomationAgentId,
 } as const;
 
-// The platform drops its error listener once the server is up; a later error still needs the
-// fatal line and exit 1. Only the first counts.
-const server = createServer();
-const serverFailed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
-server.on("error", (cause) => {
-  Deferred.doneUnsafe(serverFailed, Exit.fail(new HttpServerError.ServeError({ cause })));
-});
-
 // Dispatch, the sweep and the board watch start once the listener is up, in the same scope:
 // a port refusal starts none of them, and a shutdown stops them before the pool closes.
 const ServerLive = (port: number, models: { drive: string; diagnose: string; mint: string }) =>
-  Layer.effectDiscard(
-    Effect.gen(function* () {
+  Serve.serve({
+    port,
+    routes: Handlers.routes,
+    services: Layer.empty,
+    listening: Effect.gen(function* () {
       const log = yield* Log.Log;
       yield* log.info(
         `automation server listening on ${HOST}:${String(port)}; drive ${models.drive}; diagnose ${models.diagnose}; mint ${models.mint}`,
@@ -56,16 +47,7 @@ const ServerLive = (port: number, models: { drive: string; diagnose: string; min
       yield* Sweep.forget("automation-client");
       yield* Backlog.watch();
     }),
-  ).pipe(
-    Layer.provide(
-      HttpRouter.serve(Handlers.routes, {
-        disableLogger: true,
-        disableListenLog: true,
-      }).pipe(Layer.provide(NodeHttpServer.layer(() => server, { host: HOST, port }))),
-    ),
-    // As on the qemu server: no http.server span reaches Sentry.
-    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
-  );
+  });
 
 const DatabaseLive = Layer.unwrap(Effect.map(Config.databaseUrl, Client.Database.layer));
 
@@ -103,7 +85,6 @@ const MainLive = Layer.mergeAll(
 
 const command = AutomationServerCommand.makeAutomationServerCommand({
   serve: ServerLive,
-  serverFailed,
 });
 
 // SIGINT and SIGTERM interrupt the program and exit 0; nothing of this process's own is stopping.

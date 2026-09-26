@@ -18,11 +18,11 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as ExternalFailure from "@oligarchy/log/external-failure";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Contract from "@oligarchy/http/contract";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as Domain from "@oligarchy/shared/domain";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as Flags from "./flags.ts";
-import * as ProxyClient from "./proxy-client.ts";
 
 // Every action reads the token before anything else, so `OLIGARCHY_TOKEN is not set` precedes
 // the local checks and the request alike.

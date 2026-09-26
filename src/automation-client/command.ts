@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, Option } from "effect";
+import { Effect, Option } from "effect";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
@@ -19,8 +19,7 @@ export type AutomationClient<RServe> = {
     name: string,
     port: number,
     url: Option.Option<string>,
-  ) => Layer.Layer<never, HttpServerError.ServeError, RServe>;
-  readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
+  ) => Effect.Effect<never, HttpServerError.ServeError, RServe>;
 };
 
 type StartupError = DbErrors.DatabaseError | HttpServerError.ServeError;
@@ -75,10 +74,7 @@ export const makeAutomationClientCommand = <RServe>(server: AutomationClient<RSe
               }),
             ),
           );
-          return yield* Effect.raceFirst(
-            Layer.launch(server.serve(maxJobs, name, port, url)),
-            Deferred.await(server.serverFailed),
-          );
+          return yield* server.serve(maxJobs, name, port, url);
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>

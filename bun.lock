@@ -9,11 +9,11 @@
         "@oligarchy/db": "workspace:*",
         "@oligarchy/env": "workspace:*",
         "@oligarchy/fleet": "workspace:*",
+        "@oligarchy/http": "workspace:*",
         "@oligarchy/jobs": "workspace:*",
         "@oligarchy/linear": "workspace:*",
         "@oligarchy/log": "workspace:*",
         "@oligarchy/observability": "workspace:*",
-        "@oligarchy/routes": "workspace:*",
         "@oligarchy/shared": "workspace:*",
         "@opentui/core": "0.5.11",
         "@opentui/solid": "0.5.11",
@@ -93,6 +93,23 @@
         "vitest": "catalog:",
       },
     },
+    "packages/http": {
+      "name": "@oligarchy/http",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/log": "workspace:*",
+        "@oligarchy/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@oligarchy/testing": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/jobs": {
       "name": "@oligarchy/jobs",
       "dependencies": {
@@ -150,18 +167,6 @@
       "devDependencies": {
         "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/routes": {
-      "name": "@oligarchy/routes",
-      "dependencies": {
-        "@oligarchy/shared": "workspace:*",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -466,6 +471,8 @@
 
     "@oligarchy/fleet": ["@oligarchy/fleet@workspace:packages/fleet"],
 
+    "@oligarchy/http": ["@oligarchy/http@workspace:packages/http"],
+
     "@oligarchy/jobs": ["@oligarchy/jobs@workspace:packages/jobs"],
 
     "@oligarchy/linear": ["@oligarchy/linear@workspace:packages/linear"],
@@ -473,8 +480,6 @@
     "@oligarchy/log": ["@oligarchy/log@workspace:packages/log"],
 
     "@oligarchy/observability": ["@oligarchy/observability@workspace:packages/observability"],
-
-    "@oligarchy/routes": ["@oligarchy/routes@workspace:packages/routes"],
 
     "@oligarchy/shared": ["@oligarchy/shared@workspace:packages/shared"],
 

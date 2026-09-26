@@ -13,10 +13,10 @@ import * as SessionStore from "@oligarchy/db/sessions";
 import * as Config from "@oligarchy/env/config";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
-import * as Contract from "@oligarchy/routes/contract";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as Contract from "@oligarchy/http/contract";
+import * as ApiErrors from "@oligarchy/http/errors";
+import * as ProxyClient from "@oligarchy/http/proxy-client";
 import * as Domain from "@oligarchy/shared/domain";
-import * as ProxyClient from "../client/proxy-client.ts";
 import * as Setup from "./setup.ts";
 
 // A server that has not answered its /stats in this long is skipped for the reserve that asked and

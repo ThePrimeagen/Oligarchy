@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import * as CliError from "effect/unstable/cli/CliError";
 import * as Command from "effect/unstable/cli/Command";
 import * as Flag from "effect/unstable/cli/Flag";
@@ -17,10 +17,10 @@ import * as Errors from "../shared/errors.ts";
 
 const DEFAULT_PORT = 42069;
 
-// What main.ts hands the command: the host check, the server as a layer for a display, an
-// automation flag, how many sessions it runs at once, a port, the url it announces itself
-// under (none: it stays out of the fleet), the directory its iso cache and minted disks live in,
-// and the signal a server error raises after listen.
+// What main.ts hands the command: the host check, and the server for a display, an automation
+// flag, how many sessions it runs at once, a port, the url it announces itself under (none: it
+// stays out of the fleet) and the directory its iso cache and minted disks live in, serving until
+// it is stopped or fails.
 export type QemuServer<RHost, RServe> = {
   readonly missingHostRequirements: (
     display: Domain.QemuDisplay,
@@ -33,8 +33,7 @@ export type QemuServer<RHost, RServe> = {
     port: number,
     url: Option.Option<string>,
     dataDir: string,
-  ) => Layer.Layer<never, HttpServerError.ServeError | DbErrors.DatabaseError, RServe>;
-  readonly serverFailed: Deferred.Deferred<never, HttpServerError.ServeError>;
+  ) => Effect.Effect<never, HttpServerError.ServeError | DbErrors.DatabaseError, RServe>;
 };
 
 type StartupError =
@@ -125,10 +124,7 @@ export const makeQemuServerCommand = <RHost, RServe>(server: QemuServer<RHost, R
               }),
             ),
           );
-          return yield* Effect.raceFirst(
-            Layer.launch(server.serve(resolved, automation, maxJobs, name, port, url, dataDir)),
-            Deferred.await(server.serverFailed),
-          );
+          return yield* server.serve(resolved, automation, maxJobs, name, port, url, dataDir);
         });
         return yield* startup.pipe(
           Effect.tapError((error) =>

@@ -1,6 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Option, Semaphore } from "effect";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as ApiErrors from "@oligarchy/routes/errors";
+import * as ApiErrors from "@oligarchy/http/errors";
 import * as Iso from "./iso.ts";
 import * as Process from "./process.ts";
 

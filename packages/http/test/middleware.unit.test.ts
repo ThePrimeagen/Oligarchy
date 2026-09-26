@@ -55,25 +55,23 @@ const recordingLog = () => {
   };
 };
 
-type Answer = Effect.Effect<
-  Contract.Ok,
-  | ApiErrors.AtCapacity
-  | ApiErrors.SetupNeeded
-  | ApiErrors.RunFailed
-  | ApiErrors.RunAborted
-  | ApiErrors.UnknownSession
-  | ApiErrors.BadRequest
-  | ApiErrors.Internal
->;
+type Refusal = ApiErrors.BadRequest | ApiErrors.Internal;
+type Answers = {
+  readonly reserve?: Effect.Effect<
+    Contract.Ok,
+    ApiErrors.AtCapacity | ApiErrors.SetupNeeded | Refusal
+  >;
+  readonly run?: Effect.Effect<Contract.Ok, ApiErrors.RunAborted | ApiErrors.RunFailed | Refusal>;
+  readonly abort?: Effect.Effect<
+    Contract.Ok,
+    ApiErrors.UnknownSession | ApiErrors.RunFailed | Refusal
+  >;
+};
 
 // The automation client's small api, each route answering what the test says and counting calls,
 // behind the middleware under test.
 const serve = (
-  answers: {
-    readonly reserve?: Answer;
-    readonly run?: Answer;
-    readonly abort?: Answer;
-  } = {},
+  answers: Answers = {},
   options: {
     readonly auth?: Layer.Layer<Api.BearerAuth, never, Config.ProxyConfig>;
     readonly attribution?: Log.ProcessAttribution;
@@ -81,7 +79,7 @@ const serve = (
 ) => {
   const log = recordingLog();
   const calls: Array<string> = [];
-  const answer = (name: string, value: Answer | undefined) =>
+  const answer = <E>(name: string, value: Effect.Effect<Contract.Ok, E> | undefined) =>
     Effect.suspend(() => {
       calls.push(name);
       return value ?? Effect.succeed(Contract.Ok.make({}));
@@ -235,19 +233,19 @@ describe("boundary happy path", () => {
     "an unknown session is filed under its id when it is one this server could mint, else under the process",
     () =>
       Effect.gen(function* () {
-        const server = serve({
-          abort: Effect.fail(
-            ApiErrors.UnknownSession.make({ id: SESSION, message: "unknown", agentId: TICKET }),
-          ),
-          run: Effect.fail(
-            ApiErrors.UnknownSession.make({ id: "nope", message: "unknown", agentId: TICKET }),
-          ),
-        });
-        yield* Effect.all([
-          post("/abort", { ticket: TICKET }),
-          post("/run", { prompt: "p", ticket: TICKET }),
-        ]).pipe(Effect.provide(server.layer));
-        expect(server.log.lines.map((line) => [line.location, line.agentId])).toEqual([
+        const unknown = (id: string) =>
+          serve({
+            abort: Effect.fail(
+              ApiErrors.UnknownSession.make({ id, message: "unknown", agentId: TICKET }),
+            ),
+          });
+        const minted = unknown(SESSION);
+        const foreign = unknown("nope");
+        yield* post("/abort", { ticket: TICKET }).pipe(Effect.provide(minted.layer));
+        yield* post("/abort", { ticket: TICKET }).pipe(Effect.provide(foreign.layer));
+        expect(
+          [...minted.log.lines, ...foreign.log.lines].map((line) => [line.location, line.agentId]),
+        ).toEqual([
           [SESSION, TICKET],
           ["server", TICKET],
         ]);

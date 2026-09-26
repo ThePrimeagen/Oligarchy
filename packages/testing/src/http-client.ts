@@ -1,13 +1,11 @@
 import { Deferred, Effect, Fiber, Layer, type Scope } from "effect";
-import {
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse,
-  HttpEffect,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as HttpEffect from "effect/unstable/http/HttpEffect";
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 export type Recorded = {
   readonly method: string;

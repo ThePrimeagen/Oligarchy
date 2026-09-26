@@ -1,17 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import {
-  Cause,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  FileSystem,
-  Layer,
-  PlatformError,
-  Redacted,
-  Stream,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Redacted, Stream } from "effect";
 import {
   HttpBody,
   HttpClient,

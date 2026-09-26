@@ -1,21 +1,29 @@
 {
-  "name": "@oligarchy/routes",
+  "name": "@oligarchy/http",
   "private": true,
   "type": "module",
   "exports": {
     "./api": "./src/api.ts",
     "./contract": "./src/contract.ts",
-    "./errors": "./src/errors.ts"
+    "./errors": "./src/errors.ts",
+    "./middleware": "./src/middleware.ts",
+    "./proxy-client": "./src/proxy-client.ts",
+    "./serve": "./src/serve.ts"
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/log": "workspace:*",
     "@oligarchy/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@oligarchy/testing": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

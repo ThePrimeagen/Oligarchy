@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect";
@@ -30,6 +31,17 @@ const occupy = (port: number) =>
     (holder) => Effect.callback<void>((resume) => void holder.close(() => resume(Effect.void))),
   );
 
+// Whether something accepts connections on `port`.
+const accepting = (port: number) =>
+  Effect.callback<boolean>((resume) => {
+    const socket = connect(port, "127.0.0.1");
+    socket.once("connect", () => {
+      socket.destroy();
+      resume(Effect.succeed(true));
+    });
+    socket.once("error", () => resume(Effect.succeed(false)));
+  });
+
 const get = (port: number, path: string) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient;
@@ -47,8 +59,8 @@ describe("serve happy path", () => {
         const listening = yield* Deferred.make<void>();
         const services = Layer.effectDiscard(
           // The port is bound before a service exists.
-          Effect.flatMap(get(port, "/ping").pipe(Effect.exit), (answered) =>
-            Effect.sync(() => void order.push(Exit.isSuccess(answered) ? "services" : "unbound")),
+          Effect.flatMap(accepting(port), (bound) =>
+            Effect.sync(() => void order.push(bound ? "services" : "unbound")),
           ),
         );
         const serving = yield* Effect.forkChild(
@@ -67,7 +79,7 @@ describe("serve happy path", () => {
         expect(yield* get(port, "/ping")).toEqual({ status: 200, text: "pong" });
         yield* Fiber.interrupt(serving);
         expect(order).toEqual(["services", "listening", "closed"]);
-        expect(Exit.isFailure(yield* Effect.exit(get(port, "/ping")))).toBe(true);
+        expect(yield* accepting(port)).toBe(false);
       }),
   );
 });
@@ -78,18 +90,17 @@ describe("serve unhappy path", () => {
       const port = yield* freePort;
       yield* occupy(port);
       const built: Array<string> = [];
-      const errors: Array<Error> = [];
       const error = yield* Effect.flip(
         Serve.serve({
           port,
           routes: ping,
           services: Layer.effectDiscard(Effect.sync(() => void built.push("services"))),
           listening: Effect.sync(() => void built.push("listening")),
-          onError: (cause) => void errors.push(cause),
         }),
       );
       expect(error._tag).toBe("ServeError");
-      expect(String(error.cause)).toContain("EADDRINUSE");
+      // Bun's words for EADDRINUSE.
+      expect(String(error.cause)).toContain(`port ${String(port)} in use`);
       expect(built).toEqual([]);
     }).pipe(Effect.scoped),
   );
@@ -106,6 +117,7 @@ describe("serve unhappy path", () => {
           Serve.serveOn(server)({
             port,
             routes: ping,
+            services: Layer.empty,
             listening: Deferred.succeed(listening, undefined),
             onError: (cause) => void seen.push(cause),
           }),
