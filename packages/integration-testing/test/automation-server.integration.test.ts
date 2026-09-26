@@ -17,10 +17,10 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
-const AUTOMATION_SERVER = fileURLToPath(new URL("../../automation-server", import.meta.url));
-const AUTOMATION_CLIENT = fileURLToPath(new URL("../../automation-client", import.meta.url));
+const AUTOMATION_SERVER = fileURLToPath(new URL("../../../automation-server", import.meta.url));
+const AUTOMATION_CLIENT = fileURLToPath(new URL("../../../automation-client", import.meta.url));
 const WEBHOOK_SECRET = "whsec_test";
 // The board watch calls Linear as soon as the server listens, and dispatch moves a reserved
 // ticket to In Progress before /run. https_proxy does not cover node:https under Bun, so a

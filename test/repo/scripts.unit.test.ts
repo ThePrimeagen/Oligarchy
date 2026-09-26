@@ -206,15 +206,16 @@ describe("package.json scripts", () => {
 
   // `bun run` hands a node-shebang bin to Node when one is installed; vitest and its forked
   // workers must run on the runtime the wrappers run.
-  it("forces vitest onto bun in both lanes", () => {
+  it("forces vitest onto bun in the root's unit lane", () => {
     expect(scripts["test:unit"]).toMatch(/^bun --bun vitest run /);
-    expect(scripts["test:integration"]).toMatch(/^bun --bun vitest run /);
   });
 
   // check:fast is what CI runs: a package whose types and tests it never ran would go stale.
+  // --if-present for the system tests alone, which have no unit lane; laneProblems holds every
+  // other workspace to its own.
   it("check:types and test:unit run the root's own lane, then every workspace package's", () => {
     expect(scripts["check:types"]).toMatch(/ && bun run --workspaces check:types$/);
-    expect(scripts["test:unit"]).toMatch(/ && bun run --workspaces test:unit$/);
+    expect(scripts["test:unit"]).toMatch(/ && bun run --workspaces --if-present test:unit$/);
   });
 
   // The Worker is the dashboard app's: the root's dev runs the app's own dev script.
@@ -450,8 +451,15 @@ describe("fleet starters", () => {
 // A workspace package owns its lanes, and check:fast reaches them through `bun run --workspaces`,
 // so each names both, and runs vitest on bun as the root does. A package whose tests need the
 // real OS adds a test:integration lane, on bun too.
-const laneProblems = (scripts: Readonly<Record<string, string>>): ReadonlyArray<string> => [
-  ...["check:types", "test:unit"].filter((name) => scripts[name] === undefined),
+// The system tests have no unit tests: their one lane is test:integration.
+const SYSTEM_TESTS = "packages/integration-testing";
+const laneProblems = (
+  scripts: Readonly<Record<string, string>>,
+  dir = "",
+): ReadonlyArray<string> => [
+  ...["check:types", dir === SYSTEM_TESTS ? "test:integration" : "test:unit"].filter(
+    (name) => scripts[name] === undefined,
+  ),
   ...["test:unit", "test:integration"]
     .filter(
       (name) => scripts[name] !== undefined && !/^bun --bun vitest run\b/.test(scripts[name] ?? ""),
@@ -462,30 +470,43 @@ const laneProblems = (scripts: Readonly<Record<string, string>>): ReadonlyArray<
     .map(([name]) => `${name} names another runtime`),
 ];
 
-// The root's integration lane, then every package's that has one: Bun fails a --workspaces run
-// on a package without the script, and --workspaces skips the root.
-const integrationFanOutProblems = (script: string | undefined): ReadonlyArray<string> => {
-  const [own = "", ...rest] = (script ?? "").split(" && ");
-  return [
-    ...(/^bun --bun vitest run --project integration\b/.test(own)
-      ? []
-      : ["test:integration does not run the root's lane first"]),
-    ...(rest.join(" && ") === "bun run --workspaces --if-present test:integration"
-      ? []
-      : ["test:integration does not fan out to the packages with --if-present"]),
-  ];
-};
+// The root has no integration tests of its own: its test:integration is every package's and
+// app's lane. Bun fails a --workspaces run on a package without the script, so --if-present.
+const integrationFanOutProblems = (script: string | undefined): ReadonlyArray<string> =>
+  script === "bun run --workspaces --if-present test:integration"
+    ? []
+    : ["test:integration does not fan out to the packages with --if-present"];
+
+// The system tests share one container and copy one template: one worker, one file at a time,
+// behind the global setup that starts and migrates it.
+const systemLaneProblems = (
+  scripts: Readonly<Record<string, string>>,
+  config: string,
+): ReadonlyArray<string> => [
+  ...(/^bun --bun vitest run\b.*--maxWorkers 1\b/.test(scripts["test:integration"] ?? "")
+    ? []
+    : ["test:integration does not run one worker on bun"]),
+  ...(config.includes('globalSetup: ["./vitest.global-setup.ts"]')
+    ? []
+    : ["the lane has no global setup"]),
+];
 
 describe("workspace packages", () => {
   it("each has its own check:types and test:unit lanes on bun (happy)", () => {
     expect(WORKSPACES.length).toBeGreaterThan(0);
     for (const dir of WORKSPACES) {
-      expect(laneProblems(decodePackageJson(read(`${dir}/package.json`)).scripts), dir).toEqual([]);
+      expect(
+        laneProblems(decodePackageJson(read(`${dir}/package.json`)).scripts, dir),
+        dir,
+      ).toEqual([]);
     }
   });
 
   it("names a missing lane, vitest off bun and a script on node (unhappy)", () => {
     expect(laneProblems({})).toEqual(["check:types", "test:unit"]);
+    expect(laneProblems({ "check:types": "tsc --noEmit" }, SYSTEM_TESTS)).toEqual([
+      "test:integration",
+    ]);
     expect(laneProblems({ "check:types": "npx tsc --noEmit", "test:unit": "vitest run" })).toEqual([
       "test:unit does not run vitest on bun",
       "check:types names another runtime",
@@ -505,28 +526,42 @@ describe("workspace packages", () => {
     ).toEqual(["test:integration does not run vitest on bun"]);
   });
 
-  it("the root's test:integration runs its own lane, then every package's that has one (happy)", () => {
+  it("the root's test:integration is every package's lane, the system tests' among them (happy)", () => {
     expect(
       integrationFanOutProblems(
         decodePackageJson(read("package.json")).scripts["test:integration"],
       ),
     ).toEqual([]);
+    expect(WORKSPACES).toContain("packages/integration-testing");
   });
 
-  it("names a fan-out without --if-present, or none at all (unhappy)", () => {
-    const own = "bun --bun vitest run --project integration --maxWorkers 1";
-    expect(integrationFanOutProblems(`${own} && bun run --workspaces test:integration`)).toEqual([
+  it("names a fan-out without --if-present, or a root lane of its own (unhappy)", () => {
+    expect(integrationFanOutProblems("bun run --workspaces test:integration")).toEqual([
       "test:integration does not fan out to the packages with --if-present",
     ]);
-    expect(integrationFanOutProblems(own)).toEqual([
-      "test:integration does not fan out to the packages with --if-present",
+    expect(
+      integrationFanOutProblems(
+        "bun --bun vitest run --project integration && bun run --workspaces --if-present test:integration",
+      ),
+    ).toEqual(["test:integration does not fan out to the packages with --if-present"]);
+  });
+
+  it("the system tests run one worker behind the container's global setup (happy)", () => {
+    const dir = "packages/integration-testing";
+    expect(
+      systemLaneProblems(
+        decodePackageJson(read(`${dir}/package.json`)).scripts,
+        read(`${dir}/vitest.config.ts`),
+      ),
+    ).toEqual([]);
+    expect(existsSync(join(root, dir, "vitest.global-setup.ts"))).toBe(true);
+  });
+
+  it("names a system lane with workers in parallel, or without the global setup (unhappy)", () => {
+    expect(systemLaneProblems({ "test:integration": "bun --bun vitest run" }, "")).toEqual([
+      "test:integration does not run one worker on bun",
+      "the lane has no global setup",
     ]);
-    expect(integrationFanOutProblems("bun run --workspaces --if-present test:integration")).toEqual(
-      [
-        "test:integration does not run the root's lane first",
-        "test:integration does not fan out to the packages with --if-present",
-      ],
-    );
   });
 });
 

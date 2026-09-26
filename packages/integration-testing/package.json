@@ -1,0 +1,28 @@
+{
+  "name": "@oligarchy/integration-testing",
+  "private": true,
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:integration": "bun --bun vitest run --maxWorkers 1"
+  },
+  "dependencies": {
+    "@oligarchy/dashboard": "workspace:*",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/log": "workspace:*",
+    "@oligarchy/shared": "workspace:*",
+    "@testcontainers/postgresql": "^11.14.0",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

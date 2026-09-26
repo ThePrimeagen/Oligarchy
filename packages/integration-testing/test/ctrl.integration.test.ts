@@ -7,10 +7,10 @@ import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
 import * as DbSchema from "@oligarchy/db/schema";
-import * as Postgres from "../support/postgres.ts";
+import * as Postgres from "./support/postgres.ts";
 
 // The root wrapper.
-const CTRL = fileURLToPath(new URL("../../ctrl", import.meta.url));
+const CTRL = fileURLToPath(new URL("../../../ctrl", import.meta.url));
 const EXIT_WITHIN_MS = 60_000;
 const SERVER = "https://qemu.example.com";
 // Parsed but never connected: only the actions that query need the container.

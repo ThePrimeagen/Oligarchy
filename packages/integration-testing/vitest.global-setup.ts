@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -44,7 +45,9 @@ export const setup = async (project: TestProject) => {
   template.pathname = `/${TEMPLATE}`;
   await withClient(admin, (client) => client.query(`create database ${TEMPLATE}`));
   await withClient(template.toString(), async (client) => {
-    await migrate(drizzle({ client }), { migrationsFolder: "packages/db/drizzle" });
+    await migrate(drizzle({ client }), {
+      migrationsFolder: fileURLToPath(new URL("../db/drizzle", import.meta.url)),
+    });
     await client.query(
       `insert into test_definitions (name, description, instruction, proof) values ('lock-screen', 'd', 'i', 'p')`,
     );

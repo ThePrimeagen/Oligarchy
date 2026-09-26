@@ -60,6 +60,9 @@ const devPackageGraph: PackageGraph = new Map(
 // above the apps that use them: nothing may depend on it, only dev-depend.
 const APP = 6;
 const TOP = 7;
+// The system tests drive every app and import the dashboard's Worker entry: above the apps, and
+// above testing, whose fakes they may use.
+const SYSTEM = 8;
 
 // The layer each package sits on, numbered as in monorepo-plan.md's picture (shared 0, log 1,
 // env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6, the dev-only
@@ -84,6 +87,7 @@ const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/qemu-server": APP,
   "@oligarchy/viz": APP,
   "@oligarchy/testing": TOP,
+  "@oligarchy/integration-testing": SYSTEM,
 };
 
 // A package's sources reach another package only through a dependency its package.json names,
@@ -146,6 +150,37 @@ const reachable = (graph: PackageGraph, from: string): ReadonlySet<string> => {
   return seen;
 };
 
+// The system tests are the top of the graph and dev only: no package or app lists them, and they
+// drive the apps as processes, importing only the dashboard's Worker entry, which has none to
+// spawn.
+const SYSTEM_TESTS = "@oligarchy/integration-testing";
+const systemTestProblems = (
+  packages: ReadonlyArray<{
+    readonly name: string;
+    readonly dir: string;
+    readonly dependsOn: ReadonlyArray<string>;
+    readonly devDependsOn: ReadonlyArray<string>;
+  }>,
+  files: ReadonlyArray<readonly [string, string]>,
+): ReadonlyArray<string> => {
+  const apps = packages.filter((pkg) => pkg.dir.startsWith("apps/")).map((pkg) => pkg.name);
+  return [
+    ...packages
+      .filter((pkg) => [...pkg.dependsOn, ...pkg.devDependsOn].includes(SYSTEM_TESTS))
+      .map((pkg) => `${pkg.name} depends on ${SYSTEM_TESTS}`),
+    ...files.flatMap(([path, source]) =>
+      importSpecifiers(source)
+        .filter((specifier) =>
+          specifier.startsWith(".")
+            ? join(dirname(path), specifier).startsWith("apps/")
+            : specifier !== "@oligarchy/dashboard/worker" &&
+              apps.some((app) => specifier === app || specifier.startsWith(`${app}/`)),
+        )
+        .map((specifier) => `${path}: ${specifier}`),
+    ),
+  ];
+};
+
 // A dev edge is not layered (an app's tests may take testing's fakes), but it may not loop back:
 // a package dev-depends on another only if that one's dependencies never reach it. So a fake of
 // db's own store stays in db's test/, never in a testing that db's tests would import.
@@ -160,6 +195,8 @@ const devEdgeProblems = (graph: PackageGraph, devGraph: PackageGraph): ReadonlyA
 // The dashboard is a Hono Worker, not Effect, and keeps its own rules.
 const sources = (): ReadonlyArray<string> =>
   ["src", ...workspacePackages.map((pkg) => `${pkg.dir}/src`)]
+    // The system tests are tests only, with no src/.
+    .filter((dir) => existsSync(join(root, dir)))
     .flatMap(filesUnder)
     .filter((path) => !path.startsWith("apps/dashboard/"));
 
@@ -644,11 +681,13 @@ describe("workspace packages", () => {
 
   it("every package's sources import only the packages it declares, and itself by relative path (happy)", () => {
     expect(
-      workspacePackages.flatMap((pkg) =>
-        violationsIn(filesUnder(`${pkg.dir}/src`), (_, source) =>
-          packageImportProblems(pkg, source),
+      workspacePackages
+        .filter((pkg) => existsSync(join(root, pkg.dir, "src")))
+        .flatMap((pkg) =>
+          violationsIn(filesUnder(`${pkg.dir}/src`), (_, source) =>
+            packageImportProblems(pkg, source),
+          ),
         ),
-      ),
     ).toEqual([]);
   });
 
@@ -704,6 +743,73 @@ describe("workspace packages", () => {
       "@oligarchy/qemu-server/handlers",
       "../../automation-server/src/client.ts",
       "../../../src/session/image.ts",
+    ]);
+  });
+
+  it("nothing depends on the system tests, and they import no app but the dashboard's Worker entry (happy)", () => {
+    const dir = "packages/integration-testing";
+    const files = [
+      ...filesUnder(`${dir}/test`),
+      ...["vitest.config.ts", "vitest.global-setup.ts", "vitest.d.ts"].map(
+        (file) => `${dir}/${file}`,
+      ),
+    ];
+    const pkg = workspacePackages.find((candidate) => candidate.dir === dir);
+    expect(pkg).toBeDefined();
+    expect(
+      systemTestProblems(
+        workspacePackages,
+        files.map((path) => [path, read(path)] as const),
+      ),
+    ).toEqual([]);
+    // It has no src/, so the package-wide import check reads its tests and setup instead.
+    expect(
+      violationsIn(files, (_, source) =>
+        packageImportProblems(pkg ?? { name: "", dependsOn: [] }, source),
+      ),
+    ).toEqual([]);
+  });
+
+  it("names a dependency on the system tests, and a second app import from them (unhappy)", () => {
+    expect(
+      systemTestProblems(
+        [
+          {
+            name: "@oligarchy/viz",
+            dir: "apps/viz",
+            dependsOn: [],
+            devDependsOn: ["@oligarchy/integration-testing"],
+          },
+          {
+            name: "@oligarchy/jobs",
+            dir: "packages/jobs",
+            dependsOn: ["@oligarchy/integration-testing"],
+            devDependsOn: [],
+          },
+          { name: "@oligarchy/dashboard", dir: "apps/dashboard", dependsOn: [], devDependsOn: [] },
+          {
+            name: "@oligarchy/qemu-server",
+            dir: "apps/qemu-server",
+            dependsOn: [],
+            devDependsOn: [],
+          },
+        ],
+        [
+          [
+            "packages/integration-testing/test/x.integration.test.ts",
+            [
+              'import * as Worker from "@oligarchy/dashboard/worker";',
+              'import * as Sessions from "@oligarchy/qemu-server/sessions";',
+              'import * as Query from "../../../apps/dashboard/src/query.ts";',
+            ].join("\n"),
+          ],
+        ],
+      ),
+    ).toEqual([
+      "@oligarchy/viz depends on @oligarchy/integration-testing",
+      "@oligarchy/jobs depends on @oligarchy/integration-testing",
+      "packages/integration-testing/test/x.integration.test.ts: @oligarchy/qemu-server/sessions",
+      "packages/integration-testing/test/x.integration.test.ts: ../../../apps/dashboard/src/query.ts",
     ]);
   });
 

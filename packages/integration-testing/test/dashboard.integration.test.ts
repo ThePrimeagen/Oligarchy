@@ -8,11 +8,11 @@ import { Client } from "pg";
 import { describe, expect, it } from "vitest";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Worker from "@oligarchy/dashboard/worker";
-import * as Postgres from "../support/postgres.ts";
-import * as StubProxy from "../support/stub-proxy.ts";
+import * as Postgres from "./support/postgres.ts";
+import * as StubProxy from "./support/stub-proxy.ts";
 
-const QUERY = fileURLToPath(new URL("../../apps/dashboard/src/query.ts", import.meta.url));
-const SCHEMA = fileURLToPath(new URL("../../packages/db/src/schema.ts", import.meta.url));
+const QUERY = fileURLToPath(new URL("../../../apps/dashboard/src/query.ts", import.meta.url));
+const SCHEMA = fileURLToPath(new URL("../../../packages/db/src/schema.ts", import.meta.url));
 const SENTINEL_PASSWORD = "sentinel-secret-pw";
 const REFUSED_URL = `postgres://user:${SENTINEL_PASSWORD}@127.0.0.1:1/oligarchy`;
 const SEEDED_SESSION_ID = "11111111-1111-4111-8111-111111111111";

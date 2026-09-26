@@ -171,17 +171,17 @@ this item is what is left outside it, and what that package should grow into.
 Found running the lane with `OLIGARCHY_REQUIRE_DATABASE=1` during phase 8; each fails the same
 way on `master`, so none is the phase's. The first two fail every run; the third, some runs.
 
-- `test/integration/dashboard.integration.test.ts`, "reads one name's verdicts, durations and
+- `packages/integration-testing/test/dashboard.integration.test.ts`, "reads one name's verdicts, durations and
   per-wording tallies": the seed inserts four results for one (run, definition), which the unique
   index `test_results_run_definition_idx` refuses (`23505`), so the child process prints the
   insert failure and the test fails on its empty-stderr assertion. Give each result of the same
   wording its own run.
-- `test/integration/automation-client.integration.test.ts`, "SIGTERM stops a running driver and
+- `packages/integration-testing/test/automation-client.integration.test.ts`, "SIGTERM stops a running driver and
   the client exits": it sends `POST /run` before it waits for the listen line, so the request can
   reach a closed port, its rejection is swallowed, and the driver never starts ("driver did not
   start" after ten seconds). Send `/run` after `/reserve` answers, as every other `/run` in that
   file does.
-- `test/integration/automation-client.integration.test.ts`, "answers 503 at capacity on a second
+- `packages/integration-testing/test/automation-client.integration.test.ts`, "answers 503 at capacity on a second
   reserve while --max-jobs runs are in flight", fails some runs and passes others, on `master`
   and on phase 8's branch alike: the 503 and the abort land, but the client's stdout has no
   `POST /reserve failed: at capacity` line when the test reads it. That line is written by the

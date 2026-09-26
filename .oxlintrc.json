@@ -47,7 +47,7 @@
         "packages/*/test/**/*.ts",
         "apps/*/test/**/*.ts",
         "apps/*/test/**/*.tsx",
-        "vitest.global-setup.ts"
+        "packages/integration-testing/vitest.global-setup.ts"
       ],
       "rules": { "effecttsgo/strict-effect-provide": "off" }
     },
@@ -57,7 +57,7 @@
         "packages/*/test/**/*.ts",
         "apps/*/test/**/*.ts",
         "apps/*/test/**/*.tsx",
-        "vitest.global-setup.ts"
+        "packages/integration-testing/vitest.global-setup.ts"
       ],
       "rules": { "typescript/no-floating-promises": "off" }
     }
