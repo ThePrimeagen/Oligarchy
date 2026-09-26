@@ -23,22 +23,18 @@ export const repeat = <A extends readonly unknown[], T, E>(
   };
 };
 
-// Calls fn after every interval milliseconds, using one timeout at a time.
-// The returned function clears the pending timeout and does not schedule another.
+// Calls fn after every interval milliseconds. The next timeout is armed before
+// fn runs, so cancel is only clearTimeout and that timeout cannot fire after.
 export const tick = (fn: () => unknown, interval: number): (() => void) => {
-  let stopped = false;
   let timer = setTimeout(function run() {
-    if (stopped) {
-      return;
-    }
-    fn();
-    if (stopped) {
-      return;
-    }
     timer = setTimeout(run, interval);
+    try {
+      fn();
+    } catch {
+      // A throw stays in this turn. The next timeout is already armed.
+    }
   }, interval);
   return () => {
-    stopped = true;
     clearTimeout(timer);
   };
 };

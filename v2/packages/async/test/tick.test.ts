@@ -33,4 +33,34 @@ describe("tick", () => {
     vi.advanceTimersByTime(5_000);
     expect(calls).toBe(1);
   });
+
+  it("does not fire again when cancel is called from the function (unhappy)", () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    let cancel: () => void = () => undefined;
+    cancel = tick(() => {
+      calls += 1;
+      cancel();
+    }, 1_000);
+
+    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(5_000);
+    expect(calls).toBe(1);
+  });
+
+  it("keeps ticking after the function throws (unhappy)", () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const cancel = tick(() => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("boom");
+      }
+    }, 1_000);
+
+    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(1_000);
+    expect(calls).toBe(2);
+    cancel();
+  });
 });
