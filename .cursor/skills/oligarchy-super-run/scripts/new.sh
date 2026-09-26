@@ -1,10 +1,14 @@
 #!/bin/sh
 # new.sh <dir> <iso-url> : create the next lock-screen run; N is monotonic from $DEST/next.
 # <iso-url> is https://iso.omarchy.org/omarchy-<version>.iso; the version is read from the filename.
+# Waits SUPER_RUN_DRIVE_WAIT seconds (default 20) for the webhook's drive job; 0 does not wait,
+# for a fleet no webhook reaches, whose board poll queues the job minutes later (tick.sh reports
+# one that never comes).
 set -eu
 DEST="${SUPER_RUN_DIR:-/tmp/superrun}"
 [ -f "$DEST/env" ] && . "$DEST/env"
 ROOT="${OLIGARCHY_ROOT:?set OLIGARCHY_ROOT or run install.sh}"
+SERVER_URL_FOR_RUN="${SUPER_RUN_SERVER_URL:?set SUPER_RUN_SERVER_URL or run install.sh}"
 [ "$#" -eq 2 ] || { echo "usage: new.sh <dir> <iso-url>" >&2; exit 1; }
 DIR="$1"
 ISO="$2"
@@ -15,7 +19,7 @@ VERSION=$(printf '%s\n' "$ISO" | sed -n 's#^https://.*/omarchy-\([0-9][0-9A-Za-z
 N=$(cat "$DEST/next")
 cd "$ROOT"
 OUT=$(./ctrl test run \
-  --server-url "${SUPER_RUN_SERVER_URL:-https://oligarchy-server.trm.sh}" \
+  --server-url "$SERVER_URL_FOR_RUN" \
   --iso "$ISO" \
   --version "$VERSION" \
   --name "${SUPER_RUN_TEST:-lock-screen}" 2>&1) || {
@@ -37,8 +41,10 @@ TICKET=$(printf '%s\n' "$JSON" | jq -e -r '.tests[0].linear.identifier') || {
 printf '%s|%s|%s|%s|%s\n' "$N" "$DIR" "$RID" "$TICKET" "$(date -u +%FT%TZ)" >> "$DEST/active"
 echo $((N + 1)) > "$DEST/next"
 echo "started $DIR-$N $TICKET $RID"
+WAIT="${SUPER_RUN_DRIVE_WAIT:-20}"
+[ "$WAIT" -gt 0 ] || exit 0
 waited=0
-while [ "$waited" -lt 20 ]; do
+while [ "$waited" -lt "$WAIT" ]; do
   JOB=$(psql "$DBURL" -X -A -t -c "select status from automation_jobs where result_id='$RID' and action='drive'" || true)
   [ -n "$JOB" ] && break
   sleep 2

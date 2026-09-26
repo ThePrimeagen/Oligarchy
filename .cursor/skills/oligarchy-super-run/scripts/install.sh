@@ -8,7 +8,9 @@ mkdir -p "$DEST"
 cat > "$DEST/env" <<EOF
 export OLIGARCHY_ROOT='$ROOT'
 export SUPER_RUN_DIR='$DEST'
-export SUPER_RUN_SERVER_URL='${SUPER_RUN_SERVER_URL:-https://oligarchy-server.trm.sh}'
+export SUPER_RUN_SERVER_URL='${SERVER_URL:?export .local-env first: set -a; . ./.local-env; set +a}'
+export SUPER_RUN_DRIVE_WAIT='0'
+export SUPER_RUN_NO_DRIVE_AFTER='600'
 export SUPER_RUN_TEST='${SUPER_RUN_TEST:-lock-screen}'
 export SUPER_RUN_COUNT='${SUPER_RUN_COUNT:-10}'
 export OLIGARCHY_SESSIONS_DIR='${OLIGARCHY_SESSIONS_DIR:-$HOME/personal/oligarchy-tmp}'

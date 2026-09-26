@@ -2865,6 +2865,85 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
+    // Results the claim tests hold locks with; each starts pending, as a mint's result does.
+    const mintResults = (count: number) =>
+      Effect.gen(function* () {
+        const tests = yield* Tests.TestStore;
+        const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const created = yield* Effect.forEach(Array.from({ length: count }), () =>
+          tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42070",
+            definitions: [{ id: definition.id }],
+          }),
+        );
+        return created.map((run) => run.results[0].id);
+      });
+
+    scoped.effect(
+      "a claim takes a free lock, and one whose mint has ended or whose result is gone",
+      () =>
+        Effect.gen(function* () {
+          const setups = yield* SetupRequests.SetupRequestStore;
+          const tests = yield* Tests.TestStore;
+          const [failed, passed, next, after] = yield* mintResults(4);
+          const iso = `https://example.com/${uuid()}.iso`;
+          const server = setupServer();
+          expect(yield* setups.claim(iso, server, failed)).toBe(true);
+          expect(yield* setups.serverForResult(failed)).toEqual(Option.some(server));
+
+          // A failed mint's lock goes to the next one; so does a passed one's, minted again.
+          yield* tests.closeResult(failed, "failed", "install hung", null);
+          expect(yield* setups.claim(iso, server, passed)).toBe(true);
+          yield* tests.closeResult(passed, "passed", null, null);
+          expect(yield* setups.claim(iso, server, next)).toBe(true);
+          expect(yield* setups.serverForResult(failed)).toEqual(Option.none());
+          expect(yield* setups.serverForResult(passed)).toEqual(Option.none());
+
+          // A holder whose result was swept holds nothing.
+          const swept = setupServer();
+          expect(yield* setups.claim(iso, swept, uuid())).toBe(true);
+          expect(yield* setups.claim(iso, swept, after)).toBe(true);
+          expect(yield* setups.serverForResult(after)).toEqual(Option.some(swept));
+          expect(yield* setups.serverForResult(next)).toEqual(Option.some(server));
+        }),
+    );
+
+    scoped.effect(
+      "a claim leaves a lock the proxy is still creating, and one whose mint is in flight (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const setups = yield* SetupRequests.SetupRequestStore;
+          const [pending, mine] = yield* mintResults(2);
+          const iso = `https://example.com/${uuid()}.iso`;
+
+          const creating = setupServer();
+          expect(yield* setups.insert(iso, creating)).toBe(true);
+          expect(yield* setups.claim(iso, creating, mine)).toBe(false);
+          expect(Option.getOrThrow(yield* setups.inspect(iso, creating)).resultId).toBeNull();
+
+          const inFlight = setupServer();
+          expect(yield* setups.claim(iso, inFlight, pending)).toBe(true);
+          expect(yield* setups.claim(iso, inFlight, mine)).toBe(false);
+          expect(yield* setups.serverForResult(pending)).toEqual(Option.some(inFlight));
+          expect(yield* setups.serverForResult(mine)).toEqual(Option.none());
+        }),
+    );
+
+    scoped.effect("a claim whose result already locks another server is refused (unhappy)", () =>
+      Effect.gen(function* () {
+        const setups = yield* SetupRequests.SetupRequestStore;
+        const iso = `https://example.com/${uuid()}.iso`;
+        const serverUrl = setupServer();
+        const resultId = uuid();
+        expect(yield* setups.claim(iso, serverUrl, resultId)).toBe(true);
+        const error = yield* Effect.flip(setups.claim(iso, setupServer(), resultId));
+        expect(error).toMatchObject({ _tag: "DatabaseError", operation: "claimSetupRequest" });
+        expect(String(error.cause)).toContain("setup_requests_result_id_idx");
+        expect(yield* setups.serverForResult(resultId)).toEqual(Option.some(serverUrl));
+      }),
+    );
+
     scoped.effect("ping succeeds against the container", () =>
       Effect.gen(function* () {
         const database = yield* Client.Database;

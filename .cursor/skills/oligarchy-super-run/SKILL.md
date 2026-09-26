@@ -112,7 +112,7 @@ results are passed and each data dir holds the ISO, its `.qcow2`, and its
 - **COUNTED:** model passed/failed, `driver_loop_ceiling`, agent quit
   early. Linear → Needs Review (or Done if the diagnosis is a clean pass
   you accept).
-- **INFRA:** no qemu, webhook never made a drive job, cleanup/disk, proxy
+- **INFRA:** no qemu, the board poll never queued a drive job, cleanup/disk, proxy
   down, dispatch `ETIMEDOUT`, a start refused for a missing minted disk,
   operator/harness fault. Linear → Canceled.
   Record with `retire.sh N INFRA`, then replace (another `new.sh`).
@@ -125,15 +125,22 @@ results are passed and each data dir holds the ISO, its `.qcow2`, and its
   Do not leave it on `active` forever.
 </YourRole>
 <HowToRun>
-From the repo root. Cloudflare tunnel to `:55555` must already be up (`https://oligarchy-server.trm.sh`).
+From the repo root. Everything stays on this machine: no tunnel. `.local-env` names the local
+proxy (`SERVER_URL=http://127.0.0.1:55555`) and automation server
+(`AUTOMATION_SERVER_URL=http://127.0.0.1:54321`), and is exported before anything starts, so
+every process and every child it spawns (`./driver`, opencode, `./client`, `./ctrl`) wins over
+`.env`'s public hostnames. `--env-file` would not reach those children. No Linear webhook reaches
+this machine: the automation server's thirty-second board poll queues each ticket after ninety
+seconds unchanged, so a drive job lands a few minutes after its ticket, not seconds.
 The `mint` test definition must exist (`./ctrl test --list --details --name mint`); `./ctrl mint`
 refuses without it.
 
 ```bash
+set -a; . ./.local-env; set +a
 export OLIGARCHY_ROOT="$PWD"
 export DBURL=$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
 mkdir -p automation-super-run-logs/{muse,processes} /home/theprimeagen/personal/oligarchy-tmp
-sh .cursor/skills/oligarchy-super-run/scripts/install.sh   # writes SUPER_RUN_COUNT=10
+sh .cursor/skills/oligarchy-super-run/scripts/install.sh   # SUPER_RUN_COUNT=10; SUPER_RUN_SERVER_URL=$SERVER_URL
 . /tmp/superrun/env
 ```
 
@@ -198,7 +205,7 @@ for s in 1 2; do
 done
 ```
 
-Start **six** processes, each in its own session (`setsid`) so they outlive the operator shell. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Two qemu servers, each width one (`--max-jobs 1`), two different data dirs. Two clients, each `--max-jobs 2`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`. Omit it and they call `:42069`. `./automation-server` has no `--jobs` (it fills from client reserve) and defaults to **free** Muse — always pass the paid model.
+Start **six** processes, each in its own session (`setsid`) so they outlive the operator shell. `./qemu-server` and `./automation-client` require `--name` and `--max-jobs`. Two qemu servers, each width one (`--max-jobs 1`), two different data dirs. Two clients, each `--max-jobs 2`. Announce with `--url` on `http://127.0.0.1:…` (these binaries bind `127.0.0.1`; `localhost` can be `::1`). `--name` is unique on `servers`. Clients reserve guests through the proxy: `SERVER_URL=http://127.0.0.1:55555`, exported from `.local-env`. Start them from a shell without it and they, and every driver they spawn, take `.env`'s public hostname. `./automation-server` has no `--jobs` (it fills from client reserve) and defaults to **free** Muse — always pass the paid model.
 
 ```bash
 P=automation-super-run-logs/processes
@@ -207,6 +214,10 @@ DATA="${OLIGARCHY_DATA_ROOT:-$HOME/personal/oligarchy-data}"
 export OLIGARCHY_SESSIONS_DIR="$SESS"
 
 start_fleet() {
+  if [ "${SERVER_URL:-}" != http://127.0.0.1:55555 ] || [ "${SUPER_RUN_SERVER_URL:-}" != "$SERVER_URL" ]; then
+    echo "SERVER_URL or SUPER_RUN_SERVER_URL is not the local proxy; set -a; . ./.local-env; set +a, then install.sh"
+    return 1
+  fi
   if ss -ltn | grep -qE ':55332|:55333|:55555|:52222|:52223|:54321'; then
     echo "a listed port is already bound; stop that process first"
     return 1
@@ -229,11 +240,11 @@ start_fleet() {
     --data-dir "$DATA/qemu-2" \
     >"$P/qemu-2.log" 2>&1 & echo "qemu-2 $!" | tee -a "$P/pids"
 
-  setsid env SERVER_URL=http://127.0.0.1:55555 ./automation-client \
+  setsid ./automation-client \
     --name automation-client-2a --max-jobs 2 --port 52222 --url http://127.0.0.1:52222 \
     >"$P/automation-client-2a.log" 2>&1 & echo "automation-client-2a $!" | tee -a "$P/pids"
 
-  setsid env SERVER_URL=http://127.0.0.1:55555 ./automation-client \
+  setsid ./automation-client \
     --name automation-client-2b --max-jobs 2 --port 52223 --url http://127.0.0.1:52223 \
     >"$P/automation-client-2b.log" 2>&1 & echo "automation-client-2b $!" | tee -a "$P/pids"
 
@@ -260,9 +271,9 @@ Expect `qemu-1` / `qemu-2` (`qemu`, each `max jobs 1`, two different `data` dirs
 ```bash
 ./ctrl mint --server-url "$SUPER_RUN_SERVER_URL" --iso "$ISO"
 # → JSON: [{ id, result, server, linear }, …] × 2. Note ticket ↔ server in SCRATCH.md.
-sleep 20
+sleep 240   # the board poll, not a webhook, queues the job
 psql "$DBURL" -X -c "select r.linear_id, j.action, j.status from test_results r join automation_jobs j on j.result_id = r.result_id where r.linear_id in ('OLI-…','OLI-…');"
-# every ticket must show a drive job. One without: stop, diagnose (automation-server log), fix,
+# every ticket must show a mint job. One without: stop, diagnose (automation-server log), fix,
 # cancel that ticket, then ./ctrl mint … --unminted
 ```
 
@@ -273,8 +284,8 @@ is passed **and** the files exist:
 ```bash
 for s in 1 2; do echo "== qemu-$s"; ls -la "$DATA/qemu-$s/isos/"; done
 # expect, in every dir: the ISO, <iso>.qcow2, <iso>.OVMF_VARS.fd
-curl -sS -H "Authorization: Bearer $(grep '^OLIGARCHY_TOKEN=' .env | cut -d= -f2- | tr -d '"'"'")" \
-  "http://127.0.0.1:55555/minted?iso=$ISO" | jq .
+curl -sS -G -H "Authorization: Bearer $(grep '^OLIGARCHY_TOKEN=' .env | cut -d= -f2- | tr -d '"'"'")" \
+  --data-urlencode "iso=$ISO" "http://127.0.0.1:55555/minted" | jq .
 # expect both servers "minted"; "unminted" is a server to mint again, "unreachable" one to fix
 ```
 
@@ -291,7 +302,8 @@ while [ "$i" -lt 5 ]; do
   /tmp/superrun/new.sh muse "$ISO" || exit $?
   i=$((i + 1))
 done
-# exit 2 = no drive job: stop, diagnose (automation-server log), fix, retire.sh N INFRA
+# new.sh does not wait for the drive job (SUPER_RUN_DRIVE_WAIT=0); tick.sh prints
+# STUCK no-drive-job past SUPER_RUN_NO_DRIVE_AFTER (600s) and counts unqueued tickets in the refill queue
 ```
 
 Each `AGENT_LOOP_TICK_superrun` you **do this work** (the sleep loop does not):

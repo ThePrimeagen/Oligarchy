@@ -1031,6 +1031,31 @@ describe("mint", () => {
         "mint https://example.com/omarchy.iso created; 2 servers; OLI-42, OLI-43",
       ]);
       expect(h.touched).toEqual(["database", "linear"]);
+      // Each server's setup lock names its result: that is where the dispatcher reads the pin.
+      expect(h.stores.setups.rows).toEqual([
+        { iso: "https://example.com/omarchy.iso", serverUrl: QEMU_A, resultId: results[0]?.id },
+        { iso: "https://example.com/omarchy.iso", serverUrl: QEMU_B, resultId: results[1]?.id },
+      ]);
+    }),
+  );
+
+  it.effect("a server minted again takes the lock from the earlier mint (happy)", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stores.tests.definitions.push(mintDefinition);
+      qemu(h, QEMU_A, "qemu-a");
+      const earlier = "99999999-9999-4999-8999-999999999999";
+      h.stores.setups.rows.push({
+        iso: "https://example.com/omarchy.iso",
+        serverUrl: QEMU_A,
+        resultId: earlier,
+      });
+      const exit = yield* h.run(MINT, WITH_LINEAR);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      const [again] = h.stores.tests.results;
+      expect(h.stores.setups.rows).toEqual([
+        { iso: "https://example.com/omarchy.iso", serverUrl: QEMU_A, resultId: again?.id },
+      ]);
     }),
   );
 
@@ -1105,6 +1130,7 @@ describe("mint", () => {
         expect(yield* stdout).toEqual([]);
         // OLI-42 was handed off and the second ticket never existed: nothing is trapped.
         expect(h.log.lines).toEqual([]);
+        expect(h.stores.setups.rows.map((row) => row.serverUrl)).toEqual([QEMU_A]);
       }),
   );
 

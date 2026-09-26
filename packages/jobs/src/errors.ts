@@ -34,3 +34,10 @@ export class SetupGone extends Schema.TaggedError<SetupGone>("@oligarchy/jobs/er
   "SetupGone",
   { message: Schema.String },
 ) {}
+
+// An operator's mint found the server's setup lock held by a mint still being created or run, so
+// taking it would leave that mint's ticket without its server.
+export class SetupHeld extends Schema.TaggedError<SetupHeld>("@oligarchy/jobs/errors/SetupHeld")(
+  "SetupHeld",
+  { message: Schema.String },
+) {}

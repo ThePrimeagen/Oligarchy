@@ -9,6 +9,7 @@ import * as ProcessStats from "@oligarchy/db/process-stats";
 import type * as DbSchema from "@oligarchy/db/schema";
 import * as Servers from "@oligarchy/db/servers";
 import * as Sessions from "@oligarchy/db/sessions";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
 
 type TestDefinitionRow = typeof DbSchema.testDefinitions.$inferSelect;
@@ -1047,6 +1048,54 @@ export const fakeDiagnosisStore = (
   return { errorTypes, diagnoses, layer: Layer.succeed(Diagnosis.DiagnosisStore)(service) };
 };
 
+// ---------------------------------------------------------------------------
+// SetupRequestStore
+// ---------------------------------------------------------------------------
+
+export type SetupRow = {
+  readonly iso: string;
+  readonly serverUrl: string;
+  readonly resultId: string;
+};
+
+export type FakeSetupRequestStore = {
+  readonly rows: Array<SetupRow>;
+  readonly layer: Layer.Layer<SetupRequests.SetupRequestStore>;
+};
+
+// ctrl's mint takes a lock and the dispatcher reads its pin back; the proxy's setup flow has its
+// own fake, so every other member dies.
+export const fakeSetupRequestStore = (
+  overrides: Partial<typeof SetupRequests.SetupRequestStore.Service> = {},
+): FakeSetupRequestStore => {
+  const rows: Array<SetupRow> = [];
+  const unexpected = (member: string) => Effect.die(`Unexpected SetupRequestStore.${member}`);
+  const service = SetupRequests.SetupRequestStore.of({
+    insert: () => unexpected("insert"),
+    setResult: () => unexpected("setResult"),
+    // One row per iso and server, as the primary key holds it: a second claim replaces the first.
+    claim: (iso, serverUrl, resultId) =>
+      Effect.sync(() => {
+        const kept = rows.filter((row) => row.iso !== iso || row.serverUrl !== serverUrl);
+        rows.splice(0, rows.length, ...kept, { iso, serverUrl, resultId });
+        return true;
+      }),
+    remove: () => unexpected("remove"),
+    removeServer: () => unexpected("removeServer"),
+    serverForResult: (resultId) =>
+      Effect.sync(() =>
+        Option.map(
+          Option.fromUndefinedOr(rows.find((row) => row.resultId === resultId)),
+          (row) => row.serverUrl,
+        ),
+      ),
+    list: () => unexpected("list"),
+    inspect: () => unexpected("inspect"),
+    ...overrides,
+  });
+  return { rows, layer: Layer.succeed(SetupRequests.SetupRequestStore)(service) };
+};
+
 // Every store at once, sharing nothing: the common fixture for handler and command tests.
 export const fakeStores = () => {
   const sessions = fakeSessionStore();
@@ -1058,6 +1107,7 @@ export const fakeStores = () => {
   const diagnosis = fakeDiagnosisStore();
   const servers = fakeServerStore();
   const processStats = fakeProcessStatsStore();
+  const setups = fakeSetupRequestStore();
   return {
     sessions,
     actions,
@@ -1068,6 +1118,7 @@ export const fakeStores = () => {
     diagnosis,
     servers,
     process: processStats,
+    setups,
     layer: Layer.mergeAll(
       sessions.layer,
       actions.layer,
@@ -1078,6 +1129,7 @@ export const fakeStores = () => {
       diagnosis.layer,
       servers.layer,
       processStats.layer,
+      setups.layer,
     ),
   };
 };

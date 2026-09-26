@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -85,6 +85,30 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
         return rows.length > 0;
       });
 
+      // An operator's mint: the lock and its result in one write, where the proxy's insert and
+      // setResult are two under its own hold. True when the lock is now this result's. A held
+      // lock stays: one with no result yet is a proxy create still talking to Linear, and one
+      // whose result is pending or running is a mint in flight. A finished or swept holder's is
+      // taken, so a server can be minted again.
+      const claim = Effect.fn("db.claimSetupRequest")(function* (
+        iso: string,
+        serverUrl: string,
+        resultId: string,
+      ) {
+        const rows = yield* database.run("claimSetupRequest", (db) =>
+          db
+            .insert(DbSchema.setupRequests)
+            .values({ iso, serverUrl, resultId })
+            .onConflictDoUpdate({
+              target: [DbSchema.setupRequests.iso, DbSchema.setupRequests.serverUrl],
+              set: { resultId },
+              setWhere: sql`${DbSchema.setupRequests.resultId} is not null and not exists (select 1 from ${DbSchema.testResults} where ${DbSchema.testResults.id} = ${DbSchema.setupRequests.resultId} and ${DbSchema.testResults.status} in ('pending', 'running'))`,
+            })
+            .returning({ iso: DbSchema.setupRequests.iso }),
+        );
+        return rows.length > 0;
+      });
+
       const remove = Effect.fn("db.removeSetupRequest")(function* (iso: string, serverUrl: string) {
         yield* database.run("removeSetupRequest", (db) =>
           db
@@ -143,7 +167,7 @@ export class SetupRequestStore extends Context.Service<SetupRequestStore>()(
         return Arr.head(rows);
       });
 
-      return { insert, setResult, remove, removeServer, serverForResult, list, inspect };
+      return { insert, setResult, claim, remove, removeServer, serverForResult, list, inspect };
     }),
   },
 ) {

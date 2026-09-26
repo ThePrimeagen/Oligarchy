@@ -149,6 +149,7 @@ const withReason = {
       Object.assign({ operation: error.operation, message }, withCause(error.cause)),
     ),
   SetupGone: (_error: Errors.SetupGone, message: string) => Errors.SetupGone.make({ message }),
+  SetupHeld: (_error: Errors.SetupHeld, message: string) => Errors.SetupHeld.make({ message }),
 };
 
 // A failure fails the run and every job in it with the reason, naming the tickets that did get
@@ -265,7 +266,9 @@ const mintJob = (input: {
   readonly pinned: string;
   readonly to: Team;
   readonly tickets: Array<Linear.LinearTicket>;
-  readonly pin: (result: string) => Effect.Effect<void, Errors.SetupGone | DbErrors.DatabaseError>;
+  readonly pin: (
+    result: string,
+  ) => Effect.Effect<void, Errors.SetupGone | Errors.SetupHeld | DbErrors.DatabaseError>;
 }) =>
   Effect.gen(function* () {
     const tests = yield* Tests.TestStore;
@@ -313,6 +316,7 @@ const mintJob = (input: {
         DatabaseError: (error) =>
           failRun(created.runId, input.tickets, error, withReason.DatabaseError),
         SetupGone: (error) => failRun(created.runId, input.tickets, error, withReason.SetupGone),
+        SetupHeld: (error) => failRun(created.runId, input.tickets, error, withReason.SetupHeld),
       }),
     );
     return { id: created.runId, result: result.id, server: input.pinned, linear };
@@ -347,8 +351,11 @@ export const openMint = Effect.fn("Open.openMint")(function* (input: {
   return { id: opened.id, result: opened.result, linear: opened.linear };
 });
 
-// `./ctrl mint`: one mint job and its ticket per server, in order, the team asked for once. The
-// first failure stops the rest. Returns what it opened and prints nothing.
+// `./ctrl mint`: one mint job and its ticket per server, in order, the team asked for once. Each
+// claims that server's setup lock with its result before the ticket moves, since the lock is where
+// the dispatcher reads a mint's pin; ctrl has no hold of the proxy's, so the lock and its result
+// go in one write. A lock a mint in flight holds is refused. The first failure stops the rest.
+// Returns what it opened and prints nothing.
 export const openMints = Effect.fn("Open.openMints")(function* (input: {
   readonly iso: string;
   readonly serverUrl: string;
@@ -359,6 +366,7 @@ export const openMints = Effect.fn("Open.openMints")(function* (input: {
   if (input.servers.length === 0) {
     return [];
   }
+  const setups = yield* SetupRequests.SetupRequestStore;
   const to = yield* team(MINT_LABEL);
   const tickets: Array<Linear.LinearTicket> = [];
   const opened = yield* Effect.forEach(input.servers, (pinned) =>
@@ -369,7 +377,14 @@ export const openMints = Effect.fn("Open.openMints")(function* (input: {
       pinned,
       to,
       tickets,
-      pin: () => Effect.void,
+      pin: (result) =>
+        setups.claim(input.iso, pinned, result).pipe(
+          Effect.filterOrFail(
+            (claimed) => claimed,
+            () => Errors.SetupHeld.make({ message: `${pinned} is held by a mint still in flight` }),
+          ),
+          Effect.asVoid,
+        ),
     }),
   );
   yield* log.info(

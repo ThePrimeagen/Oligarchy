@@ -31,12 +31,19 @@ REMAIN=$((TARGET - COUNTED))
 NEED=$((TARGET - COUNTED - ACTIVE))
 [ "$NEED" -lt 0 ] && NEED=0
 N_DRIVE=$(psql "$DBURL" -X -A -t -c "select count(*) from automation_jobs where action='drive' and status in ('running','pending')" || echo "?")
+# Active tickets the automation server has not queued yet. The drive queue does not count them,
+# so they count beside it: with only the board poll queueing, a ticket waits a few minutes.
+UNQUEUED=0
+if [ -s "$DEST/active" ]; then
+  RIDS=$(awk -F'|' 'NF>=3{printf "%s('\''%s'\''::uuid)", sep, $3; sep=","}' "$DEST/active")
+  UNQUEUED=$(psql "$DBURL" -X -A -t -c "select count(*) from (values $RIDS) a(rid) where not exists (select 1 from automation_jobs j where j.result_id = a.rid and j.action = 'drive')" || echo "?")
+fi
 MEM=$(free -g | awk 'NR==2{print $7}')
 REFILL=no
-if [ "$NEED" -gt 0 ] && [ "$N_DRIVE" != "?" ] && [ "$N_DRIVE" -lt 2 ] && [ "${MEM:-0}" -ge 4 ]; then
+if [ "$NEED" -gt 0 ] && [ "$N_DRIVE" != "?" ] && [ "$UNQUEUED" != "?" ] && [ $((N_DRIVE + UNQUEUED)) -lt 2 ] && [ "${MEM:-0}" -ge 4 ]; then
   REFILL=yes
 fi
-echo "LEDGER counted=$COUNTED active=$ACTIVE remaining=$REMAIN need=$NEED target=$TARGET drive_queue=$N_DRIVE mem_avail=${MEM}G refill=$REFILL"
+echo "LEDGER counted=$COUNTED active=$ACTIVE remaining=$REMAIN need=$NEED target=$TARGET drive_queue=$N_DRIVE unqueued=$UNQUEUED mem_avail=${MEM}G refill=$REFILL"
 [ -s "$DEST/active" ] || exit 0
 VALS=$(awk -F'|' 'NF>=5{printf "%s(%s,'\''%s'\'', '\''%s'\''::uuid, '\''%s'\'', '\''%s'\'')", sep, $1, $2, $3, $4, $5; sep=","}' "$DEST/active")
 [ -n "$VALS" ] || exit 0
@@ -58,7 +65,7 @@ psql "$DBURL" -X -A -t -F'|' -c "
     fi
     continue
   fi
-  if [ -z "$DRIVE" ] && [ "${AGE:-0}" -ge 60 ]; then
+  if [ -z "$DRIVE" ] && [ "${AGE:-0}" -ge "${SUPER_RUN_NO_DRIVE_AFTER:-60}" ]; then
     echo "STUCK $N|$DIR|$RID|$TICKET no-drive-job age=${AGE}s — stop refill; diagnose; retire INFRA"
     continue
   fi

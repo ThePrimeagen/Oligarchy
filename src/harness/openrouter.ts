@@ -11,10 +11,11 @@ import type * as Tools from "./tools.ts";
 import * as Errors from "./errors.ts";
 
 // One streaming chat completion. The header timeout is the wait for a status line, the chunk
-// timeout the wait for the next body chunk: OpenRouter's own stream has neither, which is what
+// timeout the wait for the next stream event: OpenRouter's own stream has neither, which is what
 // the three-minute OpenCode options were papering over. A 429 or 5xx is retried for the
 // Retry-After the response names, or the configured default when it names none, and not at all
-// when that wait would run past the run ceiling.
+// when that wait would run past the run ceiling. One reported inside the stream, after the 200,
+// is retried the same way after the configured default.
 // A 4xx other than 429 refused the request. Anything that never produced a completion left the
 // service unreachable.
 
@@ -56,9 +57,10 @@ const decodeWireError = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.toCodecJson(WireError)),
 );
 
+// OpenRouter names the status the provider failed with in `code`, inside the stream as outside it.
 const ErrorPayload = Schema.Union([
   Schema.String,
-  Schema.Struct({ message: Schema.String }),
+  Schema.Struct({ message: Schema.String, code: Schema.optionalKey(Schema.Unknown) }),
 ]).annotate({ identifier: "@oligarchy/harness/openrouter/ErrorPayload" });
 
 const decodeErrorPayload = Schema.decodeUnknownEffect(ErrorPayload);
@@ -105,6 +107,10 @@ const chatCompletionsUrl = (baseUrl: string): string => {
 
 const payloadMessage = (payload: typeof ErrorPayload.Type): string =>
   typeof payload === "string" ? payload : payload.message;
+
+// The statuses a response is retried for: a 429 or a 5xx.
+const retryable = (status: number): boolean =>
+  Number.isInteger(status) && (status === 429 || (status >= 500 && status < 600));
 
 const refusalMessage = (text: string): string => {
   if (text === "") {
@@ -174,6 +180,23 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
   const client = yield* HttpClient.HttpClient;
   const url = chatCompletionsUrl(options.baseUrl);
 
+  // Wait `delay` and send the request again, unless the wait would pass the run ceiling.
+  const waitOrGiveUp = (delay: Duration.Duration, message: string) =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const remaining = Duration.subtract(
+        options.runCeiling,
+        Duration.millis(now - options.startedAtMillis),
+      );
+      if (Duration.Order(delay, remaining) >= 0) {
+        return yield* unreachable(
+          `openrouter: retry delay of ${Duration.format(delay)} would pass the run ceiling: ${message}`,
+          null,
+        );
+      }
+      return yield* RetryWait.make({ delayMillis: Duration.toMillis(delay) });
+    });
+
   const readEvents = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
       let content: string | null = null;
@@ -199,8 +222,11 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         callsByIndex.set(delta.index, call);
       };
 
+      // A 429 or 5xx after the 200 is the same failure as that status before it: sent again.
       const failPayload = (payload: typeof ErrorPayload.Type) =>
-        unreachable(`openrouter: ${payloadMessage(payload)}`, null);
+        typeof payload !== "string" && typeof payload.code === "number" && retryable(payload.code)
+          ? waitOrGiveUp(options.defaultRetry, payload.message)
+          : Effect.fail(unreachable(`openrouter: ${payloadMessage(payload)}`, null));
 
       const apply = (chunkText: string) =>
         Effect.gen(function* () {
@@ -249,7 +275,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
 
       // Stream.timeout does not see the test clock: it samples Clock from the stream's
       // parent and sleeps against a different one. Each pull is timed with Effect.timeout,
-      // the same primitive as the header timeout, so a gap between chunks fails on either clock.
+      // the same primitive as the header timeout, so a gap between events fails on either clock.
       // Done is the stream ending. A typed pull error is a broken body. A defect or an
       // interruption is left alone, so cancelling the run does not become an unreachable service.
       // A chat completion does not use the SSE retry field; a directive is a broken stream.
@@ -270,26 +296,36 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         return apply(event.data);
       };
 
+      // True when the text finished at least one event.
       const feed = (text: string) =>
         Effect.gen(function* () {
           const error = parser.feed(text);
           if (error !== undefined) {
             return yield* invalid(error);
           }
+          const events = queued.length;
           for (const event of queued) {
             yield* onEvent(event);
           }
           queued.length = 0;
-          return yield* Effect.void;
+          return events > 0;
         });
 
+      // The chunk timeout runs from the last event, not the last byte: OpenRouter holds a stream
+      // open with `: OPENROUTER PROCESSING` comments while the provider has not answered, and
+      // those arrive as bytes that finish no event.
       yield* Effect.scoped(
         Effect.gen(function* () {
           const pull = yield* Stream.toPull(response.stream);
-          const read: Effect.Effect<void, Failure> = Effect.gen(function* () {
+          let lastEventAt = yield* Clock.monotonicTimeNanos;
+          const read: Effect.Effect<void, AttemptFailure> = Effect.gen(function* () {
+            const quiet = Duration.nanos((yield* Clock.monotonicTimeNanos) - lastEventAt);
+            if (Duration.Order(quiet, options.timeouts.chunk) >= 0) {
+              return yield* chunkTimeout;
+            }
             const step = yield* pull.pipe(
               Effect.timeoutOrElse({
-                duration: options.timeouts.chunk,
+                duration: Duration.subtract(options.timeouts.chunk, quiet),
                 orElse: () => Effect.fail(chunkTimeout),
               }),
               Effect.map((bytes) => ({ _tag: "chunk" as const, bytes })),
@@ -302,7 +338,9 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
               return yield* Effect.void;
             }
             for (const bytes of step.bytes) {
-              yield* feed(decoder.decode(bytes, { stream: true }));
+              if (yield* feed(decoder.decode(bytes, { stream: true }))) {
+                lastEventAt = yield* Clock.monotonicTimeNanos;
+              }
             }
             if (sawTerminal) {
               return yield* Effect.void;
@@ -350,18 +388,10 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       const text = yield* readText(response);
       const now = yield* Clock.currentTimeMillis;
       const header = Option.getOrUndefined(Headers.get(response.headers, "retry-after"));
-      const delay = retryDelay(header, now, options.defaultRetry);
-      const remaining = Duration.subtract(
-        options.runCeiling,
-        Duration.millis(now - options.startedAtMillis),
+      return yield* waitOrGiveUp(
+        retryDelay(header, now, options.defaultRetry),
+        refusalMessage(text),
       );
-      if (Duration.Order(delay, remaining) >= 0) {
-        return yield* unreachable(
-          `openrouter: retry delay of ${Duration.format(delay)} would pass the run ceiling: ${refusalMessage(text)}`,
-          null,
-        );
-      }
-      return yield* RetryWait.make({ delayMillis: Duration.toMillis(delay) });
     });
 
   const refuse = (response: HttpClientResponse.HttpClientResponse) =>
@@ -396,7 +426,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         error._tag === "OpenRouterUnreachable" ? error : fromTransport(error),
       ),
     );
-    if (response.status === 429 || response.status >= 500) {
+    if (retryable(response.status)) {
       return yield* retryOrGiveUp(response);
     }
     if (response.status < 200 || response.status >= 300) {

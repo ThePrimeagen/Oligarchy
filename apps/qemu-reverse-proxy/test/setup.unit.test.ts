@@ -67,6 +67,7 @@ const memory = () => {
           row.resultStatus = "pending";
           return true;
         }),
+      claim: () => Effect.die(new Error("the proxy's setup never claims")),
       remove: (iso, serverUrl) =>
         failRemove
           ? Effect.die(new Error("unlock failed"))

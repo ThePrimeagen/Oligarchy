@@ -43,6 +43,46 @@ const setupStore = (stored: boolean) => {
             pins.push({ iso, serverUrl, resultId });
             return stored;
           }),
+        claim: () => unexpected("claim"),
+        remove: () => unexpected("remove"),
+        removeServer: () => unexpected("removeServer"),
+        serverForResult: () => unexpected("serverForResult"),
+        list: () => unexpected("list"),
+        inspect: () => unexpected("inspect"),
+      }),
+    ),
+  };
+};
+
+// The lock ctrl's mints take, as SetupRequestStore.claim answers it: taken, "held" by a mint in
+// flight, or a failure, for every claim. `after` is the Linear call a taken claim followed: the
+// ticket exists and has not moved.
+const claimStore = (h: H.Harness, refused?: DbErrors.DatabaseError | "held") => {
+  const claims: Array<{
+    readonly iso: string;
+    readonly serverUrl: string;
+    readonly resultId: string;
+    readonly after: string | undefined;
+  }> = [];
+  const unexpected = (member: string) => Effect.die(`Unexpected SetupRequestStore.${member}`);
+  return {
+    claims,
+    layer: Layer.succeed(SetupRequests.SetupRequestStore)(
+      SetupRequests.SetupRequestStore.of({
+        insert: () => unexpected("insert"),
+        setResult: () => unexpected("setResult"),
+        claim: (iso, serverUrl, resultId) => {
+          if (refused === "held") {
+            return Effect.succeed(false);
+          }
+          if (refused !== undefined) {
+            return Effect.fail(refused);
+          }
+          return Effect.sync(() => {
+            claims.push({ iso, serverUrl, resultId, after: h.linear.calls.at(-1)?.method });
+            return true;
+          });
+        },
         remove: () => unexpected("remove"),
         removeServer: () => unexpected("removeServer"),
         serverForResult: () => unexpected("serverForResult"),
@@ -604,15 +644,16 @@ const mints = (servers: ReadonlyArray<string>) => ({
   definition: mint,
   servers,
 });
-// ctrl opens mints with no setup row to pin, so nothing but the jobs' own services is provided.
-const mintServices = (h: H.Harness) => Layer.mergeAll(h.layer, NodeFileSystem.layer);
+const mintServices = (h: H.Harness, setup: ReturnType<typeof claimStore>) =>
+  Layer.mergeAll(h.layer, NodeFileSystem.layer, setup.layer);
 
 describe("Open.openMints happy path", () => {
   it.effect("one pinned run, result and ticket per server, with the team asked for once", () =>
     Effect.gen(function* () {
       const h = H.harness();
+      const setup = claimStore(h);
       const opened = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
-        Effect.provide(mintServices(h)),
+        Effect.provide(mintServices(h, setup)),
       );
       const runs = h.tests.runs;
       const results = h.tests.results;
@@ -681,6 +722,12 @@ describe("Open.openMints happy path", () => {
           linear: TestingLinear.ticketFor("OLI-43"),
         },
       ]);
+      // Each server's lock names its result after the ticket exists and before it moves, so the
+      // dispatcher finds the pin when the job is queued.
+      expect(setup.claims).toEqual([
+        { iso: ISO, serverUrl: QEMU_A, resultId: results[0]?.id, after: "createIssue" },
+        { iso: ISO, serverUrl: QEMU_B, resultId: results[1]?.id, after: "createIssue" },
+      ]);
       expect(h.log.lines).toEqual([
         {
           level: "info",
@@ -696,10 +743,12 @@ describe("Open.openMints happy path", () => {
   it.effect("no servers opens nothing, asks Linear nothing and says nothing", () =>
     Effect.gen(function* () {
       const h = H.harness();
-      const opened = yield* Open.openMints(mints([])).pipe(Effect.provide(mintServices(h)));
+      const setup = claimStore(h);
+      const opened = yield* Open.openMints(mints([])).pipe(Effect.provide(mintServices(h, setup)));
       expect(opened).toEqual([]);
       expect(h.tests.runs).toEqual([]);
       expect(h.linear.calls).toEqual([]);
+      expect(setup.claims).toEqual([]);
       expect(h.log.lines).toEqual([]);
     }),
   );
@@ -716,13 +765,15 @@ describe("Open.openMints unhappy path", () => {
       const h = H.harness({
         linear: TestingLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
       });
+      const setup = claimStore(h);
       const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
-        Effect.provide(mintServices(h)),
+        Effect.provide(mintServices(h, setup)),
         Effect.flip,
       );
       expect(error).toBe(refused);
       expect(h.tests.runs).toEqual([]);
       expect(methods(h)).not.toContain("createIssue");
+      expect(setup.claims).toEqual([]);
       expect(h.log.lines).toEqual([]);
     }),
   );
@@ -750,8 +801,9 @@ describe("Open.openMints unhappy path", () => {
             },
           }),
         });
+        const setup = claimStore(h);
         const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
-          Effect.provide(mintServices(h)),
+          Effect.provide(mintServices(h, setup)),
           Effect.flip,
         );
         const reason = `${refused.message}; created OLI-42`;
@@ -764,6 +816,8 @@ describe("Open.openMints unhappy path", () => {
           ["pending", "OLI-42"],
           ["failed", null],
         ]);
+        // Only the server whose ticket exists is locked.
+        expect(setup.claims.map((claim) => claim.serverUrl)).toEqual([QEMU_A]);
         // OLI-42 was handed off and the second ticket never existed: nothing is trapped, and
         // nothing was created as a whole.
         expect(h.log.lines).toEqual([]);
@@ -784,8 +838,9 @@ describe("Open.openMints unhappy path", () => {
             overrides: { describeIssue: () => Effect.fail(refused) },
           }),
         });
+        const setup = claimStore(h);
         const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
-          Effect.provide(mintServices(h)),
+          Effect.provide(mintServices(h, setup)),
           Effect.flip,
         );
         const reason = `${refused.message}; created OLI-42`;
@@ -795,6 +850,8 @@ describe("Open.openMints unhappy path", () => {
           ["failed", "OLI-42"],
         ]);
         expect(methods(h).filter((method) => method === "createIssue")).toHaveLength(1);
+        // The lock landed before the describe; its failed result is one the proxy releases.
+        expect(setup.claims.map((claim) => claim.serverUrl)).toEqual([QEMU_A]);
         expect(h.log.lines).toEqual([
           {
             level: "error",
@@ -803,6 +860,63 @@ describe("Open.openMints unhappy path", () => {
             agentId: "OLI-42",
             cause: refused,
           },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a lock that will not take fails the run, names the ticket, which never leaves Backlog, and reaches no later server",
+    () =>
+      Effect.gen(function* () {
+        const refused = DbErrors.DatabaseError.make({
+          operation: "claimSetupRequest",
+          message: "Failed query: insert into setup_requests",
+          cause: new Error("connection reset"),
+        });
+        const h = H.harness();
+        const setup = claimStore(h, refused);
+        const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+          Effect.provide(mintServices(h, setup)),
+          Effect.flip,
+        );
+        const reason = `${refused.message}; created OLI-42`;
+        expect(error).toMatchObject({
+          _tag: "DatabaseError",
+          operation: "claimSetupRequest",
+          message: reason,
+        });
+        expect(h.tests.runs.map((run) => [run.status, run.reason])).toEqual([["failed", reason]]);
+        // No describe: the ticket never reaches Automation Needed, where a job would be queued
+        // with no pin for the dispatcher to find.
+        expect(methods(h)).toEqual(["teamId", "labelIds", "assigneeId", "stateIds", "createIssue"]);
+        expect(setup.claims).toEqual([]);
+        expect(h.log.lines.map((line) => [line.level, line.agentId, line.cause])).toEqual([
+          ["error", "OLI-42", refused],
+        ]);
+        expect(h.log.lines[0]?.text).toMatch(/^ticket trapped in Backlog; /);
+      }),
+  );
+
+  it.effect(
+    "a lock a mint in flight holds fails the run, names the ticket, which never leaves Backlog, and reaches no later server",
+    () =>
+      Effect.gen(function* () {
+        const h = H.harness();
+        const setup = claimStore(h, "held");
+        const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+          Effect.provide(mintServices(h, setup)),
+          Effect.flip,
+        );
+        const reason = `${QEMU_A} is held by a mint still in flight; created OLI-42`;
+        expect(error).toMatchObject({ _tag: "SetupHeld", message: reason });
+        expect(h.tests.runs.map((run) => [run.status, run.reason])).toEqual([["failed", reason]]);
+        expect(methods(h)).toEqual(["teamId", "labelIds", "assigneeId", "stateIds", "createIssue"]);
+        expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          [
+            "error",
+            `ticket trapped in Backlog; ${QEMU_A} is held by a mint still in flight`,
+            "OLI-42",
+          ],
         ]);
       }),
   );

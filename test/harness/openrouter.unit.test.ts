@@ -326,6 +326,104 @@ describe("OpenRouter client", () => {
     }),
   );
 
+  // OpenRouter keeps a stream open with `: OPENROUTER PROCESSING` comments while the provider
+  // has not answered: bytes, not events. Each item here waits its delay on the test clock.
+  const KEEP_ALIVE = ": OPENROUTER PROCESSING\n\n";
+  const timed = (items: Stream.Stream<readonly [Duration.Input, string]>) => {
+    const encoder = new TextEncoder();
+    return Layer.succeed(HttpClient.HttpClient)(
+      HttpClient.make((request) => {
+        const response = HttpClientResponse.fromWeb(
+          request,
+          new Response(null, { status: 200, headers: { "content-type": "text/event-stream" } }),
+        );
+        Object.defineProperty(response, "stream", {
+          configurable: true,
+          get: () =>
+            items.pipe(
+              Stream.mapEffect(([delay, text]) =>
+                Effect.sleep(delay).pipe(Effect.as(encoder.encode(text))),
+              ),
+            ),
+        });
+        return Effect.succeed(response);
+      }),
+    );
+  };
+
+  it.effect("keep-alive comments alone fail at the chunk timeout", () =>
+    Effect.gen(function* () {
+      const layer = timed(
+        Stream.concat(
+          Stream.make([0, `data: ${frame(choice({ content: "partial" }, null))}\n\n`] as const),
+          Stream.forever(Stream.make(["30 seconds", KEEP_ALIVE] as const)),
+        ),
+      );
+      const fiber = yield* Effect.forkScoped(run(layer, { chunk: Duration.minutes(3) }));
+      yield* TestClock.adjust("2 minutes");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("1 minute");
+      expect(fiber.pollUnsafe()).toBeDefined();
+      const error = yield* Effect.flip(Fiber.join(fiber));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterUnreachable",
+        message: "openrouter: no chunk within chunk timeout",
+      });
+    }),
+  );
+
+  it.effect("a stream of keep-alive comments from the start fails at the chunk timeout", () =>
+    Effect.gen(function* () {
+      const layer = timed(Stream.forever(Stream.make(["30 seconds", KEEP_ALIVE] as const)));
+      const fiber = yield* Effect.forkScoped(run(layer, { chunk: Duration.minutes(3) }));
+      yield* TestClock.adjust("2 minutes");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("1 minute");
+      expect(fiber.pollUnsafe()).toBeDefined();
+      const error = yield* Effect.flip(Fiber.join(fiber));
+      expect(error.message).toBe("openrouter: no chunk within chunk timeout");
+    }),
+  );
+
+  it.effect("an event split across reads counts when its second half lands", () =>
+    Effect.gen(function* () {
+      const event = `data: ${frame(choice({ content: "late" }, null))}\n\n`;
+      const half = Math.floor(event.length / 2);
+      const layer = timed(
+        Stream.fromIterable([
+          [0, event.slice(0, half)],
+          ["150 seconds", event.slice(half)],
+          ["150 seconds", `data: ${frame(choice({}, "stop"))}\n\ndata: [DONE]\n\n`],
+        ] as const),
+      );
+      const fiber = yield* Effect.forkScoped(run(layer, { chunk: Duration.minutes(3) }));
+      yield* TestClock.adjust("6 minutes");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "late", toolCalls: [] });
+    }),
+  );
+
+  it.effect("events closer than the chunk timeout keep a long completion alive", () =>
+    Effect.gen(function* () {
+      const keepAlives = Array.from({ length: 3 }, () => ["30 seconds", KEEP_ALIVE] as const);
+      const word = (text: string) =>
+        [
+          ...keepAlives,
+          ["30 seconds", `data: ${frame(choice({ content: text }, null))}\n\n`] as const,
+        ] as const;
+      const layer = timed(
+        Stream.fromIterable([
+          ...word("a"),
+          ...word("b"),
+          ...word("c"),
+          [0, `data: ${frame(choice({}, "stop"))}\n\ndata: [DONE]\n\n`] as const,
+        ]),
+      );
+      const fiber = yield* Effect.forkScoped(run(layer, { chunk: Duration.minutes(3) }));
+      yield* TestClock.adjust("7 minutes");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "abc", toolCalls: [] });
+    }),
+  );
+
   it.effect("interrupting a stalled stream stays an interruption", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();
@@ -591,16 +689,110 @@ describe("OpenRouter client", () => {
     }),
   );
 
-  it.effect("a provider error inside the stream is unreachable and is not a tool call", () =>
+  it.effect("a provider error inside the stream that is not a 429 or 5xx is not retried", () =>
     Effect.gen(function* () {
-      const layer = TestingHttp.respondWith(() =>
-        sse([frame({ error: { message: "Provider returned error", code: 502 } }), "[DONE]"]),
+      const recorder = TestingHttp.recordRequests(() =>
+        sse([frame({ error: { message: "Provider returned error", code: 400 } }), "[DONE]"]),
       );
-      const error = yield* Effect.flip(run(layer));
+      const error = yield* Effect.flip(run(recorder.layer));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",
         message: "openrouter: Provider returned error",
       });
+      expect(recorder.requests).toHaveLength(1);
+    }),
+  );
+
+  // After the 200 the status cannot change, so OpenRouter reports the provider's 502 as an
+  // event. It is the same failure a 502 status is, and it is retried the same way.
+  it.effect("a 502 inside the stream is sent again after the configured default", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        recorder.requests.length === 1
+          ? sse([frame({ error: { message: "error code: 502", code: 502 } })])
+          : doneTurn(),
+      );
+      const fiber = yield* Effect.forkScoped(
+        run(recorder.layer, { defaultRetry: Duration.seconds(2) }),
+      );
+      yield* TestClock.adjust("1 second");
+      expect(recorder.requests).toHaveLength(1);
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("1 second");
+      const turn = yield* Fiber.join(fiber);
+      expect(turn).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a 503 on the choice is sent again, and what streamed before it is dropped", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        recorder.requests.length === 1
+          ? sse([
+              frame(choice({ content: "Half a" }, null)),
+              frame({
+                choices: [
+                  { delta: {}, finish_reason: "error", error: { message: "busy", code: 503 } },
+                ],
+              }),
+            ])
+          : doneTurn(),
+      );
+      const fiber = yield* Effect.forkScoped(run(recorder.layer));
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a code inside the stream that is not a status is not retried", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        sse([frame({ error: { message: "odd", code: 600 } })]),
+      );
+      const error = yield* Effect.flip(run(recorder.layer));
+      expect(error.message).toBe("openrouter: odd");
+      expect(recorder.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect("a tool call half streamed before a 503 does not reach the retry", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        recorder.requests.length === 1
+          ? sse([
+              frame(
+                choice(
+                  {
+                    tool_calls: [
+                      { index: 0, id: "call-1", function: { name: "client", arguments: '{"a' } },
+                    ],
+                  },
+                  null,
+                ),
+              ),
+              frame({ error: { message: "busy", code: 503 } }),
+            ])
+          : doneTurn(),
+      );
+      const fiber = yield* Effect.forkScoped(run(recorder.layer));
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+    }),
+  );
+
+  it.effect("a 502 inside the stream is not retried past the run ceiling", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        sse([frame({ error: { message: "error code: 502", code: 502 } })]),
+      );
+      const error = yield* Effect.flip(run(recorder.layer, { defaultRetry: Duration.hours(2) }));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterUnreachable",
+        message: "openrouter: retry delay of 2h would pass the run ceiling: error code: 502",
+      });
+      expect(recorder.requests).toHaveLength(1);
     }),
   );
 });

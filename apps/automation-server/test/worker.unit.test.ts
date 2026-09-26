@@ -231,6 +231,7 @@ const setupLayer = (pins: Map<string, string>) =>
     SetupRequests.SetupRequestStore.of({
       insert: () => unexpected("insert"),
       setResult: () => unexpected("setResult"),
+      claim: () => unexpected("claim"),
       remove: () => unexpected("remove"),
       removeServer: () => unexpected("removeServer"),
       list: () => unexpected("list"),

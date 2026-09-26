@@ -2,16 +2,10 @@
 
 Read from SKILL.md only when you need IDs, incidents, or queries.
 
-## Linear state IDs (terminaldotshop)
+## Linear states
 
-Used by `linear-state.sh`. Re-check if the workspace workflow changes.
-
-| State | UUID |
-|-------|------|
-| Needs Review | `cdf3eb61-bc4b-4b61-8e47-cc2c145a6b6a` |
-| Canceled | `4e654471-6d94-4ef7-aea6-586fe11c19a1` |
-| In Progress | `2a566723-82d0-40ef-ac2a-55b1811da198` |
-| Done | `c763405d-1724-401d-b6ab-9fa352172819` |
+`linear-state.sh` takes a state name (`Needs Review`, `Canceled`, `In Progress`, `Done`) and
+looks its id up on the ticket's own team: every team (OLI, OLIT) has its own state ids.
 
 ## Ledger
 
@@ -107,11 +101,16 @@ From `.env` in the repo root (already-set vars win):
 - All: whatever the wrappers already read (`OLIGARCHY_TOKEN`, `DATABASE_URL`, …)
 - `ctrl test run`, `ctrl test run testsuite`, `ctrl mint`, `ctrl test list`, the automation server and the qemu reverse proxy: `LINEAR_API_TOKEN`, `LINEAR_TEAM`, `DATABASE_URL`. `LINEAR_TEAM` is the Linear team name, required, with no default, so a local process and production can name different teams.
 - qemu-server: `TMPDIR` **in the process environment**, expanded path
-- automation-client: `SERVER_URL=http://127.0.0.1:55555` so `/reserve` hits the
-  proxy (which places onto a live qemu). Default is `:42069`. Not in `.env`.
+- `.local-env` exported into the operator shell before `install.sh` and the fleet
+  (`set -a; . ./.local-env; set +a`), so `SERVER_URL=http://127.0.0.1:55555` and
+  `AUTOMATION_SERVER_URL=http://127.0.0.1:54321` beat `.env`'s public hostnames.
+  `install.sh` takes `SUPER_RUN_SERVER_URL` from it. It matters to the automation
+  clients, whose `/reserve` hits the proxy with it and whose drivers and opencode
+  inherit it (`--env-file` would reach the client but not them), and to `ctrl`/viz.
 - OpenCode: operator's OpenRouter / provider credentials on the machine
 
-Cloudflare tunnel in front of `:55555` is not started by this skill.
+No tunnel. No Linear webhook reaches this machine; the automation server's board
+poll (every 30s, a ticket unchanged for 90s) queues every drive, mint and diagnose.
 
 ## `--name`, `--max-jobs`, no `--jobs`
 

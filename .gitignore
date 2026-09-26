@@ -13,3 +13,4 @@ node_modules/
 /TODOS.md
 /.tunnel
 /automation-tunnel
+/.local-env

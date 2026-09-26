@@ -12,6 +12,7 @@ import * as DbErrors from "@oligarchy/db/errors";
 import * as Logs from "@oligarchy/db/logs";
 import * as Servers from "@oligarchy/db/servers";
 import * as Sessions from "@oligarchy/db/sessions";
+import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
@@ -38,6 +39,7 @@ export type Stores =
   | Tests.TestStore
   | Automation.AutomationStore
   | Servers.ServerStore
+  | SetupRequests.SetupRequestStore
   | Log.Log;
 
 // ctrl is the record keeper: every read and write is a database call, and Linear is the remote
@@ -61,6 +63,7 @@ const databaseLayers = (url: Redacted.Redacted): Layer.Layer<Stores, DbErrors.Da
     DebugLogs.DebugLogStore.layer,
     Diagnosis.DiagnosisStore.layer,
     Servers.ServerStore.layer,
+    SetupRequests.SetupRequestStore.layer,
     Observability.LogLive,
   ).pipe(
     Layer.provideMerge(Actions.ActionStore.layer),

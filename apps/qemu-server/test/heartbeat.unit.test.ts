@@ -22,6 +22,7 @@ const fakeSetups = (removed: ReadonlyArray<Effect.Effect<number, DbErrors.Databa
     SetupRequests.SetupRequestStore.of({
       insert: () => Effect.die("Unexpected SetupRequestStore.insert"),
       setResult: () => Effect.die("Unexpected SetupRequestStore.setResult"),
+      claim: () => Effect.die("Unexpected SetupRequestStore.claim"),
       remove: () => Effect.die("Unexpected SetupRequestStore.remove"),
       removeServer: (url) =>
         Effect.suspend(() => {
