@@ -269,6 +269,26 @@ describe("POST /linear", () => {
     }),
   );
 
+  it.effect(
+    "names a drive the index kept by its status, and labels nothing (unhappy duplicate)",
+    () =>
+      Effect.gen(function* () {
+        const body = issueBody("Automation Needed");
+        const fixed = fixture();
+        const resultId = seedResult(fixed, "OLI-1063");
+        seedJob(fixed, resultId, "running");
+        yield* Effect.gen(function* () {
+          const http = yield* HttpClient.HttpClient;
+          expect((yield* webhook(http, body, sign(body))).status).toBe(200);
+        }).pipe(Effect.provide(serve(fixed)));
+        expect(fixed.stores.automation.jobs).toEqual([
+          expect.objectContaining({ resultId, action: "drive", status: "running" }),
+        ]);
+        expect(FakeLog.texts(fixed.log)).toEqual(["linear webhook ignored; drive already running"]);
+        expect(labeled(fixed)).toEqual([]);
+      }),
+  );
+
   it.effect("records In Progress without enqueueing", () =>
     Effect.gen(function* () {
       const body = issueBody("In Progress");

@@ -74,13 +74,9 @@ export const LinearLive = HttpApiBuilder.group(Api.AutomationServerApi, "Linear"
         return ok;
       }
       const action = yield* Board.actionFor(event.state, job.value).pipe(Effect.mapError(internal));
-      if (Option.isNone(action)) {
-        yield* recorded;
-        return ok;
-      }
-      const placed = yield* Board.enqueue(job.value, action.value).pipe(Effect.mapError(internal));
+      const placed = yield* Board.enqueue(job.value, action).pipe(Effect.mapError(internal));
       if (placed.result === "duplicate") {
-        yield* log.info(`linear webhook ignored; ${placed.action} already queued`, {
+        yield* log.info(`linear webhook ignored; ${Board.already(placed)}`, {
           location: Log.Locations.automation,
           agentId: event.ticket,
         });

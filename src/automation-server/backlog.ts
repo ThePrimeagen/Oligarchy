@@ -1,5 +1,4 @@
 import { Cause, Effect, Option, Schedule } from "effect";
-import type * as Automation from "@oligarchy/db/automation";
 import * as Servers from "@oligarchy/db/servers";
 import * as Board from "@oligarchy/jobs/board";
 import * as JobsErrors from "@oligarchy/jobs/errors";
@@ -12,12 +11,6 @@ const POLL_INTERVAL = "30 seconds";
 // updatedAt counts one round. Three rounds is ninety seconds with no move and
 // no edit; then the webhook is not coming. An edit or a departure starts over.
 const ROUNDS_BEFORE_MOVE = 3;
-
-// A pending row is the queue. Anything else the unique index kept is named by its status.
-const already = (
-  action: Automation.AutomationAction,
-  status: Automation.AutomationJobRow["status"],
-): string => `${action} already ${status === "pending" ? "queued" : status}`;
 
 type Sighting = {
   readonly rounds: number;
@@ -84,10 +77,7 @@ const processBacklog = Effect.fn("processBacklog")(function* (
     const team = yield* linear.teamId;
     const states = yield* linear.stateIds(team);
     yield* linear.moveIssue(ticket, states.automationNeeded);
-    const note =
-      placed.result === "queued"
-        ? `queued ${placed.action}`
-        : already(placed.action, placed.status);
+    const note = placed.result === "queued" ? `queued ${placed.action}` : Board.already(placed);
     yield* log.info(`backlog watch moved to Automation Needed; ${note}`, {
       location: Log.Locations.automation,
       agentId: ticket.identifier,
@@ -151,7 +141,7 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
   const line =
     placed.result === "queued"
       ? `automation needed watch queued ${placed.action}`
-      : `automation needed watch; ${already(placed.action, placed.status)}`;
+      : `automation needed watch; ${Board.already(placed)}`;
   yield* log.info(line, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,
@@ -194,7 +184,7 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
   const line =
     placed.result === "queued"
       ? `needs review watch queued ${placed.action}`
-      : `needs review watch; ${already(placed.action, placed.status)}`;
+      : `needs review watch; ${Board.already(placed)}`;
   yield* log.info(line, {
     location: Log.Locations.automation,
     agentId: ticket.identifier,

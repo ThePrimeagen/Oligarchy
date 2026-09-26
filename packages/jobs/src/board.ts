@@ -21,29 +21,34 @@ export const driveOrMint = Effect.fn("Board.driveOrMint")(function* (job: Find.J
   return action;
 });
 
+// The two columns that ask an action of the job whose ticket moves into them.
+export type Asking = typeof Linear.AUTOMATION_NEEDED_STATE | typeof Linear.NEEDS_REVIEW_STATE;
+
 // Whether a ticket moving into the column asks anything of its job, before the job is looked up.
-export const asks = (column: string): boolean =>
+export const asks = (column: string): column is Asking =>
   column === Linear.AUTOMATION_NEEDED_STATE || column === Linear.NEEDS_REVIEW_STATE;
 
 // The action a column asks of the job whose ticket moved into it: Automation Needed a drive or a
-// mint, Needs Review a diagnose (the mint's too), any other column none.
-export const actionFor = Effect.fn("Board.actionFor")(function* (column: string, job: Find.Job) {
-  if (column === Linear.AUTOMATION_NEEDED_STATE) {
-    return Option.some(yield* driveOrMint(job));
-  }
-  if (column === Linear.NEEDS_REVIEW_STATE) {
-    return Option.some<Automation.AutomationAction>("diagnose");
-  }
-  return Option.none<Automation.AutomationAction>();
+// mint, Needs Review a diagnose (the mint's too).
+export const actionFor = Effect.fn("Board.actionFor")(function* (column: Asking, job: Find.Job) {
+  const action: Automation.AutomationAction =
+    column === Linear.AUTOMATION_NEEDED_STATE ? yield* driveOrMint(job) : "diagnose";
+  return action;
 });
+
+type Duplicate = {
+  readonly result: "duplicate";
+  readonly action: Automation.AutomationAction;
+  readonly status: Automation.AutomationJobRow["status"];
+};
 
 export type Enqueued =
   | { readonly result: "queued"; readonly action: Automation.AutomationAction }
-  | {
-      readonly result: "duplicate";
-      readonly action: Automation.AutomationAction;
-      readonly status: Automation.AutomationJobRow["status"];
-    };
+  | Duplicate;
+
+// A pending row is the queue. Anything else the unique index kept is named by its status.
+export const already = (duplicate: Duplicate): string =>
+  `${duplicate.action} already ${duplicate.status === "pending" ? "queued" : duplicate.status}`;
 
 // The (result, action) unique index keeps one row, so a second insert is a duplicate, named by
 // the status of the row it hit. Any other failed insert is that failure.
@@ -66,6 +71,8 @@ export const enqueue = Effect.fn("Board.enqueue")(function* (
   const duplicate: Enqueued = {
     result: "duplicate",
     action,
+    // The row the insert hit was deleted before it could be read, by the old-row sweep. Its
+    // status is unknown, so it reads as the queue this insert would have joined.
     status: Option.getOrElse(kept, () => "pending" as const),
   };
   return duplicate;

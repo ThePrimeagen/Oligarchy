@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as Linear from "@oligarchy/linear/client";
 import * as TestingStores from "@oligarchy/testing/stores";
@@ -18,6 +18,7 @@ describe("Board.asks", () => {
       Linear.BACKLOG_STATE,
       Linear.IN_PROGRESS_STATE,
       Linear.IN_REVIEW_STATE,
+      Linear.SUCCEEDED_STATE,
       Linear.ERRORED_STATE,
       "Done",
       "",
@@ -39,8 +40,8 @@ describe("Board.actionFor happy path", () => {
       const review = yield* Board.actionFor(Linear.NEEDS_REVIEW_STATE, job).pipe(
         Effect.provide(h.layer),
       );
-      expect(needed).toEqual(Option.some("drive"));
-      expect(review).toEqual(Option.some("diagnose"));
+      expect(needed).toBe("drive");
+      expect(review).toBe("diagnose");
     }),
   );
 
@@ -58,40 +59,41 @@ describe("Board.actionFor happy path", () => {
           Effect.provide(h.layer),
         );
         const moved = yield* Board.driveOrMint(job).pipe(Effect.provide(h.layer));
-        expect(needed).toEqual(Option.some("mint"));
-        expect(review).toEqual(Option.some("diagnose"));
+        expect(needed).toBe("mint");
+        expect(review).toBe("diagnose");
         expect(moved).toBe("mint");
       }),
   );
 });
 
 describe("Board.actionFor unhappy path", () => {
-  it.effect("any other column is no action", () =>
-    Effect.gen(function* () {
-      const h = H.harness();
-      h.tests.definitions.push(H.definition(1, "boot"));
-      const job = H.seedResult(h.tests);
-      for (const column of [
-        Linear.BACKLOG_STATE,
-        Linear.IN_PROGRESS_STATE,
-        Linear.IN_REVIEW_STATE,
-        Linear.SUCCEEDED_STATE,
-        "Done",
-      ]) {
-        const action = yield* Board.actionFor(column, job).pipe(Effect.provide(h.layer));
-        expect(action, column).toEqual(Option.none());
-      }
-    }),
-  );
-
   it.effect("a result whose definition is gone is a drive, not a mint", () =>
     Effect.gen(function* () {
       const h = H.harness();
       const job = H.seedResult(h.tests, { definitionId: 99 });
-      const action = yield* Board.driveOrMint(job).pipe(Effect.provide(h.layer));
+      const action = yield* Board.actionFor(Linear.AUTOMATION_NEEDED_STATE, job).pipe(
+        Effect.provide(h.layer),
+      );
       expect(action).toBe("drive");
     }),
   );
+});
+
+describe("Board.already", () => {
+  it("a pending row is the queue, so its duplicate is already queued", () => {
+    expect(Board.already({ result: "duplicate", action: "drive", status: "pending" })).toBe(
+      "drive already queued",
+    );
+  });
+
+  it("any other row the index kept is named by its status (unhappy)", () => {
+    expect(Board.already({ result: "duplicate", action: "drive", status: "running" })).toBe(
+      "drive already running",
+    );
+    expect(Board.already({ result: "duplicate", action: "mint", status: "succeeded" })).toBe(
+      "mint already succeeded",
+    );
+  });
 });
 
 describe("Board.enqueue happy path", () => {
