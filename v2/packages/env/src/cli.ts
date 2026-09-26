@@ -20,7 +20,7 @@ export type Value<F extends Args.Flag> = F["required"] extends true
   ? z.output<F["schema"]>
   : MayBeAbsent<F["schema"]> extends true
     ? z.output<F["schema"]>
-    : z.output<F["schema"]> | undefined;
+    : z.output<z.ZodOptional<F["schema"]>>;
 
 // One command. It takes its own flags and variables and those of every node above it; one with
 // commands under it only routes to them.
