@@ -22,3 +22,11 @@ export const repeat = <A extends readonly unknown[], T, E>(
     return result;
   };
 };
+
+// Calls fn after every interval milliseconds. The returned function stops it.
+export const tick = (fn: () => unknown, interval: number): (() => void) => {
+  const id = setInterval(fn, interval);
+  return () => {
+    clearInterval(id);
+  };
+};
