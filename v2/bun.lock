@@ -41,6 +41,17 @@
         "vitest": "catalog:",
       },
     },
+    "packages/jarl_ext": {
+      "name": "@oligarchy/jarl_ext",
+      "dependencies": {
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@types/node": "^26.4.0",
@@ -57,6 +68,8 @@
     "@oligarchy/driver": ["@oligarchy/driver@workspace:packages/driver"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
+
+    "@oligarchy/jarl_ext": ["@oligarchy/jarl_ext@workspace:packages/jarl_ext"],
 
     "@oxc-project/types": ["@oxc-project/types@0.151.0", "", {}, "sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA=="],
 
@@ -243,5 +256,7 @@
     "why-is-node-running": ["why-is-node-running@2.3.0", "", { "dependencies": { "siginfo": "^2.0.0", "stackback": "0.0.2" }, "bin": { "why-is-node-running": "cli.js" } }, "sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w=="],
 
     "zod": ["zod@4.6.5", "", {}, "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q=="],
+
+    "@oligarchy/jarl_ext/jarl": ["jarl@github:ThePrimeagen/jarl#ff01367", {}, "ThePrimeagen-jarl-ff01367", "sha512-hjuUZdXbDgBvTCJ2+ujZ3Ym8iN8gcZxzEkyjhF1nQ3lpP8nuFQU6oOghDuYjEcD3InjlzCuoHQbbpyBeVGL2Ew=="],
   }
 }
