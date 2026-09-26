@@ -169,10 +169,10 @@ this item is what is left outside it, and what that package should grow into.
   gets a `jobs reconcile --dry-run` that lists what would move. Not for the split itself; it is
   the first thing to build once `jobs` exists, because it is the point of having one place.
 
-## 11. Two integration tests fail with Docker present, on master too
+## 11. Three integration tests fail with Docker present, on master too
 
-Found running the lane with `OLIGARCHY_REQUIRE_DATABASE=1` during phase 8; both fail the same way
-on `master`, so neither is the phase's.
+Found running the lane with `OLIGARCHY_REQUIRE_DATABASE=1` during phase 8; each fails the same
+way on `master`, so none is the phase's. The first two fail every run; the third, some runs.
 
 - `test/integration/dashboard.integration.test.ts`, "reads one name's verdicts, durations and
   per-wording tallies": the seed inserts four results for one (run, definition), which the unique
@@ -184,6 +184,12 @@ on `master`, so neither is the phase's.
   reach a closed port, its rejection is swallowed, and the driver never starts ("driver did not
   start" after ten seconds). Send `/run` after `/reserve` answers, as every other `/run` in that
   file does.
+- `test/integration/automation-client.integration.test.ts`, "answers 503 at capacity on a second
+  reserve while --max-jobs runs are in flight", fails some runs and passes others, on `master`
+  and on phase 8's branch alike: the 503 and the abort land, but the client's stdout has no
+  `POST /reserve failed: at capacity` line when the test reads it. That line is written by the
+  log drain after its row insert, so the test is reading a line whose timing it does not
+  control; wait for the line (as the listen line is waited for) instead of reading stdout once.
 
 ## Checked and sound
 
