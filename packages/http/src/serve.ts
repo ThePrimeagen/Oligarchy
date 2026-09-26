@@ -17,8 +17,8 @@ export type Serving<ER, RR, EL, RL, A, ES, RS> = {
   // Run once listening, in the server's scope: the listen line and the background work, which a
   // port refusal never starts and a shutdown stops before the server closes.
   readonly listening: Effect.Effect<void, EL, RL>;
-  // The first server error after listen, before the serve ends with it; the platform drops its
-  // own error listener once the server is up.
+  // The first server error, a bind error or a later one, before the serve ends with it; the
+  // platform drops its own error listener once the server is up.
   readonly onError?: (cause: Error) => void;
 };
 
@@ -31,10 +31,14 @@ export const serveOn =
   <ER, RR, EL, RL, A, ES, RS>(serving: Serving<ER, RR, EL, RL, A, ES, RS>) =>
     Effect.suspend(() => {
       const failed = Deferred.makeUnsafe<never, HttpServerError.ServeError>();
+      // onError before the deferred: completing it wakes the race, and a shutdown that follows
+      // reads what onError wrote.
       server.on("error", (cause) => {
-        if (Deferred.doneUnsafe(failed, Exit.fail(new HttpServerError.ServeError({ cause })))) {
-          serving.onError?.(cause);
+        if (Deferred.isDoneUnsafe(failed)) {
+          return;
         }
+        serving.onError?.(cause);
+        Deferred.doneUnsafe(failed, Exit.fail(new HttpServerError.ServeError({ cause })));
       });
       const live = Layer.effectDiscard(serving.listening).pipe(
         Layer.provide(

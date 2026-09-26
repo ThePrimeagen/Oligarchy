@@ -384,7 +384,7 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   view); a failure there is a `Result`, a thrown value from a library wrapped in one `try`.
 - Reach services with `yield*` inside the Effect that needs them, never as function parameters; a
   plain factory taking values is allowed only where a unit test constructs the seam directly
-  (`Database.make(url)`, `Host.make(source)`, `makeQemuServerCommand(server)`,
+  (`Database.make(url)`, `Host.make(source)`, `Serve.serveOn(server)`, `makeQemuServerCommand(server)`,
   `makeQemuReverseProxyCommand(server)`, `makeAutomationServerCommand(server)`, `makeCtrlCommand(deps)`).
 - Effect-native end-to-end: `Scope`, `Schedule`, `Clock`, `FileSystem`/`Path`,
   `ChildProcessSpawner`, `HttpClient`. Raw callback and Promise APIs, `async`/`await` included,
@@ -912,9 +912,11 @@ Env.run(
   `HttpRouter.serve(routes, { disableLogger: true, disableListenLog: true })` (never Effect's
   built-in request logger), runs `listening` (the listen line, the background work) in that
   scope, and sets `HttpMiddleware.TracerDisabledWhen` so no `http.server` span reaches Sentry and a
-  domain span stays a root. It runs until its scope ends and fails with the bind error or the
-  first later server error, which the platform's own listener no longer sees once the server is
-  up; `onError` runs once on that error first (qemu-server sets its drain reason there). Fail
+  domain span stays a root. It runs until its scope ends and fails with the first server error,
+  the bind error or a later one the platform's own listener no longer sees once the server is up;
+  `onError` runs once on that error before the serve ends (qemu-server sets its drain reason
+  there). A request that reaches the port before the routes are attached waits unanswered, so a
+  server's readiness is its listen line, not an open port. Fail
   before listening when the host check or the database ping fails; never fall back to another
   port.
 

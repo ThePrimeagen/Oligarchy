@@ -120,7 +120,10 @@ describe("serve unhappy path", () => {
             services: Layer.empty,
             listening: Deferred.succeed(listening, undefined),
             onError: (cause) => void seen.push(cause),
-          }),
+          }).pipe(
+            // What a shutdown after the error reads: onError has already run.
+            Effect.onError(() => Effect.sync(() => void seen.push(new Error("ended")))),
+          ),
         );
         yield* Deferred.await(listening);
         const first = new Error("accept EMFILE: too many open files");
@@ -132,7 +135,7 @@ describe("serve unhappy path", () => {
           cause: first,
         });
         server.emit("error", new Error("accept EMFILE again"));
-        expect(seen).toEqual([first]);
+        expect(seen.map((error) => error.message)).toEqual([first.message, "ended"]);
       }),
   );
 });

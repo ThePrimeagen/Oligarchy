@@ -925,10 +925,15 @@ What phase 10 decided that the checklist left open, and what it found:
   launch against the server's first error is what `serve` is for, so the effect owns the race and
   the commands `yield*` it. The commands lost `serverFailed`; `main.ts` no longer creates a
   server. `serveOn(server)` is the same over a given `node:http` server, the seam its test raises
-  a later error through.
+  a later error through, a factory seam as `Host.make(source)` is. `onError` runs before the
+  deferred that ends the serve is completed, so a shutdown reads what it wrote; it runs for a bind
+  error too, as qemu-server's listener always did.
 - `services` is built after the port is bound in all four servers, as qemu-server already did;
   the proxy, automation-client and automation-server used to build theirs first. A port refusal
-  now builds nothing. `services` is required (`Layer.empty` for automation-server): an optional
+  now builds none of a server's own services (the graph under the command exists already). The
+  price, qemu-server's before and now all four's: a request that reaches the port before the
+  routes are attached waits unanswered, so readiness is the listen line, as every process test
+  already waits for it. `services` is required (`Layer.empty` for automation-server): an optional
   one widened to a union the requirements could not be subtracted from.
 - `NotFoundRoute` lives in `middleware.ts` beside the bearer and the boundaries: every app's
   routes are built from those four. `layerClient` in the design below was never in
@@ -947,6 +952,10 @@ What phase 10 decided that the checklist left open, and what it found:
   that tag is served.
 - `serve.unit.test.ts` opens real loopback sockets, as `NodeHttpServer.layerTest` does for every
   HTTP unit test; a port in use is pinned in Bun's words ("Is port N in use?").
+- The integration lane, with Docker, QEMU and `OLIGARCHY_REQUIRE_DATABASE=1`: 319 passed, and the
+  two that fail on `master` too (NEED_FIXING item 11) failed the same way. All four servers'
+  process tests passed on `serve`, qemu-server's fifteen included, and the client bundle rebuilt
+  on an http-package edit.
 
 
 **Phase 11: the seven apps**

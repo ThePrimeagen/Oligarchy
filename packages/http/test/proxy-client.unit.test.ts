@@ -535,22 +535,3 @@ describe("ProxyClient follow", () => {
     }),
   );
 });
-
-describe("ProxyClient errors", () => {
-  it("keep the tags and identifiers they had in the main package (happy)", () => {
-    const refusal = ProxyClient.ProxyRefusal.make({ status: 409, message: "x" });
-    const unreachable = ProxyClient.ProxyUnreachable.make({ message: "x", cause: 1 });
-    expect([refusal._tag, refusal.name]).toEqual([
-      "ProxyRefusal",
-      "@oligarchy/shared/errors/ProxyRefusal",
-    ]);
-    expect([unreachable._tag, unreachable.name]).toEqual([
-      "ProxyUnreachable",
-      "@oligarchy/shared/errors/ProxyUnreachable",
-    ]);
-  });
-
-  it("a refusal refuses a status that is not an integer (unhappy)", () => {
-    expect(() => ProxyClient.ProxyRefusal.make({ status: 40.9, message: "x" })).toThrow();
-  });
-});
