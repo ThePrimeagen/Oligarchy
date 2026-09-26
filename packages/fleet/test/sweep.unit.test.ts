@@ -5,9 +5,47 @@ import { TestClock } from "effect/testing";
 import * as DbErrors from "@oligarchy/db/errors";
 import type * as Servers from "@oligarchy/db/servers";
 import * as Log from "@oligarchy/log/log";
-import * as StaleServers from "../../src/shared/stale-servers.ts";
-import * as FakeLog from "../support/log.ts";
-import * as Stores from "../support/stores.ts";
+import * as TestingStores from "@oligarchy/testing/stores";
+import * as Sweep from "../src/sweep.ts";
+
+type Line = {
+  readonly level: string;
+  readonly text: string;
+  readonly location: string | undefined;
+  readonly agentId: string | undefined;
+  readonly skipSentry: boolean;
+  readonly cause: unknown;
+};
+
+// A Log that keeps every line instead of writing it.
+const recordingLog = () => {
+  const lines: Array<Line> = [];
+  const record =
+    (level: string) =>
+    (text: string, report?: Log.Report): Effect.Effect<void> =>
+      Effect.sync(() => {
+        lines.push({
+          level,
+          text,
+          location: report?.location,
+          agentId: report?.agentId,
+          skipSentry: report?.skipSentry === true,
+          cause: report?.cause,
+        });
+      });
+  return {
+    lines,
+    layer: Layer.succeed(Log.Log)(
+      Log.Log.of({
+        info: record("info"),
+        warning: record("warning"),
+        error: record("error"),
+        fatal: record("fatal"),
+        flush: Effect.void,
+      }),
+    ),
+  };
+};
 
 const DEAD = "http://127.0.0.1:1";
 const TYPO = "http://127.0.0.1:2";
@@ -31,14 +69,14 @@ const refused = DbErrors.DatabaseError.make({
 // The loop in a scope of its own, so a test can close it and prove the ticking stops. The
 // reverse proxy's kind and attribution unless a test says otherwise.
 const start = (
-  store: Stores.FakeServerStore,
-  log = FakeLog.fakeLog(),
+  store: TestingStores.FakeServerStore,
+  log = recordingLog(),
   type: Servers.ServerType = "qemu",
   attribution: Log.ProcessAttribution = Log.ProcessAttribution.defaultValue(),
 ) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    yield* StaleServers.forget(type).pipe(
+    yield* Sweep.forget(type).pipe(
       Effect.provide(
         Layer.mergeAll(store.layer, log.layer, Layer.succeed(Log.ProcessAttribution)(attribution)),
       ),
@@ -50,7 +88,7 @@ const start = (
 // A store whose sweep answers `answers` in order and nothing after, recording the kinds asked for.
 const sweeping = (answers: ReadonlyArray<Array<string>>) => {
   const asked: Array<Servers.ServerType> = [];
-  const store = Stores.fakeServerStore({
+  const store = TestingStores.fakeServerStore({
     removeStaleServers: (type) =>
       Effect.sync(() => {
         asked.push(type);
@@ -91,7 +129,7 @@ describe("stale servers happy path", () => {
         const { store, asked } = sweeping([[DEAD]]);
         const { log } = yield* start(
           store,
-          FakeLog.fakeLog(),
+          recordingLog(),
           "automation-client",
           Log.AutomationProcessAttribution,
         );
@@ -129,7 +167,7 @@ describe("stale servers happy path", () => {
       Effect.gen(function* () {
         const deleting = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
-        const store = Stores.fakeServerStore({
+        const store = TestingStores.fakeServerStore({
           removeStaleServers: () =>
             Effect.gen(function* () {
               yield* Deferred.succeed(deleting, undefined);
@@ -156,7 +194,7 @@ describe("stale servers unhappy path", () => {
     () =>
       Effect.gen(function* () {
         let sweeps = 0;
-        const store = Stores.fakeServerStore({
+        const store = TestingStores.fakeServerStore({
           removeStaleServers: () =>
             Effect.suspend(() => {
               sweeps += 1;
@@ -183,12 +221,12 @@ describe("stale servers unhappy path", () => {
 
   it.effect("the automation server's failure line carries its attribution too", () =>
     Effect.gen(function* () {
-      const store = Stores.fakeServerStore({
+      const store = TestingStores.fakeServerStore({
         removeStaleServers: () => Effect.fail(refused),
       });
       const { log } = yield* start(
         store,
-        FakeLog.fakeLog(),
+        recordingLog(),
         "automation-client",
         Log.AutomationProcessAttribution,
       );
@@ -209,7 +247,7 @@ describe("stale servers unhappy path", () => {
     Effect.gen(function* () {
       const deleting = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const store = Stores.fakeServerStore({
+      const store = TestingStores.fakeServerStore({
         removeStaleServers: () =>
           Effect.gen(function* () {
             yield* Deferred.succeed(deleting, undefined);
@@ -238,7 +276,7 @@ describe("stale servers unhappy path", () => {
     Effect.gen(function* () {
       const boom = new Error("store exploded");
       let sweeps = 0;
-      const store = Stores.fakeServerStore({
+      const store = TestingStores.fakeServerStore({
         removeStaleServers: () =>
           Effect.suspend(() => {
             sweeps += 1;

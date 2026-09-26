@@ -749,7 +749,7 @@ app.get("/images/:id", async (context) => {
 // The homepage, and /servers: text served whole, not through the renderer.
 // Its two halves are rows: the automation queue the webhook and the worker write
 // (automation_jobs), and the fleet the servers themselves write every thirty seconds
-// (src/qemu-server/heartbeat.ts). Below them, process_stats is the series each announcing
+// (packages/fleet/src/member.ts). Below them, process_stats is the series each announcing
 // process wrote of itself, drawn as graphs. `halves` is absent only when the database
 // could not be read, so a 500 page claims neither an empty queue nor an empty fleet.
 const readHalves = async (connectionString: string): Promise<Halves> => {

@@ -39,8 +39,8 @@ const harness = (size: { readonly columns: number; readonly rows: number }) =>
         reads.count += 1;
         return listed;
       });
-    const servers = Stores.fakeServerStore({ listMachines: () => counted([]) });
-    const process = Stores.fakeProcessStatsStore({ listSeries: () => counted([]) });
+    const servers = TestingStores.fakeServerStore({ listMachines: () => counted([]) });
+    const process = TestingStores.fakeProcessStatsStore({ listSeries: () => counted([]) });
     const automation = TestingStores.fakeAutomationStore({
       listJobs: () => counted({ running: [], pending: [], completed: [] }),
     });

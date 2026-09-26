@@ -72,10 +72,10 @@ const storesLayer = (
   logs = Stores.fakeLogStore(),
 ) =>
   Layer.mergeAll(
-    Stores.fakeServerStore({
+    TestingStores.fakeServerStore({
       listMachines: scripted.machines ?? (() => Effect.succeed([garage, runner])),
     }).layer,
-    Stores.fakeProcessStatsStore({
+    TestingStores.fakeProcessStatsStore({
       listSeries: scripted.series ?? (() => Effect.succeed([garageSeries, runnerSeries])),
     }).layer,
     TestingStores.fakeAutomationStore({ listJobs: scripted.jobs ?? (() => Effect.succeed(QUEUE)) })

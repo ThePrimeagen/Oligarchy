@@ -13,13 +13,13 @@ import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
+import * as Sweep from "@oligarchy/fleet/sweep";
 import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Render from "@oligarchy/log/render";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
-import * as StaleServers from "../shared/stale-servers.ts";
 import * as QemuReverseProxyCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Router from "./router.ts";
@@ -57,7 +57,7 @@ const ServerLive = (port: number) =>
             .pipe(Effect.andThen(Effect.die(error))),
         ),
       );
-      yield* StaleServers.forget("qemu");
+      yield* Sweep.forget("qemu");
     }),
   ).pipe(
     Layer.provide(

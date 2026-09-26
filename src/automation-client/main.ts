@@ -11,13 +11,13 @@ import * as ProcessStats from "@oligarchy/db/process-stats";
 import * as Servers from "@oligarchy/db/servers";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
+import * as Host from "@oligarchy/fleet/host";
+import * as ProcessUsage from "@oligarchy/fleet/process";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
 import * as Api from "@oligarchy/routes/api";
 import * as ProxyClient from "../client/proxy-client.ts";
-import * as Stats from "../qemu/stats.ts";
-import * as ProcessUsage from "../shared/process-usage.ts";
 import * as AutomationClientCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -74,7 +74,7 @@ const ServerLive = (maxJobs: number, name: string, port: number, url: Option.Opt
         }),
       ),
     ),
-    Layer.provide(Layer.mergeAll(Stats.Stats.layer, ProcessUsage.ProcessUsage.layer)),
+    Layer.provide(Layer.mergeAll(Host.Host.layer, ProcessUsage.ProcessUsage.layer)),
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 

@@ -1,11 +1,10 @@
 import { Cause, Deferred, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { PlatformError } from "effect";
 import * as DbErrors from "@oligarchy/db/errors";
-import * as Contract from "@oligarchy/routes/contract";
+import * as Host from "@oligarchy/fleet/host";
 import type * as Domain from "@oligarchy/shared/domain";
 import * as Iso from "../../src/qemu/iso.ts";
 import * as Qemu from "../../src/qemu/qemu.ts";
-import * as Stats from "../../src/qemu/stats.ts";
 import type * as Qmp from "../../src/qmp/client.ts";
 import type * as Errors from "../../src/shared/errors.ts";
 
@@ -309,24 +308,22 @@ export const fakeIso = (
   return { calls, layer: Layer.succeed(Iso.Iso)(service) };
 };
 
-export const ZERO_STATS = {
-  memory: Contract.Memory.make({ totalBytes: 0, usedBytes: 0, freeBytes: 0 }),
-  cpu: Contract.Cpu.make({
-    cores: 0,
-    mean: 0,
-    mean1m: 0,
-    mean2m: 0,
-    mean3m: 0,
-    p10: 0,
-    p25: 0,
-    p75: 0,
-    p90: 0,
-  }),
+// What the host sampler reports, as plain values: the qemu server adds its machine count.
+export const HOST_STATS: Host.HostStats = {
+  memory: { totalBytes: 16_000, usedBytes: 4_000, freeBytes: 12_000 },
+  cpu: {
+    cores: 4,
+    mean: 20.5,
+    mean1m: 22.3,
+    mean2m: 21.4,
+    mean3m: 20.9,
+    p10: 19.8,
+    p25: 20.1,
+    p75: 20.9,
+    p90: 21.1,
+  },
 };
 
-// Stats that report zeros and echo the qemu count they are given.
-export const fakeStats: Layer.Layer<Stats.Stats> = Layer.succeed(Stats.Stats)(
-  Stats.Stats.of({
-    collect: (qemus) => Effect.succeed(Contract.Stats.make({ qemus, ...ZERO_STATS })),
-  }),
+export const fakeHost: Layer.Layer<Host.Host> = Layer.succeed(Host.Host)(
+  Host.Host.of({ collect: Effect.succeed(HOST_STATS) }),
 );

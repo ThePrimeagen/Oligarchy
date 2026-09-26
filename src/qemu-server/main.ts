@@ -15,6 +15,8 @@ import * as SessionStore from "@oligarchy/db/sessions";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Config from "@oligarchy/env/config";
 import * as Env from "@oligarchy/env/run";
+import * as FleetHost from "@oligarchy/fleet/host";
+import * as ProcessUsage from "@oligarchy/fleet/process";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
 import * as Sentry from "@oligarchy/observability/sentry";
@@ -24,8 +26,6 @@ import * as Host from "../qemu/host.ts";
 import * as Iso from "../qemu/iso.ts";
 import * as Minted from "../qemu/minted.ts";
 import * as Qemu from "../qemu/qemu.ts";
-import * as Stats from "../qemu/stats.ts";
-import * as ProcessUsage from "../shared/process-usage.ts";
 import * as QemuServerCommand from "./command.ts";
 import * as Handlers from "./handlers.ts";
 import * as Heartbeat from "./heartbeat.ts";
@@ -85,7 +85,7 @@ const ServerLive = (
       Layer.mergeAll(
         Qemu.Qemu.layer,
         Iso.Iso.layer,
-        Stats.Stats.layer,
+        FleetHost.Host.layer,
         ProcessUsage.ProcessUsage.layer,
       ),
     ),

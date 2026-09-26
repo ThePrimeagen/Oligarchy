@@ -361,16 +361,33 @@ describe("fleet starters", () => {
 });
 
 // A workspace package owns its lanes, and check:fast reaches them through `bun run --workspaces`,
-// so each names both, and runs vitest on bun as the root does.
+// so each names both, and runs vitest on bun as the root does. A package whose tests need the
+// real OS adds a test:integration lane, on bun too.
 const laneProblems = (scripts: Readonly<Record<string, string>>): ReadonlyArray<string> => [
   ...["check:types", "test:unit"].filter((name) => scripts[name] === undefined),
-  ...(scripts["test:unit"] === undefined || /^bun --bun vitest run\b/.test(scripts["test:unit"])
-    ? []
-    : ["test:unit does not run vitest on bun"]),
+  ...["test:unit", "test:integration"]
+    .filter(
+      (name) => scripts[name] !== undefined && !/^bun --bun vitest run\b/.test(scripts[name] ?? ""),
+    )
+    .map((name) => `${name} does not run vitest on bun`),
   ...Object.entries(scripts)
     .filter(([, script]) => NOT_BUN.test(script))
     .map(([name]) => `${name} names another runtime`),
 ];
+
+// The root's integration lane, then every package's that has one: Bun fails a --workspaces run
+// on a package without the script, and --workspaces skips the root.
+const integrationFanOutProblems = (script: string | undefined): ReadonlyArray<string> => {
+  const [own = "", ...rest] = (script ?? "").split(" && ");
+  return [
+    ...(/^bun --bun vitest run --project integration\b/.test(own)
+      ? []
+      : ["test:integration does not run the root's lane first"]),
+    ...(rest.join(" && ") === "bun run --workspaces --if-present test:integration"
+      ? []
+      : ["test:integration does not fan out to the packages with --if-present"]),
+  ];
+};
 
 describe("workspace packages", () => {
   it("each has its own check:types and test:unit lanes on bun (happy)", () => {
@@ -386,6 +403,43 @@ describe("workspace packages", () => {
       "test:unit does not run vitest on bun",
       "check:types names another runtime",
     ]);
+  });
+
+  it("may add a test:integration lane on bun (happy), and names one off bun (unhappy)", () => {
+    const lanes = {
+      "check:types": "tsc --noEmit -p tsconfig.json",
+      "test:unit": "bun --bun vitest run",
+    };
+    expect(
+      laneProblems({ ...lanes, "test:integration": "bun --bun vitest run --project integration" }),
+    ).toEqual([]);
+    expect(
+      laneProblems({ ...lanes, "test:integration": "vitest run --project integration" }),
+    ).toEqual(["test:integration does not run vitest on bun"]);
+  });
+
+  it("the root's test:integration runs its own lane, then every package's that has one (happy)", () => {
+    expect(
+      integrationFanOutProblems(
+        decodePackageJson(read("package.json")).scripts["test:integration"],
+      ),
+    ).toEqual([]);
+  });
+
+  it("names a fan-out without --if-present, or none at all (unhappy)", () => {
+    const own = "bun --bun vitest run --project integration --maxWorkers 1";
+    expect(integrationFanOutProblems(`${own} && bun run --workspaces test:integration`)).toEqual([
+      "test:integration does not fan out to the packages with --if-present",
+    ]);
+    expect(integrationFanOutProblems(own)).toEqual([
+      "test:integration does not fan out to the packages with --if-present",
+    ]);
+    expect(integrationFanOutProblems("bun run --workspaces --if-present test:integration")).toEqual(
+      [
+        "test:integration does not run the root's lane first",
+        "test:integration does not fan out to the packages with --if-present",
+      ],
+    );
   });
 });
 

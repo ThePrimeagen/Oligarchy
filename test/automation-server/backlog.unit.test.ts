@@ -27,7 +27,7 @@ const CLIENT_STATS = {
 };
 
 // One live automation client, unless `url` names another. The check's budget is this list.
-const announceClient = (servers: Stores.FakeServerStore, url?: string) => {
+const announceClient = (servers: TestingStores.FakeServerStore, url?: string) => {
   const announced = url ?? `http://127.0.0.1:${String(55333 + servers.servers.length)}`;
   const id = crypto.randomUUID();
   servers.servers.push({ id, url: announced, name: null, type: "automation-client" });
@@ -758,7 +758,7 @@ describe("backlog watch unhappy path", () => {
           },
         );
         const automation = TestingStores.fakeAutomationStore();
-        const servers = Stores.fakeServerStore();
+        const servers = TestingStores.fakeServerStore();
         const log = FakeLog.fakeLog();
         announceClient(servers);
         const board = [ticket(TICKET, SEEN), ticket(OTHER, SEEN), ticket(THIRD, SEEN)];
@@ -922,7 +922,7 @@ const startDeleting = (column: "listBacklog" | Column, board: Array<Linear.Linea
       },
     );
     const automation = TestingStores.fakeAutomationStore();
-    const servers = Stores.fakeServerStore();
+    const servers = TestingStores.fakeServerStore();
     const log = FakeLog.fakeLog();
     const moved: Array<Move> = [];
     const linear = TestingLinear.fakeLinear({
@@ -1504,7 +1504,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const automation = TestingStores.fakeAutomationStore({
           jobStatus: () => (fail ? Effect.fail(refused) : Effect.succeed(Option.none())),
         });
-        const servers = Stores.fakeServerStore();
+        const servers = TestingStores.fakeServerStore();
         const log = FakeLog.fakeLog();
         const linear = TestingLinear.fakeLinear({
           overrides: {
@@ -1633,7 +1633,7 @@ describe("automation needed and needs review watch unhappy path", () => {
           },
         );
         const automation = TestingStores.fakeAutomationStore();
-        const servers = Stores.fakeServerStore();
+        const servers = TestingStores.fakeServerStore();
         const log = FakeLog.fakeLog();
         announceClient(servers);
         const board = [ticket(TICKET, SEEN)];
@@ -1745,7 +1745,7 @@ describe("automation needed and needs review watch unhappy path", () => {
         const automation = TestingStores.fakeAutomationStore({
           jobStatus: () => (fail ? Effect.fail(refused) : Effect.succeed(Option.none())),
         });
-        const servers = Stores.fakeServerStore();
+        const servers = TestingStores.fakeServerStore();
         const log = FakeLog.fakeLog();
         const linear = TestingLinear.fakeLinear({
           overrides: {

@@ -98,8 +98,9 @@ on the cause (the same shape `packages/log/src/external-failure.ts` uses) and up
 
 - `Record<string, unknown>` (forbidden by `development.md`) in `packages/observability/src/sentry.ts`
   (`tag`) and `packages/linear/src/client.ts` (`variables`).
-- `src/shared/process-usage.ts` wraps `collect` in `Effect.withSpan`; every other service method is
-  `Effect.fn("Service.method")`.
+- `packages/fleet/src/process.ts` and `host.ts` wrap `collect` in `Effect.withSpan`; every other
+  service method is `Effect.fn("Service.method")`. Both are values, not functions, so
+  `Effect.fn` would change their callers.
 - `packages/db/src/logs.ts` `listLogs` orders by `created_at, id`; `development.md` says `id`, not
   `created_at`, orders rows.
 - `src/qemu-server/handlers.ts` marks `serial` and `image` uninterruptible; `development.md` says
@@ -118,14 +119,10 @@ on the cause (the same shape `packages/log/src/external-failure.ts` uses) and up
 logic in files that change independently:
 
 - The `DatabaseError`-unwrapping `detail` helper is copied verbatim in `src/qemu-server/sessions.ts`,
-  `src/qemu-server/heartbeat.ts`, `src/automation-client/heartbeat.ts` and `src/shared/stale-servers.ts`
-  (automation-server's copy became `packages/jobs/src/errors.ts` `detail` in phase 8, and its
-  callers use that); `describeThrowable(causeOf(e), errorDetail(e))` in
+  `packages/jobs/src/errors.ts` (automation-server's copy, since phase 8) and
+  `packages/fleet/src/member.ts` (the two heartbeats' and the sweep's, since phase 9); `describeThrowable(causeOf(e), errorDetail(e))` in
   `src/automation-client/child.ts`, `src/qemu/process.ts`, `src/qemu/iso.ts` and `src/viz/run.ts`. Both belong in
   `packages/log/src/external-failure.ts` beside `causeOf`.
-- `src/qemu-server/heartbeat.ts` and `src/automation-client/heartbeat.ts` differ only in the
-  `type`, the location and how `jobs`/`stats` are read; one `announce` taking those would keep a fix
-  in one from missing the other.
 - `packages/jobs/src/templates.ts` (`src/ctrl/prompts.ts` until phase 8) and
   `src/automation-server/prompts.ts` repeat `read`, `fill` and `render`.
 - `src/automation-server/client.ts` repeats the same twelve-line `HttpClientError` catch in
