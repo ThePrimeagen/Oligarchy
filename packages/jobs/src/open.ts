@@ -13,7 +13,7 @@ import * as Templates from "./templates.ts";
 // The one definition a mint installs from, and the label its tickets carry beside the agent test
 // label the automation server watches.
 export const MINT_DEFINITION = "mint";
-export const MINT_LABEL = "mint";
+const MINT_LABEL = "mint";
 
 const refuse = (message: string) => SharedErrors.CommandError.make({ message });
 
@@ -63,14 +63,14 @@ export const mintDefinition = Effect.fn("Open.mintDefinition")(function* () {
 
 // Where a run's tickets go: the team, the labels (the agent test label and the run's own), the
 // assignee, and the columns.
-export type Team = {
+type Team = {
   readonly teamId: string;
   readonly labelIds: ReadonlyArray<string>;
   readonly assigneeId: string;
   readonly states: Linear.WorkflowStateIds;
 };
 
-export const team = Effect.fn("Open.team")(function* (label: string) {
+const team = Effect.fn("Open.team")(function* (label: string) {
   const linear = yield* Linear.Linear;
   const teamId = yield* linear.teamId;
   const labelIds = yield* linear.labelIds(teamId, label);
@@ -104,7 +104,7 @@ const trapped =
 // be queued, then renders the description, which names the ticket and so waits for its creation.
 // The move into Automation Needed rides with the description and goes last: it queues the action.
 // Every ticket Linear creates is pushed onto `tickets` first, so a failure can name it.
-export const ticket = <E, R>(
+const ticket = <E, R>(
   to: Team,
   title: string,
   tickets: Array<Linear.LinearTicket>,
@@ -133,7 +133,7 @@ export const ticket = <E, R>(
 const withCause = (cause: unknown) => (cause === undefined ? undefined : { cause });
 
 // The same failure, its message now the run's reason.
-export const withReason = {
+const withReason = {
   LinearError: (error: LinearErrors.LinearError, message: string) =>
     LinearErrors.LinearError.make(
       Object.assign(
@@ -154,7 +154,7 @@ export const withReason = {
 // A failure fails the run and every job in it with the reason, naming the tickets that did get
 // created so they can be cleaned up by hand; the error goes on carrying that reason. A run that
 // will not take it is a line: the failure that stopped the run is the one the caller reports.
-export const failRun = <E extends { readonly message: string }>(
+const failRun = <E extends { readonly message: string }>(
   runId: string,
   tickets: ReadonlyArray<Linear.LinearTicket>,
   error: E,
@@ -252,61 +252,128 @@ export const open = Effect.fn("Open.open")(function* (input: {
   return { id: created.runId, tests: opened };
 });
 
+type Definition = Tests.DefinitionInput & { readonly id: number };
+
+// Not a test: one install, its own run with one job, and a ticket pinned to the server that ends
+// up holding the iso's minted disk. `pin` writes what must land beside the job's Linear id before
+// the ticket reaches Automation Needed. A failure fails this run, naming every ticket in
+// `tickets`; runs already whole for earlier servers stand.
+const mintJob = (input: {
+  readonly iso: string;
+  readonly serverUrl: string;
+  readonly definition: Definition;
+  readonly pinned: string;
+  readonly to: Team;
+  readonly tickets: Array<Linear.LinearTicket>;
+  readonly pin: (result: string) => Effect.Effect<void, Errors.SetupGone | DbErrors.DatabaseError>;
+}) =>
+  Effect.gen(function* () {
+    const tests = yield* Tests.TestStore;
+    const { definition } = input;
+    const created = yield* tests.createRun({
+      iso: input.iso,
+      serverUrl: input.serverUrl,
+      definitions: [definition],
+    });
+    // createRun inserts the job in the same transaction; a missing one is a broken invariant.
+    const result = yield* Effect.fromOption(Arr.head(created.results)).pipe(
+      Effect.mapError(
+        () =>
+          new Error(`mint: run ${created.runId} has no result for definition ${definition.name}`),
+      ),
+      Effect.orDie,
+    );
+    const linear = yield* ticket(
+      input.to,
+      `Omarchy mint: ${input.pinned}`,
+      input.tickets,
+      (issued) =>
+        Effect.gen(function* () {
+          yield* tests.setLinearId(result.id, issued.identifier);
+          yield* input.pin(result.id);
+          return yield* Templates.renderMintIssue({
+            LINEAR_TICKET: issued.identifier,
+            RUN_ID: created.runId,
+            RESULT_ID: result.id,
+            ISO_URL: input.iso,
+            SERVER_URL: input.serverUrl,
+            PINNED_SERVER: input.pinned,
+            INSTALL_NAME: definition.name,
+            INSTALL_DESCRIPTION: definition.description,
+            INSTALL_INSTRUCTION: definition.instruction,
+            INSTALL_PROOF: definition.proof,
+          });
+        }),
+    ).pipe(
+      Effect.catchTags({
+        LinearError: (error) =>
+          failRun(created.runId, input.tickets, error, withReason.LinearError),
+        PromptError: (error) =>
+          failRun(created.runId, input.tickets, error, withReason.PromptError),
+        DatabaseError: (error) =>
+          failRun(created.runId, input.tickets, error, withReason.DatabaseError),
+        SetupGone: (error) => failRun(created.runId, input.tickets, error, withReason.SetupGone),
+      }),
+    );
+    return { id: created.runId, result: result.id, server: input.pinned, linear };
+  });
+
 // The proxy's first reserve of an iso on a qemu server: one mint job and its ticket, pinned to
 // that server. The pin goes on the setup row before the ticket reaches Automation Needed, or the
 // dispatcher would reserve the mint with no server; a setup row gone by then is SetupGone and the
-// ticket stays in Backlog.
+// ticket stays in Backlog. Linear refusing the team opens no run.
 export const openMint = Effect.fn("Open.openMint")(function* (input: {
   readonly iso: string;
   readonly serverUrl: string;
   readonly pinned: string;
 }) {
-  const tests = yield* Tests.TestStore;
   const setups = yield* SetupRequests.SetupRequestStore;
   const definition = yield* mintDefinition();
-  const created = yield* tests.createRun({
-    iso: input.iso,
-    serverUrl: input.serverUrl,
-    definitions: [definition],
+  const to = yield* team(MINT_LABEL);
+  const opened = yield* mintJob({
+    ...input,
+    definition,
+    to,
+    tickets: [],
+    pin: (result) =>
+      setups.setResult(input.iso, input.pinned, result).pipe(
+        Effect.filterOrFail(
+          (stored) => stored,
+          () => Errors.SetupGone.make({ message: "setup row gone before its result was stored" }),
+        ),
+        Effect.asVoid,
+      ),
   });
-  // createRun inserts the job in the same transaction; a missing one is a broken invariant.
-  const result = yield* Effect.fromOption(Arr.head(created.results)).pipe(
-    Effect.mapError(() => new Error(`mint: run ${created.runId} has no result`)),
-    Effect.orDie,
-  );
+  return { id: opened.id, result: opened.result, linear: opened.linear };
+});
 
+// `./ctrl mint`: one mint job and its ticket per server, in order, the team asked for once. The
+// first failure stops the rest. Returns what it opened and prints nothing.
+export const openMints = Effect.fn("Open.openMints")(function* (input: {
+  readonly iso: string;
+  readonly serverUrl: string;
+  readonly definition: Definition;
+  readonly servers: ReadonlyArray<string>;
+}) {
+  const log = yield* Log.Log;
+  if (input.servers.length === 0) {
+    return [];
+  }
+  const to = yield* team(MINT_LABEL);
   const tickets: Array<Linear.LinearTicket> = [];
-  const linear = yield* Effect.gen(function* () {
-    const to = yield* team(MINT_LABEL);
-    return yield* ticket(to, `Omarchy mint: ${input.pinned}`, tickets, (issued) =>
-      Effect.gen(function* () {
-        yield* tests.setLinearId(result.id, issued.identifier);
-        if (!(yield* setups.setResult(input.iso, input.pinned, result.id))) {
-          return yield* Errors.SetupGone.make({
-            message: "setup row gone before its result was stored",
-          });
-        }
-        return yield* Templates.renderMintIssue({
-          LINEAR_TICKET: issued.identifier,
-          RUN_ID: created.runId,
-          RESULT_ID: result.id,
-          ISO_URL: input.iso,
-          SERVER_URL: input.serverUrl,
-          PINNED_SERVER: input.pinned,
-          INSTALL_NAME: definition.name,
-          INSTALL_DESCRIPTION: definition.description,
-          INSTALL_INSTRUCTION: definition.instruction,
-          INSTALL_PROOF: definition.proof,
-        });
-      }),
-    );
-  }).pipe(
-    Effect.catchTags({
-      LinearError: (error) => failRun(created.runId, tickets, error, withReason.LinearError),
-      PromptError: (error) => failRun(created.runId, tickets, error, withReason.PromptError),
-      DatabaseError: (error) => failRun(created.runId, tickets, error, withReason.DatabaseError),
-      SetupGone: (error) => failRun(created.runId, tickets, error, withReason.SetupGone),
+  const opened = yield* Effect.forEach(input.servers, (pinned) =>
+    mintJob({
+      iso: input.iso,
+      serverUrl: input.serverUrl,
+      definition: input.definition,
+      pinned,
+      to,
+      tickets,
+      pin: () => Effect.void,
     }),
   );
-  return { id: created.runId, result: result.id, linear };
+  yield* log.info(
+    `mint ${input.iso} created; ${String(opened.length)} servers; ${tickets.map((issued) => issued.identifier).join(", ")}`,
+  );
+  return opened;
 });

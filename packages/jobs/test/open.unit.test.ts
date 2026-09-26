@@ -498,6 +498,30 @@ describe("Open.openMint happy path", () => {
 });
 
 describe("Open.openMint unhappy path", () => {
+  it.effect("Linear refusing the team is refused before any run or pin", () =>
+    Effect.gen(function* () {
+      const refused = LinearErrors.LinearError.make({
+        operation: "teamId",
+        status: 401,
+        message: "linear: request failed (401): unauthorized",
+      });
+      const h = H.harness({
+        linear: TestingLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
+      });
+      h.tests.definitions.push(mint);
+      const setup = setupStore(true);
+      const error = yield* Open.openMint({ iso: ISO, serverUrl: SERVER, pinned: PINNED }).pipe(
+        Effect.provide(Layer.mergeAll(h.layer, NodeFileSystem.layer, setup.layer)),
+        Effect.flip,
+      );
+      expect(error).toBe(refused);
+      expect(h.tests.runs).toEqual([]);
+      expect(methods(h)).not.toContain("createIssue");
+      expect(setup.pins).toEqual([]);
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+
   it.effect("no mint definition is refused before any run or ticket", () =>
     Effect.gen(function* () {
       const h = H.harness();
@@ -567,6 +591,218 @@ describe("Open.openMint unhappy path", () => {
             "OLI-42",
           ],
           ["error", `failRun failed; ${run?.id ?? ""}: connection reset`, undefined],
+        ]);
+      }),
+  );
+});
+
+const QEMU_A = "http://10.0.0.6:42069";
+const QEMU_B = "http://10.0.0.7:42069";
+const mints = (servers: ReadonlyArray<string>) => ({
+  iso: ISO,
+  serverUrl: SERVER,
+  definition: mint,
+  servers,
+});
+// ctrl opens mints with no setup row to pin, so nothing but the jobs' own services is provided.
+const mintServices = (h: H.Harness) => Layer.mergeAll(h.layer, NodeFileSystem.layer);
+
+describe("Open.openMints happy path", () => {
+  it.effect("one pinned run, result and ticket per server, with the team asked for once", () =>
+    Effect.gen(function* () {
+      const h = H.harness();
+      const opened = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+        Effect.provide(mintServices(h)),
+      );
+      const runs = h.tests.runs;
+      const results = h.tests.results;
+      expect(runs.map((run) => [run.iso, run.serverUrl, run.status])).toEqual([
+        [ISO, SERVER, "pending"],
+        [ISO, SERVER, "pending"],
+      ]);
+      expect(results.map((row) => [row.runId, row.definitionId, row.linearId])).toEqual([
+        [runs[0]?.id, mint.id, "OLI-42"],
+        [runs[1]?.id, mint.id, "OLI-43"],
+      ]);
+      const description = (index: number, identifier: string, pinned: string) =>
+        Templates.renderMintIssue({
+          LINEAR_TICKET: identifier,
+          RUN_ID: runs[index]?.id ?? "",
+          RESULT_ID: results[index]?.id ?? "",
+          ISO_URL: ISO,
+          SERVER_URL: SERVER,
+          PINNED_SERVER: pinned,
+          INSTALL_NAME: mint.name,
+          INSTALL_DESCRIPTION: mint.description,
+          INSTALL_INSTRUCTION: mint.instruction,
+          INSTALL_PROOF: mint.proof,
+        }).pipe(Effect.provide(NodeFileSystem.layer));
+      const created = (pinned: string) => ({
+        method: "createIssue",
+        input: {
+          teamId: TestingLinear.TEAM_ID,
+          title: `Omarchy mint: ${pinned}`,
+          labelIds: [TestingLinear.labelId("agent test"), TestingLinear.labelId("mint")],
+          assigneeId: TestingLinear.USER_ID,
+          stateId: TestingLinear.STATES.backlog,
+        },
+      });
+      expect(h.linear.calls).toEqual([
+        { method: "teamId" },
+        { method: "labelIds", teamId: TestingLinear.TEAM_ID, version: "mint" },
+        { method: "assigneeId" },
+        { method: "stateIds", teamId: TestingLinear.TEAM_ID },
+        created(QEMU_A),
+        {
+          method: "describeIssue",
+          ticket: TestingLinear.ticketFor("OLI-42"),
+          description: yield* description(0, "OLI-42", QEMU_A),
+          stateId: TestingLinear.STATES.automationNeeded,
+        },
+        created(QEMU_B),
+        {
+          method: "describeIssue",
+          ticket: TestingLinear.ticketFor("OLI-43"),
+          description: yield* description(1, "OLI-43", QEMU_B),
+          stateId: TestingLinear.STATES.automationNeeded,
+        },
+      ]);
+      expect(opened).toEqual([
+        {
+          id: runs[0]?.id,
+          result: results[0]?.id,
+          server: QEMU_A,
+          linear: TestingLinear.ticketFor("OLI-42"),
+        },
+        {
+          id: runs[1]?.id,
+          result: results[1]?.id,
+          server: QEMU_B,
+          linear: TestingLinear.ticketFor("OLI-43"),
+        },
+      ]);
+      expect(h.log.lines).toEqual([
+        {
+          level: "info",
+          text: `mint ${ISO} created; 2 servers; OLI-42, OLI-43`,
+          location: undefined,
+          agentId: undefined,
+          cause: undefined,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("no servers opens nothing, asks Linear nothing and says nothing", () =>
+    Effect.gen(function* () {
+      const h = H.harness();
+      const opened = yield* Open.openMints(mints([])).pipe(Effect.provide(mintServices(h)));
+      expect(opened).toEqual([]);
+      expect(h.tests.runs).toEqual([]);
+      expect(h.linear.calls).toEqual([]);
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+});
+
+describe("Open.openMints unhappy path", () => {
+  it.effect("Linear refusing the team opens no run", () =>
+    Effect.gen(function* () {
+      const refused = LinearErrors.LinearError.make({
+        operation: "teamId",
+        status: 401,
+        message: "linear: request failed (401): unauthorized",
+      });
+      const h = H.harness({
+        linear: TestingLinear.fakeLinear({ overrides: { teamId: Effect.fail(refused) } }),
+      });
+      const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+        Effect.provide(mintServices(h)),
+        Effect.flip,
+      );
+      expect(error).toBe(refused);
+      expect(h.tests.runs).toEqual([]);
+      expect(methods(h)).not.toContain("createIssue");
+      expect(h.log.lines).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "a failure on the second server fails that run, names the ticket before it, and leaves the first run standing",
+    () =>
+      Effect.gen(function* () {
+        const refused = LinearErrors.LinearError.make({
+          operation: "createIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        let issues = 0;
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: {
+              createIssue: () =>
+                Effect.suspend(() => {
+                  issues += 1;
+                  return issues === 2
+                    ? Effect.fail(refused)
+                    : Effect.succeed(TestingLinear.ticketFor("OLI-42"));
+                }),
+            },
+          }),
+        });
+        const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+          Effect.provide(mintServices(h)),
+          Effect.flip,
+        );
+        const reason = `${refused.message}; created OLI-42`;
+        expect(error).toMatchObject({ _tag: "LinearError", message: reason });
+        expect(h.tests.runs.map((run) => [run.status, run.reason])).toEqual([
+          ["pending", null],
+          ["failed", reason],
+        ]);
+        expect(h.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+          ["pending", "OLI-42"],
+          ["failed", null],
+        ]);
+        // OLI-42 was handed off and the second ticket never existed: nothing is trapped, and
+        // nothing was created as a whole.
+        expect(h.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a description that fails names the ticket it was describing, which stays in Backlog, and reaches no later server",
+    () =>
+      Effect.gen(function* () {
+        const refused = LinearErrors.LinearError.make({
+          operation: "describeIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: { describeIssue: () => Effect.fail(refused) },
+          }),
+        });
+        const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+          Effect.provide(mintServices(h)),
+          Effect.flip,
+        );
+        const reason = `${refused.message}; created OLI-42`;
+        expect(error).toMatchObject({ _tag: "LinearError", message: reason });
+        expect(h.tests.runs.map((run) => [run.status, run.reason])).toEqual([["failed", reason]]);
+        expect(h.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+          ["failed", "OLI-42"],
+        ]);
+        expect(methods(h).filter((method) => method === "createIssue")).toHaveLength(1);
+        expect(h.log.lines).toEqual([
+          {
+            level: "error",
+            text: `ticket trapped in Backlog; ${refused.message}`,
+            location: undefined,
+            agentId: "OLI-42",
+            cause: refused,
+          },
         ]);
       }),
   );

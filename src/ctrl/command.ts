@@ -16,7 +16,6 @@ import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as EnvFile from "@oligarchy/env/env-file";
 import * as Open from "@oligarchy/jobs/open";
-import * as Templates from "@oligarchy/jobs/templates";
 import * as Linear from "@oligarchy/linear/client";
 import * as Log from "@oligarchy/log/log";
 import * as Observability from "@oligarchy/observability/log";
@@ -308,7 +307,6 @@ export const makeCtrlCommand = (deps: Deps = live) => {
     // command's layers, the same order as every ctrl command), the bearer is the next variable
     // reported, and it is refused before any query or Linear call.
     const token = input.unminted ? Option.some(yield* Config.oligarchyToken) : Option.none();
-    const tests = yield* Tests.TestStore;
     const servers = yield* Servers.ServerStore;
     const log = yield* Log.Log;
 
@@ -349,69 +347,16 @@ export const makeCtrlCommand = (deps: Deps = live) => {
           return fleet.filter((target) => state(target.url) === "unminted");
         }),
     });
-    if (targets.length === 0) {
-      return yield* printJson([]);
-    }
-
-    const to = yield* Open.team(Open.MINT_LABEL);
-
-    const minted: Array<{
-      readonly id: string;
-      readonly result: string;
-      readonly server: string;
-      readonly linear: Linear.LinearTicket;
-    }> = [];
-    // Every ticket Linear created, the one being described included, so a failure names it. A
-    // failure fails the run it was creating and names the tickets that stand, as `test run`
+    // A failure fails the run it was creating and names the tickets that stand, as `test run`
     // does; the runs already whole for earlier servers are left standing, they are complete.
-    const tickets: Array<Linear.LinearTicket> = [];
-    for (const target of targets) {
-      const created = yield* tests.createRun({
+    return yield* printJson(
+      yield* Open.openMints({
         iso: input.iso,
         serverUrl: input.serverUrl,
-        definitions: [definition],
-      });
-      // createRun inserts the result in the same transaction; a missing one is a broken invariant.
-      const result = yield* Effect.fromOption(Arr.head(created.results)).pipe(
-        Effect.mapError(
-          () =>
-            new Error(`mint: run ${created.runId} has no result for definition ${definition.name}`),
-        ),
-        Effect.orDie,
-      );
-      const issued = yield* Open.ticket(to, `Omarchy mint: ${target.url}`, tickets, (ticket) =>
-        Effect.gen(function* () {
-          yield* tests.setLinearId(result.id, ticket.identifier);
-          return yield* Templates.renderMintIssue({
-            LINEAR_TICKET: ticket.identifier,
-            RUN_ID: created.runId,
-            RESULT_ID: result.id,
-            ISO_URL: input.iso,
-            SERVER_URL: input.serverUrl,
-            PINNED_SERVER: target.url,
-            INSTALL_NAME: definition.name,
-            INSTALL_DESCRIPTION: definition.description,
-            INSTALL_INSTRUCTION: definition.instruction,
-            INSTALL_PROOF: definition.proof,
-          });
-        }),
-      ).pipe(
-        Effect.catchTags({
-          LinearError: (error) =>
-            Open.failRun(created.runId, tickets, error, Open.withReason.LinearError),
-          PromptError: (error) =>
-            Open.failRun(created.runId, tickets, error, Open.withReason.PromptError),
-          DatabaseError: (error) =>
-            Open.failRun(created.runId, tickets, error, Open.withReason.DatabaseError),
-        }),
-      );
-      minted.push({ id: created.runId, result: result.id, server: target.url, linear: issued });
-    }
-
-    yield* log.info(
-      `mint ${input.iso} created; ${String(minted.length)} servers; ${tickets.map((ticket) => ticket.identifier).join(", ")}`,
+        definition,
+        servers: targets.map((target) => target.url),
+      }),
     );
-    return yield* printJson(minted);
   });
 
   // test list

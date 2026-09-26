@@ -1108,51 +1108,6 @@ describe("mint", () => {
       }),
   );
 
-  it.effect(
-    "a description that fails names the ticket it was describing, which stands in Linear (unhappy)",
-    () =>
-      Effect.gen(function* () {
-        const refused = LinearErrors.LinearError.make({
-          operation: "describeIssue",
-          status: 401,
-          message: "linear: request failed (401): unauthorized",
-        });
-        const h = harness({
-          linear: TestingLinear.fakeLinear({
-            overrides: { describeIssue: () => Effect.fail(refused) },
-          }),
-        });
-        h.stores.tests.definitions.push(mintDefinition);
-        qemu(h, QEMU_A, "qemu-a");
-        qemu(h, QEMU_B, "qemu-b");
-        const exit = yield* h.run(MINT, WITH_LINEAR);
-        expect(failure(exit)).toMatchObject({
-          _tag: "LinearError",
-          message: "linear: request failed (401): unauthorized; created OLI-42",
-        });
-        // The first server's run fails with its ticket on the result; the second server is
-        // never reached.
-        expect(h.stores.tests.runs.map((run) => [run.status, run.reason])).toEqual([
-          ["failed", "linear: request failed (401): unauthorized; created OLI-42"],
-        ]);
-        expect(h.stores.tests.results.map((row) => [row.status, row.linearId])).toEqual([
-          ["failed", "OLI-42"],
-        ]);
-        expect(h.linear.calls.filter((call) => call.method === "createIssue")).toHaveLength(1);
-        // The ticket stands in Backlog with no body and no move, so it is reported.
-        expect(h.log.lines).toEqual([
-          {
-            level: "error",
-            text: "ticket trapped in Backlog; linear: request failed (401): unauthorized",
-            location: undefined,
-            agentId: "OLI-42",
-            skipSentry: false,
-            cause: refused,
-          },
-        ]);
-      }),
-  );
-
   it.effect("--iso must be https and --help touches nothing", () =>
     Effect.gen(function* () {
       const h = harness();
