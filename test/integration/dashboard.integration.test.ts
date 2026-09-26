@@ -949,16 +949,28 @@ for (const suite of queue.suites) {
   });
 });
 
-const abortSuiteBindings = (databaseUrl: string) => ({
+type SuiteReach = { readonly automationUrl: string; readonly linearUrl: string };
+
+// Both refuse unless a test stands them up.
+const UNREACHABLE: SuiteReach = {
+  automationUrl: "http://127.0.0.1:1",
+  linearUrl: "http://127.0.0.1:1",
+};
+
+const abortSuiteBindings = (databaseUrl: string, reach: SuiteReach) => ({
   HYPERDRIVE: { connectionString: databaseUrl },
   OLIGARCHY_TOKEN: "t",
-  AUTOMATION_SERVER_URL: "http://127.0.0.1:1",
-  LINEAR_API_URL: "http://127.0.0.1:1/graphql",
+  AUTOMATION_SERVER_URL: reach.automationUrl,
+  LINEAR_API_URL: `${reach.linearUrl}/graphql`,
   LINEAR_API_TOKEN: "lin",
   LINEAR_TEAM: "Local Board",
 });
 
-const postAbortSuite = async (databaseUrl: string, run: string): Promise<number> => {
+const postAbortSuite = async (
+  databaseUrl: string,
+  run: string,
+  reach: SuiteReach = UNREACHABLE,
+): Promise<number> => {
   const response = await app.request(
     "/suites/abort",
     {
@@ -969,10 +981,92 @@ const postAbortSuite = async (databaseUrl: string, run: string): Promise<number>
       },
       body: new URLSearchParams({ run }).toString(),
     },
-    abortSuiteBindings(databaseUrl),
+    abortSuiteBindings(databaseUrl, reach),
   );
   return response.status;
 };
+
+const graphqlOf = (received: StubProxy.Received) => {
+  const body = received.body;
+  const query =
+    typeof body === "object" && body !== null && "query" in body && typeof body.query === "string"
+      ? body.query
+      : "";
+  const variables =
+    typeof body === "object" && body !== null && "variables" in body ? body.variables : undefined;
+  const id =
+    typeof variables === "object" && variables !== null && "id" in variables
+      ? String(variables.id)
+      : "";
+  return { query, id };
+};
+
+// Linear as moveToAborted meets it: the ticket's team has an Aborted state, and the update takes.
+const linearAborting: StubProxy.Script = (received) =>
+  graphqlOf(received).query.includes("issueUpdate")
+    ? StubProxy.json(200, { data: { issueUpdate: { success: true } } })
+    : StubProxy.json(200, {
+        data: { issue: { team: { states: { nodes: [{ id: "state-aborted" }] } } } },
+      });
+
+// The tickets Linear was asked to move, in order.
+const movedTickets = (linear: StubProxy.StubProxy): ReadonlyArray<string> =>
+  linear.requests.flatMap((received) => {
+    const { query, id } = graphqlOf(received);
+    return query.includes("issueUpdate") ? [id] : [];
+  });
+
+// One open suite: a drive running on one result and a drive waiting on another, each result
+// carrying its ticket.
+const seedOpenSuite = (name: string, running: string, pending: string) =>
+  seed(dbUrl, async (db) => {
+    const [first] = await db
+      .insert(DbSchema.testDefinitions)
+      .values({ name: `${name}-run`, description: "d", instruction: "i", proof: "p" })
+      .returning({ id: DbSchema.testDefinitions.id });
+    const [second] = await db
+      .insert(DbSchema.testDefinitions)
+      .values({ name: `${name}-pen`, description: "d", instruction: "i", proof: "p" })
+      .returning({ id: DbSchema.testDefinitions.id });
+    const [run] = await db
+      .insert(DbSchema.testRuns)
+      .values({
+        name,
+        iso: "https://example.com/omarchy.iso",
+        serverUrl: "http://127.0.0.1:42069",
+        status: "pending",
+      })
+      .returning({ id: DbSchema.testRuns.id });
+    const [runningResult] = await db
+      .insert(DbSchema.testResults)
+      .values({ runId: run.id, definitionId: first.id, status: "running", linearId: running })
+      .returning({ id: DbSchema.testResults.id });
+    const [pendingResult] = await db
+      .insert(DbSchema.testResults)
+      .values({ runId: run.id, definitionId: second.id, status: "pending", linearId: pending })
+      .returning({ id: DbSchema.testResults.id });
+    await db.insert(DbSchema.automationJobs).values([
+      { resultId: runningResult.id, action: "drive", status: "running" },
+      { resultId: pendingResult.id, action: "drive", status: "pending" },
+    ]);
+    return {
+      runId: run.id,
+      definitionIds: [first.id, second.id],
+      resultIds: [runningResult.id, pendingResult.id],
+    };
+  });
+
+const dropSuite = (inserted: Awaited<ReturnType<typeof seedOpenSuite>>) =>
+  seed(dbUrl, async (db) => {
+    await db
+      .delete(DbSchema.automationJobs)
+      .where(inArray(DbSchema.automationJobs.resultId, inserted.resultIds));
+    await db.delete(DbSchema.testResults).where(eq(DbSchema.testResults.runId, inserted.runId));
+    await db.delete(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, inserted.runId));
+    await db
+      .delete(DbSchema.testDefinitions)
+      .where(inArray(DbSchema.testDefinitions.id, inserted.definitionIds));
+  });
 
 // Aborting is the operator's way off a suite whose results never reached a verdict. The
 // automation server and Linear are down here: a running job still aborts in the database,
@@ -1153,6 +1247,50 @@ describe.skipIf(dbUrl === "")("dashboard abort a test suite", () => {
           .delete(DbSchema.testDefinitions)
           .where(eq(DbSchema.testDefinitions.id, inserted.definitionId));
       });
+    }
+  });
+
+  it("moves the ticket of a job it aborted itself, and leaves a ticket the automation server already moved when it aborted the job", async () => {
+    const automation = await StubProxy.startStubProxy(() => StubProxy.OK);
+    const linear = await StubProxy.startStubProxy(linearAborting);
+    const inserted = await seedOpenSuite("suite-moved", "SMV-RUN", "SMV-PEN");
+    try {
+      expect(
+        await postAbortSuite(dbUrl, inserted.runId, {
+          automationUrl: automation.url,
+          linearUrl: linear.url,
+        }),
+      ).toBe(200);
+      expect(automation.requests).toContainEqual(
+        expect.objectContaining({ url: "/abort", body: { ticket: "SMV-RUN", action: "drive" } }),
+      );
+      expect(movedTickets(linear)).toEqual(["SMV-PEN"]);
+    } finally {
+      await dropSuite(inserted);
+      await automation.close();
+      await linear.close();
+    }
+  });
+
+  it("moves a running job's ticket too when the automation server did not abort it", async () => {
+    const automation = await StubProxy.startStubProxy(() =>
+      StubProxy.refusal(500, "internal error"),
+    );
+    const linear = await StubProxy.startStubProxy(linearAborting);
+    const inserted = await seedOpenSuite("suite-unmoved", "SUM-RUN", "SUM-PEN");
+    try {
+      expect(
+        await postAbortSuite(dbUrl, inserted.runId, {
+          automationUrl: automation.url,
+          linearUrl: linear.url,
+        }),
+      ).toBe(200);
+      expect(automation.requests.length).toBeGreaterThan(0);
+      expect([...movedTickets(linear)].sort()).toEqual(["SUM-PEN", "SUM-RUN"]);
+    } finally {
+      await dropSuite(inserted);
+      await automation.close();
+      await linear.close();
     }
   });
 });

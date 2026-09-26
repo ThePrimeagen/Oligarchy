@@ -974,7 +974,8 @@ const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // stop, forwarded the way /abort forwards. A miss still aborts the row here, and the client may
 // still be driving; the VM itself ends when commands stop. The
 // results still pending or running become aborted, which is what takes the suite out of the
-// running count, and each of their tickets moves to Aborted. A suite that has already finished
+// running count, and each of their tickets moves to Aborted, but for a ticket whose job the
+// automation server aborted: its abort already moved it. A suite that has already finished
 // is left as it is. A Linear miss is logged and the rows stay aborted. The click answers with
 // the queue.
 app.post("/suites/abort", async (context) => {
@@ -1000,6 +1001,8 @@ app.post("/suites/abort", async (context) => {
       return reply();
     }
     await abortPendingSuiteJobs(connectionString, run);
+    // A 200 is the automation server's abort, and that abort moved the ticket to Aborted.
+    const settled = new Set<string>();
     // The first pass is the slow one. A claim that won the pending abort shows up on
     // the second. A job that becomes running during that second pass is still running
     // afterwards; that window is one read, not the whole abort loop.
@@ -1021,7 +1024,9 @@ app.post("/suites/abort", async (context) => {
             body: JSON.stringify({ ticket: job.ticket, action: job.action }),
             signal: AbortSignal.timeout(ABORT_TIMEOUT_MS),
           });
-          if (response.status !== 200) {
+          if (response.status === 200) {
+            settled.add(job.ticket);
+          } else {
             missed = true;
             console.error(
               `dashboard: aborting a suite: automation server returned ${String(response.status)}`,
@@ -1042,6 +1047,9 @@ app.post("/suites/abort", async (context) => {
     }
     if (suite.aborted) {
       for (const ticket of suite.tickets) {
+        if (settled.has(ticket)) {
+          continue;
+        }
         try {
           await abortLinearIssue(context.env, ticket);
         } catch (error) {
