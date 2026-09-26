@@ -1,5 +1,5 @@
 {
-  "name": "@oligarchy/jarl_ext",
+  "name": "@oligarchy/async",
   "private": true,
   "type": "module",
   "exports": {

@@ -5,6 +5,17 @@
     "": {
       "name": "oligarchy-v2",
     },
+    "packages/async": {
+      "name": "@oligarchy/async",
+      "dependencies": {
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/driver": {
       "name": "@oligarchy/driver",
       "dependencies": {
@@ -30,17 +41,6 @@
         "vitest": "catalog:",
       },
     },
-    "packages/jarl_ext": {
-      "name": "@oligarchy/jarl_ext",
-      "dependencies": {
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
   },
   "catalog": {
     "@types/node": "^26.4.0",
@@ -52,11 +52,11 @@
   "packages": {
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
 
+    "@oligarchy/async": ["@oligarchy/async@workspace:packages/async"],
+
     "@oligarchy/driver": ["@oligarchy/driver@workspace:packages/driver"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
-
-    "@oligarchy/jarl_ext": ["@oligarchy/jarl_ext@workspace:packages/jarl_ext"],
 
     "@oxc-project/types": ["@oxc-project/types@0.151.0", "", {}, "sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA=="],
 
@@ -244,6 +244,6 @@
 
     "zod": ["zod@4.6.5", "", {}, "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q=="],
 
-    "@oligarchy/jarl_ext/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
+    "@oligarchy/async/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
   }
 }
