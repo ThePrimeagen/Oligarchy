@@ -1,15 +1,16 @@
 import * as jarl from "jarl";
-import * as App from "./app.ts";
 import * as Cli from "./cli.ts";
 import * as Config from "./config.ts";
+import * as Environment from "./environment.ts";
 import * as Errors from "./errors.ts";
 import * as Io from "./io.ts";
 import * as Sources from "./sources.ts";
 import * as Vars from "./vars.ts";
 
 // Everything about the environment lives in this package: every flag and variable, oligarchy.json,
-// the env files and where they are read from, and the shape of a command line. An app declares its
-// commands, their flags and the variables they need, and gets back the command that ran, typed.
+// the env files and where they are read from, and the shape of a command line. A program declares
+// its environment: its commands, their flags and the variables they need; it gets back the command
+// that ran, typed.
 
 export {
   ConfigInvalid,
@@ -20,7 +21,7 @@ export {
   Unexpected,
   UsageError,
 } from "./errors.ts";
-export type { App, Command, Group, Run, Top } from "./app.ts";
+export type { Command, Environment, Group, Run, Top } from "./environment.ts";
 export type { Config } from "./config.ts";
 export type { Io } from "./io.ts";
 export type { Secret } from "./secret.ts";
@@ -33,7 +34,7 @@ export const CONFIG_PATH = Config.PATH;
 
 export const fakeIo = Io.fake;
 
-export const cli = App.cli;
+export const cli = Environment.cli;
 
 export const source = {
   processEnv: Sources.processEnv,
@@ -47,18 +48,21 @@ export const source = {
 // written, the command they name, the flags it does not take, the env files, the flags' values,
 // oligarchy.json, then the variables the command needs. A test hands in its own io. The overload
 // is the typed face: the body builds the member of `Out` the words name.
-async function build<Out>(app: App.App<Out>, io?: Io.Io): Promise<Out>;
-async function build(app: App.App<unknown>, io: Io.Io = Io.node()): Promise<unknown> {
-  const shared: Cli.Spec = Object.assign({}, ...app.sources.map((each) => each.flags));
+async function build<Out>(environment: Environment.Environment<Out>, io?: Io.Io): Promise<Out>;
+async function build(
+  environment: Environment.Environment<unknown>,
+  io: Io.Io = Io.node(),
+): Promise<unknown> {
+  const shared: Cli.Spec = Object.assign({}, ...environment.sources.map((each) => each.flags));
 
   if (io.argv.includes("--help")) {
     const firstFlag = io.argv.findIndex((arg) => arg.startsWith("-"));
     const words = io.argv.slice(0, firstFlag);
-    throw new Errors.HelpRequested(Cli.help(app.name, app.top, shared, words));
+    throw new Errors.HelpRequested(Cli.help(environment.name, environment.top, shared, words));
   }
 
   const tokens = await jarl.unwrap(Cli.tokenize(io.argv));
-  const found = await jarl.unwrap(Cli.find(app.top, tokens.words));
+  const found = await jarl.unwrap(Cli.find(environment.top, tokens.words));
   const takes = new Set(Object.keys({ ...shared, ...found.flags }).map(Cli.flagName));
   for (const name of tokens.flags.keys()) {
     if (!takes.has(name)) {
@@ -69,7 +73,7 @@ async function build(app: App.App<unknown>, io: Io.Io = Io.node()): Promise<unkn
   // An earlier source wins. An empty value is unset, so a later source may still fill it.
   const given = await jarl.unwrap(Cli.resolve(shared, tokens.flags, {}));
   const vars: Record<string, string> = {};
-  for (const each of app.sources) {
+  for (const each of environment.sources) {
     for (const [key, value] of Object.entries(await jarl.unwrap(each.load(io, given)))) {
       if (value !== "" && vars[key] === undefined) {
         vars[key] = value;

@@ -1,8 +1,18 @@
 import * as Env from "@oligarchy/env";
 import * as jarl from "jarl";
-import * as App from "./app.ts";
 
-const result = await Env.create(App.app);
+const environment = Env.cli({ name: "driver", description: "Run the harness loop for one prompt" })
+  .flags({
+    action: Env.args.action(),
+    prompt: Env.args.prompt(),
+    agentId: Env.args.agentId(),
+    debugLog: Env.args.debugLog(false),
+    serverUrl: Env.args.serverUrl(false),
+  })
+  .needs("openRouterToken", "databaseUrl")
+  .done();
+
+const result = await Env.create(environment);
 if (jarl.error.is(result, Env.HelpRequested)) {
   process.stdout.write(result.error.text);
   process.exit(0);

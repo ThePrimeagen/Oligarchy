@@ -5,7 +5,7 @@ import * as Errors from "./errors.ts";
 import type * as Vars from "./vars.ts";
 
 // A command line is words, then flags: `ctrl test run one --name lock-screen`. The words name one
-// command in the app's tree; after the first flag there is nothing but flags.
+// command in the environment's tree; after the first flag there is nothing but flags.
 
 // Flags by camelCase key: `sessionId` is `--session-id` on the command line.
 export type Spec = Readonly<Record<string, Args.Flag>>;
@@ -42,8 +42,8 @@ export type Tokens = {
 export const flagName = (key: string): string =>
   key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 
-// Knows no app, which it does not need: with no positional arguments, whatever follows a flag and
-// is not a flag is its value. A repeated flag keeps its last value.
+// Knows no environment, which it does not need: with no positional arguments, whatever follows a
+// flag and is not a flag is its value. A repeated flag keeps its last value.
 export const tokenize = jarl.fn(async (argv: ReadonlyArray<string>): Promise<Tokens> => {
   const words: Array<string> = [];
   let index = 0;

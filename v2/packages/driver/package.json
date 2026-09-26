@@ -7,8 +7,7 @@
   },
   "scripts": {
     "start": "bun --no-env-file src/main.ts",
-    "check:types": "tsc --noEmit -p tsconfig.json",
-    "test:unit": "bun --bun vitest run"
+    "check:types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@oligarchy/env": "workspace:*",
@@ -16,7 +15,6 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   }
 }

@@ -4,12 +4,13 @@ import type * as Config from "./config.ts";
 import * as Sources from "./sources.ts";
 import type * as Vars from "./vars.ts";
 
-// An app is a tree of commands built by chained calls: `cli` opens the app, `command` opens a
-// command under the one open, and `done` closes it; the app closes with a `done` too, which hands
-// back the finished App. Flags and variables go on a command before its first sub-command, and
-// apply to it and every command under it.
+// The environment a program runs in, declared as a tree of commands by chained calls: `cli` opens
+// the program's own command, `command` opens a command under the one open, and `done` closes it;
+// the program's command closes with a `done` too, which hands back the Environment. Flags and
+// variables go on a command before its first sub-command, and apply to it and every command under
+// it.
 
-// Above the app: closing the app finishes it.
+// Above the program's command: closing that finishes the environment.
 export type Top = { readonly top: true };
 
 // What the program receives when argv's words name this command.
@@ -22,8 +23,8 @@ export type Run<Path extends string, S extends Cli.Spec, N extends Vars.Name> = 
     }
   : never;
 
-// A finished app: what `done` on the app returns, and the only thing `create` takes.
-export type App<Out> = {
+// What `done` on the program's command returns, and the only thing `create` takes.
+export type Environment<Out> = {
   readonly name: string;
   readonly description: string;
   readonly sources: ReadonlyArray<Sources.Source>;
@@ -34,9 +35,9 @@ export type App<Out> = {
 
 type Join<Path extends string, K extends string> = Path extends "" ? K : `${Path} ${K}`;
 
-// `done`: the finished app at the top, else the parent with this command's runs added.
+// `done`: the environment at the top, else the parent with this command's runs added.
 type Close<Parent, O> = Parent extends Top
-  ? App<O>
+  ? Environment<O>
   : Parent extends Group<infer Path, infer S, infer N, infer Out, infer P>
     ? Group<Path, S, N, Out | O, P>
     : never;
@@ -62,7 +63,7 @@ type Word<Path extends string, K extends string, Out> = K extends
     : `${Join<Path, K>} is already a command`;
 
 // A command still taking its own flags and variables. `Path` is its words ("test run"; "" for the
-// app), `S` every flag it takes, its own and every one above it, `N` likewise for variables,
+// program), `S` every flag it takes, its own and every one above it, `N` likewise for variables,
 // `Parent` what `done` goes back to.
 export type Command<Path extends string, S extends Cli.Spec, N extends Vars.Name, Parent> = {
   flags<F extends Cli.Spec>(flags: F & Unclaimed<F, S>): Command<Path, S & F, N, Parent>;
@@ -134,11 +135,11 @@ export function cli(options: {
     needs: [],
     commands: new Map(),
   };
-  const app: App<unknown> = {
+  const environment: Environment<unknown> = {
     name: options.name,
     description: options.description,
     sources: options.sources ?? Sources.defaults,
     top,
   };
-  return open(top, () => app);
+  return open(top, () => environment);
 }

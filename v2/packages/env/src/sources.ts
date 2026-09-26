@@ -7,9 +7,9 @@ import type * as Io from "./io.ts";
 
 export type Vars = Readonly<Record<string, string>>;
 
-// One place variables come from. A source brings the flags it reads, so an app that leaves a
-// source out also refuses its flag. Its flags are read before any variable exists, so none of them
-// falls back to one, and the program never receives them.
+// One place variables come from. A source brings the flags it reads, so an environment that
+// leaves a source out also refuses its flag. Its flags are read before any variable exists, so
+// none of them falls back to one, and the program never receives them.
 export type Source = {
   readonly flags: Cli.Spec;
   readonly load: (
@@ -37,7 +37,7 @@ export const processEnv: Source = {
   }, Errors.keep()),
 };
 
-// A file the app names must exist.
+// A file the environment names must exist.
 export const file = (path: string): Source => ({ flags: {}, load: (io) => readVars(io, path) });
 
 // A file that may be absent; one that exists but cannot be read is still a failure.
