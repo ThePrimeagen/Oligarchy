@@ -216,7 +216,7 @@ type FlagFn<S extends z.ZodType> = {
 
 type ArgName =
   | "envFile" | "serverUrl" | "agentId" | "sessionId" | "testResultId"
-  | "port" | "machineName" | "url" | "maxJobs" | "display" | "automation" | "dataDir"
+  | "port" | "machineName" | "url" | "maxJobs" | "display" | "xDisplay" | "automation" | "dataDir"
   | "action" | "prompt" | "debugLog"
   | "output" | "imageId"
   | "list" | "details" | "history" | "definitionName" | "testDescription" | "instruction" | "proof"
@@ -509,6 +509,9 @@ export of its own and the command keys it by the spelling: `name: Env.args.machi
 `status: Env.args.resultStatus()`. A default applies only to a flag that is not required. Only
 `client` took flags missing here; it is going away.
 
+A variable a flag falls back to (`SERVER_URL`, `SESSION_ID`, `OLIGARCHY_DATA_DIR`, `DISPLAY`) is
+declared on the flag, and argv wins over it; it is never among the variables a command needs.
+
 | Export | Spelling | Value | Variable | Default |
 |---|---|---|---|---|
 | `envFile` | `--env-file` | path | | |
@@ -521,6 +524,7 @@ export of its own and the command keys it by the spelling: `name: Env.args.machi
 | `url` | `--url` | http(s) url the fleet reaches this machine at | | |
 | `maxJobs` | `--max-jobs` | integer, at least 1 | | |
 | `display` | `--display` | `none`, `gtk`, `sdl`, `egl-headless`, `spice-app`, `dbus` | | |
+| `xDisplay` | `--x-display` | X display, like `:0`; must reach QEMU as `DISPLAY` | `DISPLAY` | |
 | `automation` | `--automation` | boolean | | `false` |
 | `dataDir` | `--data-dir` | directory | `OLIGARCHY_DATA_DIR` | `~/.oligarchy` |
 | `action` | `--action` | `drive`, `mint` | | |
