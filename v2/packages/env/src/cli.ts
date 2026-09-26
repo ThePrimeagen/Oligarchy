@@ -29,7 +29,7 @@ type Options<T> = {
 
 // The first issue is the one reported, as every other refusal here names one thing.
 export const decodeWith =
-  (schema: z.ZodType | undefined) =>
+  (schema?: z.ZodType) =>
   (text: string): jarl.Result<unknown, string> => {
     if (schema === undefined) {
       return jarl.ok(text);

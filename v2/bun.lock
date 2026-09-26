@@ -5,17 +5,6 @@
     "": {
       "name": "oligarchy-v2",
     },
-    "packages/async": {
-      "name": "@oligarchy/async",
-      "dependencies": {
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
     "packages/driver": {
       "name": "@oligarchy/driver",
       "dependencies": {
@@ -62,8 +51,6 @@
   },
   "packages": {
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
-
-    "@oligarchy/async": ["@oligarchy/async@workspace:packages/async"],
 
     "@oligarchy/driver": ["@oligarchy/driver@workspace:packages/driver"],
 
@@ -187,7 +174,7 @@
 
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
-    "jarl": ["jarl@github:ThePrimeagen/jarl#ff01367", {}, "ThePrimeagen-jarl-ff01367", "sha512-hjuUZdXbDgBvTCJ2+ujZ3Ym8iN8gcZxzEkyjhF1nQ3lpP8nuFQU6oOghDuYjEcD3InjlzCuoHQbbpyBeVGL2Ew=="],
+    "jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
 
     "lightningcss": ["lightningcss@1.33.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.33.0", "lightningcss-darwin-arm64": "1.33.0", "lightningcss-darwin-x64": "1.33.0", "lightningcss-freebsd-x64": "1.33.0", "lightningcss-linux-arm-gnueabihf": "1.33.0", "lightningcss-linux-arm64-gnu": "1.33.0", "lightningcss-linux-arm64-musl": "1.33.0", "lightningcss-linux-x64-gnu": "1.33.0", "lightningcss-linux-x64-musl": "1.33.0", "lightningcss-win32-arm64-msvc": "1.33.0", "lightningcss-win32-x64-msvc": "1.33.0" } }, "sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA=="],
 
@@ -257,6 +244,6 @@
 
     "zod": ["zod@4.6.5", "", {}, "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q=="],
 
-    "@oligarchy/jarl_ext/jarl": ["jarl@github:ThePrimeagen/jarl#ff01367", {}, "ThePrimeagen-jarl-ff01367", "sha512-hjuUZdXbDgBvTCJ2+ujZ3Ym8iN8gcZxzEkyjhF1nQ3lpP8nuFQU6oOghDuYjEcD3InjlzCuoHQbbpyBeVGL2Ew=="],
+    "@oligarchy/jarl_ext/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
   }
 }
