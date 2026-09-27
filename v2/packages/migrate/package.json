@@ -1,0 +1,27 @@
+{
+  "name": "@oligarchy/migrate",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "bun --no-env-file src/main.ts",
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:integration": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "jarl": "catalog:"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

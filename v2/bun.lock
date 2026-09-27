@@ -68,6 +68,23 @@
         "vitest": "catalog:",
       },
     },
+    "packages/migrate": {
+      "name": "@oligarchy/migrate",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@testcontainers/postgresql": "catalog:",
+        "@types/node": "catalog:",
+        "@types/pg": "catalog:",
+        "pg": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@testcontainers/postgresql": "^11.14.0",
@@ -104,6 +121,8 @@
     "@oligarchy/driver": ["@oligarchy/driver@workspace:packages/driver"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
+
+    "@oligarchy/migrate": ["@oligarchy/migrate@workspace:packages/migrate"],
 
     "@oxc-project/types": ["@oxc-project/types@0.151.0", "", {}, "sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA=="],
 
@@ -594,8 +613,6 @@
     "@isaacs/cliui/strip-ansi": ["strip-ansi@7.2.0", "", { "dependencies": { "ansi-regex": "^6.2.2" } }, "sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w=="],
 
     "@isaacs/cliui/wrap-ansi": ["wrap-ansi@8.1.0", "", { "dependencies": { "ansi-styles": "^6.1.0", "string-width": "^5.0.1", "strip-ansi": "^7.0.1" } }, "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ=="],
-
-    "@oligarchy/driver/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
 
     "@types/ssh2/@types/node": ["@types/node@18.19.130", "", { "dependencies": { "undici-types": "~5.26.4" } }, "sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg=="],
 
