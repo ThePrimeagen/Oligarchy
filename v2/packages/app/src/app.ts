@@ -1,3 +1,5 @@
+import { Aborted } from "@oligarchy/async";
+import { writeSync } from "node:fs";
 import * as jarl from "jarl";
 import type {
   AnyService,
@@ -10,14 +12,11 @@ import type {
   Provided,
   Provides,
   ServicesOf,
+  Signal,
 } from "./types.ts";
 
 export const MainCalledTwice = jarl.error.define("MainCalledTwice");
 export type MainCalledTwice = InstanceType<typeof MainCalledTwice>;
-
-// The reason app.signal carries, so a fetch or a sleep handed the signal fails with it.
-export const Aborted = jarl.error.define("Aborted");
-export type Aborted = InstanceType<typeof Aborted>;
 
 type Main<Environment, Wants extends AnyService> = (
   app: App<Environment, Wants>,
@@ -35,21 +34,32 @@ export type State = {
   readonly aborter: AbortController;
 };
 
+// SIGHUP is the terminal closing; left alone it kills the process before any handler runs.
+const SIGNALS: ReadonlyArray<Signal> = ["SIGINT", "SIGTERM", "SIGHUP"];
+
 const processIo: Io = {
   onSignal: (handler) => {
-    const interrupt = () => handler("SIGINT");
-    const terminate = () => handler("SIGTERM");
-    process.on("SIGINT", interrupt);
-    process.on("SIGTERM", terminate);
+    const listeners = SIGNALS.map((signal) => ({ signal, listener: () => handler(signal) }));
+    for (const { signal, listener } of listeners) {
+      process.on(signal, listener);
+    }
     return () => {
-      process.off("SIGINT", interrupt);
-      process.off("SIGTERM", terminate);
+      for (const { signal, listener } of listeners) {
+        process.off(signal, listener);
+      }
     };
   },
   exit: (code) => {
     process.exit(code);
   },
+  // Written before this returns: a second signal's process.exit does not wait for stderr.
+  stderr: (text) => {
+    writeSync(process.stderr.fd, text);
+  },
 };
+
+// A C-c in the terminal is a person waiting on the exit handlers; the second one kills at once.
+const PRESS_AGAIN = "press again to kill the application right away\n";
 
 const call = async (state: State, handler: OnExit, reason: ExitReason): Promise<void> => {
   try {
@@ -152,6 +162,9 @@ export class App<const Environment, const S extends Provided | AnyService> {
     let signalled: ExitReason | undefined;
     const stopListening = io.onSignal((signal) => {
       signals += 1;
+      if (signals === 1 && signal === "SIGINT") {
+        io.stderr(PRESS_AGAIN);
+      }
       if (signals === 2) {
         io.exit(1);
       }

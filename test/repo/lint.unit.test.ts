@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -42,6 +42,60 @@ const augment = (specifier: string) =>
 
 const refused = (specifier: string) =>
   `augment ${specifier} through its package's entry: the package name, or src/main.ts inside the package [Error/oligarchy(augment-through-entry)]`;
+
+// CI lints v2 without installing it, so a type from a v2 dependency is any. The fixture is that:
+// two errors from a module that is not there, and a union of them.
+const UNRESOLVED_UNION = `import * as missing from "missing-module";
+
+export const One = missing.define("One");
+export type One = InstanceType<typeof One>;
+export const Two = missing.define("Two");
+export type Two = InstanceType<typeof Two>;
+
+export const pick = (flip: boolean): One | Two => (flip ? new One() : new Two());
+`;
+
+// Lints the fixture with the repo's own config from a directory made under `parent`, then removes
+// it: oxlint's exit status, how many files it linted, and how many no-redundant-type-constituents
+// diagnostics it gave. The file count keeps a run that linted nothing from passing as clean.
+const redundantUnions = (
+  parent: string,
+): { readonly status: number | null; readonly files: number; readonly redundant: number } => {
+  const dir = mkdtempSync(join(root, parent, ".lint-"));
+  try {
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "preserve", moduleResolution: "bundler" },
+        include: ["*.ts"],
+      }),
+    );
+    writeFileSync(join(dir, "union.ts"), UNRESOLVED_UNION);
+    const run = spawnSync(
+      join(root, "node_modules/.bin/oxlint"),
+      ["-c", join(root, ".oxlintrc.json"), "--format", "json", dir],
+      { encoding: "utf8" },
+    );
+    return {
+      status: run.status,
+      files: Number(/"number_of_files": (\d+)/.exec(run.stdout)?.[1] ?? 0),
+      redundant:
+        run.stdout.split('"code": "typescript(no-redundant-type-constituents)"').length - 1,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+describe("no-redundant-type-constituents", () => {
+  it("is off under v2, where a union of types CI cannot resolve is not a mistake (happy)", () => {
+    expect(redundantUnions("v2")).toEqual({ status: 0, files: 1, redundant: 0 });
+  });
+
+  it("still refuses the same union everywhere else (unhappy)", () => {
+    expect(redundantUnions(".")).toEqual({ status: 1, files: 1, redundant: 2 });
+  });
+});
 
 describe("oligarchy/augment-through-entry", () => {
   it("accepts a package name, the package's own src/main.ts from any depth, and declare global (happy)", () => {

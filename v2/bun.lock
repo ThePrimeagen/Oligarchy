@@ -8,6 +8,7 @@
     "packages/app": {
       "name": "@oligarchy/app",
       "dependencies": {
+        "@oligarchy/async": "workspace:*",
         "jarl": "catalog:",
       },
       "devDependencies": {
