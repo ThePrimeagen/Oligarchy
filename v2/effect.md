@@ -31,7 +31,7 @@ that must not run twice keeps a flag.
 - [x] `tick(fn, interval, signal)`: awaits `fn`, spaces calls from the end of the last one, keeps
       going after a throw, and settles once the signal aborts and the call in flight returns (#264).
 - [x] `sleep(ms, signal)`: ok after `ms`, `Aborted` as soon as the signal aborts (#264).
-- [x] `timeout(fn, ms, signal?)`: `fn`'s signal aborts at the deadline or with the caller's; the
+- [x] `timeout(fn, { ms, signal })`: `fn`'s signal aborts at the deadline or with the caller's; the
       answer is `fn`'s, or `TimedOut` for an `fn` still running (#264).
 - [x] `repeat(fn, count, { errorFilter, delay, signal })`: Linear reads retry once, two seconds
       later, only while `retryable` (#264).
