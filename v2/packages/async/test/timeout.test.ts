@@ -29,8 +29,7 @@ describe("timeout", () => {
           await new Promise((resolve) => setTimeout(resolve, 100));
           return jarl.ok("answered");
         },
-        1_000,
-        new AbortController().signal,
+        { ms: 1_000, signal: new AbortController().signal },
       ),
     );
 
@@ -41,7 +40,7 @@ describe("timeout", () => {
 
   it("is TimedOut at the deadline without waiting for fn, and aborts fn's signal (unhappy)", async () => {
     const { fn, seen } = hangs();
-    const result = track(timeout(fn, 1_000, new AbortController().signal));
+    const result = track(timeout(fn, { ms: 1_000, signal: new AbortController().signal }));
 
     await vi.advanceTimersByTimeAsync(999);
     expect(result.settled).toBe(false);
@@ -54,7 +53,9 @@ describe("timeout", () => {
 
   it("hands fn the caller's abort, and gives back fn's answer to it (unhappy)", async () => {
     const controller = new AbortController();
-    const result = track(timeout((signal) => sleep(60_000, signal), 1_000, controller.signal));
+    const result = track(
+      timeout((signal) => sleep(60_000, signal), { ms: 1_000, signal: controller.signal }),
+    );
 
     await vi.advanceTimersByTimeAsync(200);
     const reason = new Aborted("SIGINT received");
@@ -70,7 +71,10 @@ describe("timeout", () => {
     const reason = new Aborted("main returned");
     controller.abort(reason);
 
-    const result = await timeout((signal) => sleep(60_000, signal), 1_000, controller.signal);
+    const result = await timeout((signal) => sleep(60_000, signal), {
+      ms: 1_000,
+      signal: controller.signal,
+    });
 
     expect(result).toEqual(jarl.err(reason));
     expect(vi.getTimerCount()).toBe(0);
@@ -79,7 +83,7 @@ describe("timeout", () => {
   it("still ends at the deadline when fn ignores the caller's abort (unhappy)", async () => {
     const controller = new AbortController();
     const { fn, seen } = hangs();
-    const result = track(timeout(fn, 1_000, controller.signal));
+    const result = track(timeout(fn, { ms: 1_000, signal: controller.signal }));
 
     await vi.advanceTimersByTimeAsync(200);
     controller.abort(new Aborted("SIGTERM received"));
@@ -106,7 +110,7 @@ describe("timeout", () => {
                 setTimeout(() => reject(new Error("late")), 10);
               });
             }),
-          1_000,
+          { ms: 1_000 },
         ),
       );
 

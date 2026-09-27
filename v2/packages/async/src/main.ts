@@ -95,14 +95,15 @@ export const tick = async (
   }
 };
 
-// Gives fn a deadline. fn's signal aborts delay milliseconds from now, or when signal aborts, with
+// Gives fn a deadline. fn's signal aborts ms milliseconds from now, or when signal aborts, with
 // signal's reason. The answer is fn's, or TimedOut at the deadline for an fn still running.
 export const timeout = <T, E>(
   fn: (signal: AbortSignal) => Promise<jarl.Result<T, E>>,
-  delay: number,
-  signal: AbortSignal = new AbortController().signal,
+  options: { readonly ms: number; readonly signal?: AbortSignal },
 ): Promise<jarl.Result<T, E | TimedOut>> =>
   new Promise((resolve, reject) => {
+    const { ms } = options;
+    const signal = options.signal ?? new AbortController().signal;
     const inner = new AbortController();
     const forward = () => inner.abort(signal.reason);
     let settled = false;
@@ -117,12 +118,12 @@ export const timeout = <T, E>(
       return true;
     };
     const timer = setTimeout(() => {
-      const timedOut = new TimedOut(`timed out after ${String(delay)} ms`);
+      const timedOut = new TimedOut(`timed out after ${String(ms)} ms`);
       inner.abort(timedOut);
       if (first()) {
         resolve(jarl.err(timedOut));
       }
-    }, delay);
+    }, ms);
     if (signal.aborted) {
       forward();
     } else {
