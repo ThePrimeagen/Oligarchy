@@ -17,10 +17,19 @@ export type Provided = { readonly [K in keyof Services]?: Services[K] };
 // A bare service where the object of services goes has a `service` field; this refuses it.
 export type NotAService = { readonly service?: never };
 
+// Every key of a services object must be a service's name, even beside one that is.
+export type OnlyServices<S> = { readonly [K in Exclude<keyof S, keyof Services>]: never };
+
+// The keys a services object certainly has: an optional key, or one that may be undefined, is not
+// a service the app can hand to main.
+type Present<S> = {
+  [K in keyof S]-?: {} extends Pick<S, K> ? never : undefined extends S[K] ? never : K;
+}[keyof S];
+
 // An app is written with the services main wants (a union) or built from an object. Both read as
-// the same object of services, and both name the same keys.
+// the same object of services, and both name the services they certainly have.
 export type ServicesOf<S> = [S] extends [AnyService] ? Needs<S> : S;
-export type NamesOf<S> = [S] extends [AnyService] ? S["service"] : keyof S;
+export type NamesOf<S> = [S] extends [AnyService] ? S["service"] : Present<S>;
 
 type Missing<Wants extends AnyService, Names> = Exclude<Wants["service"], Names>;
 

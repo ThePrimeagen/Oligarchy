@@ -78,19 +78,33 @@ describe("App", () => {
     expect(codes).toEqual([0]);
   });
 
-  it("runs a handler added during exit at once, and waits for it before exiting (unhappy)", async () => {
+  it("runs handlers added during exit one at a time, and waits for the ones they add (unhappy)", async () => {
     const app = new App.App(environment, { counter: counter() });
     const order: Array<string> = [];
-    app.onExit(() => {
-      order.push("first");
+    const later = () => new Promise((resolve) => setTimeout(resolve, 0));
+    app.onExit(async () => {
+      order.push("first starts");
       app.onExit(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        order.push("added during exit");
+        order.push("added starts");
+        app.onExit(async () => {
+          await later();
+          order.push("added by the added one");
+        });
+        await later();
+        order.push("added ends");
       });
+      await later();
+      order.push("first ends");
     });
     const { io, codes } = fakeIo();
     await app.main(async () => jarl.ok(undefined), io);
-    expect(order).toEqual(["first", "added during exit"]);
+    expect(order).toEqual([
+      "first starts",
+      "first ends",
+      "added starts",
+      "added ends",
+      "added by the added one",
+    ]);
     expect(codes).toEqual([0]);
   });
 
@@ -138,6 +152,37 @@ describe("App", () => {
     void app.main(() => new Promise<never>(() => undefined), io);
     signal("SIGINT");
     signal("SIGINT");
+    expect(codes).toEqual([1]);
+  });
+
+  it("does not cut exit handlers short on a first signal after main returned (unhappy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const order: Array<string> = [];
+    const { io, codes, signal } = fakeIo();
+    app.onExit(async () => {
+      await Promise.resolve();
+      signal("SIGINT");
+      await Promise.resolve();
+      order.push("close services");
+    });
+    await app.main(async () => jarl.ok(undefined), io);
+    expect(order).toEqual(["close services"]);
+    expect(codes).toEqual([0]);
+  });
+
+  it("exits 1 once on a second signal, even when main returns afterwards (unhappy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const closed = new Promise<void>((resolve) => {
+      app.onExit(() => resolve());
+    });
+    const { io, codes, signal } = fakeIo();
+    const running = app.main(async () => {
+      await closed;
+      return jarl.ok(undefined);
+    }, io);
+    signal("SIGINT");
+    signal("SIGINT");
+    await running;
     expect(codes).toEqual([1]);
   });
 
