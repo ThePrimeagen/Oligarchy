@@ -7,8 +7,6 @@
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
-    "test:unit": "bun --bun vitest run --project unit",
-    "test:integration": "bun --bun vitest run --project integration",
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
@@ -19,11 +17,9 @@
     "pg": "catalog:"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   }
 }

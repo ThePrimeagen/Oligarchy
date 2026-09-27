@@ -6,7 +6,6 @@
       "packages/*"
     ],
     "catalog": {
-      "@testcontainers/postgresql": "^11.14.0",
       "@types/node": "^26.4.0",
       "@types/pg": "^8.23.1",
       "drizzle-orm": "^0.45.2",
@@ -24,7 +23,6 @@
     "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.prod-env run db:migrate",
     "tester": "bun --no-env-file packages/tester/src/main.ts",
     "check:types": "bun run --workspaces check:types",
-    "test:unit": "bun run --workspaces --if-present test:unit",
-    "test:integration": "bun run --workspaces --if-present test:integration"
+    "test:unit": "bun run --workspaces --if-present test:unit"
   }
 }
