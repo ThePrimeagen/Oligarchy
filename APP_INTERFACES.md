@@ -453,9 +453,12 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
 - `app.main(main)` infers what `main` needs from its parameter. It checks the app has each service
   by key, so a missing one fails on that call as `{ missing: "name" }`, and it checks the
   environment the ordinary way, so a missing flag fails as `Property 'iso' is missing`.
-- `@oligarchy/app`'s `src/main.ts` re-exports `Services` with `export *` (or declares it itself).
-  Never `export type { Services } from`: an augmentation through that lands on a separate
-  declaration, and the list and the augmentation stop seeing each other (checked with 7.0.2).
+- Every `declare module` that adds to `Services` names the package's entry: `@oligarchy/app`, or
+  `../src/main.ts` from inside the package. Two augmentations through different files of the same
+  package land on separate declarations and stop seeing each other; any re-export form is fine as
+  long as every augmentation goes through the entry (checked with 7.0.2). The lint rule
+  `oligarchy/augment-through-entry` (`v2/lint/plugin.js`, loaded for `v2/**` by the root
+  `.oxlintrc.json`) refuses any other path.
 - A type-check test file (`test/types.test.ts`) uses `expectTypeOf` and a `// @ts-expect-error
   <why>` above each line that must not compile, as jarl's own tests do. vitest runs it, but its
   assertions are compile-time: `check:types` fails when an `expectTypeOf` no longer matches or a
@@ -739,7 +742,7 @@ describe("App types", () => {
 
 1. `@oligarchy/env`: export `Result` and `Vars`.
 2. `@oligarchy/async`: `tick` awaits `fn`; `cancel` returns a promise that waits for a run in flight.
-3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands; `src/main.ts` re-exports it with `export *`), `src/app.ts` (`Needs`, `Has`, `Register`, `Signal`, `ExitReason`, `OnExit`, `Io`, `MainCalledTwice`, `App`), `src/main.ts` exporting them.
+3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Signal`, `ExitReason`, `OnExit`, `Io`, `MainCalledTwice`, `App`), `src/main.ts` exporting them.
 4. Services, one package each, added to `Services` as each lands: `log`, `sentry`, `db` (a port of `packages/db`: the pool, `run`, `transaction`, `ping` and the stores as operations; `DatabaseError` keeps `operation` and `cause`), `openrouter`, `linear`.
 5. `@oligarchy/common`.
 6. driver: replace `v2/packages/driver/src/main.ts`'s print with Example 1.
