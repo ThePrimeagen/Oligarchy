@@ -75,7 +75,7 @@
     "@types/node": "^26.4.0",
     "@types/pg": "^8.23.1",
     "drizzle-orm": "^0.45.2",
-    "jarl": "github:ThePrimeagen/jarl",
+    "jarl": "github:ThePrimeagen/jarl#v1.1.0",
     "pg": "^8.23.0",
     "typescript": "7.0.2",
     "vitest": "^4.1.11",
@@ -280,7 +280,7 @@
 
     "get-tsconfig": ["get-tsconfig@4.14.3", "", { "dependencies": { "resolve-pkg-maps": "^1.0.0" } }, "sha512-++QEw4DIY7WGoukz+/+A/8dGYPT9l9yIadnmSgZ8Rjr3YVSVDipQSO9CdnJo9ePqFqUUqh+wk9uIaoiAwsiPkA=="],
 
-    "jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
+    "jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "lightningcss": ["lightningcss@1.33.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.33.0", "lightningcss-darwin-arm64": "1.33.0", "lightningcss-darwin-x64": "1.33.0", "lightningcss-freebsd-x64": "1.33.0", "lightningcss-linux-arm-gnueabihf": "1.33.0", "lightningcss-linux-arm64-gnu": "1.33.0", "lightningcss-linux-arm64-musl": "1.33.0", "lightningcss-linux-x64-gnu": "1.33.0", "lightningcss-linux-x64-musl": "1.33.0", "lightningcss-win32-arm64-msvc": "1.33.0", "lightningcss-win32-x64-msvc": "1.33.0" } }, "sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA=="],
 
