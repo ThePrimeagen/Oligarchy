@@ -11,6 +11,7 @@
     "test:integration": "bun --bun vitest run --project integration"
   },
   "dependencies": {
+    "@oligarchy/app": "workspace:*",
     "@oligarchy/env": "workspace:*",
     "drizzle-orm": "catalog:",
     "jarl": "catalog:",

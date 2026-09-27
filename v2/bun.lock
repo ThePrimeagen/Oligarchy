@@ -9,7 +9,6 @@
       "name": "@oligarchy/app",
       "dependencies": {
         "@oligarchy/async": "workspace:*",
-        "@oligarchy/db": "workspace:*",
         "jarl": "catalog:",
       },
       "devDependencies": {
@@ -32,6 +31,7 @@
     "packages/db": {
       "name": "@oligarchy/db",
       "dependencies": {
+        "@oligarchy/app": "workspace:*",
         "@oligarchy/env": "workspace:*",
         "drizzle-orm": "catalog:",
         "jarl": "catalog:",

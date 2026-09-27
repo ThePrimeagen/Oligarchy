@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import type * as App from "@oligarchy/app";
 import type * as Env from "@oligarchy/env";
 import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -31,6 +32,12 @@ export type Database = {
   // Ends the pool once the queries in flight have finished. Nothing uses the database after.
   readonly close: () => Promise<jarl.Result<void, DatabaseError>>;
 };
+
+declare module "@oligarchy/app" {
+  interface Services {
+    db: App.Register<"db", Database>;
+  }
+}
 
 const messageOf = (value: unknown): string =>
   value instanceof Error ? value.message : String(value);
