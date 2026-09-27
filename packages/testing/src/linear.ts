@@ -18,6 +18,7 @@ export type LinearCall =
       readonly ticket: Linear.LinearTicket;
       readonly stateId: string;
     }
+  | { readonly method: "issueStateId"; readonly ticket: Linear.LinearTicket }
   | { readonly method: "markReady"; readonly identifier: string }
   | { readonly method: "clearReady"; readonly identifier: string }
   | { readonly method: "moveToErrored"; readonly identifier: string; readonly message: string }
@@ -92,6 +93,9 @@ export const fakeLinear = (
       record({ method: "describeIssue", ticket, description, stateId: state }, Effect.void),
     moveIssue: (issue, state) =>
       record({ method: "moveIssue", ticket: issue, stateId: state }, Effect.void),
+    // A ticket read back sits where it was born, in Backlog, unless a test says otherwise.
+    issueStateId: (ticket) =>
+      record({ method: "issueStateId", ticket }, Effect.succeed(STATES.backlog)),
     markReady: (identifier) => record({ method: "markReady", identifier }, Effect.void),
     clearReady: (identifier) => record({ method: "clearReady", identifier }, Effect.void),
     moveToErrored: (identifier, message) =>
@@ -117,6 +121,7 @@ export const fakeLinear = (
     createIssue: overrides.createIssue ?? defaults.createIssue,
     describeIssue: overrides.describeIssue ?? defaults.describeIssue,
     moveIssue: overrides.moveIssue ?? defaults.moveIssue,
+    issueStateId: overrides.issueStateId ?? defaults.issueStateId,
     markReady: overrides.markReady ?? defaults.markReady,
     clearReady: overrides.clearReady ?? defaults.clearReady,
     moveToErrored: overrides.moveToErrored ?? defaults.moveToErrored,

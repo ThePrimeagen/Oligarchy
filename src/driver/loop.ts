@@ -178,6 +178,9 @@ const sessionGone = (output: string): string | undefined => {
 // shutting it down. Any other save failure is the system's.
 const notPoweredOff = (why: string): boolean => why.startsWith("guest did not power off");
 
+// What the qemu server answers a start while an intent is still open.
+const INTENT_HELD = "Cannot start one intent when one's already running";
+
 // Three in a row: the model cannot answer in the tool's shape, and asking again only spends
 // the run. A command that reaches the guest, even one the guest refuses, starts the count again.
 const BAD_REPLY_LIMIT = 3;
@@ -362,10 +365,19 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         const openStep = Effect.fn("Driver.openStep")(function* (turn: number) {
           const message = steps[step - 1] ?? `step ${String(step)}`;
           yield* log(input, turn, "intent", message);
-          const failed = yield* failure(
-            Actions.intentStart({ ...held, testResultId: facts.resultId, message }),
-          );
+          const start = Actions.intentStart({ ...held, testResultId: facts.resultId, message });
+          let failed = yield* failure(start);
           yield* log(input, turn, "command", `intent start ${failed ?? "ok"}`);
+          // An end whose request was lost leaves the server holding the last step's intent, and
+          // every later start is refused: end it and open this one once more.
+          if (failed !== undefined && failed.includes(INTENT_HELD)) {
+            const ended = yield* failure(Actions.intentEnd(held));
+            yield* log(input, turn, "command", `intent end ${ended ?? "ok"}`);
+            if (ended === undefined) {
+              failed = yield* failure(start);
+              yield* log(input, turn, "command", `intent start ${failed ?? "ok"}`);
+            }
+          }
           if (failed === undefined) {
             intentOpen = true;
             return undefined;

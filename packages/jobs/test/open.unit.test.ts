@@ -5,6 +5,7 @@ import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
+import * as Linear from "@oligarchy/linear/client";
 import * as LinearErrors from "@oligarchy/linear/errors";
 import * as TestingLinear from "@oligarchy/testing/linear";
 import * as TestingStores from "@oligarchy/testing/stores";
@@ -21,6 +22,8 @@ const terminal = H.definition(2, "Open a terminal");
 // A second wording of install: same name, higher id, so it is the one a run pins from now on.
 const installRevised = { ...install, id: 3, instruction: "Complete the installer, then log in" };
 const mint = H.definition(8, "mint");
+const bar = H.definition(4, "Toggle the bar");
+const unlock = H.definition(5, "Unlock the screen");
 
 const suite = { serverUrl: SERVER, iso: ISO, version: "1.2.3", name: Option.none<string>() };
 const named = (name: string) => ({ ...suite, name: Option.some(name) });
@@ -116,6 +119,50 @@ const runStaysOpen = DbErrors.DatabaseError.make({
 });
 const unfailable = () =>
   TestingStores.fakeTestStore({}, { failRun: () => Effect.fail(runStaysOpen) });
+
+const noAnswer = (operation: string) =>
+  LinearErrors.LinearError.make({
+    operation,
+    message: "linear: request failed: no answer within 10 seconds",
+    retryable: true,
+  });
+
+const busy = LinearErrors.LinearError.make({
+  operation: "createIssue",
+  status: 503,
+  message: "linear: request failed (503): busy",
+  retryable: true,
+});
+
+// A Linear whose creates, counted from one, fail with `failures` at the counts it names and
+// otherwise answer OLI-42, OLI-43, ... by count. The fake does not record an overridden call.
+const creates = (
+  failures: ReadonlyMap<number, LinearErrors.LinearError>,
+  overrides: Partial<Linear.LinearService> = {},
+) => {
+  const sent = { count: 0 };
+  return {
+    sent,
+    linear: TestingLinear.fakeLinear({
+      overrides: {
+        ...overrides,
+        createIssue: () =>
+          Effect.suspend(() => {
+            sent.count += 1;
+            const failure = failures.get(sent.count);
+            return failure === undefined
+              ? Effect.succeed(TestingLinear.ticketFor(`OLI-${String(41 + sent.count)}`))
+              : Effect.fail(failure);
+          }),
+      },
+    }),
+  };
+};
+
+const handedOff = (h: H.Harness) =>
+  h.linear.calls.flatMap((call) =>
+    call.method === "describeIssue" ? [call.ticket.identifier] : [],
+  );
 
 describe("Open.open asks Linear again when it did not answer", () => {
   it.effect("a team lookup that got no answer once is asked again, and the run opens", () =>
@@ -326,6 +373,174 @@ describe("Open.open happy path", () => {
   );
 });
 
+describe("Open.open files past one ticket Linear did not answer", () => {
+  it.effect(
+    "a suite create Linear did not answer fails that result alone, is never sent again, and the rest are handed off",
+    () =>
+      Effect.gen(function* () {
+        const linear = creates(
+          new Map([
+            [2, noAnswer("createIssue")],
+            [4, busy],
+          ]),
+        );
+        const h = H.harness({ linear: linear.linear });
+        h.tests.definitions.push(install, terminal, bar, unlock);
+        const error = yield* Open.open(suite).pipe(Effect.provide(services(h)), Effect.flip);
+        // The suite fails with the last failure it filed past.
+        const reason = `${busy.message}; created OLI-42, OLI-44; failed Open a terminal, Unlock the screen`;
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "createIssue",
+          status: 503,
+          retryable: true,
+          message: reason,
+        });
+        // Each create is sent once: one whose answer was lost may still have made the issue.
+        expect(linear.sent.count).toBe(4);
+        expect(handedOff(h)).toEqual(["OLI-42", "OLI-44"]);
+        expect(h.tests.results.map((row) => [row.status, row.linearId, row.reason])).toEqual([
+          ["pending", "OLI-42", null],
+          ["failed", null, reason],
+          ["pending", "OLI-44", null],
+          ["failed", null, reason],
+        ]);
+        expect(h.tests.runs[0]).toMatchObject({ status: "failed", reason });
+        expect(h.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a suite hand-off Linear did not answer that left its ticket in Backlog fails that result alone, and the rest are handed off",
+    () =>
+      Effect.gen(function* () {
+        let sends = 0;
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: {
+              describeIssue: (ticket) =>
+                Effect.suspend(() => {
+                  sends += 1;
+                  return ticket.identifier === "OLI-43"
+                    ? Effect.fail(noAnswer("describeIssue"))
+                    : Effect.void;
+                }),
+            },
+          }),
+        });
+        h.tests.definitions.push(install, terminal, bar);
+        const error = yield* Open.open(suite).pipe(Effect.provide(services(h)), Effect.flip);
+        const reason =
+          "linear: request failed: no answer within 10 seconds; created OLI-42, OLI-43, OLI-44; failed Open a terminal";
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "describeIssue",
+          message: reason,
+        });
+        expect(sends).toBe(3);
+        expect(h.tests.results.map((row) => [row.status, row.linearId, row.reason])).toEqual([
+          ["pending", "OLI-42", null],
+          ["failed", "OLI-43", reason],
+          ["pending", "OLI-44", null],
+        ]);
+        expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          [
+            "error",
+            "ticket trapped in Backlog; linear: request failed: no answer within 10 seconds",
+            "OLI-43",
+          ],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a hand-off then a create Linear did not answer, in a row, stop the suite, and only what was handed off stands (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const linear = creates(new Map([[3, noAnswer("createIssue")]]), {
+          describeIssue: (ticket) =>
+            ticket.identifier === "OLI-43" ? Effect.fail(noAnswer("describeIssue")) : Effect.void,
+        });
+        const h = H.harness({ linear: linear.linear });
+        h.tests.definitions.push(install, terminal, bar, unlock);
+        const error = yield* Open.open(suite).pipe(Effect.provide(services(h)), Effect.flip);
+        const reason =
+          "linear: request failed: no answer within 10 seconds; created OLI-42, OLI-43; failed Open a terminal, Toggle the bar, Unlock the screen";
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "createIssue",
+          message: reason,
+        });
+        // Linear is down, not one answer lost: the fourth definition is never asked for.
+        expect(linear.sent.count).toBe(3);
+        expect(h.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+          ["pending", "OLI-42"],
+          ["failed", "OLI-43"],
+          ["failed", null],
+          ["failed", null],
+        ]);
+        expect(h.log.lines.map((line) => [line.level, line.text, line.agentId])).toEqual([
+          [
+            "error",
+            "ticket trapped in Backlog; linear: request failed: no answer within 10 seconds",
+            "OLI-43",
+          ],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a refusal after a ticket the suite filed past stops the suite with the refusal, and still names the one filed past (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const refused = LinearErrors.LinearError.make({
+          operation: "createIssue",
+          status: 401,
+          message: "linear: request failed (401): unauthorized",
+        });
+        const linear = creates(
+          new Map([
+            [1, noAnswer("createIssue")],
+            [3, refused],
+          ]),
+        );
+        const h = H.harness({ linear: linear.linear });
+        h.tests.definitions.push(install, terminal, bar, unlock);
+        const error = yield* Open.open(suite).pipe(Effect.provide(services(h)), Effect.flip);
+        const reason = `${refused.message}; created OLI-43; failed Install Omarchy, Toggle the bar, Unlock the screen`;
+        expect(error).toMatchObject({ _tag: "LinearError", status: 401, message: reason });
+        expect(linear.sent.count).toBe(3);
+        expect(h.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+          ["failed", null],
+          ["pending", "OLI-43"],
+          ["failed", null],
+          ["failed", null],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a single test whose create Linear did not answer fails its run and is not sent again (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const linear = creates(new Map([[1, noAnswer("createIssue")]]));
+        const h = H.harness({ linear: linear.linear });
+        h.tests.definitions.push(install);
+        const error = yield* Open.open(named("Install Omarchy")).pipe(
+          Effect.provide(services(h)),
+          Effect.flip,
+        );
+        const message = "linear: request failed: no answer within 10 seconds";
+        expect(error).toMatchObject({ _tag: "LinearError", operation: "createIssue", message });
+        expect(linear.sent.count).toBe(1);
+        expect(h.tests.runs[0]).toMatchObject({ status: "failed", reason: message });
+        expect(h.tests.results.map((row) => [row.status, row.reason])).toEqual([
+          ["failed", message],
+        ]);
+      }),
+  );
+});
+
 describe("Open.open unhappy path", () => {
   it.effect(
     "an unknown name, an empty table, or a suite of only mint is refused before Linear",
@@ -422,7 +637,7 @@ describe("Open.open unhappy path", () => {
   );
 
   it.effect(
-    "a hand-off that fails names every ticket created, and reports the one left in Backlog",
+    "a hand-off Linear refused stops the suite, names every ticket created and every definition not handed off, and leaves the handed-off result standing",
     () =>
       Effect.gen(function* () {
         const refused = LinearErrors.LinearError.make({
@@ -438,9 +653,9 @@ describe("Open.open unhappy path", () => {
             },
           }),
         });
-        h.tests.definitions.push(install, terminal);
+        h.tests.definitions.push(install, terminal, bar);
         const error = yield* Open.open(suite).pipe(Effect.provide(services(h)), Effect.flip);
-        const reason = `${refused.message}; created OLI-42, OLI-43`;
+        const reason = `${refused.message}; created OLI-42, OLI-43; failed Open a terminal, Toggle the bar`;
         expect(error).toMatchObject({
           _tag: "LinearError",
           operation: "describeIssue",
@@ -448,9 +663,13 @@ describe("Open.open unhappy path", () => {
           message: reason,
         });
         expect(h.tests.runs[0]?.reason).toBe(reason);
-        expect(h.tests.results.map((row) => [row.status, row.linearId])).toEqual([
-          ["failed", "OLI-42"],
-          ["failed", "OLI-43"],
+        expect(methods(h)).not.toContain("issueStateId");
+        // A refusal is not one ticket's: the definition after it is never filed.
+        expect(methods(h).filter((method) => method === "createIssue")).toHaveLength(2);
+        expect(h.tests.results.map((row) => [row.status, row.linearId, row.reason])).toEqual([
+          ["pending", "OLI-42", null],
+          ["failed", "OLI-43", reason],
+          ["failed", null, reason],
         ]);
         // OLI-42 was handed to automation; OLI-43 never left Backlog, and nobody would drive it.
         expect(h.log.lines).toEqual([
@@ -462,6 +681,134 @@ describe("Open.open unhappy path", () => {
             cause: refused,
           },
         ]);
+      }),
+  );
+
+  it.effect(
+    "a hand-off whose answer Linear lost, but that moved the ticket, opens the run as if it had answered",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = LinearErrors.LinearError.make({
+          operation: "describeIssue",
+          message: "linear: request failed: no answer within 10 seconds",
+          retryable: true,
+        });
+        let sends = 0;
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: {
+              describeIssue: () =>
+                Effect.suspend(() => {
+                  sends += 1;
+                  return Effect.fail(unanswered);
+                }),
+              issueStateId: () => Effect.succeed(TestingLinear.STATES.automationNeeded),
+            },
+          }),
+        });
+        h.tests.definitions.push(install);
+        const opened = yield* Open.open(named("Install Omarchy")).pipe(Effect.provide(services(h)));
+        expect(opened.tests.map((test) => test.linear.identifier)).toEqual(["OLI-42"]);
+        expect(h.tests.runs[0]?.status).not.toBe("failed");
+        expect(h.tests.results.map((row) => [row.status, row.linearId])).toEqual([
+          ["pending", "OLI-42"],
+        ]);
+        expect(sends).toBe(1);
+        expect(h.log.lines.filter((line) => line.level === "error")).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a hand-off Linear did not answer that left the ticket in Backlog still fails the run (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = LinearErrors.LinearError.make({
+          operation: "describeIssue",
+          message: "linear: request failed: no answer within 10 seconds",
+          retryable: true,
+        });
+        let sends = 0;
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: {
+              describeIssue: () =>
+                Effect.suspend(() => {
+                  sends += 1;
+                  return Effect.fail(unanswered);
+                }),
+              issueStateId: () => Effect.succeed(TestingLinear.STATES.backlog),
+            },
+          }),
+        });
+        h.tests.definitions.push(install);
+        const error = yield* Open.open(named("Install Omarchy")).pipe(
+          Effect.provide(services(h)),
+          Effect.flip,
+        );
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          message: `${unanswered.message}; created OLI-42`,
+        });
+        expect(sends).toBe(1);
+        expect(h.tests.runs[0]?.status).toBe("failed");
+        expect(h.log.lines).toEqual([
+          expect.objectContaining({
+            level: "error",
+            text: `ticket trapped in Backlog; ${unanswered.message}`,
+            agentId: "OLI-42",
+          }),
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a hand-off Linear did not answer whose state will not read either keeps the first failure (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = LinearErrors.LinearError.make({
+          operation: "describeIssue",
+          message: "linear: request failed: no answer within 10 seconds",
+          retryable: true,
+        });
+        let sends = 0;
+        const read = yield* Deferred.make<void>();
+        const h = H.harness({
+          linear: TestingLinear.fakeLinear({
+            overrides: {
+              describeIssue: () =>
+                Effect.suspend(() => {
+                  sends += 1;
+                  return Effect.fail(unanswered);
+                }),
+              issueStateId: () =>
+                Deferred.succeed(read, undefined).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      LinearErrors.LinearError.make({
+                        operation: "issueStateId",
+                        message: "linear: request failed (503): busy",
+                        status: 503,
+                        retryable: true,
+                      }),
+                    ),
+                  ),
+                ),
+            },
+          }),
+        });
+        h.tests.definitions.push(install);
+        const fiber = yield* Effect.forkChild(
+          Open.open(named("Install Omarchy")).pipe(Effect.provide(services(h)), Effect.flip),
+        );
+        yield* Deferred.await(read);
+        yield* TestClock.adjust("2 seconds");
+        const error = yield* Fiber.join(fiber);
+        expect(error).toMatchObject({
+          _tag: "LinearError",
+          operation: "describeIssue",
+          message: `${unanswered.message}; created OLI-42`,
+        });
+        expect(h.tests.runs[0]?.status).toBe("failed");
       }),
   );
 
@@ -914,6 +1261,26 @@ describe("Open.openMints unhappy path", () => {
         // OLI-42 was handed off and the second ticket never existed: nothing is trapped, and
         // nothing was created as a whole.
         expect(h.log.lines).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "a create Linear did not answer fails that server's run, is not sent again, and reaches no later server",
+    () =>
+      Effect.gen(function* () {
+        const linear = creates(new Map([[1, noAnswer("createIssue")]]));
+        const h = H.harness({ linear: linear.linear });
+        const setup = claimStore(h);
+        const error = yield* Open.openMints(mints([QEMU_A, QEMU_B])).pipe(
+          Effect.provide(mintServices(h, setup)),
+          Effect.flip,
+        );
+        const message = "linear: request failed: no answer within 10 seconds";
+        expect(error).toMatchObject({ _tag: "LinearError", operation: "createIssue", message });
+        expect(linear.sent.count).toBe(1);
+        expect(h.tests.runs.map((run) => [run.status, run.reason])).toEqual([["failed", message]]);
+        expect(h.tests.results.map((row) => row.status)).toEqual(["failed"]);
+        expect(setup.claims).toEqual([]);
       }),
   );
 

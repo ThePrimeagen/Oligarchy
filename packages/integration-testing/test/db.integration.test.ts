@@ -1259,17 +1259,28 @@ Postgres.describeWithDatabase("database", () => {
       }),
     );
 
-    scoped.effect("TestStore.failRun marks the run and every result failed", () =>
+    scoped.effect("TestStore.failRun marks the run and the results it names failed", () =>
       Effect.gen(function* () {
         const tests = yield* Tests.TestStore;
         const database = yield* Client.Database;
         const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+        const other = yield* tests.defineTestDefinition({
+          name: `handed-off-${uuid()}`,
+          description: "a ticket that reached automation",
+          instruction: "open a terminal",
+          proof: "the terminal",
+        });
         const created = yield* tests.createRun({
           iso: "https://example.com/omarchy.iso",
           serverUrl: "http://127.0.0.1:42069",
-          definitions: [{ id: definition.id }],
+          definitions: [{ id: definition.id }, { id: other.id }],
         });
-        yield* tests.failRun(created.runId, "linear: request failed (401)");
+        const failed = created.results.find((row) => row.definitionId === definition.id);
+        const standing = created.results.find((row) => row.definitionId === other.id);
+        if (failed === undefined || standing === undefined) {
+          return yield* Effect.die(new Error("createRun made no results"));
+        }
+        yield* tests.failRun(created.runId, "linear: request failed (401)", [failed.id]);
         const [run] = yield* database.run("select", (db) =>
           db.select().from(DbSchema.testRuns).where(eq(DbSchema.testRuns.id, created.runId)),
         );
@@ -1280,16 +1291,18 @@ Postgres.describeWithDatabase("database", () => {
         });
         expect(run).not.toHaveProperty("model");
         expect(run?.endedAt).toBeInstanceOf(Date);
-        const results = yield* database.run("select", (db) =>
-          db
-            .select()
-            .from(DbSchema.testResults)
-            .where(eq(DbSchema.testResults.runId, created.runId)),
-        );
-        expect(results.map((row) => row.status)).toEqual(["failed"]);
-        expect(results[0]?.reason).toBe("linear: request failed (401)");
-        expect(results[0]?.model).toBeNull();
-        expect(results[0]?.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
+        const result = Option.getOrThrow(yield* tests.findResult(failed.id));
+        expect(result.status).toBe("failed");
+        expect(result.reason).toBe("linear: request failed (401)");
+        expect(result.model).toBeNull();
+        expect(result.finishedAt?.getTime()).toBe(run?.endedAt?.getTime());
+        // A result the call does not name, a ticket already handed off, is left as it was.
+        expect(Option.getOrThrow(yield* tests.findResult(standing.id))).toMatchObject({
+          status: "pending",
+          reason: null,
+          finishedAt: null,
+        });
+        return yield* Effect.void;
       }),
     );
 

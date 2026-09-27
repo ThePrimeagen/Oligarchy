@@ -102,6 +102,10 @@ const STATE_QUERY =
 const TICKET_STATE_QUERY =
   "query ExperimentTicketState($ticket: String!, $state: String!) { issue(id: $ticket) { team { states(filter: { name: { eq: $state } }, first: 1) { nodes { id } } } } }";
 
+// The column a ticket sits in now, by its Linear id.
+const ISSUE_STATE_QUERY =
+  "query ExperimentIssueState($id: String!) { issue(id: $id) { state { id } } }";
+
 const ISSUE_CREATE_MUTATION = `mutation ExperimentIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     success
@@ -172,6 +176,9 @@ const IssueCreate = Schema.Struct({
   issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.NullOr(LinearTicket) }),
 });
 const IssueUpdate = Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean }) });
+const IssueState = Schema.Struct({
+  issue: Schema.Struct({ state: Schema.Struct({ id: Schema.String }) }),
+});
 const CommentCreate = Schema.Struct({
   commentCreate: Schema.Struct({ success: Schema.Boolean }),
 });
@@ -221,6 +228,7 @@ export type LinearService = {
     ticket: LinearTicket,
     stateId: string,
   ) => Effect.Effect<void, Errors.LinearError>;
+  readonly issueStateId: (ticket: LinearTicket) => Effect.Effect<string, Errors.LinearError>;
   // identifier is the OLI shorthand stored on the result. issueUpdate accepts it.
   readonly markReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
   readonly clearReady: (identifier: string) => Effect.Effect<void, Errors.LinearError>;
@@ -551,6 +559,16 @@ const makeLinear = (
       );
     });
 
+    const issueStateId = Effect.fn("Linear.issueStateId")(function* (ticket: LinearTicket) {
+      const found = yield* request(
+        "issueStateId",
+        ISSUE_STATE_QUERY,
+        { id: ticket.id },
+        IssueState,
+      );
+      return found.issue.state.id;
+    });
+
     const listIssues = (
       operation: "listBacklog" | "listAutomationNeeded" | "listNeedsReview",
       filter: IssueFilter,
@@ -666,6 +684,7 @@ const makeLinear = (
       createIssue,
       describeIssue,
       moveIssue,
+      issueStateId,
       markReady,
       clearReady,
       moveToErrored,

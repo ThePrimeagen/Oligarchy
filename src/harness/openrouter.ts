@@ -15,7 +15,9 @@ import * as Errors from "./errors.ts";
 // the three-minute OpenCode options were papering over. A 429 or 5xx is retried for the
 // Retry-After the response names, or the configured default when it names none, and not at all
 // when that wait would run past the run ceiling. One reported inside the stream, after the 200,
-// is retried the same way after the configured default.
+// is retried the same way after the configured default, and so is either timeout: a completion
+// has no side effect but its cost. A stream that closes before its completion is not, since it
+// ends at once and a provider cutting every answer short would be billed every default.
 // A 4xx other than 429 refused the request. Anything that never produced a completion left the
 // service unreachable.
 
@@ -33,7 +35,8 @@ export type Options = {
     readonly chunk: Duration.Duration;
   };
   readonly runCeiling: Duration.Duration;
-  // Wait when a 429 or 5xx names no Retry-After. oligarchy.json's harness.defaultRetry.
+  // Wait when a 429 or 5xx names no Retry-After, and after a timeout. oligarchy.json's
+  // harness.defaultRetry.
   readonly defaultRetry: Duration.Duration;
   // The run's start on the same clock, so a retry can be refused before the ceiling.
   readonly startedAtMillis: number;
@@ -181,9 +184,6 @@ type PartialCall = {
   arguments: string;
 };
 
-const headerTimeout = unreachable("openrouter: no response within header timeout", null);
-const chunkTimeout = unreachable("openrouter: no chunk within chunk timeout", null);
-
 export const complete = Effect.fn("OpenRouter.complete")(function* (options: Options) {
   const client = yield* HttpClient.HttpClient;
   const url = chatCompletionsUrl(options.baseUrl);
@@ -204,6 +204,9 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       }
       return yield* RetryWait.make({ delayMillis: Duration.toMillis(delay) });
     });
+
+  const headerTimeout = waitOrGiveUp(options.defaultRetry, "no response within header timeout");
+  const chunkTimeout = waitOrGiveUp(options.defaultRetry, "no chunk within chunk timeout");
 
   const readEvents = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
@@ -334,15 +337,13 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
               return yield* chunkTimeout;
             }
             const step = yield* pull.pipe(
-              Effect.timeoutOrElse({
-                duration: Duration.subtract(options.timeouts.chunk, quiet),
-                orElse: () => Effect.fail(chunkTimeout),
-              }),
               Effect.map((bytes) => ({ _tag: "chunk" as const, bytes })),
               Pull.catchDone(() => Effect.succeed({ _tag: "end" as const })),
-              Effect.mapError((error) =>
-                error._tag === "OpenRouterUnreachable" ? error : invalid(error),
-              ),
+              Effect.mapError(invalid),
+              Effect.timeoutOrElse({
+                duration: Duration.subtract(options.timeouts.chunk, quiet),
+                orElse: () => chunkTimeout,
+              }),
             );
             if (step._tag === "end") {
               return yield* Effect.void;
@@ -383,14 +384,14 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
     });
 
   // Headers are already in. The body is the next chunk: a 429 or a refusal that never
-  // finishes writing must fail here, not hold the run out to its ceiling.
+  // finishes writing must time out here, not hold the run out to its ceiling.
   const readText = (response: HttpClientResponse.HttpClientResponse) =>
     response.text.pipe(
+      Effect.mapError(invalid),
       Effect.timeoutOrElse({
         duration: options.timeouts.chunk,
-        orElse: () => Effect.fail(chunkTimeout),
+        orElse: () => chunkTimeout,
       }),
-      Effect.mapError((error) => (error._tag === "OpenRouterUnreachable" ? error : invalid(error))),
     );
 
   const retryOrGiveUp = (response: HttpClientResponse.HttpClientResponse) =>
@@ -428,13 +429,11 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
       }),
     );
     const response = yield* client.execute(request).pipe(
+      Effect.mapError(fromTransport),
       Effect.timeoutOrElse({
         duration: options.timeouts.header,
-        orElse: () => Effect.fail(headerTimeout),
+        orElse: () => headerTimeout,
       }),
-      Effect.mapError((error) =>
-        error._tag === "OpenRouterUnreachable" ? error : fromTransport(error),
-      ),
     );
     if (retryable(response.status)) {
       return yield* retryOrGiveUp(response);

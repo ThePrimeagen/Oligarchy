@@ -138,6 +138,8 @@ The dashboard answers the same run at `POST /create-test-suite-run`, opening the
 
 Tickets are born in `Backlog` and moved to `Automation Needed` as in `test run`. An empty table, or one holding only `mint`, is refused before Linear: `test: no test definitions found`.
 
+A ticket Linear did not answer for (no connection, a timeout, a 429 or a 5xx on its create, or on its hand-off when the ticket is still in `Backlog` after or its column will not read) fails that definition's result alone, and the rest are still filed; a second such ticket in a row, or any other failure, stops the suite there. Either way the results already handed to `Automation Needed` stand, every other result fails, and the command exits 1 with `<error>[; created OLI-n, …][; failed <definition>, …]`: every ticket whose create Linear answered, handed off or not, and, when some were handed off, every definition to file again (when none were, the whole run failed and the names are left out). A create whose answer was lost is never sent again: Linear may still have made the issue, and one it did sits in `Backlog`, titled `Omarchy: <definition>`, under no ticket the line names, for deleting by hand.
+
 ```bash
 ./ctrl test run testsuite --server-url https://qemu.example.com --iso https://example.com/omarchy.iso --version 1.2.3
 ```

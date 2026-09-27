@@ -87,7 +87,7 @@ const call = (body: unknown): Response =>
     "[DONE]",
   ]);
 
-const client = (reason: string, args: ReadonlyArray<string>, step = 1): Response =>
+const client = (reason: string, args: ReadonlyArray<string | number>, step = 1): Response =>
   call({ name: "client", arguments: { step, reason, args } });
 
 const done = (): Response => call({ name: "Done", arguments: {} });
@@ -721,14 +721,121 @@ describe("driver loop", () => {
         });
         const { spawner } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
         expect(spawner.spawned.map((child) => child.command)).toEqual(["./ctrl", "./ctrl"]);
+        // Each refusal ends the intent the server holds and asks once more.
         expect(guestPaths(recorder.requests)).toEqual([
           "/start",
           "/intent/start",
+          "/intent/end",
+          "/intent/start",
+          "/intent/start",
+          "/intent/end",
           "/intent/start",
           "/stop",
         ]);
         expect(past(recorder.requests, 0)).toContain("already running");
         expect(past(recorder.requests, 1)).toContain("step 1: send-keys");
+      }),
+  );
+
+  it.effect(
+    "an intent the server still holds after a lost end is ended, and the step opens and runs",
+    () =>
+      Effect.gen(function* () {
+        let starts = 0;
+        const recorder = routed(answers(sendKeys("press the key", 2), done()), (url) => {
+          if (url.pathname === "/start") {
+            return TestingHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/intent/start") {
+            starts += 1;
+            return starts === 2
+              ? TestingHttp.json(
+                  {
+                    error:
+                      "Cannot start one intent when one's already running. Please end your previous intent.",
+                  },
+                  400,
+                )
+              : TestingHttp.json({ ok: "true" });
+          }
+          if (url.pathname === "/intent/end") {
+            return starts === 2
+              ? TestingHttp.json({ ok: "true" })
+              : TestingHttp.json({ error: "request failed: no answer" }, 502);
+          }
+          return TestingHttp.json({ ok: "true" });
+        });
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(stopped).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests)).toEqual([
+          "/start",
+          "/intent/start",
+          "/intent/end",
+          "/intent/start",
+          "/intent/end",
+          "/intent/start",
+          "/send-keys",
+          "/stop",
+        ]);
+      }),
+  );
+
+  it.effect(
+    "a start refused again for another reason after the held intent ends carries that reason (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        let starts = 0;
+        const recorder = routed(answers(sendKeys(null), done()), (url) => {
+          if (url.pathname === "/start") {
+            return TestingHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/intent/start") {
+            starts += 1;
+            return starts % 2 === 1
+              ? TestingHttp.json(
+                  {
+                    error:
+                      "Cannot start one intent when one's already running. Please end your previous intent.",
+                  },
+                  400,
+                )
+              : TestingHttp.json({ error: "intent refused: session busy" }, 400);
+          }
+          return TestingHttp.json({ ok: "true" });
+        });
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        expect(guestPaths(recorder.requests)).not.toContain("/send-keys");
+        expect(past(recorder.requests, 0)).toContain("intent refused: session busy");
+        expect(past(recorder.requests, 0)).not.toContain("already running");
+      }),
+  );
+
+  it.effect(
+    "an intent the server holds that will not end leaves the step unopened and runs nothing (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(sendKeys(null), done()), (url) => {
+          if (url.pathname === "/start") {
+            return TestingHttp.json({ id: SESSION });
+          }
+          if (url.pathname === "/intent/start") {
+            return TestingHttp.json(
+              {
+                error:
+                  "Cannot start one intent when one's already running. Please end your previous intent.",
+              },
+              400,
+            );
+          }
+          return url.pathname === "/intent/end"
+            ? TestingHttp.json({ error: "no intent open" }, 400)
+            : TestingHttp.json({ ok: "true" });
+        });
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), []);
+        const paths = guestPaths(recorder.requests);
+        expect(paths).not.toContain("/send-keys");
+        expect(paths.filter((path) => path === "/intent/start")).toHaveLength(2);
+        expect(past(recorder.requests, 1)).toContain("already running");
       }),
   );
 
@@ -1730,6 +1837,26 @@ describe("driver loop", () => {
         expect(Exit.isSuccess(exit) && exit.value.stopped).toEqual({ reason: "result-closed" });
         expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
           expect.objectContaining({ x: 0.25, y: 0.75, button: "left" }),
+        ]);
+      }),
+    );
+
+    it.effect("a mouse move with JSON numbers drives the guest and is not a bad reply", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            client("point at Lock", ["mouse", "move", "--x", 0.5, "--y", 0.678]),
+            click(),
+            done(),
+          ),
+        );
+        const exit = yield* driven(recorder);
+        expect(Exit.isSuccess(exit) && exit.value.stopped).toEqual({ reason: "result-closed" });
+        expect(bodiesAt(recorder.requests, "/mouse/move")).toEqual([
+          expect.objectContaining({ x: 0.5, y: 0.678 }),
+        ]);
+        expect(bodiesAt(recorder.requests, "/mouse/click")).toEqual([
+          expect.objectContaining({ x: 0.5, y: 0.678 }),
         ]);
       }),
     );

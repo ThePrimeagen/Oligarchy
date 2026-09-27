@@ -127,7 +127,7 @@ export const fakeTestStore = (
         });
         return { runId, results: created };
       }),
-    failRun: (runId, reason) =>
+    failRun: (runId, reason, resultIds) =>
       Effect.sync(() => {
         const now = new Date();
         for (const run of runs) {
@@ -138,7 +138,10 @@ export const fakeTestStore = (
           }
         }
         for (const result of results) {
-          if (sameId(result.runId, runId)) {
+          if (
+            sameId(result.runId, runId) &&
+            resultIds.some((resultId) => sameId(result.id, resultId))
+          ) {
             result.status = "failed";
             result.reason = reason;
             result.finishedAt = now;

@@ -1,4 +1,4 @@
-import { Array as Arr, Cause, Effect, Option } from "effect";
+import { Array as Arr, Cause, Effect, Option, Result } from "effect";
 import * as DbErrors from "@oligarchy/db/errors";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
 import * as Tests from "@oligarchy/db/tests";
@@ -102,6 +102,28 @@ const trapped =
     });
   };
 
+// The one update that writes a new ticket's description and moves it out of Backlog, which
+// queues its action. It is never sent twice: when Linear does not answer, the update may still
+// have landed, so the ticket's column is read instead (asked once more if that read gets no
+// answer either). A ticket that has left Backlog was handed off; one still in Backlog, or one
+// whose column cannot be read, is the hand-off failing.
+const handOff = (
+  linear: typeof Linear.Linear.Service,
+  created: Linear.LinearTicket,
+  description: string,
+  states: Linear.WorkflowStateIds,
+) =>
+  linear.describeIssue(created, description, states.automationNeeded).pipe(
+    Effect.catchIf(
+      (error) => error.retryable === true,
+      (error) =>
+        Retry.linearRead(linear.issueStateId(created)).pipe(
+          Effect.catch(() => Effect.fail(error)),
+          Effect.flatMap((state) => (state === states.backlog ? Effect.fail(error) : Effect.void)),
+        ),
+    ),
+  );
+
 // One ticket, born in Backlog: the automation server queues nothing there, so the create webhook
 // cannot beat the job's Linear id to the row. `body` writes what must land before the action can
 // be queued, then renders the description, which names the ticket and so waits for its creation.
@@ -125,9 +147,7 @@ const ticket = <E, R>(
     });
     tickets.push(created);
     yield* body(created).pipe(
-      Effect.flatMap((description) =>
-        linear.describeIssue(created, description, to.states.automationNeeded),
-      ),
+      Effect.flatMap((description) => handOff(linear, created, description, to.states)),
       Effect.onError(trapped(log, created)),
     );
     return created;
@@ -142,6 +162,7 @@ const withReason = {
       Object.assign(
         { operation: error.operation, message },
         error.status === undefined ? undefined : { status: error.status },
+        error.retryable === undefined ? undefined : { retryable: error.retryable },
         withCause(error.cause),
       ),
     ),
@@ -155,11 +176,15 @@ const withReason = {
   SetupHeld: (_error: Errors.SetupHeld, message: string) => Errors.SetupHeld.make({ message }),
 };
 
-// A failure fails the run and every job in it with the reason, naming the tickets that did get
-// created so they can be cleaned up by hand; the error goes on carrying that reason. A run that
-// will not take it is a line: the failure that stopped the run is the one the caller reports.
+// A failure fails the run and the jobs in `failed`, the ones whose tickets were not handed off,
+// with the reason: it names every ticket that did get created, so one left in Backlog can be
+// found and cleaned up by hand, then the definitions in `named`, when part of the run stands, so
+// they can be filed again. The error goes on carrying that reason. A run that will not take it
+// is a line: the failure that stopped the run is the one the caller reports.
 const failRun = <E extends { readonly message: string }>(
   runId: string,
+  failed: ReadonlyArray<string>,
+  named: ReadonlyArray<string>,
   tickets: ReadonlyArray<Linear.LinearTicket>,
   error: E,
   rename: (error: E, reason: string) => E,
@@ -168,15 +193,21 @@ const failRun = <E extends { readonly message: string }>(
     const tests = yield* Tests.TestStore;
     const log = yield* Log.Log;
     const created = tickets.map((issued) => issued.identifier).join(", ");
-    const reason = created === "" ? error.message : `${error.message}; created ${created}`;
+    const reason = [
+      error.message,
+      created === "" ? "" : `created ${created}`,
+      named.length === 0 ? "" : `failed ${named.join(", ")}`,
+    ]
+      .filter((part) => part !== "")
+      .join("; ");
     yield* tests
-      .failRun(runId, reason)
+      .failRun(runId, reason, failed)
       .pipe(
         Effect.catchTag("DatabaseError", (write) =>
           log.error(`failRun failed; ${runId}: ${Errors.detail(write)}`, { cause: write }),
         ),
       );
-    return yield* Effect.fail(created === "" ? error : rename(error, reason));
+    return yield* Effect.fail(reason === error.message ? error : rename(error, reason));
   });
 
 // `./ctrl test run --name <definition>`, and `test run testsuite`, which names none: one pending
@@ -219,34 +250,71 @@ export const open = Effect.fn("Open.open")(function* (input: {
   });
 
   const tickets: Array<Linear.LinearTicket> = [];
-  const opened = yield* Effect.gen(function* () {
-    const to = yield* team(input.version);
-    return yield* Effect.forEach(jobs, ({ id, definition }) =>
-      ticket(to, `Omarchy: ${definition.name}`, tickets, (issued) =>
-        Effect.gen(function* () {
-          // Webhooks name the ticket by its identifier; the job carries it so the automation
-          // queue finds the row without parsing the ticket body.
-          yield* tests.setLinearId(id, issued.identifier);
-          return yield* Templates.renderLinearIssue({
-            LINEAR_TICKET: issued.identifier,
-            RUN_ID: created.runId,
-            RESULT_ID: id,
-            VERSION: input.version,
-            ISO_URL: input.iso,
-            SERVER_URL: input.serverUrl,
-            TEST_NAME: definition.name,
-            TEST_DESCRIPTION: definition.description,
-            TEST_INSTRUCTION: definition.instruction,
-            TEST_PROOF: definition.proof,
-          });
-        }),
-      ).pipe(Effect.map((linear) => ({ id, linear }))),
+  const opened: Array<{ readonly id: string; readonly linear: Linear.LinearTicket }> = [];
+  // A failure fails every job not handed off; their definitions are named when some were.
+  const failSuite = <E extends { readonly message: string }>(
+    error: E,
+    rename: (error: E, reason: string) => E,
+  ) => {
+    const handedOff = new Set(opened.map((test) => test.id));
+    const failed = jobs.filter((job) => !handedOff.has(job.id));
+    return failRun(
+      created.runId,
+      failed.map((job) => job.id),
+      opened.length === 0 ? [] : failed.map((job) => job.definition.name),
+      tickets,
+      error,
+      rename,
     );
+  };
+  yield* Effect.gen(function* () {
+    const to = yield* team(input.version);
+    // A ticket Linear did not answer for is that ticket's failure: the suite files the rest,
+    // and fails once every definition has been tried. A second one in a row is Linear down, and
+    // stops the suite rather than leave a Backlog ticket, or an unanswered create, per
+    // definition; so does any other failure, which every ticket after it would repeat.
+    let lost: Option.Option<LinearErrors.LinearError> = Option.none();
+    let lostLast = false;
+    for (const { id, definition } of jobs) {
+      const filed = yield* Effect.result(
+        ticket(to, `Omarchy: ${definition.name}`, tickets, (issued) =>
+          Effect.gen(function* () {
+            // Webhooks name the ticket by its identifier; the job carries it so the automation
+            // queue finds the row without parsing the ticket body.
+            yield* tests.setLinearId(id, issued.identifier);
+            return yield* Templates.renderLinearIssue({
+              LINEAR_TICKET: issued.identifier,
+              RUN_ID: created.runId,
+              RESULT_ID: id,
+              VERSION: input.version,
+              ISO_URL: input.iso,
+              SERVER_URL: input.serverUrl,
+              TEST_NAME: definition.name,
+              TEST_DESCRIPTION: definition.description,
+              TEST_INSTRUCTION: definition.instruction,
+              TEST_PROOF: definition.proof,
+            });
+          }),
+        ),
+      );
+      if (Result.isSuccess(filed)) {
+        opened.push({ id, linear: filed.success });
+        lostLast = false;
+        continue;
+      }
+      const error = filed.failure;
+      if (error._tag !== "LinearError" || error.retryable !== true || lostLast) {
+        return yield* Effect.fail(error);
+      }
+      lost = Option.some(error);
+      lostLast = true;
+    }
+    return yield* Option.match(lost, { onNone: () => Effect.void, onSome: Effect.fail });
   }).pipe(
     Effect.catchTags({
-      LinearError: (error) => failRun(created.runId, tickets, error, withReason.LinearError),
-      PromptError: (error) => failRun(created.runId, tickets, error, withReason.PromptError),
-      DatabaseError: (error) => failRun(created.runId, tickets, error, withReason.DatabaseError),
+      LinearError: (error) => failSuite(error, withReason.LinearError),
+      PromptError: (error) => failSuite(error, withReason.PromptError),
+      DatabaseError: (error) => failSuite(error, withReason.DatabaseError),
     }),
   );
 
@@ -289,6 +357,10 @@ const mintJob = (input: {
       ),
       Effect.orDie,
     );
+    const failMint = <E extends { readonly message: string }>(
+      error: E,
+      rename: (error: E, reason: string) => E,
+    ) => failRun(created.runId, [result.id], [], input.tickets, error, rename);
     const linear = yield* ticket(
       input.to,
       `Omarchy mint: ${input.pinned}`,
@@ -312,14 +384,11 @@ const mintJob = (input: {
         }),
     ).pipe(
       Effect.catchTags({
-        LinearError: (error) =>
-          failRun(created.runId, input.tickets, error, withReason.LinearError),
-        PromptError: (error) =>
-          failRun(created.runId, input.tickets, error, withReason.PromptError),
-        DatabaseError: (error) =>
-          failRun(created.runId, input.tickets, error, withReason.DatabaseError),
-        SetupGone: (error) => failRun(created.runId, input.tickets, error, withReason.SetupGone),
-        SetupHeld: (error) => failRun(created.runId, input.tickets, error, withReason.SetupHeld),
+        LinearError: (error) => failMint(error, withReason.LinearError),
+        PromptError: (error) => failMint(error, withReason.PromptError),
+        DatabaseError: (error) => failMint(error, withReason.DatabaseError),
+        SetupGone: (error) => failMint(error, withReason.SetupGone),
+        SetupHeld: (error) => failMint(error, withReason.SetupHeld),
       }),
     );
     return { id: created.runId, result: result.id, server: input.pinned, linear };

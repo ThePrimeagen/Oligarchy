@@ -237,8 +237,11 @@ Durable preferences from the maintainer; when they conflict with generic best pr
   ticket, which move together, and an action is one of its `automation_jobs` rows (a drive, mint
   or diagnose). It holds `open.ts` (`open` for `./ctrl test run` and the dashboard's suite,
   `openMint` for the proxy's setup, `openMints` for `./ctrl mint`, `mintDefinition`,
-  `MINT_DEFINITION`; a failure fails the run it was opening and names the tickets created, and a
-  run that will not take that failure is a line), `close.ts` (`close`, `fail`,
+  `MINT_DEFINITION`; a failure fails the run it was opening and every job not yet handed off,
+  names the tickets created, and, in a suite where some were handed off, the definitions that
+  were not; a suite files past one ticket Linear did not answer, never two in a row; a run that
+  will not take that failure is a line),
+  `close.ts` (`close`, `fail`,
   `judge`, `moveTicket`: three attempts, then a line), `retry.ts` (`linearRead`: a Linear read
   asked once more, two seconds later, when its `LinearError` is `retryable`; never a write), `ready.ts` (`mark`,
   `release`), `board.ts` (which column asks for which action: `asks`, `actionFor`, `enqueue`,
@@ -706,9 +709,9 @@ export const decodeFollowLine = (line: string): Effect.Effect<FollowEvent, Schem
   marking a result started or completed belong to the harness, which reports the result closed.
   The step limit counts tool calls.
 - The OpenRouter client lives in `src/harness/openrouter.ts`. It posts one streaming chat
-  completion, fails when no headers or no next chunk arrive within the configured timeouts, and
-  retries an HTTP 429 or 5xx only when `retry-after` fits inside the run ceiling. A missing or
-  malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`. A refused
+  completion, and retries an HTTP 429 or 5xx only when `retry-after` fits inside the run ceiling.
+  A missing or malformed `retry-after` waits `harness.defaultRetry` from `oligarchy.json`, and
+  so do no headers or no next chunk within the configured timeouts. A refused
   request and an unreachable service are different errors. Its tests answer a fake OpenRouter.
 - `./driver` runs that loop for one prompt and one model. The only identity it is given is
   `--agent-id`, the ticket on the result. From that row it loads the definition, the proof, the

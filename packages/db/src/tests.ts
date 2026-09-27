@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ne, notInArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Client from "./client.ts";
 import * as DbSchema from "./schema.ts";
@@ -128,7 +128,13 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
       );
     });
 
-    const failRun = Effect.fn("db.failRun")(function* (runId: string, reason: string) {
+    // Only the results named: the run's others may be handed to automation already, and their
+    // drives close them.
+    const failRun = Effect.fn("db.failRun")(function* (
+      runId: string,
+      reason: string,
+      resultIds: ReadonlyArray<string>,
+    ) {
       const finishedAt = sql`now()`;
       yield* database.transaction("failRun", (tx) =>
         Effect.gen(function* () {
@@ -142,7 +148,12 @@ export class TestStore extends Context.Service<TestStore>()("@oligarchy/db/TestS
             tx
               .update(DbSchema.testResults)
               .set({ status: "failed", reason, finishedAt })
-              .where(eq(DbSchema.testResults.runId, runId)),
+              .where(
+                and(
+                  eq(DbSchema.testResults.runId, runId),
+                  inArray(DbSchema.testResults.id, resultIds),
+                ),
+              ),
           );
         }),
       );

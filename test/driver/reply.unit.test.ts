@@ -134,6 +134,9 @@ describe("reply", () => {
       line({ name: "bash", arguments: { args: ["ls"] } }),
       line({ name: "client", arguments: { step: 1, reason: "   ", args: ["start"] } }),
       line({ name: "client", arguments: { step: 1, reason: "boot", args: [] } }),
+      line({ name: "client", arguments: { step: 1, reason: "move", args: "mouse move" } }),
+      line({ name: "client", arguments: { step: 1, reason: "move", args: 0.5 } }),
+      line({ name: "client", arguments: { step: 1, reason: "move", args: { x: 0.5 } } }),
       line({ name: "Done", arguments: { step: 1, reason: "finished" } }),
       line({ name: "Done", arguments: [] }),
       line({ name: "Done", arguments: 1 }),
@@ -193,6 +196,68 @@ describe("reply", () => {
       expect.fail("an empty action parsed");
     }
     expect(empty.failure.message).toContain("action");
+  });
+
+  it("reads a JSON number in args as the string the client parses", () => {
+    const move = parsedClient(
+      line({
+        name: "client",
+        arguments: {
+          step: 5,
+          reason: "point at Lock",
+          args: ["mouse", "move", "--x", 0.5, "--y", 0.678],
+        },
+      }),
+    );
+    expect(move.args).toEqual(["mouse", "move", "--x", "0.5", "--y", "0.678"]);
+    const scroll = parsedClient(
+      line({
+        name: "client",
+        arguments: { step: 1, reason: "scroll", args: ["mouse", "scroll", "--ticks", 3] },
+      }),
+    );
+    expect(scroll.args).toEqual(["mouse", "scroll", "--ticks", "3"]);
+    const edge = parsedClient(
+      '{"name":"client","arguments":{"step":1,"reason":"edge","args":["mouse","move","--x",0,"--y",1.0]}}',
+    );
+    expect(edge.args).toEqual(["mouse", "move", "--x", "0", "--y", "1"]);
+    const signed = parsedClient(
+      '{"name":"client","arguments":{"step":1,"reason":"signed and small","args":["mouse","move","--x",-0,"--y",1e-7]}}',
+    );
+    expect(signed.args).toEqual(["mouse", "move", "--x", "0", "--y", "1e-7"]);
+  });
+
+  it("refuses an arg that is neither a string nor a number, and names where (unhappy)", () => {
+    for (const bad of [true, null, {}, [], ["0.5"]]) {
+      const parsed = Reply.parse(
+        line({
+          name: "client",
+          arguments: { step: 1, reason: "move", args: ["mouse", "move", "--x", bad] },
+        }),
+      );
+      if (Result.isSuccess(parsed)) {
+        expect.fail(`arg ${JSON.stringify(bad)} parsed`);
+      }
+      expect(parsed.failure.message.startsWith("reply:")).toBe(true);
+      expect(parsed.failure.message).toContain("string | number");
+      expect(parsed.failure.message).toContain('["args"][3]');
+    }
+  });
+
+  it("refuses a number that is not finite (unhappy)", () => {
+    const infinite = Reply.parse(
+      '{"name":"client","arguments":{"step":1,"reason":"move","args":["mouse","move","--x",1e999]}}',
+    );
+    if (Result.isSuccess(infinite)) {
+      expect.fail("an infinite arg parsed");
+    }
+    expect(infinite.failure.message.startsWith("reply:")).toBe(true);
+    expect(infinite.failure.message).toContain("finite");
+    expect(infinite.failure.message).toContain('["args"][3]');
+    const nan = Reply.parse(
+      '{"name":"client","arguments":{"step":1,"reason":"move","args":["mouse","move","--x",NaN]}}',
+    );
+    expect(Result.isFailure(nan)).toBe(true);
   });
 
   it("refuses an intent action", () => {

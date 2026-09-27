@@ -844,6 +844,52 @@ describe("Linear unhappy path", () => {
     }),
   );
 
+  it.effect("issueStateId reads the column a ticket sits in now", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("state { id }")
+          ? FakeHttp.json({ data: { issue: { state: { id: "state-automation-needed" } } } })
+          : happyLinear(body),
+      );
+      const state = yield* Effect.flatMap(Linear.Linear, (client) =>
+        client.issueStateId({
+          id: "issue-45",
+          identifier: "OLI-45",
+          url: "https://linear.app/OLI-45",
+        }),
+      ).pipe(Effect.provide(linear().pipe(Layer.provide(http.layer))));
+      expect(state).toBe("state-automation-needed");
+      const bodies: ReadonlyArray<GraphQl> = http.requests.map((request) =>
+        JSON.parse(request.body),
+      );
+      expect(bodies.map((body) => body.variables)).toEqual([{ id: "issue-45" }]);
+    }),
+  );
+
+  it.effect("issueStateId reports a ticket Linear will not answer for (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp((body) =>
+        body.query.includes("state { id }")
+          ? FakeHttp.json({ data: null, errors: [{ message: "Entity not found: Issue" }] })
+          : happyLinear(body),
+      );
+      const error = yield* failureOf(
+        Effect.flatMap(Linear.Linear, (client) =>
+          client.issueStateId({
+            id: "issue-45",
+            identifier: "OLI-45",
+            url: "https://linear.app/OLI-45",
+          }),
+        ),
+      ).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        _tag: "LinearError",
+        operation: "issueStateId",
+        message: "linear: Entity not found: Issue",
+      });
+    }),
+  );
+
   it.effect("clearReady on a ticket that does not carry the label is done", () =>
     Effect.gen(function* () {
       const http = withHttp((body) =>

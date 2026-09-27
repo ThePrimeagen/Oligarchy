@@ -17,12 +17,15 @@ export type Reply =
 const fail = (message: string): Result.Result<never, Errors.ToolError> =>
   Result.fail(Errors.ToolError.make({ message }));
 
+// Models write a number flag as a JSON number, `--x 0.5`; the client reads it as its string.
+const Arg = Schema.Union([Schema.String, Schema.flip(Schema.FiniteFromString)]);
+
 const ClientCall = Schema.Struct({
   name: Schema.Literal("client"),
   arguments: Schema.Struct({
     step: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
     reason: Schema.String,
-    args: Schema.Array(Schema.String),
+    args: Schema.Array(Arg),
   }),
 });
 

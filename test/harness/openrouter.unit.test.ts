@@ -2,7 +2,12 @@ import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import {
+  HttpClient,
+  HttpClientError,
+  type HttpClientRequest,
+  HttpClientResponse,
+} from "effect/unstable/http";
 import * as Render from "@oligarchy/log/render";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as OpenRouter from "../../src/harness/openrouter.ts";
@@ -273,62 +278,144 @@ describe("OpenRouter client", () => {
     }),
   );
 
-  it.effect("the header timeout fails the request before the run ceiling", () =>
+  it.effect("a header timeout is sent again after the configured default", () =>
     Effect.gen(function* () {
-      const fiber = yield* Effect.forkScoped(
-        run(TestingHttp.never, { header: Duration.minutes(3) }),
+      const recorder = TestingHttp.recordRequests(() =>
+        recorder.requests.length === 1 ? Effect.never : doneTurn(),
       );
-      yield* TestClock.adjust("2 minutes");
+      const fiber = yield* Effect.forkScoped(
+        run(recorder.layer, { header: Duration.minutes(3), defaultRetry: Duration.seconds(2) }),
+      );
+      yield* TestClock.adjust("3 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
-      yield* TestClock.adjust("1 minute");
-      const error = yield* Effect.flip(Fiber.join(fiber));
-      expect(error).toMatchObject({
-        _tag: "OpenRouterUnreachable",
-        message: "openrouter: no response within header timeout",
-      });
+      yield* TestClock.adjust("1 second");
+      expect(recorder.requests).toHaveLength(1);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(recorder.requests).toHaveLength(2);
+      expect(recorder.requests[1]?.body).toBe(recorder.requests[0]?.body);
     }),
   );
 
-  it.effect("a stall between chunks fails at the chunk timeout", () =>
+  it.effect("a header timeout is not sent again past the run ceiling (unhappy)", () =>
     Effect.gen(function* () {
-      // A web body that never reads again blocks the test clock. The stall is an Effect
-      // stream: one chunk, then nothing. The client times out the same way on a live body.
-      const bytes = new TextEncoder().encode(
-        `data: ${frame(choice({ content: "partial" }, null))}\n\n`,
-      );
-      const layer = Layer.succeed(HttpClient.HttpClient)(
-        HttpClient.make((request) => {
-          const response = HttpClientResponse.fromWeb(
-            request,
-            new Response(null, {
-              status: 200,
-              headers: { "content-type": "text/event-stream" },
-            }),
-          );
-          Object.defineProperty(response, "stream", {
-            configurable: true,
-            get: () => Stream.concat(Stream.make(bytes), Stream.never),
-          });
-          return Effect.succeed(response);
+      const recorder = TestingHttp.recordRequests(() => Effect.never);
+      const fiber = yield* Effect.forkScoped(
+        run(recorder.layer, {
+          header: Duration.minutes(3),
+          ceiling: Duration.minutes(5),
+          defaultRetry: Duration.minutes(1),
         }),
       );
+      yield* TestClock.adjust("2 minutes");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("2 minutes");
+      expect(recorder.requests).toHaveLength(2);
+      yield* TestClock.adjust("3 minutes");
+      const error = yield* Effect.flip(Fiber.join(fiber));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterUnreachable",
+        message:
+          "openrouter: retry delay of 1m would pass the run ceiling: no response within header timeout",
+      });
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  // Answers the nth request, counting from 1. A web body that never reads again blocks the test
+  // clock, so a stall here is an Effect that never ends; the client times out the same way on a
+  // live body.
+  const counted = (
+    respond: (
+      request: HttpClientRequest.HttpClientRequest,
+      sent: number,
+    ) => HttpClientResponse.HttpClientResponse,
+  ) => {
+    let sent = 0;
+    const layer = Layer.succeed(HttpClient.HttpClient)(
+      HttpClient.make((request) =>
+        Effect.sync(() => {
+          sent += 1;
+          return respond(request, sent);
+        }),
+      ),
+    );
+    return { layer, sent: () => sent };
+  };
+
+  // One event, then nothing.
+  const stalledStream = (request: HttpClientRequest.HttpClientRequest) => {
+    const response = HttpClientResponse.fromWeb(
+      request,
+      new Response(null, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    );
+    const bytes = new TextEncoder().encode(
+      `data: ${frame(choice({ content: "partial" }, null))}\n\n`,
+    );
+    Object.defineProperty(response, "stream", {
+      configurable: true,
+      get: () => Stream.concat(Stream.make(bytes), Stream.never),
+    });
+    return response;
+  };
+
+  // A status line whose body never arrives.
+  const stalledBody = (request: HttpClientRequest.HttpClientRequest, status: number) => {
+    const response = HttpClientResponse.fromWeb(request, new Response(null, { status }));
+    Object.defineProperty(response, "text", { configurable: true, get: () => Effect.never });
+    return response;
+  };
+
+  it.effect("a stall between chunks is sent again, and what streamed before it is dropped", () =>
+    Effect.gen(function* () {
+      const server = counted((request, sent) =>
+        sent === 1 ? stalledStream(request) : HttpClientResponse.fromWeb(request, doneTurn()),
+      );
       const fiber = yield* Effect.forkScoped(
-        run(layer, { chunk: Duration.minutes(3), header: Duration.minutes(3) }),
+        run(server.layer, { chunk: Duration.minutes(3), defaultRetry: Duration.seconds(2) }),
       );
       yield* TestClock.adjust("2 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
       yield* TestClock.adjust("1 minute");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("1 second");
+      expect(server.sent()).toBe(1);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(server.sent()).toBe(2);
+    }),
+  );
+
+  it.effect("stalls between chunks are not sent again past the run ceiling (unhappy)", () =>
+    Effect.gen(function* () {
+      const server = counted((request) => stalledStream(request));
+      const fiber = yield* Effect.forkScoped(
+        run(server.layer, {
+          chunk: Duration.minutes(3),
+          ceiling: Duration.minutes(5),
+          defaultRetry: Duration.minutes(1),
+        }),
+      );
+      yield* TestClock.adjust("4 minutes");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      expect(server.sent()).toBe(2);
+      yield* TestClock.adjust("3 minutes");
       const error = yield* Effect.flip(Fiber.join(fiber));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",
-        message: "openrouter: no chunk within chunk timeout",
+        message:
+          "openrouter: retry delay of 1m would pass the run ceiling: no chunk within chunk timeout",
       });
+      expect(server.sent()).toBe(2);
     }),
   );
 
   // OpenRouter keeps a stream open with `: OPENROUTER PROCESSING` comments while the provider
   // has not answered: bytes, not events. Each item here waits its delay on the test clock.
   const KEEP_ALIVE = ": OPENROUTER PROCESSING\n\n";
+  // A ceiling at the chunk timeout leaves no room to send again, so the first stall is final.
+  const lastStall =
+    "openrouter: retry delay of 1s would pass the run ceiling: no chunk within chunk timeout";
   const timed = (items: Stream.Stream<readonly [Duration.Input, string]>) => {
     const encoder = new TextEncoder();
     return Layer.succeed(HttpClient.HttpClient)(
@@ -359,29 +446,30 @@ describe("OpenRouter client", () => {
           Stream.forever(Stream.make(["30 seconds", KEEP_ALIVE] as const)),
         ),
       );
-      const fiber = yield* Effect.forkScoped(run(layer, { chunk: Duration.minutes(3) }));
+      const fiber = yield* Effect.forkScoped(
+        run(layer, { chunk: Duration.minutes(3), ceiling: Duration.minutes(3) }),
+      );
       yield* TestClock.adjust("2 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
       yield* TestClock.adjust("1 minute");
       expect(fiber.pollUnsafe()).toBeDefined();
       const error = yield* Effect.flip(Fiber.join(fiber));
-      expect(error).toMatchObject({
-        _tag: "OpenRouterUnreachable",
-        message: "openrouter: no chunk within chunk timeout",
-      });
+      expect(error).toMatchObject({ _tag: "OpenRouterUnreachable", message: lastStall });
     }),
   );
 
   it.effect("a stream of keep-alive comments from the start fails at the chunk timeout", () =>
     Effect.gen(function* () {
       const layer = timed(Stream.forever(Stream.make(["30 seconds", KEEP_ALIVE] as const)));
-      const fiber = yield* Effect.forkScoped(run(layer, { chunk: Duration.minutes(3) }));
+      const fiber = yield* Effect.forkScoped(
+        run(layer, { chunk: Duration.minutes(3), ceiling: Duration.minutes(3) }),
+      );
       yield* TestClock.adjust("2 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
       yield* TestClock.adjust("1 minute");
       expect(fiber.pollUnsafe()).toBeDefined();
       const error = yield* Effect.flip(Fiber.join(fiber));
-      expect(error.message).toBe("openrouter: no chunk within chunk timeout");
+      expect(error.message).toBe(lastStall);
     }),
   );
 
@@ -480,16 +568,17 @@ describe("OpenRouter client", () => {
     }),
   );
 
-  it.effect("a stream that closes before the completion is unreachable", () =>
+  it.effect("a stream that closes before the completion is unreachable and not sent again", () =>
     Effect.gen(function* () {
-      const layer = TestingHttp.respondWith(() =>
+      const recorder = TestingHttp.recordRequests(() =>
         sse([frame(choice({ content: "partial" }, null))]),
       );
-      const error = yield* Effect.flip(run(layer));
+      const error = yield* Effect.flip(run(recorder.layer));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",
         message: "openrouter: stream ended before the completion",
       });
+      expect(recorder.requests).toHaveLength(1);
     }),
   );
 
@@ -635,32 +724,58 @@ describe("OpenRouter client", () => {
     }),
   );
 
-  it.effect("a 429 whose body never arrives fails at the chunk timeout", () =>
+  it.effect("a 429 whose body never arrives is sent again at the chunk timeout", () =>
     Effect.gen(function* () {
-      const layer = Layer.succeed(HttpClient.HttpClient)(
-        HttpClient.make((request) => {
-          const response = HttpClientResponse.fromWeb(
-            request,
-            new Response(null, { status: 429, headers: { "retry-after": "7200" } }),
-          );
-          Object.defineProperty(response, "text", {
-            configurable: true,
-            get: () => Effect.never,
-          });
-          return Effect.succeed(response);
-        }),
+      const server = counted((request, sent) =>
+        sent === 1 ? stalledBody(request, 429) : HttpClientResponse.fromWeb(request, doneTurn()),
       );
-      const fiber = yield* Effect.forkScoped(
-        run(layer, { chunk: Duration.minutes(3), header: Duration.minutes(3) }),
-      );
+      const fiber = yield* Effect.forkScoped(run(server.layer, { chunk: Duration.minutes(3) }));
       yield* TestClock.adjust("2 minutes");
       expect(fiber.pollUnsafe()).toBeUndefined();
       yield* TestClock.adjust("1 minute");
+      expect(server.sent()).toBe(1);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(fiber)).toEqual({ content: "Locked.", toolCalls: [] });
+      expect(server.sent()).toBe(2);
+    }),
+  );
+
+  it.effect("a body that never arrives is not sent again past the run ceiling (unhappy)", () =>
+    Effect.gen(function* () {
+      const server = counted((request) => stalledBody(request, 503));
+      const fiber = yield* Effect.forkScoped(
+        run(server.layer, { chunk: Duration.minutes(3), ceiling: Duration.minutes(3) }),
+      );
+      yield* TestClock.adjust("3 minutes");
       const error = yield* Effect.flip(Fiber.join(fiber));
       expect(error).toMatchObject({
         _tag: "OpenRouterUnreachable",
-        message: "openrouter: no chunk within chunk timeout",
+        message:
+          "openrouter: retry delay of 1s would pass the run ceiling: no chunk within chunk timeout",
       });
+      expect(server.sent()).toBe(1);
+    }),
+  );
+
+  // The status already refused the request; the second answer's body names why, and it is final.
+  it.effect("a refusal whose body never arrives is sent again, and stays a refusal", () =>
+    Effect.gen(function* () {
+      const server = counted((request, sent) =>
+        sent === 1
+          ? stalledBody(request, 400)
+          : HttpClientResponse.fromWeb(request, jsonError(400, "Model not found")),
+      );
+      const fiber = yield* Effect.forkScoped(run(server.layer, { chunk: Duration.minutes(3) }));
+      yield* TestClock.adjust("3 minutes");
+      expect(server.sent()).toBe(1);
+      yield* TestClock.adjust("1 second");
+      const error = yield* Effect.flip(Fiber.join(fiber));
+      expect(error).toMatchObject({
+        _tag: "OpenRouterRefusal",
+        status: 400,
+        message: "Model not found",
+      });
+      expect(server.sent()).toBe(2);
     }),
   );
 

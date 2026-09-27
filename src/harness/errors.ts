@@ -19,8 +19,8 @@ export class OpenRouterRefusal extends Schema.TaggedError<OpenRouterRefusal>(
   "@oligarchy/shared/errors/OpenRouterRefusal",
 )("OpenRouterRefusal", { status: Schema.Int, message: Schema.String }) {}
 
-// OpenRouter did not produce a completion: nothing was listening, the header or chunk timeout
-// fired, a 429 or 5xx could not be retried inside the run ceiling, or the stream died. A refused
+// OpenRouter did not produce a completion: nothing was listening, a 429, a 5xx or a header or
+// chunk timeout could not be retried inside the run ceiling, or the stream died. A refused
 // request is OpenRouterRefusal, not this.
 export class OpenRouterUnreachable extends Schema.TaggedError<OpenRouterUnreachable>(
   "@oligarchy/shared/errors/OpenRouterUnreachable",
