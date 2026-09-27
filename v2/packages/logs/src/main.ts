@@ -6,9 +6,9 @@ import type * as jarl from "jarl";
 
 export type LogLevel = (typeof DbSchema.logLevel.enumValues)[number];
 
-export type Log = typeof DbSchema.logs.$inferSelect;
+export type LogRow = typeof DbSchema.logs.$inferSelect;
 
-export type LogRow = {
+export type LogInput = {
   readonly text: string;
   readonly level: LogLevel;
   readonly location: string | null;
@@ -21,9 +21,9 @@ type Answer<T> = Promise<jarl.Result<T, Db.DatabaseError>>;
 
 export type Logs = {
   readonly service: "logs";
-  readonly insertLog: (row: LogRow) => Answer<void>;
-  readonly listLogs: (location: string) => Answer<ReadonlyArray<Log>>;
-  readonly listRecent: (limit: number) => Answer<ReadonlyArray<Log>>;
+  readonly insertLog: (row: LogInput) => Answer<void>;
+  readonly listLogs: (location: string) => Answer<ReadonlyArray<LogRow>>;
+  readonly listRecent: (limit: number) => Answer<ReadonlyArray<LogRow>>;
   readonly listIntents: (sessionId: string) => Answer<ReadonlyArray<Intent>>;
 };
 
