@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import * as Db from "@oligarchy/db";
+import type { ServerStats } from "@oligarchy/db/schema";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as Servers from "../src/main.ts";
 import { database, value } from "./support.ts";
 
-const stats = (qemus: number): Servers.ServerStats => ({
+const stats = (qemus: number): ServerStats => ({
   qemus,
   memory: { totalBytes: 16_000, usedBytes: 4_000 },
   cpu: { mean1m: 22.3, mean2m: 21.4, mean3m: 20.9 },

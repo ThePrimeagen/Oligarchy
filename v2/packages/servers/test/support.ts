@@ -10,13 +10,16 @@ import * as jarl from "jarl";
 import { onTestFinished } from "vitest";
 
 // The rules under test are the service's SQL, so they run on Postgres itself: PGlite in this
-// process, migrated with v1's migrations (the tables production has), served over the wire so
-// the service reaches it through Db.open and node-postgres as a program does.
-const MIGRATIONS = resolve(Env.ROOT, "packages/db/drizzle");
+// process, migrated with v2's migrations as db:migrate applies them, served over the wire so the
+// service reaches it through Db.open and node-postgres as a program does.
+const MIGRATIONS = resolve(Env.ROOT, "v2/packages/db/drizzle");
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
 
 const template = new PGlite();
-await migrate(drizzle({ client: template }), { migrationsFolder: MIGRATIONS });
+await migrate(drizzle({ client: template }), {
+  migrationsFolder: MIGRATIONS,
+  migrationsTable: "__drizzle_migrations_v2",
+});
 const migrated = await template.dumpDataDir("none");
 await template.close();
 

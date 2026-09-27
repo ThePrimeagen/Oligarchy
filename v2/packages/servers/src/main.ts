@@ -1,44 +1,14 @@
 import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
+import {
+  agentServers,
+  type ServerStats,
+  servers,
+  serverType,
+  sessionServers,
+} from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { bigint, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type * as jarl from "jarl";
-
-// What a machine says of itself on each heartbeat.
-export type ServerStats = {
-  readonly qemus: number;
-  readonly memory: { readonly totalBytes: number; readonly usedBytes: number };
-  readonly cpu: { readonly mean1m: number; readonly mean2m: number; readonly mean3m: number };
-};
-
-// v1's tables (packages/db/src/schema.ts), made by its migrations: the columns this service
-// reads and writes. Indexes, uniqueness and references stay the migrations' to keep; a default
-// is declared only so an insert may leave the column to it.
-const serverType = pgEnum("server_type", ["qemu", "automation-client"]);
-
-const servers = pgTable("servers", {
-  id: uuid("id").notNull().defaultRandom(),
-  url: text("url").primaryKey(),
-  name: text("name"),
-  type: serverType("type").notNull(),
-  stats: jsonb("stats").$type<ServerStats>(),
-  generation: bigint("generation", { mode: "number" }).notNull().default(0),
-  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-// Which server started a session. server_url is attribution, not a relation: forgetting a server
-// keeps the sessions still running on it routable.
-const sessionServers = pgTable("session_servers", {
-  sessionId: uuid("session_id").primaryKey(),
-  serverUrl: text("server_url").notNull(),
-});
-
-// Which server reserved a slot for an agent, before a session id exists.
-const agentServers = pgTable("agent_servers", {
-  agentId: text("agent_id").primaryKey(),
-  serverUrl: text("server_url").notNull(),
-});
 
 // A qemu server boots guests; an automation-client is a host that announces itself the same way.
 export type ServerType = (typeof serverType.enumValues)[number];
