@@ -1,17 +1,11 @@
 import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
-import {
-  agentServers,
-  type ServerStats,
-  servers,
-  serverType,
-  sessionServers,
-} from "@oligarchy/db/schema";
+import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import type * as jarl from "jarl";
 
 // A qemu server boots guests; an automation-client is a host that announces itself the same way.
-export type ServerType = (typeof serverType.enumValues)[number];
+export type ServerType = (typeof DbSchema.serverType.enumValues)[number];
 
 export type LiveServer = { readonly id: string; readonly url: string };
 
@@ -22,7 +16,7 @@ export type Machine = {
   readonly url: string;
   readonly name: string | null;
   readonly type: ServerType;
-  readonly stats: ServerStats | null;
+  readonly stats: DbSchema.ServerStats | null;
   readonly generation: number;
   readonly heartbeatAt: Date | null;
   readonly queriedAt: Date;
@@ -41,7 +35,7 @@ export type Servers = {
     url: string,
     type: ServerType,
     name: string,
-    stats: ServerStats,
+    stats: DbSchema.ServerStats,
   ) => Answer<void>;
   // false when nothing was registered under the url.
   readonly removeServer: (url: string) => Answer<boolean>;
@@ -78,37 +72,43 @@ export const create = (db: Db.Database): Servers => ({
 
   addServer: (url, type) =>
     db.run(async (d) => {
-      await d.insert(servers).values({ url, type }).onConflictDoNothing();
+      await d.insert(DbSchema.servers).values({ url, type }).onConflictDoNothing();
     }),
 
   heartbeat: (url, type, name, stats) =>
     db.run(async (d) => {
       const now = sql`now()`;
       await d
-        .insert(servers)
+        .insert(DbSchema.servers)
         .values({ url, name, type, stats, generation: 1, heartbeatAt: now })
         .onConflictDoUpdate({
-          target: servers.url,
-          set: { name, type, stats, generation: sql`${servers.generation} + 1`, heartbeatAt: now },
+          target: DbSchema.servers.url,
+          set: {
+            name,
+            type,
+            stats,
+            generation: sql`${DbSchema.servers.generation} + 1`,
+            heartbeatAt: now,
+          },
         });
     }),
 
   removeServer: (url) =>
     db.run(async (d) => {
       const rows = await d
-        .delete(servers)
-        .where(eq(servers.url, url))
-        .returning({ url: servers.url });
+        .delete(DbSchema.servers)
+        .where(eq(DbSchema.servers.url, url))
+        .returning({ url: DbSchema.servers.url });
       return rows.length > 0;
     }),
 
   listServers: (type) =>
     db.run(async (d) => {
       const rows = await d
-        .select({ url: servers.url })
-        .from(servers)
-        .where(eq(servers.type, type))
-        .orderBy(servers.createdAt, servers.url);
+        .select({ url: DbSchema.servers.url })
+        .from(DbSchema.servers)
+        .where(eq(DbSchema.servers.type, type))
+        .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url);
       return rows.map((row) => row.url);
     }),
 
@@ -116,82 +116,88 @@ export const create = (db: Db.Database): Servers => ({
     db.run((d) =>
       d
         .select({
-          url: servers.url,
-          name: servers.name,
-          type: servers.type,
-          stats: servers.stats,
-          generation: servers.generation,
-          heartbeatAt: servers.heartbeatAt,
-          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(servers.createdAt),
+          url: DbSchema.servers.url,
+          name: DbSchema.servers.name,
+          type: DbSchema.servers.type,
+          stats: DbSchema.servers.stats,
+          generation: DbSchema.servers.generation,
+          heartbeatAt: DbSchema.servers.heartbeatAt,
+          queriedAt: sql<Date>`CURRENT_TIMESTAMP`.mapWith(DbSchema.servers.createdAt),
         })
-        .from(servers)
-        .orderBy(servers.type, servers.createdAt, servers.url),
+        .from(DbSchema.servers)
+        .orderBy(DbSchema.servers.type, DbSchema.servers.createdAt, DbSchema.servers.url),
     ),
 
   listLiveServers: (type) =>
     db.run((d) =>
       d
-        .select({ id: servers.id, url: servers.url })
-        .from(servers)
+        .select({ id: DbSchema.servers.id, url: DbSchema.servers.url })
+        .from(DbSchema.servers)
         .where(
-          and(eq(servers.type, type), sql`${servers.heartbeatAt} > now() - interval '45 seconds'`),
+          and(
+            eq(DbSchema.servers.type, type),
+            sql`${DbSchema.servers.heartbeatAt} > now() - interval '45 seconds'`,
+          ),
         )
-        .orderBy(servers.createdAt, servers.url),
+        .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
     ),
 
   removeStaleServers: (type) =>
     db.run(async (d) => {
       const rows = await d
-        .delete(servers)
+        .delete(DbSchema.servers)
         .where(
           and(
-            eq(servers.type, type),
-            sql`coalesce(${servers.heartbeatAt}, ${servers.createdAt}) < now() - interval '10 minutes'`,
+            eq(DbSchema.servers.type, type),
+            sql`coalesce(${DbSchema.servers.heartbeatAt}, ${DbSchema.servers.createdAt}) < now() - interval '10 minutes'`,
           ),
         )
-        .returning({ url: servers.url });
+        .returning({ url: DbSchema.servers.url });
       return rows.map((row) => row.url);
     }),
 
   findServer: (id) =>
     db.run(async (d) => {
       const [row] = await d
-        .select({ id: servers.id, url: servers.url })
-        .from(servers)
-        .where(eq(servers.id, id));
+        .select({ id: DbSchema.servers.id, url: DbSchema.servers.url })
+        .from(DbSchema.servers)
+        .where(eq(DbSchema.servers.id, id));
       return row;
     }),
 
   routeSession: (sessionId, url) =>
     db.run(async (d) => {
-      await d.insert(sessionServers).values({ sessionId, serverUrl: url });
+      await d.insert(DbSchema.sessionServers).values({ sessionId, serverUrl: url });
     }),
 
   serverForSession: (sessionId) =>
     db.run(async (d) => {
       const [row] = await d
-        .select({ serverUrl: sessionServers.serverUrl })
-        .from(sessionServers)
-        .where(eq(sessionServers.sessionId, sessionId));
+        .select({ serverUrl: DbSchema.sessionServers.serverUrl })
+        .from(DbSchema.sessionServers)
+        .where(eq(DbSchema.sessionServers.sessionId, sessionId));
       return row?.serverUrl;
     }),
 
   routeAgent: (agentId, url) =>
     db.run(async (d) => {
-      await d.insert(agentServers).values({ agentId, serverUrl: url }).onConflictDoNothing();
+      await d
+        .insert(DbSchema.agentServers)
+        .values({ agentId, serverUrl: url })
+        .onConflictDoNothing();
     }),
 
   serverForAgent: (agentId) =>
     db.run(async (d) => {
       const [row] = await d
-        .select({ serverUrl: agentServers.serverUrl })
-        .from(agentServers)
-        .where(eq(agentServers.agentId, agentId));
+        .select({ serverUrl: DbSchema.agentServers.serverUrl })
+        .from(DbSchema.agentServers)
+        .where(eq(DbSchema.agentServers.agentId, agentId));
       return row?.serverUrl;
     }),
 
   clearAgent: (agentId) =>
     db.run(async (d) => {
-      await d.delete(agentServers).where(eq(agentServers.agentId, agentId));
+      await d.delete(DbSchema.agentServers).where(eq(DbSchema.agentServers.agentId, agentId));
     }),
 });
