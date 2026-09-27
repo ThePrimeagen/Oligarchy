@@ -357,3 +357,52 @@ if (environment.command === "test run") {
   );
 }
 ```
+
+## Test: ctrl's `session` with fakes
+
+`session` moves to `ctrl/src/session.ts` so a test can import it.
+
+```ts
+// ctrl/test/session.test.ts
+import * as App from "@oligarchy/app";
+import * as Common from "@oligarchy/common";
+import type * as Db from "@oligarchy/db";
+import type * as Log from "@oligarchy/log";
+import type * as Sentry from "@oligarchy/sentry";
+import * as jarl from "jarl";
+import { expect, it } from "vitest";
+import { session } from "../src/session.ts";
+
+it("prints the session it found (happy)", async () => {
+  const lines: Array<string> = [];
+  const log: Log.Log = {
+    service: "log",
+    info: (text) => void lines.push(text),
+    error: () => undefined,
+    flush: async () => undefined,
+  };
+  const db: Db.Database = {
+    service: "db",
+    heartbeat: async () => jarl.ok(undefined),
+    session: async (id) => jarl.ok({ id, status: "ended" }),
+    saveRun: async (run) => jarl.ok(run.ticket),
+    close: async () => undefined,
+  };
+  const sentry: Sentry.Sentry = {
+    service: "sentry",
+    capture: () => undefined,
+    flush: async () => undefined,
+  };
+  const app = App.create({
+    environment: { command: "session", flags: { sessionId: "s1" } },
+    services: [log, db, sentry],
+    main: session,
+    onExit: Common.close,
+  });
+
+  expect(await session(app)).toEqual(jarl.ok({ id: "s1", status: "ended" }));
+  expect(lines).toEqual(['{"id":"s1","status":"ended"}']);
+});
+```
+
+A fake that leaves out an operation, or returns the wrong result, does not compile.
