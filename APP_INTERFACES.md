@@ -113,7 +113,7 @@ export class App<const Environment, const S> {
   readonly environment: Environment; // what Env.create returned
   readonly services: S;              // the object passed in: app.services.db, app.services.log
 
-  constructor(services: S & Provided, environment: Environment);
+  constructor(environment: Environment, services: S & Provided);
 
   // Any number of times. Handlers run newest first, each awaited. Returns remove.
   onExit(handler: OnExit): () => void;
@@ -246,7 +246,7 @@ const environment = await Common.load(definition);
 const [log, db, sentry] = Common.open("driver", environment.vars.databaseUrl);
 const openRouter = OpenRouter.open({ token: environment.vars.openRouterToken });
 
-const app = new App.App({ log, db, sentry, openRouter }, environment);
+const app = new App.App(environment, { log, db, sentry, openRouter });
 app.onExit(() => Common.close(app)); // registered first: runs last
 await app.main(main);
 ```
@@ -302,7 +302,7 @@ const sessions = Sessions.open({
   maxJobs: environment.flags.maxJobs,
 });
 
-const app = new App.App({ log, db, sentry, sessions }, environment);
+const app = new App.App(environment, { log, db, sentry, sessions });
 app.onExit(() => Common.close(app));
 await app.main(main);
 ```
@@ -354,11 +354,11 @@ if (environment.command === "test run") {
     token: environment.vars.linearApiToken,
     team: environment.vars.linearTeam,
   });
-  const app = new App.App({ log, db, sentry, linear }, environment);
+  const app = new App.App(environment, { log, db, sentry, linear });
   app.onExit(() => Common.close(app));
   await app.main(testRun);
 } else {
-  const app = new App.App({ log, db, sentry }, environment);
+  const app = new App.App(environment, { log, db, sentry });
   app.onExit(() => Common.close(app));
   await app.main(session);
 }
@@ -398,6 +398,7 @@ it("prints the session it found (happy)", async () => {
   const lines: Array<string> = [];
   // Each fake is checked against its key's service; no annotations needed.
   const app = new App.App(
+    { command: "session", flags: { sessionId: "s1" } },
     {
       log: {
         service: "log",
@@ -414,7 +415,6 @@ it("prints the session it found (happy)", async () => {
       },
       sentry: { service: "sentry", capture: () => undefined, flush: async () => undefined },
     },
-    { command: "session", flags: { sessionId: "s1" } },
   );
 
   expect(await session(app)).toEqual(jarl.ok({ id: "s1", status: "ended" }));
@@ -442,7 +442,7 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
   and `passWithNoTests: false`.
 - A service package never imports `@oligarchy/app`. `@oligarchy/app` imports service types only
   (`import type`), for the `Services` list.
-- `new App(services, environment)` takes its types from its two arguments, both `const` type
+- `new App(environment, services)` takes its types from its two arguments, both `const` type
   parameters, so a literal environment in a test keeps `command: "session"`. `services` is an
   object checked against `Provided`: each key a service's name, its value that service. It also
   refuses a bare service in place of the object (`services: S & { readonly service?: never }`).
