@@ -1,8 +1,9 @@
 // Type checks only: check:types fails when one breaks. Nothing here calls main.
+import type * as Db from "@oligarchy/db";
 import * as jarl from "jarl";
 import { describe, expectTypeOf, it } from "vitest";
 import * as App from "../src/main.ts";
-import { counter, greeter, type Counter, type Greeter } from "./support.ts";
+import { counter, database, greeter, type Counter, type Greeter } from "./support.ts";
 
 type Reads = { readonly flags: { readonly name: string } };
 const environment = { command: "", flags: { name: "ada" } } as const;
@@ -26,6 +27,24 @@ describe("App types", () => {
     void new App.App(environment, { counter: { service: "counter", increment: () => undefined } });
     // @ts-expect-error clock is not a service, even beside one that is
     void new App.App(environment, { counter: counter(), clock: counter() });
+  });
+
+  it("files the database under db, and hands it to a main that wants it", () => {
+    const pings = async (app: App.App<Reads, Db.Database>) => app.services.db.ping();
+    const app = new App.App(environment, { db: database(), counter: counter() });
+    expectTypeOf(app.services.db).toEqualTypeOf<Db.Database>();
+    void (() => app.main(pings));
+  });
+
+  it("refuses the database under another name, anything else under db, and a main it lacks", () => {
+    // @ts-expect-error the database is filed under db
+    void new App.App(environment, { database: database() });
+    // @ts-expect-error a counter is not the database
+    void new App.App(environment, { db: counter() });
+    const pings = async (app: App.App<Reads, Db.Database>) => app.services.db.ping();
+    const app = new App.App(environment, { counter: counter() });
+    // @ts-expect-error the app has no database
+    void (() => app.main(pings));
   });
 
   it("counts only the services an app certainly has", () => {

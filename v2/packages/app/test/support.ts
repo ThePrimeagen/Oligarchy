@@ -1,3 +1,5 @@
+import type * as Db from "@oligarchy/db";
+import * as jarl from "jarl";
 import type * as App from "../src/main.ts";
 
 // Two services that exist only for these tests.
@@ -30,3 +32,11 @@ export const counter = (): Counter => {
 };
 
 export const greeter = (): Greeter => ({ service: "greeter", greet: (name) => `hi ${name}` });
+
+// A shared service written inline, as a test fakes one: checked against the list in services.ts.
+export const database = (): Db.Database => ({
+  service: "db",
+  ping: async () => jarl.ok(undefined),
+  migrate: async () => jarl.ok(undefined),
+  close: async () => jarl.ok(undefined),
+});

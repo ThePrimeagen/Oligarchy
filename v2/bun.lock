@@ -9,6 +9,7 @@
       "name": "@oligarchy/app",
       "dependencies": {
         "@oligarchy/async": "workspace:*",
+        "@oligarchy/db": "workspace:*",
         "jarl": "catalog:",
       },
       "devDependencies": {
@@ -594,11 +595,7 @@
 
     "@isaacs/cliui/wrap-ansi": ["wrap-ansi@8.1.0", "", { "dependencies": { "ansi-styles": "^6.1.0", "string-width": "^5.0.1", "strip-ansi": "^7.0.1" } }, "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ=="],
 
-    "@oligarchy/db/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
-
     "@oligarchy/driver/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
-
-    "@oligarchy/env/jarl": ["jarl@github:ThePrimeagen/jarl#5658d25", {}, "ThePrimeagen-jarl-5658d25", "sha512-QPyM2sbkkQgQyFAhKzc6JV3Q8H7o+2ru/NjHJz7QhkTghvzCPRhUM0TcjvRTNnip8w8gpkdA6Ywb0FRE/scIoQ=="],
 
     "@types/ssh2/@types/node": ["@types/node@18.19.130", "", { "dependencies": { "undici-types": "~5.26.4" } }, "sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg=="],
 
