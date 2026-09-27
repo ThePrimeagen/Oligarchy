@@ -10,6 +10,7 @@
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
+    "@oligarchy/async": "workspace:*",
     "jarl": "catalog:"
   },
   "devDependencies": {

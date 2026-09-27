@@ -1,3 +1,4 @@
+import * as Async from "@oligarchy/async";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as App from "../src/main.ts";
@@ -161,7 +162,7 @@ describe("App", () => {
       return jarl.ok(undefined);
     }, io);
     expect(seen).toEqual(["main sees aborted false", "handler sees aborted true"]);
-    expect(jarl.error.is(app.signal.reason, App.Aborted)).toBe(true);
+    expect(jarl.error.is(app.signal.reason, Async.Aborted)).toBe(true);
     expect(codes).toEqual([0]);
   });
 
@@ -189,7 +190,7 @@ describe("App", () => {
     const { io, codes, signal } = fakeIo();
     const running = app.main(async (started) => {
       await aborted(started.signal);
-      return jarl.err(new App.Aborted("stopped"));
+      return jarl.err(new Async.Aborted("stopped"));
     }, io);
     signal("SIGTERM");
     await running;
@@ -212,7 +213,7 @@ describe("App", () => {
   it("exits 1 when main returns Aborted without a signal (unhappy)", async () => {
     const app = new App.App(environment, { counter: counter() });
     const { io, codes } = fakeIo();
-    await app.main(async () => jarl.err(new App.Aborted("stopped")), io);
+    await app.main(async () => jarl.err(new Async.Aborted("stopped")), io);
     expect(codes).toEqual([1]);
   });
 

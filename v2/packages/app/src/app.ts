@@ -1,3 +1,4 @@
+import { Aborted } from "@oligarchy/async";
 import * as jarl from "jarl";
 import type {
   AnyService,
@@ -14,10 +15,6 @@ import type {
 
 export const MainCalledTwice = jarl.error.define("MainCalledTwice");
 export type MainCalledTwice = InstanceType<typeof MainCalledTwice>;
-
-// The reason app.signal carries, so a fetch or a sleep handed the signal fails with it.
-export const Aborted = jarl.error.define("Aborted");
-export type Aborted = InstanceType<typeof Aborted>;
 
 type Main<Environment, Wants extends AnyService> = (
   app: App<Environment, Wants>,
