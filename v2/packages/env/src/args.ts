@@ -113,6 +113,14 @@ export const display = flag({
   description: "QEMU display backend for every session; none captures without showing a window",
 });
 
+// Not --display: that spelling is the backend. Given here, it must reach QEMU as DISPLAY, or the
+// host check passes and the gtk window still has nowhere to open.
+export const xDisplay = flag({
+  schema: z.string().regex(/:\d+(\.\d+)?$/, "must be an X display like :0"),
+  description: "X display --display gtk opens its window on; DISPLAY when omitted",
+  env: "DISPLAY",
+});
+
 export const automation = flag({
   schema: toggle,
   description: "Force the automation QEMU profile for every session",
