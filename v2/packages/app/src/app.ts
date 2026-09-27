@@ -54,7 +54,13 @@ const processIo: Io = {
   exit: (code) => {
     process.exit(code);
   },
+  stderr: (text) => {
+    process.stderr.write(text);
+  },
 };
+
+// A C-c in the terminal is a person waiting on the exit handlers; the second one kills at once.
+const PRESS_AGAIN = "press again to kill the application right away\n";
 
 const call = async (state: State, handler: OnExit, reason: ExitReason): Promise<void> => {
   try {
@@ -157,6 +163,9 @@ export class App<const Environment, const S extends Provided | AnyService> {
     let signalled: ExitReason | undefined;
     const stopListening = io.onSignal((signal) => {
       signals += 1;
+      if (signals === 1 && signal === "SIGINT") {
+        io.stderr(PRESS_AGAIN);
+      }
       if (signals === 2) {
         io.exit(1);
       }

@@ -6,12 +6,17 @@ import type * as App from "../src/main.ts";
 const fixture = join(import.meta.dirname, "fixtures/waits.ts");
 
 // Runs the fixture as its own process: `waitFor` settles once stdout has shown the line, `exited`
-// with the exit code, and `lines` is everything it printed.
+// with the exit code, `lines` is everything it printed and `errors` everything on stderr.
 const start = (args: ReadonlyArray<string> = []) => {
   const child = spawn(process.execPath, [fixture, ...args], {
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   let out = "";
+  let err = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    err += chunk;
+  });
   const waiting: Array<{ readonly line: string; readonly resolve: () => void }> = [];
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
@@ -35,18 +40,23 @@ const start = (args: ReadonlyArray<string> = []) => {
   const send = (signal: App.Signal) => {
     child.kill(signal);
   };
-  return { waitFor, exited, send, lines: () => out.trim().split("\n") };
+  return { waitFor, exited, send, lines: () => out.trim().split("\n"), errors: () => err };
 };
 
 describe("App on the real process", () => {
-  it.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)(
+  it.each([
+    ["SIGINT", "press again to kill the application right away\n"],
+    ["SIGTERM", ""],
+    ["SIGHUP", ""],
+  ] as const)(
     "ends on %s: main returns, the handler runs, and it exits 0 (happy)",
-    async (signal) => {
+    async (signal, stderr) => {
       const program = start();
       await program.waitFor("ready");
       program.send(signal);
       expect(await program.exited).toBe(0);
       expect(program.lines()).toEqual(["ready", `handler ${signal}`]);
+      expect(program.errors()).toBe(stderr);
     },
   );
 

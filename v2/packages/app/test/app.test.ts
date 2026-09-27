@@ -6,9 +6,11 @@ import { counter, type Counter } from "./support.ts";
 type Reads = { readonly flags: { readonly name: string } };
 const environment = { flags: { name: "ada" } };
 
-// The process as a test drives it: who is listening for signals, and every exit code asked for.
+// The process as a test drives it: who is listening for signals, every exit code asked for, and
+// everything written to stderr.
 const fakeIo = () => {
   const codes: Array<number> = [];
+  const stderr: Array<string> = [];
   const listeners = new Set<(signal: App.Signal) => void>();
   const io: App.Io = {
     onSignal: (handler) => {
@@ -20,6 +22,9 @@ const fakeIo = () => {
     exit: (code) => {
       codes.push(code);
     },
+    stderr: (text) => {
+      stderr.push(text);
+    },
   };
   const signal = (name: App.Signal) => {
     if (listeners.size === 0) {
@@ -29,8 +34,10 @@ const fakeIo = () => {
       listener(name);
     }
   };
-  return { io, codes, signal, listening: () => listeners.size };
+  return { io, codes, stderr, signal, listening: () => listeners.size };
 };
+
+const PRESS_AGAIN = "press again to kill the application right away\n";
 
 // Settles once the signal aborts, as a fetch or a sleep handed the signal would.
 const aborted = (signal: AbortSignal) =>
@@ -147,6 +154,40 @@ describe("App", () => {
     expect(order).toEqual(["main saw the abort", "close services on SIGTERM"]);
     expect(codes).toEqual([0]);
     expect(listening()).toBe(0);
+  });
+
+  it("on the first C-c tells stderr that pressing again kills the application right away (happy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes, stderr, signal } = fakeIo();
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      return jarl.ok(undefined);
+    }, io);
+    signal("SIGINT");
+    expect(stderr).toEqual([PRESS_AGAIN]);
+    await running;
+    expect(stderr).toEqual([PRESS_AGAIN]);
+    expect(codes).toEqual([0]);
+  });
+
+  it("says nothing for SIGTERM or SIGHUP, nor on a C-c that already kills (unhappy)", () => {
+    for (const first of ["SIGTERM", "SIGHUP"] as const) {
+      const app = new App.App(environment, { counter: counter() });
+      const { io, codes, stderr, signal } = fakeIo();
+      void app.main(() => new Promise<never>(() => undefined), io);
+      signal(first);
+      expect(stderr).toEqual([]);
+      signal("SIGINT");
+      expect(stderr).toEqual([]);
+      expect(codes).toEqual([1]);
+    }
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes, stderr, signal } = fakeIo();
+    void app.main(() => new Promise<never>(() => undefined), io);
+    signal("SIGINT");
+    signal("SIGINT");
+    expect(stderr).toEqual([PRESS_AGAIN]);
+    expect(codes).toEqual([1]);
   });
 
   it("on SIGHUP aborts, waits for main, then runs the handlers with the hangup as the reason (happy)", async () => {
