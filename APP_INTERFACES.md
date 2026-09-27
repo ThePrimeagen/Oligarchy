@@ -2,39 +2,62 @@
 
 ## Services
 
-A service is a data object with a fixed `service` name. Its functions take it first.
+A service's type is its interface: a fixed `service` name and every operation. `open` returns the
+real one; a test writes its own. The module's functions take the service first and call through
+it, so whatever object was passed in is what runs.
 
 ```ts
 // @oligarchy/log
-export type Log = { readonly service: "log"; readonly program: string };
+export type Log = {
+  readonly service: "log";
+  readonly info: (text: string) => void;
+  readonly error: (text: string, cause?: unknown) => void;
+  readonly flush: () => Promise<void>;
+};
 export function open(options: { program: string }): Log;
-export function info(log: Log, text: string): void;
-export function error(log: Log, text: string, cause?: unknown): void;
-export function flush(log: Log): Promise<void>;
+export const info = (log: Log, text: string) => log.info(text);
+export const error = (log: Log, text: string, cause?: unknown) => log.error(text, cause);
+export const flush = (log: Log) => log.flush();
 
 // @oligarchy/db
-export type Database = { readonly service: "db"; readonly url: Env.Secret; readonly log: Log.Log };
+export type Database = {
+  readonly service: "db";
+  readonly heartbeat: (row: { name: string; at: number }) => Promise<jarl.Result<void, DatabaseError>>;
+  readonly session: (id: string) => Promise<jarl.Result<Session, DatabaseError>>;
+  readonly saveRun: (run: { name: string; iso: string; ticket: string }) => Promise<jarl.Result<string, DatabaseError>>;
+  readonly close: () => Promise<void>;
+};
 export function open(options: { url: Env.Secret; log: Log.Log }): Database;
-export function close(db: Database): Promise<void>;
-export function heartbeat(db: Database, row: { name: string; at: number }): Promise<jarl.Result<void, DatabaseError>>;
-export function session(db: Database, id: string): Promise<jarl.Result<Session, DatabaseError>>;
-export function saveRun(db: Database, run: { name: string; iso: string; ticket: string }): Promise<jarl.Result<string, DatabaseError>>;
+export const heartbeat = (db: Database, row: { name: string; at: number }) => db.heartbeat(row);
+export const session = (db: Database, id: string) => db.session(id);
+export const saveRun = (db: Database, run: { name: string; iso: string; ticket: string }) => db.saveRun(run);
+export const close = (db: Database) => db.close();
 
 // @oligarchy/sentry
-export type Sentry = { readonly service: "sentry"; readonly program: string };
+export type Sentry = {
+  readonly service: "sentry";
+  readonly capture: (error: unknown) => void;
+  readonly flush: () => Promise<void>;
+};
 export function open(options: { program: string }): Sentry;
-export function capture(sentry: Sentry, error: unknown): void;
-export function flush(sentry: Sentry): Promise<void>;
+export const capture = (sentry: Sentry, error: unknown) => sentry.capture(error);
+export const flush = (sentry: Sentry) => sentry.flush();
 
 // @oligarchy/openrouter
-export type OpenRouter = { readonly service: "openRouter"; readonly token: Env.Secret };
+export type OpenRouter = {
+  readonly service: "openRouter";
+  readonly complete: (prompt: string) => Promise<jarl.Result<string, OpenRouterError>>;
+};
 export function open(options: { token: Env.Secret }): OpenRouter;
-export function complete(openRouter: OpenRouter, prompt: string): Promise<jarl.Result<string, OpenRouterError>>;
+export const complete = (openRouter: OpenRouter, prompt: string) => openRouter.complete(prompt);
 
 // @oligarchy/linear
-export type Linear = { readonly service: "linear"; readonly token: Env.Secret; readonly team: string };
+export type Linear = {
+  readonly service: "linear";
+  readonly fileTicket: (title: string) => Promise<jarl.Result<string, LinearError>>;
+};
 export function open(options: { token: Env.Secret; team: string }): Linear;
-export function fileTicket(linear: Linear, title: string): Promise<jarl.Result<string, LinearError>>;
+export const fileTicket = (linear: Linear, title: string) => linear.fileTicket(title);
 
 // qemu-server/src/sessions.ts
 export type Sessions = {
