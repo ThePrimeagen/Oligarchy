@@ -109,11 +109,11 @@ export interface Has<T extends AnyService> {
 export type Provided = { readonly [K in keyof Services]?: Services[K] };
 
 // App.App<Reads, Log.Log | Db.Database> is an app with those services: what main and helpers ask for.
-export class App<const Environment, const S> {
+export class App<const Environment, const S extends Provided | AnyService> {
   readonly environment: Environment; // what Env.create returned
-  readonly services: S;              // the object passed in: app.services.db, app.services.log
+  readonly services: ServicesOf<S>;  // the object passed in: app.services.db, app.services.log
 
-  constructor(environment: Environment, services: S & Provided);
+  constructor(environment: Environment, services: S & NotAService);
 
   // Any number of times. Handlers run newest first, each awaited. Returns remove.
   onExit(handler: OnExit): () => void;
@@ -126,11 +126,16 @@ export class App<const Environment, const S> {
   // A second signal exits 1 at once. A second call returns MainCalledTwice. io defaults to the process.
   // A main that asks for nothing (Wants defaults to never) runs on any app.
   main<Wants extends AnyService = never>(
-    main: (app: App<Environment, Wants>) => Promise<jarl.Result<unknown, unknown>>,
+    run: Main<Environment, Wants> & Provides<Wants, NamesOf<S>>,
     io?: Io,
   ): Promise<jarl.Result<void, MainCalledTwice>>;
 }
 ```
+
+Built in `v2/packages/app`. `src/types.ts` holds every mapped and conditional type (`AnyService`,
+`Needs`, `Register`, `Provided`, `NotAService`, `ServicesOf`, `NamesOf`, `Provides`, `Has`);
+`src/app.ts` is the plain class and names them; `src/services.ts` is the list; `src/main.ts`
+re-exports. `services.ts` is empty until the first shared service lands.
 
 ## Async
 
@@ -518,231 +523,15 @@ Programs
 
 ## `@oligarchy/app` tests
 
-```ts
-// @oligarchy/app/test/support.ts: two services that exist only for these tests.
-import type * as App from "../src/main.ts";
-
-export type Counter = {
-  readonly service: "counter";
-  readonly increment: () => void;
-  readonly read: () => number;
-};
-export type Greeter = {
-  readonly service: "greeter";
-  readonly greet: (name: string) => string;
-};
-
-declare module "../src/main.ts" {
-  interface Services {
-    counter: App.Register<"counter", Counter>;
-    greeter: App.Register<"greeter", Greeter>;
-  }
-}
-
-export const counter = (): Counter => {
-  let count = 0;
-  return { service: "counter", increment: () => void (count += 1), read: () => count };
-};
-export const greeter = (): Greeter => ({ service: "greeter", greet: (name) => `hi ${name}` });
-```
-
-```ts
-// @oligarchy/app/test/app.test.ts
-import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
-import * as App from "../src/main.ts";
-import { counter, type Counter } from "./support.ts";
-
-type Reads = { readonly flags: { readonly name: string } };
-const environment = { flags: { name: "ada" } };
-
-const fakeIo = () => {
-  const codes: Array<number> = [];
-  let send: (signal: App.Signal) => void = () => undefined;
-  const io: App.Io = {
-    onSignal: (handler) => {
-      send = handler;
-      return () => undefined;
-    },
-    exit: (code) => void codes.push(code),
-  };
-  return { io, codes, signal: (signal: App.Signal) => send(signal) };
-};
-
-describe("App", () => {
-  it("runs main with its environment and services, then exits 0 (happy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    const { io, codes } = fakeIo();
-    await app.main(async (app: App.App<Reads, Counter>) => {
-      app.services.counter.increment();
-      return jarl.ok(app.environment.flags.name);
-    }, io);
-    expect(app.services.counter.read()).toBe(1);
-    expect(codes).toEqual([0]);
-  });
-
-  it("exits 1 when main returns an error, after running the handlers (unhappy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    const ran: Array<string> = [];
-    app.onExit(() => void ran.push("close"));
-    const { io, codes } = fakeIo();
-    await app.main(async () => jarl.err("boom"), io);
-    expect(ran).toEqual(["close"]);
-    expect(codes).toEqual([1]);
-  });
-
-  it("runs exit handlers newest first, each awaited, and skips a removed one (happy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    const order: Array<string> = [];
-    app.onExit(() => void order.push("close services"));
-    app.onExit(async () => {
-      await Promise.resolve();
-      order.push("stop heartbeat");
-    });
-    const remove = app.onExit(() => void order.push("removed"));
-    remove();
-    const { io, codes } = fakeIo();
-    await app.main(async () => jarl.ok(undefined), io);
-    expect(order).toEqual(["stop heartbeat", "close services"]);
-    expect(codes).toEqual([0]);
-  });
-
-  it("still runs every handler when one throws, and exits 1 (unhappy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    const order: Array<string> = [];
-    app.onExit(() => void order.push("close services"));
-    app.onExit(() => {
-      throw new Error("boom");
-    });
-    const { io, codes } = fakeIo();
-    await app.main(async () => jarl.ok(undefined), io);
-    expect(order).toEqual(["close services"]);
-    expect(codes).toEqual([1]);
-  });
-
-  it("on a signal runs the handlers, then waits for main to return, then exits 0 (happy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    const order: Array<string> = [];
-    let closed: () => void = () => undefined;
-    const services = new Promise<void>((resolve) => {
-      closed = resolve;
-    });
-    app.onExit((reason) => {
-      order.push(`close services on ${reason.kind === "signal" ? reason.signal : reason.kind}`);
-      closed();
-    });
-    const { io, codes, signal } = fakeIo();
-    const running = app.main(async () => {
-      await services; // main waits on something the exit closes
-      order.push("main returned");
-      return jarl.ok(undefined);
-    }, io);
-    signal("SIGTERM");
-    await running;
-    expect(order).toEqual(["close services on SIGTERM", "main returned"]);
-    expect(codes).toEqual([0]);
-  });
-
-  it("exits 1 at once on a second signal (unhappy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    app.onExit(() => new Promise<void>(() => undefined)); // a handler that never finishes
-    const { io, codes, signal } = fakeIo();
-    void app.main(() => new Promise<never>(() => undefined), io);
-    signal("SIGINT");
-    signal("SIGINT");
-    expect(codes).toEqual([1]);
-  });
-
-  it("refuses a second main and runs nothing (unhappy)", async () => {
-    const app = new App.App(environment, { counter: counter() });
-    const { io, codes } = fakeIo();
-    let runs = 0;
-    const main = async () => {
-      runs += 1;
-      return jarl.ok(undefined);
-    };
-    await app.main(main, io);
-    const again = await app.main(main, io);
-    expect(jarl.error.is(again, App.MainCalledTwice)).toBe(true);
-    expect(runs).toBe(1);
-    expect(codes).toEqual([0]);
-  });
-});
-```
-
-```ts
-// @oligarchy/app/test/types.test.ts: type checks only. check:types fails when one breaks;
-// nothing here calls main.
-import * as jarl from "jarl";
-import { describe, expectTypeOf, it } from "vitest";
-import * as App from "../src/main.ts";
-import { counter, greeter, type Counter, type Greeter } from "./support.ts";
-
-type Reads = { readonly flags: { readonly name: string } };
-const environment = { command: "", flags: { name: "ada" } } as const;
-
-describe("App types", () => {
-  it("files each service under its key, and keeps the environment's literals", () => {
-    const app = new App.App(environment, { counter: counter(), greeter: greeter() });
-    expectTypeOf(app.services.counter).toEqualTypeOf<Counter>();
-    expectTypeOf(app.services.greeter).toEqualTypeOf<Greeter>();
-    expectTypeOf(app.environment.command).toEqualTypeOf<"">();
-  });
-
-  it("refuses a wrong services object", () => {
-    // @ts-expect-error a greeter is not a counter
-    void new App.App(environment, { counter: greeter() });
-    // @ts-expect-error clock is not a service
-    void new App.App(environment, { clock: counter() });
-    // @ts-expect-error a service, not an object of services
-    void new App.App(environment, counter());
-    // @ts-expect-error the fake has no read
-    void new App.App(environment, { counter: { service: "counter", increment: () => undefined } });
-  });
-
-  it("checks main against the app", () => {
-    const app = new App.App(environment, { counter: counter() });
-    const counts = async (app: App.App<Reads, Counter>) => jarl.ok(app.services.counter.read());
-    const greets = async (app: App.App<Reads, Greeter>) => jarl.ok(app.services.greeter.greet("x"));
-    const readsAge = async (app: App.App<{ readonly flags: { readonly age: number } }, Counter>) =>
-      jarl.ok(app.environment.flags.age);
-    void (() => app.main(counts));
-    void (() => app.main(async () => jarl.ok(undefined))); // asks for nothing: runs on any app
-    // @ts-expect-error the app has no greeter
-    void (() => app.main(greets));
-    // @ts-expect-error the environment has no age
-    void (() => app.main(readsAge));
-  });
-
-  it("checks what main and helpers use", () => {
-    const greet = (app: App.Has<Greeter>) => app.services.greeter.greet("x");
-    const main = async (app: App.App<Reads, Counter>) => {
-      // @ts-expect-error main did not ask for a greeter
-      void app.services.greeter;
-      // @ts-expect-error greet needs a greeter
-      greet(app);
-      return jarl.ok(undefined);
-    };
-    void main;
-  });
-
-  it("takes exit handlers that take the reason or nothing", () => {
-    const app = new App.App(environment, { counter: counter() });
-    app.onExit(() => undefined);
-    app.onExit(async (reason) => {
-      expectTypeOf(reason).toEqualTypeOf<App.ExitReason>();
-    });
-    // @ts-expect-error a handler gets the reason, not a number
-    app.onExit((count: number) => void count);
-  });
-});
-```
+Written: `v2/packages/app/test/support.ts` (two test-only services, `counter` and `greeter`),
+`test/app.test.ts` (the happy path, exit-handler order, signals) and `test/types.test.ts`
+(compile-time checks only).
 
 ## Build order
 
 1. `@oligarchy/env`: export `Result` and `Vars`.
 2. `@oligarchy/async`: `tick` awaits `fn`; `cancel` returns a promise that waits for a run in flight.
-3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Signal`, `ExitReason`, `OnExit`, `Io`, `MainCalledTwice`, `App`), `src/main.ts` exporting them.
+3. `@oligarchy/app`: done, in `v2/packages/app`. `src/types.ts` (every mapped and conditional type), `src/app.ts` (the class, `MainCalledTwice`, the process io), `src/services.ts` (the list), `src/main.ts` (re-exports).
 4. Services, one package each, added to `Services` as each lands: `log`, `sentry`, `db` (a port of `packages/db`: the pool, `run`, `transaction`, `ping` and the stores as operations; `DatabaseError` keeps `operation` and `cause`), `openrouter`, `linear`.
 5. `@oligarchy/common`.
 6. driver: replace `v2/packages/driver/src/main.ts`'s print with Example 1.
