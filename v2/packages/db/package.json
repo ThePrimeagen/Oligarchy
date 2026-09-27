@@ -3,11 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/main.ts"
+    ".": "./src/main.ts",
+    "./schema": "./src/schema.ts"
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check"
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",

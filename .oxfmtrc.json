@@ -11,6 +11,7 @@
     "**/node_modules/**",
     "**/.wrangler/**",
     "packages/db/drizzle/**",
+    "v2/packages/db/drizzle/**",
     "public/**",
     "prompts/**",
     "**/*.md",
