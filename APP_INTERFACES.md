@@ -105,26 +105,28 @@ export interface Has<T extends AnyService> {
 }
 
 export class App<Environment, T extends AnyService> implements Has<T> {
-  readonly environment: Environment; // what Env.create returned
-  readonly services: Needs<T>;
+  readonly environment: Environment; // the part of Env.create's result main asked for
+  readonly services: Needs<T>;       // exactly the services main asked for
 
-  constructor(options: {
-    readonly environment: Environment;
-    readonly services: ReadonlyArray<T>; // each files itself under its `service` name
-  });
+  // main defines Environment and T. The environment and the list are checked against it; a
+  // service main asked for that the list lacks fails on the list: { missing: "openRouter" }.
+  // Each service files itself under its `service` name.
+  static create<Environment, T extends AnyService>(
+    main: (app: App<Environment, T>) => Promise<jarl.Result<unknown, unknown>>,
+    options: { readonly environment: Environment; readonly services: ReadonlyArray<AnyService> },
+  ): App<Environment, T>;
 
   // Any number of times. Handlers run newest first, each awaited. Returns remove.
   onExit(handler: OnExit): () => void;
 
-  // Once. 1. listen for SIGINT and SIGTERM   2. await run(app)
-  // 3. on the first signal, or when run returns: the exit handlers, newest first
-  // 4. after a signal, wait for run to return   5. exit 0 if run was ok and no handler threw, else 1
+  // Once. 1. listen for SIGINT and SIGTERM   2. await main(app)
+  // 3. on the first signal, or when main returns: the exit handlers, newest first
+  // 4. after a signal, wait for main to return   5. exit 0 if main was ok and no handler threw, else 1
   // A second signal exits 1 at once. A second call returns MainCalledTwice. io defaults to the process.
-  main(
-    run: (app: App<Environment, T>) => Promise<jarl.Result<unknown, unknown>>,
-    io?: Io,
-  ): Promise<jarl.Result<void, MainCalledTwice>>;
+  main(io?: Io): Promise<jarl.Result<void, MainCalledTwice>>;
 }
+
+export const create = App.create;
 ```
 
 ## Async
@@ -242,9 +244,9 @@ const environment = await Common.load(definition);
 const [log, db, sentry] = Common.open("driver", environment.vars.databaseUrl);
 const openRouter = OpenRouter.open({ token: environment.vars.openRouterToken });
 
-const app = new App.App({ environment, services: [log, db, sentry, openRouter] });
+const app = App.create(main, { environment, services: [log, db, sentry, openRouter] });
 app.onExit(() => Common.close(app)); // registered first: runs last
-await app.main(main);
+await app.main();
 ```
 
 ## Example 2: qemu-server, long-running
@@ -298,9 +300,9 @@ const sessions = Sessions.open({
   maxJobs: environment.flags.maxJobs,
 });
 
-const app = new App.App({ environment, services: [log, db, sentry, sessions] });
+const app = App.create(main, { environment, services: [log, db, sentry, sessions] });
 app.onExit(() => Common.close(app));
-await app.main(main);
+await app.main();
 ```
 
 ## Example 3: ctrl, several commands
@@ -350,13 +352,13 @@ if (environment.command === "test run") {
     token: environment.vars.linearApiToken,
     team: environment.vars.linearTeam,
   });
-  const app = new App.App({ environment, services: [log, db, sentry, linear] });
+  const app = App.create(testRun, { environment, services: [log, db, sentry, linear] });
   app.onExit(() => Common.close(app));
-  await app.main(testRun);
+  await app.main();
 } else {
-  const app = new App.App({ environment, services: [log, db, sentry] });
+  const app = App.create(session, { environment, services: [log, db, sentry] });
   app.onExit(() => Common.close(app));
-  await app.main(session);
+  await app.main();
 }
 ```
 
@@ -391,7 +393,7 @@ import type * as Log from "@oligarchy/log";
 import type * as Sentry from "@oligarchy/sentry";
 import * as jarl from "jarl";
 import { expect, it } from "vitest";
-import { session, type SessionReads } from "../src/session.ts";
+import { session } from "../src/session.ts";
 
 it("prints the session it found (happy)", async () => {
   const lines: Array<string> = [];
@@ -413,8 +415,10 @@ it("prints the session it found (happy)", async () => {
     capture: () => undefined,
     flush: async () => undefined,
   };
-  const environment: SessionReads = { command: "session", flags: { sessionId: "s1" } };
-  const app = new App.App({ environment, services: [log, db, sentry] });
+  const app = App.create(session, {
+    environment: { command: "session", flags: { sessionId: "s1" } },
+    services: [log, db, sentry],
+  });
 
   expect(await session(app)).toEqual(jarl.ok({ id: "s1", status: "ended" }));
   expect(lines).toEqual(['{"id":"s1","status":"ended"}']);
@@ -441,8 +445,10 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
   and `passWithNoTests: false`.
 - A service package never imports `@oligarchy/app`. `@oligarchy/app` imports service types only
   (`import type`), for the `Services` list.
-- `App`'s type arguments come from the constructor alone (`environment`, `services`). `main` and
-  `onExit` are checked against them at the call; they never widen them.
+- `App`'s type comes from `main`. `create(main, options)` infers `Environment` and `T` from
+  `main`'s parameter alone (`NoInfer` on `environment` and `services`), so the list can never widen
+  what `main` asked for. The list is checked by service name, and a missing one fails on the list
+  as `{ missing: "name" }`. The constructor is private.
 - v2's `lib` is ES2023: `Promise.withResolvers` is ES2024. Use a small helper, or raise `lib`
   for every package at once.
 - CI installs only the root, so root oxlint type-checks `v2/` without `v2/node_modules`. An
@@ -468,17 +474,19 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
 - [ ] The existing `tick` tests still pass with `cancel` returning a promise.
 
 `@oligarchy/app` (test services added with `declare module "../src/main.ts"` in the test)
-- [ ] Services are filed under their names, and `main`'s function receives them (happy).
-- [ ] Two services with the same name throw at construction (unhappy).
-- [ ] `main`'s function returns ok: exit handlers newest first, each given `returned`, then exit 0 (happy).
-- [ ] `main`'s function returns an error: the handlers still run; exit 1 (unhappy).
-- [ ] A signal: the handlers run with that signal, then `main` waits for its function to return, then exit 0 (happy).
+- [ ] Services are filed under their names, and `main` receives them (happy).
+- [ ] Two services with the same name throw in `create` (unhappy).
+- [ ] A list missing a service `main` asked for does not compile, and the error names it (unhappy).
+- [ ] An environment without a flag `main` reads does not compile (unhappy).
+- [ ] `main` returns ok: exit handlers newest first, each given `returned`, then exit 0 (happy).
+- [ ] `main` returns an error: the handlers still run; exit 1 (unhappy).
+- [ ] A signal: the handlers run with that signal, then `app.main()` waits for `main` to return, then exit 0 (happy).
 - [ ] A handler that throws: the rest still run; exit 1 (unhappy).
-- [ ] A second call to `main` returns `MainCalledTwice` and runs nothing (unhappy).
+- [ ] A second `app.main()` returns `MainCalledTwice` and runs nothing (unhappy).
 - [ ] A removed handler does not run; removing twice does nothing (unhappy).
 - [ ] A handler added after exit started runs at once (unhappy).
 - [ ] A second signal exits 1 without waiting (unhappy).
-- [ ] Types: a function passed to `main`, or a helper, that needs a service the list lacks does not compile; one that reads a flag the environment lacks does not compile; an exit handler that takes something other than the reason does not compile (unhappy).
+- [ ] Types: a helper that needs a service `main` did not ask for does not compile; inside `main`, a service `main` did not ask for is not on `app.services`; an exit handler that takes something other than the reason does not compile (unhappy).
 
 Each service (`log`, `sentry`, `db`, `openrouter`, `linear`)
 - [ ] `open` returns a service whose operations work against the real dependency, where the v1 package tests it that way (`db`: Postgres, as `packages/integration-testing` does) (happy).
@@ -499,7 +507,7 @@ Programs
 
 1. `@oligarchy/env`: export `Result` and `Vars`.
 2. `@oligarchy/async`: `tick` awaits `fn`; `cancel` returns a promise that waits for a run in flight.
-3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Signal`, `ExitReason`, `OnExit`, `Io`, `MainCalledTwice`, `App`), `src/main.ts` exporting them.
+3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Signal`, `ExitReason`, `OnExit`, `Io`, `MainCalledTwice`, `App`, `create`), `src/main.ts` exporting them.
 4. Services, one package each, added to `Services` as each lands: `log`, `sentry`, `db` (a port of `packages/db`: the pool, `run`, `transaction`, `ping` and the stores as operations; `DatabaseError` keeps `operation` and `cause`), `openrouter`, `linear`.
 5. `@oligarchy/common`.
 6. driver: replace `v2/packages/driver/src/main.ts`'s print with Example 1.
