@@ -60,6 +60,11 @@
         "packages/integration-testing/vitest.global-setup.ts"
       ],
       "rules": { "typescript/no-floating-promises": "off" }
+    },
+    {
+      "files": ["v2/**"],
+      "jsPlugins": ["./v2/lint/plugin.js"],
+      "rules": { "oligarchy/augment-through-entry": "error" }
     }
   ],
   "env": { "builtin": true, "node": true, "es2022": true },
