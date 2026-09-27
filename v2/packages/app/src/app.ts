@@ -17,6 +17,15 @@ type Main<Environment, Wants extends AnyService> = (
   app: App<Environment, Wants>,
 ) => Promise<jarl.Result<unknown, unknown>>;
 
+// What an app has done so far. Each registration is its own entry, so a remover takes off only
+// its own.
+export type State = {
+  started: boolean;
+  exiting: ExitReason | undefined;
+  failed: boolean;
+  readonly handlers: Array<{ readonly handler: OnExit }>;
+};
+
 const processIo: Io = {
   onSignal: (handler) => {
     const interrupt = () => handler("SIGINT");
@@ -33,14 +42,39 @@ const processIo: Io = {
   },
 };
 
+const call = async (state: State, handler: OnExit, reason: ExitReason): Promise<void> => {
+  try {
+    await handler(reason);
+  } catch (caught) {
+    state.failed = true;
+    console.error(caught);
+  }
+};
+
+const exit = async (state: State, reason: ExitReason): Promise<void> => {
+  state.exiting = reason;
+  for (let entry = state.handlers.pop(); entry !== undefined; entry = state.handlers.pop()) {
+    await call(state, entry.handler, reason);
+  }
+};
+
+const run = async <Environment, S extends Provided | AnyService>(
+  app: App<Environment, S>,
+  main: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
+): Promise<boolean> => {
+  try {
+    const result = await main(app);
+    return result.ok;
+  } catch (caught) {
+    console.error(caught);
+    return false;
+  }
+};
+
 export class App<const Environment, const S extends Provided | AnyService> {
   readonly environment: Environment;
   readonly services: ServicesOf<S>;
-  // Each registration is its own entry, so a remover takes off only its own.
-  readonly #handlers: Array<{ readonly handler: OnExit }> = [];
-  #started = false;
-  #exiting: ExitReason | undefined = undefined;
-  #failed = false;
+  readonly state: State = { started: false, exiting: undefined, failed: false, handlers: [] };
 
   // The overloads are the typed face; the bodies below take what they already checked.
   constructor(environment: Environment, services: S & NotAService);
@@ -50,74 +84,46 @@ export class App<const Environment, const S extends Provided | AnyService> {
   }
 
   onExit(handler: OnExit): () => void {
-    const reason = this.#exiting;
+    const reason = this.state.exiting;
     if (reason !== undefined) {
-      void this.#call(handler, reason);
+      void call(this.state, handler, reason);
       return () => undefined;
     }
     const entry = { handler };
-    this.#handlers.push(entry);
+    this.state.handlers.push(entry);
     return () => {
-      const at = this.#handlers.indexOf(entry);
+      const at = this.state.handlers.indexOf(entry);
       if (at !== -1) {
-        this.#handlers.splice(at, 1);
+        this.state.handlers.splice(at, 1);
       }
     };
   }
 
   main<Wants extends AnyService = never>(
-    run: Main<Environment, Wants> & Provides<Wants, NamesOf<S>>,
+    main: Main<Environment, Wants> & Provides<Wants, NamesOf<S>>,
     io?: Io,
   ): Promise<jarl.Result<void, MainCalledTwice>>;
   async main(
-    run: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
+    main: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
     io: Io = processIo,
   ): Promise<jarl.Result<void, MainCalledTwice>> {
-    if (this.#started) {
+    if (this.state.started) {
       return jarl.err(new MainCalledTwice("main was already called"));
     }
-    this.#started = true;
+    this.state.started = true;
     let exiting: Promise<void> | undefined;
     const stopListening = io.onSignal((signal) => {
       if (exiting !== undefined) {
         io.exit(1);
         return;
       }
-      exiting = this.#exit({ kind: "signal", signal });
+      exiting = exit(this.state, { kind: "signal", signal });
     });
-    const ok = await this.#run(run);
-    exiting ??= this.#exit({ kind: "returned" });
+    const ok = await run(this, main);
+    exiting ??= exit(this.state, { kind: "returned" });
     await exiting;
     stopListening();
-    io.exit(ok && !this.#failed ? 0 : 1);
+    io.exit(ok && !this.state.failed ? 0 : 1);
     return jarl.ok(undefined);
-  }
-
-  async #run(
-    run: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
-  ): Promise<boolean> {
-    try {
-      const result = await run(this);
-      return result.ok;
-    } catch (caught) {
-      console.error(caught);
-      return false;
-    }
-  }
-
-  async #exit(reason: ExitReason): Promise<void> {
-    this.#exiting = reason;
-    for (let entry = this.#handlers.pop(); entry !== undefined; entry = this.#handlers.pop()) {
-      await this.#call(entry.handler, reason);
-    }
-  }
-
-  async #call(handler: OnExit, reason: ExitReason): Promise<void> {
-    try {
-      await handler(reason);
-    } catch (caught) {
-      this.#failed = true;
-      console.error(caught);
-    }
   }
 }
