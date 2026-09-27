@@ -15,26 +15,27 @@ needs it. Programs (driver, ctrl, the servers) are built from these and are not 
       The log and Sentry must not count it as a failure; that is theirs, below.
 - [x] `Has<T>` exposes `signal`, so a helper can pass it on (#263).
 - [x] A server's `main` waits for exit by waiting on `app.signal`.
-- [ ] A deadline for each exit handler: they run after the signal aborts, and stopping a session,
-      deleting a heartbeat row and the flushes make requests of their own. Built on `timeout` in
-      `@oligarchy/async`.
+- [x] A deadline for each exit handler: they run after the signal aborts, so a handler that sends a
+      request wraps it in `timeout` from `@oligarchy/async` with no signal (#264).
 - [ ] Signals a program chooses: the session REPL answers SIGHUP.
 - [ ] stdout drained before `process.exit`, so a piped PNG is not cut short.
 - [ ] An exported fake `Io` for tests, and stderr through `Io` rather than `console.error`.
 
 ## @oligarchy/async
 
-Every timer goes through an injectable clock, so a test steps time for all of them at once.
-`AbortSignal.timeout` is not used: fake timers cannot drive it.
+A signal is the one way to stop any of them. Their timers are `setTimeout`, so vitest's fake timers
+drive them in a test (`advanceTimersByTimeAsync`); `AbortSignal.timeout` is not used, because fake
+timers cannot drive it. There is no mutex: `tick` never runs two calls at once, and anything else
+that must not run twice keeps a flag.
 
-- [ ] `tick` awaits `fn`, can run at once, catches a rejection, and its cancel waits for a run in
-      flight. Today async runs overlap and a rejection escapes. Heartbeat, sweeps, backlog, viz polls.
-- [ ] `sleep(ms, signal)` that can be aborted.
-- [ ] `timeout(fn(signal), ms)` returning a Result; the loser is aborted, not left running.
-- [ ] `retry(fn, { times, delay, while, signal })`: Linear reads retry once, two seconds later,
-      only while `retryable`.
-- [ ] `mutex` with `tryLock`: one reserve at a time, one mint save at a time, a sweep skipped while
-      the last one runs.
+- [x] `tick(fn, interval, signal)`: awaits `fn`, spaces calls from the end of the last one, keeps
+      going after a throw, and settles once the signal aborts and the call in flight returns (#264).
+- [x] `sleep(ms, signal)`: ok after `ms`, `Aborted` as soon as the signal aborts (#264).
+- [x] `timeout(fn, ms, signal?)`: `fn`'s signal aborts at the deadline or with the caller's; the
+      answer is `fn`'s, or `TimedOut` for an `fn` still running (#264).
+- [x] `repeat(fn, count, { errorFilter, delay, signal })`: Linear reads retry once, two seconds
+      later, only while `retryable` (#264).
+- [x] `Aborted` and `TimedOut` live here; the app's signal carries this `Aborted` (#264).
 - [ ] `singleFlight`: callers share one lookup, and a failure is not kept, so the next caller tries
       again (Linear's ready-label id, an ISO download).
 - [ ] `channel(capacity)`: an async iterable that drops a subscriber who falls behind (the follow
@@ -115,10 +116,11 @@ Every timer goes through an injectable clock, so a test steps time for all of th
 
 ## Tests
 
-- [ ] A clock with `advance(ms)` that also runs what it wakes. `vi.advanceTimersByTime` works in
-      v2 today only because `tick` and `sleep` take synchronous callbacks.
-- [ ] `track(promise)`, to ask whether it has settled; `flush()`; `expectErr(result, Error)`;
-      `unexpected(name)`, the member a fake does not expect.
+- [x] Stepping time: vitest's fake timers with `advanceTimersByTimeAsync`, which also runs what the
+      timers wake (#264).
+- [ ] `track(promise)`, to ask whether it has settled (in `async/test/support.ts` today, #264);
+      `expectErr(result, Error)`; `unexpected(name)`, the member a fake does not expect. Shared once
+      a second package needs them.
 - [ ] A fake `fetch`: a script, a recorder, an app answering in process, one that never answers.
 - [ ] A fake spawner: exit, stdout and stderr scripted, a child that ignores SIGTERM, the kill
       escalation, `unref`, and the next spawn to wait for.
