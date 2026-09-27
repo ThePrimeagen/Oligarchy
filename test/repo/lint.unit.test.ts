@@ -56,8 +56,11 @@ export const pick = (flip: boolean): One | Two => (flip ? new One() : new Two())
 `;
 
 // Lints the fixture with the repo's own config from a directory made under `parent`, then removes
-// it: how many no-redundant-type-constituents diagnostics it gets.
-const redundantUnions = (parent: string): number => {
+// it: oxlint's exit status, how many files it linted, and how many no-redundant-type-constituents
+// diagnostics it gave. The file count keeps a run that linted nothing from passing as clean.
+const redundantUnions = (
+  parent: string,
+): { readonly status: number | null; readonly files: number; readonly redundant: number } => {
   const dir = mkdtempSync(join(root, parent, ".lint-"));
   try {
     writeFileSync(
@@ -70,11 +73,15 @@ const redundantUnions = (parent: string): number => {
     writeFileSync(join(dir, "union.ts"), UNRESOLVED_UNION);
     const run = spawnSync(
       join(root, "node_modules/.bin/oxlint"),
-      ["-c", join(root, ".oxlintrc.json"), "--format", "unix", dir],
+      ["-c", join(root, ".oxlintrc.json"), "--format", "json", dir],
       { encoding: "utf8" },
     );
-    return run.stdout.split("\n").filter((line) => line.includes("no-redundant-type-constituents"))
-      .length;
+    return {
+      status: run.status,
+      files: Number(/"number_of_files": (\d+)/.exec(run.stdout)?.[1] ?? 0),
+      redundant:
+        run.stdout.split('"code": "typescript(no-redundant-type-constituents)"').length - 1,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -82,11 +89,11 @@ const redundantUnions = (parent: string): number => {
 
 describe("no-redundant-type-constituents", () => {
   it("is off under v2, where a union of types CI cannot resolve is not a mistake (happy)", () => {
-    expect(redundantUnions("v2")).toBe(0);
+    expect(redundantUnions("v2")).toEqual({ status: 0, files: 1, redundant: 0 });
   });
 
   it("still refuses the same union everywhere else (unhappy)", () => {
-    expect(redundantUnions(".")).toBe(2);
+    expect(redundantUnions(".")).toEqual({ status: 1, files: 1, redundant: 2 });
   });
 });
 

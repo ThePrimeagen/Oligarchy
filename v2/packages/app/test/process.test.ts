@@ -1,46 +1,68 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type * as App from "../src/main.ts";
 
 const fixture = join(import.meta.dirname, "fixtures/waits.ts");
 
-// Runs the fixture as its own process: `waitFor` settles once stdout has shown the line, `exited`
-// with the exit code, `lines` is everything it printed and `errors` everything on stderr.
+// A child a failed test left running would keep ticking; each test's children end with it.
+const children = new Set<ChildProcess>();
+afterEach(() => {
+  for (const child of children) {
+    child.kill("SIGKILL");
+  }
+  children.clear();
+});
+
+// Runs the fixture as its own process. `waitFor` settles once stdout has shown the line, and fails
+// if the process ends first; `closed` is the exit code once stdout and stderr have been read to
+// the end; `lines` is everything it printed and `errors` everything on stderr.
 const start = (args: ReadonlyArray<string> = []) => {
   const child = spawn(process.execPath, [fixture, ...args], {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  children.add(child);
   let out = "";
   let err = "";
+  let ended = false;
+  const waiting: Array<{ readonly line: string; readonly done: (seen: boolean) => void }> = [];
+  const shown = (line: string) => out.split("\n").includes(line);
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
     err += chunk;
   });
-  const waiting: Array<{ readonly line: string; readonly resolve: () => void }> = [];
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
     out += chunk;
     for (const each of waiting) {
-      if (out.split("\n").includes(each.line)) {
-        each.resolve();
+      if (shown(each.line)) {
+        each.done(true);
       }
     }
   });
-  const exited = new Promise<number | null>((resolve) => {
-    child.on("exit", (code) => resolve(code));
+  const closed = new Promise<number | null>((resolve) => {
+    child.on("close", (code) => {
+      ended = true;
+      for (const each of waiting) {
+        each.done(shown(each.line));
+      }
+      resolve(code);
+    });
   });
   const waitFor = (line: string) =>
-    new Promise<void>((resolve) => {
-      waiting.push({ line, resolve });
-      if (out.split("\n").includes(line)) {
-        resolve();
+    new Promise<void>((resolve, reject) => {
+      const done = (seen: boolean) =>
+        seen ? resolve() : reject(new Error(`ended without printing ${line}`));
+      if (shown(line) || ended) {
+        done(shown(line));
+        return;
       }
+      waiting.push({ line, done });
     });
   const send = (signal: App.Signal) => {
     child.kill(signal);
   };
-  return { waitFor, exited, send, lines: () => out.trim().split("\n"), errors: () => err };
+  return { waitFor, closed, send, lines: () => out.trim().split("\n"), errors: () => err };
 };
 
 describe("App on the real process", () => {
@@ -54,7 +76,7 @@ describe("App on the real process", () => {
       const program = start();
       await program.waitFor("ready");
       program.send(signal);
-      expect(await program.exited).toBe(0);
+      expect(await program.closed).toBe(0);
       expect(program.lines()).toEqual(["ready", `handler ${signal}`]);
       expect(program.errors()).toBe(stderr);
     },
@@ -66,6 +88,6 @@ describe("App on the real process", () => {
     program.send("SIGHUP");
     await program.waitFor("handler SIGHUP");
     program.send("SIGHUP");
-    expect(await program.exited).toBe(1);
+    expect(await program.closed).toBe(1);
   });
 });

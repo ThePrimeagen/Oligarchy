@@ -1,4 +1,5 @@
 import { Aborted } from "@oligarchy/async";
+import { writeSync } from "node:fs";
 import * as jarl from "jarl";
 import type {
   AnyService,
@@ -51,8 +52,9 @@ const processIo: Io = {
   exit: (code) => {
     process.exit(code);
   },
+  // Written before this returns: a second signal's process.exit does not wait for stderr.
   stderr: (text) => {
-    process.stderr.write(text);
+    writeSync(process.stderr.fd, text);
   },
 };
 
