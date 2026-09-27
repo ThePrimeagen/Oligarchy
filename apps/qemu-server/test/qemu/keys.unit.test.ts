@@ -105,6 +105,68 @@ describe("parseKeys happy path", () => {
   });
 });
 
+describe("parseKeys reads the Super key and chords the way driving models write them", () => {
+  it("reads a bare Super key by any of its names as meta_l", () => {
+    for (const name of ["SUPER", "Super", "super", "WIN", "WINDOWS", "LOGO", "CMD", "META"]) {
+      expect(chords(`<${name}>`)).toEqual([["meta_l"]]);
+    }
+    expect(chords("<super_l>")).toEqual([["meta_l"]]);
+    expect(chords("<win_l>")).toEqual([["meta_l"]]);
+  });
+
+  it("reads a Super modifier by any of its names as meta_l", () => {
+    expect(chords("<SUPER-SPACE>")).toEqual([["meta_l", "spc"]]);
+    expect(chords("<super-ENTER>")).toEqual([["meta_l", "ret"]]);
+    expect(chords("<Super-S-q>")).toEqual([["meta_l", "shift", "q"]]);
+    expect(chords("<WIN-e>")).toEqual([["meta_l", "e"]]);
+    expect(chords("<LOGO-e>")).toEqual([["meta_l", "e"]]);
+    expect(chords("<CMD-e>")).toEqual([["meta_l", "e"]]);
+    expect(chords("<meta_l-RET>")).toEqual([["meta_l", "ret"]]);
+  });
+
+  it("reads a key bracketed again inside its chord as that key", () => {
+    expect(chords("<M-<SPACE>>")).toEqual([["meta_l", "spc"]]);
+    expect(chords("<M-<ENTER>>")).toEqual([["meta_l", "ret"]]);
+    expect(chords("<C-S-<TAB>>")).toEqual([["ctrl", "shift", "tab"]]);
+    expect(chords("<C-<->>")).toEqual([["ctrl", "minus"]]);
+    expect(chords("a<M-<ENTER>>b")).toEqual([["a"], ["meta_l", "ret"], ["b"]]);
+  });
+
+  it("reads a chord joined with + as one joined with -", () => {
+    expect(chords("<META_L+RET>")).toEqual([["meta_l", "ret"]]);
+    expect(chords("<meta_l+ret>")).toEqual([["meta_l", "ret"]]);
+    expect(chords("<SUPER+ENTER>")).toEqual([["meta_l", "ret"]]);
+    expect(chords("<C+S+t>")).toEqual([["ctrl", "shift", "t"]]);
+  });
+
+  it("still reads a lone + and a + under a modifier as the plus key", () => {
+    expect(chords("<+>")).toEqual([["shift", "equal"]]);
+    expect(chords("<C-+>")).toEqual([["ctrl", "shift", "equal"]]);
+  });
+
+  it("reads punctuation written by name", () => {
+    expect(chords("<comma>")).toEqual([["comma"]]);
+    expect(chords("<COMMA>")).toEqual([["comma"]]);
+    expect(chords("<DOLLAR>")).toEqual([["shift", "4"]]);
+    expect(chords("<AMPERSAND>")).toEqual([["shift", "7"]]);
+    expect(chords("<AMP>")).toEqual([["shift", "7"]]);
+  });
+
+  it("still refuses a bracket inside a chord that is not a modified key closed by >> (unhappy)", () => {
+    expect(failure("<<SPACE>")).toBe('qemu: unknown key "<SPACE"');
+    expect(failure("<M-<SPACE>")).toBe('qemu: unknown key "<SPACE"');
+    expect(failure("<M-<BOGUS>>")).toBe('qemu: unknown key "BOGUS"');
+    expect(failure("x < /dev/null<ENTER>")).toBe('qemu: unknown key " /dev/null<ENTER"');
+  });
+
+  it("still refuses a name it would have to guess at (unhappy)", () => {
+    expect(failure("<W-e>")).toBe('qemu: unknown modifier "W"');
+    expect(failure("<AND>")).toBe('qemu: unknown key "AND"');
+    expect(failure("<SUPER+>")).toBe('qemu: unknown key "SUPER+"');
+    expect(failure("<X+c>")).toBe('qemu: unknown modifier "X"');
+  });
+});
+
 describe("parseKeys unhappy path", () => {
   it("fails on an unknown encoding", () => {
     expect(failure("a", "vim")).toBe('qemu: unknown key encoding "vim"');
