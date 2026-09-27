@@ -1,4 +1,5 @@
 import { inspect } from "node:util";
+import { sql } from "drizzle-orm";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as Db from "../src/main.ts";
@@ -57,22 +58,20 @@ describe("close", () => {
   });
 });
 
-describe("ping", () => {
+describe("run", () => {
   it("fails once the pool is closed, naming the query and the reason (unhappy)", async () => {
     const db = await opened();
     await Db.close(db);
-    const pinged = await Db.ping(db);
-    if (!jarl.error.is(pinged, Db.DatabaseError)) {
+    const selected = await Db.run(db, "selectOne", (drizzle) => drizzle.execute(sql`select 1`));
+    if (!jarl.error.is(selected, Db.DatabaseError)) {
       throw new Error("expected a DatabaseError");
     }
-    expect(pinged.error.message).toBe(
-      "ping: Failed query: select 1\nparams: : Cannot use a pool after calling end on the pool",
+    expect(selected.error.message).toBe(
+      "selectOne: Failed query: select 1\nparams: : Cannot use a pool after calling end on the pool",
     );
-    expect(pinged.error.cause).toBeInstanceOf(Error);
+    expect(selected.error.cause).toBeInstanceOf(Error);
   });
-});
 
-describe("run", () => {
   it("answers what the query returns (happy)", async () => {
     const db = await opened();
     expect(await Db.run(db, "answer", async () => 42)).toEqual(jarl.ok(42));

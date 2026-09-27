@@ -52,33 +52,38 @@ const opened = async (url: string, onPoolError = poolErrors().onPoolError) => {
 
 const unreachable = `postgres://oligarchy:${PASSWORD}@${UNREACHABLE}/oligarchy`;
 
-describe("ping", () => {
-  it("answers once the database is up (happy)", async () => {
-    const db = await opened((await freshDatabase()).url);
-    expect(await Db.ping(db)).toEqual(jarl.ok(undefined));
+const selectOne = (db: Db.Database) =>
+  Db.run(db, "selectOne", async (drizzle) => {
+    await drizzle.execute(sql`select 1`);
   });
-
-  it("carries the driver's reason for an unreachable database, never the password (unhappy)", async () => {
-    const errors = poolErrors();
-    const db = await opened(unreachable, errors.onPoolError);
-    const pinged = await Db.ping(db);
-    if (!jarl.error.is(pinged, Db.DatabaseError)) {
-      throw new Error("expected a DatabaseError");
-    }
-    expect(pinged.error.message).toMatch(/^ping: /);
-    expect(pinged.error.message).toContain(`ECONNREFUSED ${UNREACHABLE}`);
-    expect(inspect(pinged.error)).not.toContain(PASSWORD);
-    expect(String(pinged.error)).not.toContain(PASSWORD);
-    // A refused connect is the query's failure, not an error of the pool.
-    expect(errors.seen).toEqual([]);
-  });
-});
 
 describe("open", () => {
   it("connects with a url carrying sslrootcert=system, which node-postgres reads as a path (happy)", async () => {
     const { url } = await freshDatabase();
     const db = await opened(`${url}?sslrootcert=system`);
-    expect(await Db.ping(db)).toEqual(jarl.ok(undefined));
+    expect(await selectOne(db)).toEqual(jarl.ok(undefined));
+  });
+
+  it("keeps the rest of the url: sslmode=require still asks this server for TLS (unhappy)", async () => {
+    const { url } = await freshDatabase();
+    const db = await opened(`${url}?sslmode=require&sslrootcert=system`);
+    const selected = await selectOne(db);
+    if (!jarl.error.is(selected, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(selected.error.message).toContain("The server does not support SSL connections");
+  });
+
+  it("keeps an sslrootcert that names a file, and reads that file (unhappy)", async () => {
+    const { url } = await freshDatabase();
+    const db = await opened(`${url}?sslrootcert=/nonexistent/ca.pem`);
+    const selected = await selectOne(db);
+    if (!jarl.error.is(selected, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(selected.error.message).toContain(
+      "ENOENT: no such file or directory, open '/nonexistent/ca.pem'",
+    );
   });
 });
 
@@ -118,14 +123,29 @@ describe("run", () => {
     });
     expect(ran).toEqual(jarl.ok([{ answer: 42 }]));
   });
+
+  it("carries the driver's reason for an unreachable database, never the password (unhappy)", async () => {
+    const errors = poolErrors();
+    const db = await opened(unreachable, errors.onPoolError);
+    const selected = await selectOne(db);
+    if (!jarl.error.is(selected, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(selected.error.message).toMatch(/^selectOne: /);
+    expect(selected.error.message).toContain(`ECONNREFUSED ${UNREACHABLE}`);
+    expect(inspect(selected.error)).not.toContain(PASSWORD);
+    expect(String(selected.error)).not.toContain(PASSWORD);
+    // A refused connect is the query's failure, not an error of the pool.
+    expect(errors.seen).toEqual([]);
+  });
 });
 
 describe("the pool", () => {
-  it("reports a connection the server drops, and the next ping connects again (unhappy)", async () => {
+  it("reports a connection the server drops, and the next query connects again (unhappy)", async () => {
     const { name, url } = await freshDatabase();
     const errors = poolErrors();
     const db = await opened(url, errors.onPoolError);
-    expect(await Db.ping(db)).toEqual(jarl.ok(undefined));
+    expect(await selectOne(db)).toEqual(jarl.ok(undefined));
 
     const reported = errors.next();
     await rows(
@@ -134,6 +154,6 @@ describe("the pool", () => {
     );
     expect((await reported).message).toMatch(/terminat/);
 
-    expect(await Db.ping(db)).toEqual(jarl.ok(undefined));
+    expect(await selectOne(db)).toEqual(jarl.ok(undefined));
   });
 });

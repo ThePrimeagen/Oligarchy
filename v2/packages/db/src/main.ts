@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type * as App from "@oligarchy/app";
 import type * as Env from "@oligarchy/env";
-import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as Migrator from "drizzle-orm/node-postgres/migrator";
 import * as jarl from "jarl";
@@ -24,9 +23,6 @@ export type Database = {
     operation: string,
     query: (db: Drizzle) => Promise<T>,
   ) => Promise<jarl.Result<T, DatabaseError>>;
-  // select 1. The pool connects on its first query, so a program that needs the database pings it
-  // before it starts work.
-  readonly ping: () => Promise<jarl.Result<void, DatabaseError>>;
   // Applies every migration the database has not applied yet.
   readonly migrate: () => Promise<jarl.Result<void, DatabaseError>>;
   // Ends the pool once the queries in flight have finished. Nothing uses the database after.
@@ -43,7 +39,7 @@ const messageOf = (value: unknown): string =>
   value instanceof Error ? value.message : String(value);
 
 // drizzle buries the driver's reason in `cause`, so the message carries both:
-// `ping: Failed query: select 1\nparams: : connect ECONNREFUSED 127.0.0.1:1`.
+// `countTests: Failed query: select count(*) ...: connect ECONNREFUSED 127.0.0.1:1`.
 const failed = (operation: string, thrown: unknown): DatabaseError => {
   const cause = thrown instanceof Error ? thrown.cause : undefined;
   const reason = cause === undefined ? "" : `: ${messageOf(cause)}`;
@@ -83,16 +79,13 @@ export const open = (options: {
   if (url === undefined) {
     return jarl.err(new DatabaseError("db: database url is not a valid url"));
   }
+  // Nothing connects until the first query.
   const pool = new Pool({ connectionString: url });
   pool.on("error", options.onPoolError);
   const db = drizzle({ client: pool });
   return jarl.ok({
     service: "db",
     run: (operation, query) => attempt(operation, () => query(db)),
-    ping: () =>
-      attempt("ping", async () => {
-        await db.execute(sql`select 1`);
-      }),
     migrate: () => attempt("migrate", () => Migrator.migrate(db, { migrationsFolder: MIGRATIONS })),
     close: () => attempt("close", () => pool.end()),
   });
@@ -100,6 +93,5 @@ export const open = (options: {
 
 export const run = <T>(db: Database, operation: string, query: (db: Drizzle) => Promise<T>) =>
   db.run(operation, query);
-export const ping = (db: Database) => db.ping();
 export const migrate = (db: Database) => db.migrate();
 export const close = (db: Database) => db.close();
