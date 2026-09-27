@@ -17,8 +17,10 @@ needs it. Programs (driver, ctrl, the servers) are built from these and are not 
 - [x] A server's `main` waits for exit by waiting on `app.signal`.
 - [x] A deadline for each exit handler: they run after the signal aborts, so a handler that sends a
       request wraps it in `timeout` from `@oligarchy/async` with no signal (#264).
-- [ ] Signals a program chooses: the session REPL answers SIGHUP.
-- [ ] stdout drained before `process.exit`, so a piped PNG is not cut short.
+- [x] SIGHUP ends the app like SIGINT and SIGTERM, instead of killing it before any handler runs
+      (#265).
+- [x] Flushing is not the app's: whatever writes (the log, stdout for a piped PNG) registers its
+      own `app.onExit` and flushes there.
 - [ ] An exported fake `Io` for tests, and stderr through `Io` rather than `console.error`.
 
 ## @oligarchy/async
@@ -86,7 +88,8 @@ that must not run twice keeps a flag.
 ## Services
 
 - [ ] `@oligarchy/log`: `info`, `warning`, `error`, `fatal`, `flush`; `location` and `agentId`;
-      `skipSentry`; the palette. The row sink is one promise chain, and `flush` is its tail.
+      `skipSentry`; the palette. The row sink is one promise chain, and `flush` is its tail. The
+      log registers `flush` with `app.onExit` itself, and waits for stdout to take the last line.
 - [ ] `@oligarchy/sentry`: `report(error, { level, tags, extra })` and an ignore mark. The session,
       intent and action spans on `startInactiveSpan`, each a root, and a parent that ends ends its
       open children. `@sentry/effect` goes.
