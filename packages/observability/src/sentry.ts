@@ -43,21 +43,42 @@ const tag = (
     onSome: (value) => ({ [key]: value }),
   });
 
+const ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const TICKET = /\b[A-Z]+-\d+\b/g;
+const NUMBER = /\d+/g;
+
+// Every line without a cause is made in the same frame, so Sentry's stack grouping would file every
+// kind of line as one issue. Its first line, with ids, tickets and numbers blanked, is its issue.
+const lineFingerprint = (text: string): Array<string> => [
+  LogErrors.LogLine.identifier,
+  (text.split("\n")[0] ?? "")
+    .trim()
+    .replace(ID, "<id>")
+    .replace(TICKET, "<ticket>")
+    .replace(NUMBER, "<n>"),
+];
+
 export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
   ({ error, severity, attributes, fiber }) => {
     const annotations = fiber.getRef(References.CurrentLogAnnotations);
     const context = { ...annotations, ...attributes };
     // A log line brings the level and the text (`extra.log`); the exception Sentry groups on is
     // the cause it carries, as it always was. A line without a cause is the exception itself.
-    const exception =
-      error.name === LogErrors.LogLine.identifier && error.cause !== undefined
-        ? error.cause
-        : error;
-    Sentry.captureException(exception, {
-      level: toSentryLevel(severity),
-      tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
-      extra: context,
-    });
+    const line = error.name === LogErrors.LogLine.identifier;
+    const exception = line && error.cause !== undefined ? error.cause : error;
+    Sentry.captureException(
+      exception,
+      Object.assign(
+        {
+          level: toSentryLevel(severity),
+          tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
+          extra: context,
+        },
+        line && error.cause === undefined
+          ? { fingerprint: lineFingerprint(error.message) }
+          : undefined,
+      ),
+    );
   },
 );
 
