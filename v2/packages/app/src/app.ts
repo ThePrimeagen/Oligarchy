@@ -10,6 +10,7 @@ import type {
   Provided,
   Provides,
   ServicesOf,
+  Signal,
 } from "./types.ts";
 
 export const MainCalledTwice = jarl.error.define("MainCalledTwice");
@@ -35,15 +36,19 @@ export type State = {
   readonly aborter: AbortController;
 };
 
+// SIGHUP is the terminal closing; left alone it kills the process before any handler runs.
+const SIGNALS: ReadonlyArray<Signal> = ["SIGINT", "SIGTERM", "SIGHUP"];
+
 const processIo: Io = {
   onSignal: (handler) => {
-    const interrupt = () => handler("SIGINT");
-    const terminate = () => handler("SIGTERM");
-    process.on("SIGINT", interrupt);
-    process.on("SIGTERM", terminate);
+    const listeners = SIGNALS.map((signal) => ({ signal, listener: () => handler(signal) }));
+    for (const { signal, listener } of listeners) {
+      process.on(signal, listener);
+    }
     return () => {
-      process.off("SIGINT", interrupt);
-      process.off("SIGTERM", terminate);
+      for (const { signal, listener } of listeners) {
+        process.off(signal, listener);
+      }
     };
   },
   exit: (code) => {

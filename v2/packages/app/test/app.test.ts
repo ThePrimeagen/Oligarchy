@@ -149,6 +149,33 @@ describe("App", () => {
     expect(listening()).toBe(0);
   });
 
+  it("on SIGHUP aborts, waits for main, then runs the handlers with the hangup as the reason (happy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const order: Array<string> = [];
+    app.onExit((reason) => {
+      order.push(`close services on ${reason.kind === "signal" ? reason.signal : reason.kind}`);
+    });
+    const { io, codes, signal } = fakeIo();
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      order.push("main saw the abort");
+      return jarl.ok(undefined);
+    }, io);
+    signal("SIGHUP");
+    await running;
+    expect(order).toEqual(["main saw the abort", "close services on SIGHUP"]);
+    expect(codes).toEqual([0]);
+  });
+
+  it("takes a SIGTERM after a SIGHUP as the second signal, and exits 1 at once (unhappy)", () => {
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes, signal } = fakeIo();
+    void app.main(() => new Promise<never>(() => undefined), io);
+    signal("SIGHUP");
+    signal("SIGTERM");
+    expect(codes).toEqual([1]);
+  });
+
   it("aborts app.signal when main returns, before the handlers run (happy)", async () => {
     const app = new App.App(environment, { counter: counter() });
     const seen: Array<string> = [];

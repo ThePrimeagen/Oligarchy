@@ -38,7 +38,7 @@ export type Provides<Wants extends AnyService, Names> = [Missing<Wants, Names>] 
   ? unknown
   : { readonly missing: Missing<Wants, Names> };
 
-export type Signal = "SIGINT" | "SIGTERM";
+export type Signal = "SIGINT" | "SIGTERM" | "SIGHUP";
 
 export type ExitReason =
   | { readonly kind: "returned" }
