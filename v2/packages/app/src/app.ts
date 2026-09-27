@@ -15,18 +15,24 @@ import type {
 export const MainCalledTwice = jarl.error.define("MainCalledTwice");
 export type MainCalledTwice = InstanceType<typeof MainCalledTwice>;
 
+// The reason app.signal carries, so a fetch or a sleep handed the signal fails with it.
+export const Aborted = jarl.error.define("Aborted");
+export type Aborted = InstanceType<typeof Aborted>;
+
 type Main<Environment, Wants extends AnyService> = (
   app: App<Environment, Wants>,
 ) => Promise<jarl.Result<unknown, unknown>>;
 
 // What an app has done so far. Each registration is its own entry, so a remover takes off only
-// its own. `drained` settles once every handler queued so far has run.
+// its own. `drained` settles once every handler queued so far has run. `exiting` is set once main
+// has settled, when the handlers start.
 export type State = {
   started: boolean;
   exiting: ExitReason | undefined;
   failed: boolean;
   readonly handlers: Array<{ readonly handler: OnExit }>;
   drained: Promise<void>;
+  readonly aborter: AbortController;
 };
 
 const processIo: Io = {
@@ -74,14 +80,21 @@ const settled = async (state: State): Promise<void> => {
   } while (current !== state.drained);
 };
 
+// While main runs the signal aborts only on a signal, so Aborted then is a stop, not a failure.
+const stopped = (signal: AbortSignal, error: unknown): boolean =>
+  signal.aborted && jarl.error.is(error, Aborted);
+
 const run = async <Environment, S extends Provided | AnyService>(
   app: App<Environment, S>,
   main: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
 ): Promise<boolean> => {
   try {
     const result = await main(app);
-    return result.ok;
+    return result.ok || stopped(app.signal, result.error);
   } catch (caught) {
+    if (stopped(app.signal, caught)) {
+      return true;
+    }
     console.error(caught);
     return false;
   }
@@ -96,7 +109,11 @@ export class App<const Environment, const S extends Provided | AnyService> {
     failed: false,
     handlers: [],
     drained: Promise.resolve(),
+    aborter: new AbortController(),
   };
+  // Aborts on the first signal, or once main returns. The exit handlers run after it aborts, so
+  // what they send takes a deadline of its own, not this.
+  readonly signal: AbortSignal = this.state.aborter.signal;
 
   // The overloads are the typed face; the bodies below take what they already checked.
   constructor(environment: Environment, services: S & NotAService & OnlyServices<S>);
@@ -132,21 +149,22 @@ export class App<const Environment, const S extends Provided | AnyService> {
     }
     this.state.started = true;
     let signals = 0;
+    let signalled: ExitReason | undefined;
     const stopListening = io.onSignal((signal) => {
       signals += 1;
       if (signals === 2) {
         io.exit(1);
       }
-      if (this.state.exiting === undefined) {
-        this.state.exiting = { kind: "signal", signal };
-        schedule(this.state, this.state.exiting);
+      // Main settles before any handler runs, so nothing is closed under a request in flight.
+      if (signalled === undefined && this.state.exiting === undefined) {
+        signalled = { kind: "signal", signal };
+        this.state.aborter.abort(new Aborted(`${signal} received`));
       }
     });
     const ok = await run(this, main);
-    if (this.state.exiting === undefined) {
-      this.state.exiting = { kind: "returned" };
-      schedule(this.state, this.state.exiting);
-    }
+    this.state.aborter.abort(new Aborted("main returned"));
+    this.state.exiting = signalled ?? { kind: "returned" };
+    schedule(this.state, this.state.exiting);
     await settled(this.state);
     stopListening();
     if (signals < 2) {
