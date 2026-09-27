@@ -6,8 +6,7 @@
     ".": "./src/main.ts"
   },
   "scripts": {
-    "check:types": "tsc --noEmit -p tsconfig.json",
-    "test:unit": "bun --bun vitest run"
+    "check:types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
@@ -16,11 +15,7 @@
     "jarl": "catalog:"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8",
-    "@electric-sql/pglite-socket": "0.2.11",
-    "@oligarchy/env": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   }
 }
