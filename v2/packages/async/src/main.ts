@@ -11,9 +11,8 @@ export type TimedOut = InstanceType<typeof TimedOut>;
 const abortedBy = (signal: AbortSignal): Aborted =>
   jarl.error.is(signal.reason, Aborted) ? signal.reason : new Aborted("aborted");
 
-// A call, not a property read, so TypeScript does not keep `aborted` narrowed across an await.
-const isAborted = (signal: AbortSignal | undefined): signal is AbortSignal =>
-  signal?.aborted === true;
+// What a helper waits on when it was given no signal: one that never aborts.
+const NEVER = new AbortController().signal;
 
 // Ok after delay milliseconds; Aborted as soon as signal aborts, and at once if it already has.
 export const sleep = (delay: number, signal: AbortSignal): Promise<jarl.Result<void, Aborted>> =>
@@ -51,8 +50,8 @@ export const repeat = <A extends readonly unknown[], T, E>(
     if (!Number.isInteger(count) || count < 1) {
       throw new Error("repeat count must be at least 1");
     }
-    const { signal, delay, errorFilter } = options;
-    if (isAborted(signal)) {
+    const { delay, errorFilter, signal = NEVER } = options;
+    if (signal.aborted) {
       return jarl.err(abortedBy(signal));
     }
     let result = await fn(...args);
@@ -60,13 +59,12 @@ export const repeat = <A extends readonly unknown[], T, E>(
       if (errorFilter !== undefined && !errorFilter(result.error)) {
         return result;
       }
-      // Without a delay the next call follows at once, with no timer between them.
       if (delay !== undefined) {
-        const slept = await sleep(delay, signal ?? new AbortController().signal);
+        const slept = await sleep(delay, signal);
         if (!slept.ok) {
           return slept;
         }
-      } else if (isAborted(signal)) {
+      } else if (signal.aborted) {
         return jarl.err(abortedBy(signal));
       }
       result = await fn(...args);
@@ -102,8 +100,7 @@ export const timeout = <T, E>(
   options: { readonly ms: number; readonly signal?: AbortSignal },
 ): Promise<jarl.Result<T, E | TimedOut>> =>
   new Promise((resolve, reject) => {
-    const { ms } = options;
-    const signal = options.signal ?? new AbortController().signal;
+    const { ms, signal = NEVER } = options;
     const inner = new AbortController();
     const forward = () => inner.abort(signal.reason);
     let settled = false;
@@ -129,7 +126,8 @@ export const timeout = <T, E>(
     } else {
       signal.addEventListener("abort", forward, { once: true });
     }
-    fn(inner.signal).then(
+    // A throw before fn returns its promise takes the rejection's path, so it cleans up too.
+    new Promise<jarl.Result<T, E>>((answer) => answer(fn(inner.signal))).then(
       (result) => {
         if (first()) {
           resolve(result);

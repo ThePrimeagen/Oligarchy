@@ -95,6 +95,17 @@ describe("timeout", () => {
     expect(jarl.error.is(result.value, TimedOut)).toBe(true);
   });
 
+  it("rejects with a throw from fn before it returns a promise, and leaves no timer (unhappy)", async () => {
+    const thrown = (): Promise<jarl.Result<string, never>> => {
+      throw new Error("thrown");
+    };
+
+    await expect(
+      timeout(thrown, { ms: 1_000, signal: new AbortController().signal }),
+    ).rejects.toThrow("thrown");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("keeps a rejection from fn after the deadline from surfacing (unhappy)", async () => {
     const unhandled: Array<unknown> = [];
     const collect = (reason: unknown) => {
