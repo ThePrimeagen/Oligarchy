@@ -1,6 +1,6 @@
 import * as App from "@oligarchy/app";
 import * as Db from "@oligarchy/db";
-import { testResults, testRuns } from "@oligarchy/db/schema";
+import * as DbSchema from "@oligarchy/db/schema";
 import * as Env from "@oligarchy/env";
 import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
@@ -14,9 +14,9 @@ const environment = Env.cli({
 
 const main = async (app: App.App<unknown, Db.Database>) => {
   const counted = await app.services.db.run(async (db) => ({
-    running: await db.$count(testRuns, eq(testRuns.status, "running")),
-    passing: await db.$count(testResults, eq(testResults.status, "passed")),
-    failing: await db.$count(testResults, eq(testResults.status, "failed")),
+    running: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "running")),
+    passing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "passed")),
+    failing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "failed")),
   }));
   if (!counted.ok) {
     process.stderr.write(`${counted.error.message}\n`);
