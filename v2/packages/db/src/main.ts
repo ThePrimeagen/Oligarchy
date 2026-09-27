@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import type * as Env from "@oligarchy/env";
 import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as Migrator from "drizzle-orm/node-postgres/migrator";
 import * as jarl from "jarl";
 import { Pool } from "pg";
@@ -14,8 +14,15 @@ const MIGRATIONS = fileURLToPath(new URL("../../../../packages/db/drizzle", impo
 export const DatabaseError = jarl.error.define("DatabaseError");
 export type DatabaseError = InstanceType<typeof DatabaseError>;
 
+export type Drizzle = NodePgDatabase;
+
 export type Database = {
   readonly service: "db";
+  // Hands the query drizzle; whatever it throws comes back as a DatabaseError named for operation.
+  readonly run: <T>(
+    operation: string,
+    query: (db: Drizzle) => Promise<T>,
+  ) => Promise<jarl.Result<T, DatabaseError>>;
   // select 1. The pool connects on its first query, so a program that needs the database pings it
   // before it starts work.
   readonly ping: () => Promise<jarl.Result<void, DatabaseError>>;
@@ -38,7 +45,7 @@ const failed = (operation: string, thrown: unknown): DatabaseError => {
   return error;
 };
 
-const attempt = (operation: string, query: () => Promise<void>) =>
+const attempt = <T>(operation: string, query: () => Promise<T>) =>
   jarl.fn(query, (thrown) => failed(operation, thrown))();
 
 // canParse, not new URL's throw: that TypeError carries the url, password and all, into the logs.
@@ -74,6 +81,7 @@ export const open = (options: {
   const db = drizzle({ client: pool });
   return jarl.ok({
     service: "db",
+    run: (operation, query) => attempt(operation, () => query(db)),
     ping: () =>
       attempt("ping", async () => {
         await db.execute(sql`select 1`);
@@ -83,6 +91,8 @@ export const open = (options: {
   });
 };
 
+export const run = <T>(db: Database, operation: string, query: (db: Drizzle) => Promise<T>) =>
+  db.run(operation, query);
 export const ping = (db: Database) => db.ping();
 export const migrate = (db: Database) => db.migrate();
 export const close = (db: Database) => db.close();

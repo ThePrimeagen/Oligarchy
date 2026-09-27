@@ -1,4 +1,4 @@
-import type * as Db from "@oligarchy/db";
+import * as Db from "@oligarchy/db";
 import * as jarl from "jarl";
 import type * as App from "../src/main.ts";
 
@@ -36,6 +36,7 @@ export const greeter = (): Greeter => ({ service: "greeter", greet: (name) => `h
 // A shared service written inline, as a test fakes one: checked against the list in services.ts.
 export const database = (): Db.Database => ({
   service: "db",
+  run: async () => jarl.err(new Db.DatabaseError("the type tests never run a query")),
   ping: async () => jarl.ok(undefined),
   migrate: async () => jarl.ok(undefined),
   close: async () => jarl.ok(undefined),

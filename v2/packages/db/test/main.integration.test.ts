@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inspect } from "node:util";
+import { sql } from "drizzle-orm";
 import * as jarl from "jarl";
 import { Client } from "pg";
 import { describe, expect, inject, it, onTestFinished } from "vitest";
@@ -105,6 +106,17 @@ describe("migrate", () => {
     }
     expect(migrated.error.message).toMatch(/^migrate: /);
     expect(migrated.error.message).toContain(`ECONNREFUSED ${UNREACHABLE}`);
+  });
+});
+
+describe("run", () => {
+  it("hands the query drizzle over the live database (happy)", async () => {
+    const db = await opened((await freshDatabase()).url);
+    const ran = await Db.run(db, "answer", async (drizzle) => {
+      const result = await drizzle.execute<{ answer: number }>(sql`select 41 + 1 as answer`);
+      return result.rows;
+    });
+    expect(ran).toEqual(jarl.ok([{ answer: 42 }]));
   });
 });
 

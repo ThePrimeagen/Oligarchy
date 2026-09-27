@@ -71,3 +71,25 @@ describe("ping", () => {
     expect(pinged.error.cause).toBeInstanceOf(Error);
   });
 });
+
+describe("run", () => {
+  it("answers what the query returns (happy)", async () => {
+    const db = await opened();
+    expect(await Db.run(db, "answer", async () => 42)).toEqual(jarl.ok(42));
+  });
+
+  it("turns a rejected query into a DatabaseError naming the operation and the reason (unhappy)", async () => {
+    const db = await opened();
+    const reason = new Error(`connect ECONNREFUSED ${UNREACHABLE}`);
+    const ran = await Db.run(db, "countTests", async () => {
+      throw new Error("Failed query: select count(*) from test_runs", { cause: reason });
+    });
+    if (!jarl.error.is(ran, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(ran.error.message).toBe(
+      `countTests: Failed query: select count(*) from test_runs: connect ECONNREFUSED ${UNREACHABLE}`,
+    );
+    expect(ran.error.cause).toBe(reason);
+  });
+});
