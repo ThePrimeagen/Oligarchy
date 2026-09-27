@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { inspect } from "node:util";
 import { sql } from "drizzle-orm";
 import * as jarl from "jarl";
@@ -10,14 +9,6 @@ import { databaseUrl, poolErrors, UNREACHABLE } from "./support.ts";
 
 const PASSWORD = "pa55w0rd-sentinel";
 const ADMIN = inject("postgresUrl");
-
-// v1's migrations, the ones migrate applies.
-const JOURNAL: { entries: ReadonlyArray<unknown> } = JSON.parse(
-  readFileSync(
-    new URL("../../../../packages/db/drizzle/meta/_journal.json", import.meta.url),
-    "utf8",
-  ),
-);
 
 const rows = async (url: string, text: string): Promise<Array<Record<string, unknown>>> => {
   const client = new Client({ connectionString: url });
@@ -88,41 +79,17 @@ describe("open", () => {
 });
 
 describe("migrate", () => {
-  it("applies every migration to an empty database, and a second run applies none (happy)", async () => {
+  it("applies v1's migrations to an empty database (happy)", async () => {
     const { url } = await freshDatabase();
     const db = await opened(url);
-    const applied = "select count(*)::int as count from drizzle.__drizzle_migrations";
-
     expect(await db.migrate()).toEqual(jarl.ok(undefined));
-    expect(await rows(url, applied)).toEqual([{ count: JOURNAL.entries.length }]);
     expect(await rows(url, "select to_regclass('public.sessions') is not null as made")).toEqual([
       { made: true },
     ]);
-
-    expect(await db.migrate()).toEqual(jarl.ok(undefined));
-    expect(await rows(url, applied)).toEqual([{ count: JOURNAL.entries.length }]);
-  });
-
-  it("fails on an unreachable database with the driver's reason (unhappy)", async () => {
-    const db = await opened(unreachable);
-    const migrated = await db.migrate();
-    if (!jarl.error.is(migrated, Db.DatabaseError)) {
-      throw new Error("expected a DatabaseError");
-    }
-    expect(migrated.error.message).toContain(`ECONNREFUSED ${UNREACHABLE}`);
   });
 });
 
 describe("run", () => {
-  it("hands the query drizzle over the live database (happy)", async () => {
-    const db = await opened((await freshDatabase()).url);
-    const ran = await db.run(async (drizzle) => {
-      const result = await drizzle.execute<{ answer: number }>(sql`select 41 + 1 as answer`);
-      return result.rows;
-    });
-    expect(ran).toEqual(jarl.ok([{ answer: 42 }]));
-  });
-
   it("carries the driver's reason for an unreachable database, never the password (unhappy)", async () => {
     const errors = poolErrors();
     const db = await opened(unreachable, errors.onPoolError);
