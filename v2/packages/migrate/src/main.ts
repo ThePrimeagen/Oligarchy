@@ -39,14 +39,14 @@ const app = new App.App(result.value, { db: db.value });
 
 // The migrations are in or they are not; a pool that fails to close is only worth a line.
 app.onExit(async () => {
-  const closed = await Db.close(app.services.db);
+  const closed = await app.services.db.close();
   if (!closed.ok) {
     process.stderr.write(`${closed.error.message}\n`);
   }
 });
 
 await app.main(async (running: App.App<unknown, Db.Database>) => {
-  const migrated = await Db.migrate(running.services.db);
+  const migrated = await running.services.db.migrate();
   if (migrated.ok) {
     process.stdout.write("database migrations applied\n");
   } else {

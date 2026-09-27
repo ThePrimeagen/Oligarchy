@@ -18,7 +18,7 @@ const environment = Env.cli({
   .done();
 
 const main = async (app: App.App<unknown, Db.Database>) => {
-  const counted = await Db.run(app.services.db, "countTests", async (db) => ({
+  const counted = await app.services.db.run(async (db) => ({
     running: await db.$count(testRuns, eq(testRuns.status, "running")),
     passing: await db.$count(testResults, eq(testResults.status, "passed")),
     failing: await db.$count(testResults, eq(testResults.status, "failed")),
@@ -62,7 +62,7 @@ if (!db.ok) {
 
 const app = new App.App(created.value, { db: db.value });
 app.onExit(async () => {
-  const closed = await Db.close(app.services.db);
+  const closed = await app.services.db.close();
   if (!closed.ok) {
     process.stderr.write(`${closed.error.message}\n`);
   }

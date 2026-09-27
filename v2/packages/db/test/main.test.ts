@@ -44,50 +44,50 @@ describe("open", () => {
 describe("close", () => {
   it("ends a pool that never connected (happy)", async () => {
     const db = await opened();
-    expect(await Db.close(db)).toEqual(jarl.ok(undefined));
+    expect(await db.close()).toEqual(jarl.ok(undefined));
   });
 
   it("refuses a second close with the driver's reason (unhappy)", async () => {
     const db = await opened();
-    await Db.close(db);
-    const again = await Db.close(db);
+    await db.close();
+    const again = await db.close();
     if (!jarl.error.is(again, Db.DatabaseError)) {
       throw new Error("expected a DatabaseError");
     }
-    expect(again.error.message).toBe("close: Called end on pool more than once");
+    expect(again.error.message).toBe("Called end on pool more than once");
   });
 });
 
 describe("run", () => {
   it("fails once the pool is closed, naming the query and the reason (unhappy)", async () => {
     const db = await opened();
-    await Db.close(db);
-    const selected = await Db.run(db, "selectOne", (drizzle) => drizzle.execute(sql`select 1`));
+    await db.close();
+    const selected = await db.run((drizzle) => drizzle.execute(sql`select 1`));
     if (!jarl.error.is(selected, Db.DatabaseError)) {
       throw new Error("expected a DatabaseError");
     }
     expect(selected.error.message).toBe(
-      "selectOne: Failed query: select 1\nparams: : Cannot use a pool after calling end on the pool",
+      "Failed query: select 1\nparams: : Cannot use a pool after calling end on the pool",
     );
     expect(selected.error.cause).toBeInstanceOf(Error);
   });
 
   it("answers what the query returns (happy)", async () => {
     const db = await opened();
-    expect(await Db.run(db, "answer", async () => 42)).toEqual(jarl.ok(42));
+    expect(await db.run(async () => 42)).toEqual(jarl.ok(42));
   });
 
-  it("turns a rejected query into a DatabaseError naming the operation and the reason (unhappy)", async () => {
+  it("turns a rejected query into a DatabaseError carrying the driver's reason (unhappy)", async () => {
     const db = await opened();
     const reason = new Error(`connect ECONNREFUSED ${UNREACHABLE}`);
-    const ran = await Db.run(db, "countTests", async () => {
+    const ran = await db.run(async () => {
       throw new Error("Failed query: select count(*) from test_runs", { cause: reason });
     });
     if (!jarl.error.is(ran, Db.DatabaseError)) {
       throw new Error("expected a DatabaseError");
     }
     expect(ran.error.message).toBe(
-      `countTests: Failed query: select count(*) from test_runs: connect ECONNREFUSED ${UNREACHABLE}`,
+      `Failed query: select count(*) from test_runs: connect ECONNREFUSED ${UNREACHABLE}`,
     );
     expect(ran.error.cause).toBe(reason);
   });

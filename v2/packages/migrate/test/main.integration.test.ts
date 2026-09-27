@@ -73,7 +73,6 @@ describe("migrate", () => {
     });
     expect(ran.code).toBe(1);
     expect(ran.stdout).toBe("");
-    expect(ran.stderr).toMatch(/^migrate: /);
     expect(ran.stderr).toContain("ECONNREFUSED 127.0.0.1:1");
     expect(ran.stderr).not.toContain(PASSWORD);
   });

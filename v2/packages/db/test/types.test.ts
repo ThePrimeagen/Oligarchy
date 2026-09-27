@@ -17,7 +17,7 @@ const database = (): Db.Database => ({
 
 describe("the database as an app service", () => {
   it("is filed under db, and an app built with it hands main the database (happy)", () => {
-    const closes = async (app: App.App<Reads, Db.Database>) => Db.close(app.services.db);
+    const closes = async (app: App.App<Reads, Db.Database>) => app.services.db.close();
     const app = new App.App(environment, { db: database() });
     expectTypeOf(app.services.db).toEqualTypeOf<Db.Database>();
     void (() => app.main(closes));
@@ -28,7 +28,7 @@ describe("the database as an app service", () => {
     void new App.App(environment, { database: database() });
     // @ts-expect-error a database has every operation
     void new App.App(environment, { db: { service: "db", close: database().close } });
-    const closes = async (app: App.App<Reads, Db.Database>) => Db.close(app.services.db);
+    const closes = async (app: App.App<Reads, Db.Database>) => app.services.db.close();
     const app = new App.App(environment, {});
     // @ts-expect-error the app has no database
     void (() => app.main(closes));

@@ -45,7 +45,7 @@ const opened = async (url: string, onPoolError = poolErrors().onPoolError) => {
   }
   const db = result.value;
   onTestFinished(async () => {
-    await Db.close(db);
+    await db.close();
   });
   return db;
 };
@@ -53,7 +53,7 @@ const opened = async (url: string, onPoolError = poolErrors().onPoolError) => {
 const unreachable = `postgres://oligarchy:${PASSWORD}@${UNREACHABLE}/oligarchy`;
 
 const selectOne = (db: Db.Database) =>
-  Db.run(db, "selectOne", async (drizzle) => {
+  db.run(async (drizzle) => {
     await drizzle.execute(sql`select 1`);
   });
 
@@ -93,23 +93,22 @@ describe("migrate", () => {
     const db = await opened(url);
     const applied = "select count(*)::int as count from drizzle.__drizzle_migrations";
 
-    expect(await Db.migrate(db)).toEqual(jarl.ok(undefined));
+    expect(await db.migrate()).toEqual(jarl.ok(undefined));
     expect(await rows(url, applied)).toEqual([{ count: JOURNAL.entries.length }]);
     expect(await rows(url, "select to_regclass('public.sessions') is not null as made")).toEqual([
       { made: true },
     ]);
 
-    expect(await Db.migrate(db)).toEqual(jarl.ok(undefined));
+    expect(await db.migrate()).toEqual(jarl.ok(undefined));
     expect(await rows(url, applied)).toEqual([{ count: JOURNAL.entries.length }]);
   });
 
   it("fails on an unreachable database with the driver's reason (unhappy)", async () => {
     const db = await opened(unreachable);
-    const migrated = await Db.migrate(db);
+    const migrated = await db.migrate();
     if (!jarl.error.is(migrated, Db.DatabaseError)) {
       throw new Error("expected a DatabaseError");
     }
-    expect(migrated.error.message).toMatch(/^migrate: /);
     expect(migrated.error.message).toContain(`ECONNREFUSED ${UNREACHABLE}`);
   });
 });
@@ -117,7 +116,7 @@ describe("migrate", () => {
 describe("run", () => {
   it("hands the query drizzle over the live database (happy)", async () => {
     const db = await opened((await freshDatabase()).url);
-    const ran = await Db.run(db, "answer", async (drizzle) => {
+    const ran = await db.run(async (drizzle) => {
       const result = await drizzle.execute<{ answer: number }>(sql`select 41 + 1 as answer`);
       return result.rows;
     });
@@ -131,7 +130,6 @@ describe("run", () => {
     if (!jarl.error.is(selected, Db.DatabaseError)) {
       throw new Error("expected a DatabaseError");
     }
-    expect(selected.error.message).toMatch(/^selectOne: /);
     expect(selected.error.message).toContain(`ECONNREFUSED ${UNREACHABLE}`);
     expect(inspect(selected.error)).not.toContain(PASSWORD);
     expect(String(selected.error)).not.toContain(PASSWORD);

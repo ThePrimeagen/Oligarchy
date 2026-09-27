@@ -18,11 +18,8 @@ export type Drizzle = NodePgDatabase;
 
 export type Database = {
   readonly service: "db";
-  // Hands the query drizzle; whatever it throws comes back as a DatabaseError named for operation.
-  readonly run: <T>(
-    operation: string,
-    query: (db: Drizzle) => Promise<T>,
-  ) => Promise<jarl.Result<T, DatabaseError>>;
+  // Hands the query drizzle; whatever it throws comes back as a DatabaseError.
+  readonly run: <T>(query: (db: Drizzle) => Promise<T>) => Promise<jarl.Result<T, DatabaseError>>;
   // Applies every migration the database has not applied yet.
   readonly migrate: () => Promise<jarl.Result<void, DatabaseError>>;
   // Ends the pool once the queries in flight have finished. Nothing uses the database after.
@@ -39,17 +36,16 @@ const messageOf = (value: unknown): string =>
   value instanceof Error ? value.message : String(value);
 
 // drizzle buries the driver's reason in `cause`, so the message carries both:
-// `countTests: Failed query: select count(*) ...: connect ECONNREFUSED 127.0.0.1:1`.
-const failed = (operation: string, thrown: unknown): DatabaseError => {
+// `Failed query: select count(*) ...: connect ECONNREFUSED 127.0.0.1:1`.
+const failed = (thrown: unknown): DatabaseError => {
   const cause = thrown instanceof Error ? thrown.cause : undefined;
   const reason = cause === undefined ? "" : `: ${messageOf(cause)}`;
-  const error = new DatabaseError(`${operation}: ${messageOf(thrown)}${reason}`);
+  const error = new DatabaseError(`${messageOf(thrown)}${reason}`);
   error.cause = cause ?? thrown;
   return error;
 };
 
-const attempt = <T>(operation: string, query: () => Promise<T>) =>
-  jarl.fn(query, (thrown) => failed(operation, thrown))();
+const attempt = <T>(query: () => Promise<T>) => jarl.fn(query, failed)();
 
 // canParse, not new URL's throw: that TypeError carries the url, password and all, into the logs.
 // PlanetScale urls carry sslrootcert=system, libpq 16's "verify against the system trust store".
@@ -85,13 +81,8 @@ export const open = (options: {
   const db = drizzle({ client: pool });
   return jarl.ok({
     service: "db",
-    run: (operation, query) => attempt(operation, () => query(db)),
-    migrate: () => attempt("migrate", () => Migrator.migrate(db, { migrationsFolder: MIGRATIONS })),
-    close: () => attempt("close", () => pool.end()),
+    run: (query) => attempt(() => query(db)),
+    migrate: () => attempt(() => Migrator.migrate(db, { migrationsFolder: MIGRATIONS })),
+    close: () => attempt(() => pool.end()),
   });
 };
-
-export const run = <T>(db: Database, operation: string, query: (db: Drizzle) => Promise<T>) =>
-  db.run(operation, query);
-export const migrate = (db: Database) => db.migrate();
-export const close = (db: Database) => db.close();
