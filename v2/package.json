@@ -18,6 +18,8 @@
   },
   "type": "module",
   "scripts": {
+    "db:generate": "bun run --cwd packages/db db:generate",
+    "db:check": "bun run --cwd packages/db db:check",
     "db:migrate": "bun run --cwd packages/db db:migrate",
     "test:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.env run db:migrate",
     "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.prod-env run db:migrate",

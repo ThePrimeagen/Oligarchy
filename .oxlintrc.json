@@ -71,5 +71,11 @@
     }
   ],
   "env": { "builtin": true, "node": true, "es2022": true },
-  "ignorePatterns": ["**/node_modules/**", "**/.wrangler/**", "packages/db/drizzle/**", "public/**"]
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/.wrangler/**",
+    "packages/db/drizzle/**",
+    "v2/packages/db/drizzle/**",
+    "public/**"
+  ]
 }
