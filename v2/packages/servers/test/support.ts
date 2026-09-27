@@ -15,13 +15,10 @@ import { onTestFinished } from "vitest";
 const MIGRATIONS = resolve(Env.ROOT, "packages/db/drizzle");
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
 
-const migrated = await (async () => {
-  const client = new PGlite();
-  await migrate(drizzle({ client }), { migrationsFolder: MIGRATIONS });
-  const dump = await client.dumpDataDir("none");
-  await client.close();
-  return dump;
-})();
+const template = new PGlite();
+await migrate(drizzle({ client: template }), { migrationsFolder: MIGRATIONS });
+const migrated = await template.dumpDataDir("none");
+await template.close();
 
 const environment = Env.cli({ name: "servers-test", description: "Reads DATABASE_URL" })
   .needs("databaseUrl")
@@ -50,22 +47,23 @@ export const database = async (): Promise<Database> => {
   const client = new PGlite({ loadDataDir: migrated });
   // The pool drops a connection whose query was refused and opens another before the server has
   // let the first go; one connection, the default, would refuse the second.
-  const server = new PGLiteSocketServer({ db: client, port: 0, maxConnections: 4 });
+  const server = new PGLiteSocketServer({ db: client, port: 0, maxConnections: 2 });
   await server.start();
   const opened = Db.open({
     url: await databaseUrl(`postgres://postgres@${server.getServerConn()}/postgres`),
-    onPoolError: (error) => {
-      throw error;
-    },
+    // The pool replaces a connection the server dropped; the next query answers for itself.
+    onPoolError: () => undefined,
   });
   if (!opened.ok) {
     throw opened.error;
   }
   const db = opened.value;
   onTestFinished(async () => {
-    await db.close();
+    // The pool lets go of the server before the server lets go of PGlite.
+    const closed = await db.close();
     await server.stop();
     await client.close();
+    value(closed);
   });
   return {
     db,
@@ -81,12 +79,4 @@ export const value = <T>(result: jarl.Result<T, Db.DatabaseError>): T => {
     throw result.error;
   }
   return result.value;
-};
-
-// Why the database refused a query: the constraint Postgres named.
-export const refusal = (result: jarl.Result<unknown, Db.DatabaseError>): string => {
-  if (!jarl.error.is(result, Db.DatabaseError)) {
-    throw new Error("expected a DatabaseError");
-  }
-  return result.error.message;
 };

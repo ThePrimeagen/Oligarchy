@@ -188,8 +188,7 @@ export const create = (db: Db.Database): Servers => ({
       const [row] = await d
         .select({ id: servers.id, url: servers.url })
         .from(servers)
-        .where(eq(servers.id, id))
-        .limit(1);
+        .where(eq(servers.id, id));
       return row;
     }),
 
