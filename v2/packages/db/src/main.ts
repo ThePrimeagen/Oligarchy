@@ -1,15 +1,8 @@
-import { fileURLToPath } from "node:url";
 import type * as App from "@oligarchy/app";
 import type * as Env from "@oligarchy/env";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import * as Migrator from "drizzle-orm/node-postgres/migrator";
 import * as jarl from "jarl";
 import { Pool } from "pg";
-
-// The database, as every program shares it. The schema and its migrations stay v1's in
-// packages/db: they are generated from packages/db/src/schema.ts and append-only, so v1 and v2
-// apply the same files and keep one journal.
-const MIGRATIONS = fileURLToPath(new URL("../../../../packages/db/drizzle", import.meta.url));
 
 export const DatabaseError = jarl.error.define("DatabaseError");
 export type DatabaseError = InstanceType<typeof DatabaseError>;
@@ -20,8 +13,6 @@ export type Database = {
   readonly service: "db";
   // Hands the query drizzle; whatever it throws comes back as a DatabaseError.
   readonly run: <T>(query: (db: Drizzle) => Promise<T>) => Promise<jarl.Result<T, DatabaseError>>;
-  // Applies every migration the database has not applied yet.
-  readonly migrate: () => Promise<jarl.Result<void, DatabaseError>>;
   // Ends the pool once the queries in flight have finished. Nothing uses the database after.
   readonly close: () => Promise<jarl.Result<void, DatabaseError>>;
 };
@@ -82,7 +73,6 @@ export const open = (options: {
   return jarl.ok({
     service: "db",
     run: (query) => attempt(() => query(db)),
-    migrate: () => attempt(() => Migrator.migrate(db, { migrationsFolder: MIGRATIONS })),
     close: () => attempt(() => pool.end()),
   });
 };

@@ -78,17 +78,6 @@ describe("open", () => {
   });
 });
 
-describe("migrate", () => {
-  it("applies v1's migrations to an empty database (happy)", async () => {
-    const { url } = await freshDatabase();
-    const db = await opened(url);
-    expect(await db.migrate()).toEqual(jarl.ok(undefined));
-    expect(await rows(url, "select to_regclass('public.sessions') is not null as made")).toEqual([
-      { made: true },
-    ]);
-  });
-});
-
 describe("run", () => {
   it("carries the driver's reason for an unreachable database, never the password (unhappy)", async () => {
     const errors = poolErrors();

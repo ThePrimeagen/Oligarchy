@@ -19,7 +19,7 @@
   },
   "type": "module",
   "scripts": {
-    "db:migrate": "bun --no-env-file packages/migrate/src/main.ts",
+    "db:migrate": "bun run --cwd packages/db db:migrate",
     "tester": "bun --no-env-file packages/tester/src/main.ts",
     "check:types": "bun run --workspaces check:types",
     "test:unit": "bun run --workspaces --if-present test:unit",
