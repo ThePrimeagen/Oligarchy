@@ -64,7 +64,10 @@
     {
       "files": ["v2/**"],
       "jsPlugins": ["./v2/lint/plugin.js"],
-      "rules": { "oligarchy/augment-through-entry": "error" }
+      "rules": {
+        "oligarchy/augment-through-entry": "error",
+        "typescript/no-redundant-type-constituents": "off"
+      }
     }
   ],
   "env": { "builtin": true, "node": true, "es2022": true },
