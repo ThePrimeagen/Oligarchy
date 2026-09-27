@@ -3,8 +3,7 @@
 ## Services
 
 A service's type is its interface: a fixed `service` name and every operation. `open` returns the
-real one; a test writes its own. The module's functions take the service first and call through
-it, so whatever object was passed in is what runs.
+real one; a test writes its own. Module functions take the service first and call through it.
 
 ```ts
 // @oligarchy/log
@@ -59,46 +58,71 @@ export type Linear = {
 export function open(options: { token: Env.Secret; team: string }): Linear;
 export const fileTicket = (linear: Linear, title: string) => linear.fileTicket(title);
 
-// qemu-server/src/sessions.ts
+// qemu-server/src/sessions.ts: a program's own service
 export type Sessions = {
   readonly service: "sessions";
-  readonly dataDir: string;
-  readonly maxJobs: number;
-  readonly live: Map<string, Session>;
+  readonly start: (request: Request) => Promise<Response>;
+  readonly live: () => ReadonlyArray<Session>;
 };
+declare module "@oligarchy/app" {
+  interface Services {
+    sessions: App.Register<"sessions", Sessions>;
+  }
+}
 export function open(options: { dataDir: string; maxJobs: number }): Sessions;
-export function start(app: App.Has<Sessions | Log.Log>, request: Request): Promise<Response>;
+export const start = (app: App.Has<Sessions | Log.Log>, request: Request) => app.services.sessions.start(request);
 export function drain(app: App.Has<Sessions | Db.Database | Log.Log>): Promise<jarl.Result<void, DrainFailed>>;
 ```
 
 ## App
 
 ```ts
-// @oligarchy/app/src/services.ts: every service, one list
-export type Services =
-  | Log.Log
-  | Db.Database
-  | Sentry.Sentry
-  | OpenRouter.OpenRouter
-  | Linear.Linear
-  | Sessions.Sessions;
+// @oligarchy/app/src/services.ts: the shared services, one list
+export interface Services {
+  log: Log.Log;
+  db: Db.Database;
+  sentry: Sentry.Sentry;
+  openRouter: OpenRouter.OpenRouter;
+  linear: Linear.Linear;
+}
 
 // @oligarchy/app
-App.App<Reads, Log.Log | Db.Database>  // app.environment: Reads; app.services.log, app.services.db
-App.Has<Log.Log | Sentry.Sentry>       // any app with at least these services
-
+export type Kill = () => void | Promise<void>;
+export type Signal = "SIGINT" | "SIGTERM";
 export type ExitReason =
   | { readonly kind: "returned" }
-  | { readonly kind: "signal"; readonly signal: "SIGINT" | "SIGTERM" };
+  | { readonly kind: "signal"; readonly signal: Signal };
+export type Io = {
+  readonly onSignal: (handler: (signal: Signal) => void) => () => void;
+  readonly exit: (code: number) => void;
+};
 
-export function create(options: {
-  environment: Out;                     // what Env.create returned
-  services: [log, db /* , ... */];      // each files itself under its `service` name
-  main: (app: App.App<Reads, S>) => Promise<jarl.Result<unknown, unknown>>;
-  onExit: (app: App.App<Reads, S>, reason: ExitReason) => Promise<jarl.Result<void, unknown>>;
-}): App.App<Out, S>;
-export function run(app: App.App<Out, S>): Promise<never>;
-export function killable(app: App.Has<never>, kill: () => void | Promise<void>): () => void;
+// Any app with at least these services.
+export interface Has<T extends AnyService> {
+  readonly services: Needs<T>; // app.services.db is the Db.Database in the list
+  killable(kill: Kill): () => void;
+}
+
+export class App<Environment, T extends AnyService> implements Has<T> {
+  readonly environment: Environment; // what Env.create returned
+  readonly services: Needs<T>;
+
+  constructor(options: {
+    readonly environment: Environment;
+    readonly services: ReadonlyArray<T>; // each files itself under its `service` name
+    readonly main: (app: App<Environment, T>) => Promise<jarl.Result<unknown, unknown>>;
+    readonly onExit: (app: App<Environment, T>, reason: ExitReason) => Promise<jarl.Result<void, unknown>>;
+  });
+
+  // Runs when everything is over: newest first, each awaited, before onExit. Returns remove.
+  killable(kill: Kill): () => void;
+
+  // 1. listen for SIGINT and SIGTERM   2. await main
+  // 3. on the first signal, or when main returns: kills newest first, then onExit
+  // 4. after a signal, wait for main to return   5. exit 0 if main, every kill and onExit were ok, else 1
+  // A second signal exits 1 at once. io defaults to the process.
+  run(io?: Io): Promise<void>;
+}
 ```
 
 ## Async
@@ -114,11 +138,16 @@ export function tick(fn: () => void | Promise<void>, interval: number): () => Pr
 export function sleep(fn: () => void, delay: number): () => void;
 ```
 
-## Env (exists)
+## Env
 
 ```ts
+// @oligarchy/env: exists
 Env.cli({ name, description }).flags({ ... }).needs("databaseUrl").command(name, description) /* ... */ .done();
 Env.create(definition): Promise<jarl.Result<Out, UsageError | HelpRequested | MissingVariable | ...>>;
+
+// to add
+Env.Result<typeof definition>   // what Env.create returns for it
+Env.Vars<"databaseUrl">         // { databaseUrl: Env.Secret }
 ```
 
 ## Common: shared by all three
@@ -174,7 +203,7 @@ export const heartbeat = (app: App.Has<Db.Database | Log.Log>, name: string) => 
       Log.error(app.services.log, "heartbeat failed", written.error);
     }
   }, 30_000);
-  App.killable(app, stop);
+  app.killable(stop);
 };
 ```
 
@@ -212,14 +241,12 @@ const environment = await Common.load(definition);
 const [log, db, sentry] = Common.open("driver", environment.vars.databaseUrl);
 const openRouter = OpenRouter.open({ token: environment.vars.openRouterToken });
 
-await App.run(
-  App.create({
-    environment,
-    services: [log, db, sentry, openRouter],
-    main,
-    onExit: Common.close,
-  }),
-);
+await new App.App({
+  environment,
+  services: [log, db, sentry, openRouter],
+  main,
+  onExit: Common.close,
+}).run();
 ```
 
 ## Example 2: qemu-server, long-running
@@ -258,10 +285,10 @@ const main = async (app: App.App<Reads, Common.Common | Sessions.Sessions>) => {
     return server;
   }
   Common.heartbeat(app, app.environment.flags.name);
-  App.killable(app, async () => {
+  app.killable(async () => {
     await jarl.unwrap(Sessions.drain(app)); // a session that refuses to stop: exit 1
   });
-  App.killable(app, () => Http.stop(server.value)); // newest first: stop taking requests first
+  app.killable(() => Http.stop(server.value)); // newest first: stop taking requests first
   await Http.stopped(server.value);
   return jarl.ok(undefined);
 };
@@ -273,14 +300,12 @@ const sessions = Sessions.open({
   maxJobs: environment.flags.maxJobs,
 });
 
-await App.run(
-  App.create({
-    environment,
-    services: [log, db, sentry, sessions],
-    main,
-    onExit: Common.close,
-  }),
-);
+await new App.App({
+  environment,
+  services: [log, db, sentry, sessions],
+  main,
+  onExit: Common.close,
+}).run();
 ```
 
 ## Example 3: ctrl, several commands
@@ -292,7 +317,7 @@ import * as Common from "@oligarchy/common";
 import * as Db from "@oligarchy/db";
 import * as Env from "@oligarchy/env";
 import * as Linear from "@oligarchy/linear";
-import * as Log from "@oligarchy/log";
+import { session } from "./session.ts";
 
 const definition = Env.cli({ name: "ctrl", description: "Record and read test results" })
   .needs("databaseUrl")
@@ -322,19 +347,6 @@ const testRun = async (app: App.App<TestRunReads, Common.Common | Linear.Linear>
   return Db.saveRun(app.services.db, { name, iso, ticket: ticket.value });
 };
 
-type SessionReads = {
-  readonly command: "session";
-  readonly flags: { readonly sessionId: string };
-};
-
-const session = async (app: App.App<SessionReads, Common.Common>) => {
-  const found = await Db.session(app.services.db, app.environment.flags.sessionId);
-  if (found.ok) {
-    Log.info(app.services.log, JSON.stringify(found.value));
-  }
-  return found;
-};
-
 const environment = await Common.load(definition);
 const [log, db, sentry] = Common.open("ctrl", environment.vars.databaseUrl);
 
@@ -343,24 +355,44 @@ if (environment.command === "test run") {
     token: environment.vars.linearApiToken,
     team: environment.vars.linearTeam,
   });
-  await App.run(
-    App.create({
-      environment,
-      services: [log, db, sentry, linear],
-      main: testRun,
-      onExit: Common.close,
-    }),
-  );
+  await new App.App({
+    environment,
+    services: [log, db, sentry, linear],
+    main: testRun,
+    onExit: Common.close,
+  }).run();
 } else {
-  await App.run(
-    App.create({ environment, services: [log, db, sentry], main: session, onExit: Common.close }),
-  );
+  await new App.App({
+    environment,
+    services: [log, db, sentry],
+    main: session,
+    onExit: Common.close,
+  }).run();
 }
 ```
 
-## Test: ctrl's `session` with fakes
+```ts
+// ctrl/src/session.ts
+import type * as App from "@oligarchy/app";
+import type * as Common from "@oligarchy/common";
+import * as Db from "@oligarchy/db";
+import * as Log from "@oligarchy/log";
 
-`session` moves to `ctrl/src/session.ts` so a test can import it.
+export type SessionReads = {
+  readonly command: "session";
+  readonly flags: { readonly sessionId: string };
+};
+
+export const session = async (app: App.App<SessionReads, Common.Common>) => {
+  const found = await Db.session(app.services.db, app.environment.flags.sessionId);
+  if (found.ok) {
+    Log.info(app.services.log, JSON.stringify(found.value));
+  }
+  return found;
+};
+```
+
+## Test: ctrl's `session` with fakes
 
 ```ts
 // ctrl/test/session.test.ts
@@ -371,7 +403,7 @@ import type * as Log from "@oligarchy/log";
 import type * as Sentry from "@oligarchy/sentry";
 import * as jarl from "jarl";
 import { expect, it } from "vitest";
-import { session } from "../src/session.ts";
+import { session, type SessionReads } from "../src/session.ts";
 
 it("prints the session it found (happy)", async () => {
   const lines: Array<string> = [];
@@ -393,16 +425,94 @@ it("prints the session it found (happy)", async () => {
     capture: () => undefined,
     flush: async () => undefined,
   };
-  const app = App.create({
-    environment: { command: "session", flags: { sessionId: "s1" } },
-    services: [log, db, sentry],
-    main: session,
-    onExit: Common.close,
-  });
+  const environment: SessionReads = { command: "session", flags: { sessionId: "s1" } };
+  const app = new App.App({ environment, services: [log, db, sentry], main: session, onExit: Common.close });
 
   expect(await session(app)).toEqual(jarl.ok({ id: "s1", status: "ended" }));
   expect(lines).toEqual(['{"id":"s1","status":"ended"}']);
 });
 ```
 
-A fake that leaves out an operation, or returns the wrong result, does not compile.
+---
+
+# Instructions
+
+For the agent that builds this. Work in `v2/` on a branch off `master`.
+
+## Rules
+
+- No `effect` or `@effect/*` import anywhere in `v2/`. Results are jarl.
+- Tests first. Write every test in the list below failing, then the code. Each surface has a happy
+  and an unhappy test. Business logic only: no test that fails because of formatting or wording
+  that is not a report a caller prints.
+- One `jarl` across `v2/`: after `bun install` in `v2/`, every package's `jarl` in `v2/bun.lock`
+  is the same commit.
+- A new package copies `v2/packages/async`: `exports` `{ ".": "./src/main.ts" }`, scripts
+  `check:types` and `test:unit`, `jarl`, `@types/node`, `typescript`, `vitest` from the catalog,
+  `tsconfig.json` extending `../../tsconfig.base.json`, vitest `include: ["test/**/*.test.ts"]`
+  and `passWithNoTests: false`.
+- A service package never imports `@oligarchy/app`. `@oligarchy/app` imports service types only
+  (`import type`), for the `Services` list.
+- `App`'s constructor infers `Environment` and `T` from `environment` and `services` only
+  (`NoInfer` on `main` and `onExit`). Without it, a `main` that needs a service the list lacks
+  compiles.
+- CI installs only the root, so root oxlint type-checks `v2/` without `v2/node_modules`. An
+  imported type in a union with `undefined` then fails `no-redundant-type-constituents`: write an
+  optional parameter (`x?: X`), not `x: X | undefined`. Reproduce by moving `v2/node_modules` and
+  the packages' `node_modules` aside and running `bun run check:lint` at the root.
+- Before each push: `bun run --cwd v2 check:types`, `bun run --cwd v2 test:unit`, then at the root
+  `bun install --frozen-lockfile`, `bun run check:lint`, `bun run check:format`.
+
+## Tests to write first
+
+`@oligarchy/env`
+- [ ] `Env.Result<typeof definition>` is the type `Env.create(definition)` returns ok (happy).
+- [ ] `Env.Result` of a two-command definition is a union narrowed by `command` (unhappy: the other command's flags are absent).
+- [ ] `Env.Vars<"databaseUrl">` is `{ databaseUrl: Env.Secret }` (happy).
+- [ ] `Env.Vars<"nope">` does not compile (unhappy).
+
+`@oligarchy/async` `tick`
+- [ ] An async `fn` is awaited: a slow run is not overlapped by the next (happy).
+- [ ] A rejection does not escape, and the next run still happens (unhappy).
+- [ ] Cancel during a run resolves after that run, and no run follows (unhappy).
+- [ ] Cancel called inside `fn`: no run follows (unhappy).
+- [ ] The existing `tick` tests still pass with `cancel` returning a promise.
+
+`@oligarchy/app` (test services added with `declare module "../src/main.ts"` in the test)
+- [ ] Services are filed under their names, and `main` receives them (happy).
+- [ ] Two services with the same name throw at construction (unhappy).
+- [ ] `main` returns ok: kills newest first, then `onExit` with `returned`, then exit 0 (happy).
+- [ ] `main` returns an error: kills and `onExit` still run; exit 1 (unhappy).
+- [ ] A signal: kills, then `onExit` with that signal, then `run` waits for `main`, then exit 0 (happy).
+- [ ] A kill that throws: the rest still run, `onExit` runs, exit 1 (unhappy).
+- [ ] `onExit` returns an error: exit 1 (unhappy).
+- [ ] A removed kill does not run; removing twice does nothing (unhappy).
+- [ ] A kill registered after exit started runs at once (unhappy).
+- [ ] A second signal exits 1 without waiting (unhappy).
+- [ ] Types: a `main`, a helper, or an `onExit` that needs a service the list lacks does not compile; a `main` that reads a flag the environment lacks does not compile; a kill that takes an argument does not compile (unhappy).
+
+Each service (`log`, `sentry`, `db`, `openrouter`, `linear`)
+- [ ] `open` returns a service whose operations work against the real dependency, where the v1 package tests it that way (`db`: Postgres, as `packages/integration-testing` does) (happy).
+- [ ] Each operation's failure is its jarl error with the fields a caller reads (unhappy).
+- [ ] A fake missing an operation does not compile (unhappy).
+
+`@oligarchy/common`
+- [ ] `load` returns the environment (happy); help prints and exits 0, a usage error prints and exits 1 (unhappy). `load` takes an io like `Env.create` so the test reads the output and the code.
+- [ ] `close` flushes the log, then Sentry, then closes the database (happy); a failing flush still closes the database (unhappy).
+- [ ] `report` writes to the log and to Sentry (happy).
+- [ ] `heartbeat` writes each interval and stops when the app's kills run (happy); a failed write is logged and the next one still happens (unhappy).
+
+Programs
+- [ ] driver `main` with fakes: the answer is logged (happy); an OpenRouter error is reported and returned (unhappy).
+- [ ] ctrl `session` and `test run` with fakes, as in the test above (happy and unhappy each).
+
+## Build order
+
+1. `@oligarchy/env`: export `Result` and `Vars`.
+2. `@oligarchy/async`: `tick` awaits `fn`; `cancel` returns a promise that waits for a run in flight.
+3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Kill`, `Signal`, `ExitReason`, `Io`, `App`), `src/main.ts` exporting them.
+4. Services, one package each, added to `Services` as each lands: `log`, `sentry`, `db` (a port of `packages/db`: the pool, `run`, `transaction`, `ping` and the stores as operations; `DatabaseError` keeps `operation` and `cause`), `openrouter`, `linear`.
+5. `@oligarchy/common`.
+6. driver: replace `v2/packages/driver/src/main.ts`'s print with Example 1.
+7. ctrl, one command per module, each its own `main`.
+8. qemu-server last. It also needs `@oligarchy/http` (Hono and zod), the sessions service, `AbortSignal` passed through services, `AsyncDisposableStack` (add `esnext.disposable` to `lib`), a mutex with try-lock, and a bounded queue. Plan those separately.
