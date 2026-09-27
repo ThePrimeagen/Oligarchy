@@ -9,7 +9,7 @@
       "@types/node": "^26.4.0",
       "@types/pg": "^8.23.1",
       "drizzle-orm": "^0.45.2",
-      "jarl": "github:ThePrimeagen/jarl",
+      "jarl": "github:ThePrimeagen/jarl#v1.1.0",
       "pg": "^8.23.0",
       "typescript": "7.0.2",
       "vitest": "^4.1.11",
@@ -18,6 +18,8 @@
   },
   "type": "module",
   "scripts": {
+    "db:generate": "bun run --cwd packages/db db:generate",
+    "db:check": "bun run --cwd packages/db db:check",
     "db:migrate": "bun run --cwd packages/db db:migrate",
     "test:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.env run db:migrate",
     "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.prod-env run db:migrate",

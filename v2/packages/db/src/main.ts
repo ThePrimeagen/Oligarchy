@@ -3,11 +3,12 @@ import type * as Env from "@oligarchy/env";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as jarl from "jarl";
 import { Pool } from "pg";
+import * as Schema from "./schema.ts";
 
 export const DatabaseError = jarl.error.define("DatabaseError");
 export type DatabaseError = InstanceType<typeof DatabaseError>;
 
-export type Drizzle = NodePgDatabase;
+export type Drizzle = NodePgDatabase<typeof Schema>;
 
 export type Database = {
   readonly service: "db";
@@ -69,7 +70,7 @@ export const open = (options: {
   // Nothing connects until the first query.
   const pool = new Pool({ connectionString: url });
   pool.on("error", options.onPoolError);
-  const db = drizzle({ client: pool });
+  const db = drizzle({ client: pool, schema: Schema });
   return jarl.ok({
     service: "db",
     run: (query) => attempt(() => query(db)),
