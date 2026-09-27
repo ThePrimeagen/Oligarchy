@@ -32,6 +32,12 @@ const fakeIo = () => {
   return { io, codes, signal, listening: () => listeners.size };
 };
 
+// Settles once the signal aborts, as a fetch or a sleep handed the signal would.
+const aborted = (signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+
 describe("App", () => {
   it("runs main with its environment and services, then exits 0 (happy)", async () => {
     const main = async (app: App.App<Reads, Counter>) => {
@@ -123,26 +129,103 @@ describe("App", () => {
     expect(codes).toEqual([1]);
   });
 
-  it("on a signal runs the handlers, then waits for main to return, then exits 0 (happy)", async () => {
+  it("on a signal aborts app.signal, waits for main to return, then runs the handlers (happy)", async () => {
     const app = new App.App(environment, { counter: counter() });
     const order: Array<string> = [];
-    const closed = new Promise<void>((resolve) => {
-      app.onExit((reason) => {
-        order.push(`close services on ${reason.kind === "signal" ? reason.signal : reason.kind}`);
-        resolve();
-      });
+    app.onExit((reason) => {
+      order.push(`close services on ${reason.kind === "signal" ? reason.signal : reason.kind}`);
     });
     const { io, codes, signal, listening } = fakeIo();
-    const running = app.main(async () => {
-      await closed;
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      order.push("main saw the abort");
+      return jarl.ok(undefined);
+    }, io);
+    expect(app.signal.aborted).toBe(false);
+    signal("SIGTERM");
+    await running;
+    expect(order).toEqual(["main saw the abort", "close services on SIGTERM"]);
+    expect(codes).toEqual([0]);
+    expect(listening()).toBe(0);
+  });
+
+  it("aborts app.signal when main returns, before the handlers run (happy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const seen: Array<string> = [];
+    app.onExit(() => {
+      seen.push(`handler sees aborted ${String(app.signal.aborted)}`);
+    });
+    const { io, codes } = fakeIo();
+    await app.main(async (started) => {
+      seen.push(`main sees aborted ${String(started.signal.aborted)}`);
+      return jarl.ok(undefined);
+    }, io);
+    expect(seen).toEqual(["main sees aborted false", "handler sees aborted true"]);
+    expect(jarl.error.is(app.signal.reason, App.Aborted)).toBe(true);
+    expect(codes).toEqual([0]);
+  });
+
+  it("holds a handler main adds after a signal until main returns (unhappy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const order: Array<string> = [];
+    const { io, codes, signal } = fakeIo();
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      started.onExit(() => {
+        order.push("added handler");
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
       order.push("main returned");
       return jarl.ok(undefined);
     }, io);
+    signal("SIGINT");
+    await running;
+    expect(order).toEqual(["main returned", "added handler"]);
+    expect(codes).toEqual([0]);
+  });
+
+  it("exits 0 when main returns Aborted after a signal (happy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes, signal } = fakeIo();
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      return jarl.err(new App.Aborted("stopped"));
+    }, io);
     signal("SIGTERM");
     await running;
-    expect(order).toEqual(["close services on SIGTERM", "main returned"]);
     expect(codes).toEqual([0]);
-    expect(listening()).toBe(0);
+  });
+
+  it("exits 0 when main throws the signal's reason, as an aborted fetch does (happy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes, signal } = fakeIo();
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      started.signal.throwIfAborted();
+      return jarl.ok(undefined);
+    }, io);
+    signal("SIGINT");
+    await running;
+    expect(codes).toEqual([0]);
+  });
+
+  it("exits 1 when main returns Aborted without a signal (unhappy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes } = fakeIo();
+    await app.main(async () => jarl.err(new App.Aborted("stopped")), io);
+    expect(codes).toEqual([1]);
+  });
+
+  it("exits 1 when main returns another error after a signal (unhappy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const { io, codes, signal } = fakeIo();
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
+      return jarl.err("the stop failed");
+    }, io);
+    signal("SIGTERM");
+    await running;
+    expect(codes).toEqual([1]);
   });
 
   it("exits 1 at once on a second signal (unhappy)", () => {
@@ -172,12 +255,9 @@ describe("App", () => {
 
   it("exits 1 once on a second signal, even when main returns afterwards (unhappy)", async () => {
     const app = new App.App(environment, { counter: counter() });
-    const closed = new Promise<void>((resolve) => {
-      app.onExit(() => resolve());
-    });
     const { io, codes, signal } = fakeIo();
-    const running = app.main(async () => {
-      await closed;
+    const running = app.main(async (started) => {
+      await aborted(started.signal);
       return jarl.ok(undefined);
     }, io);
     signal("SIGINT");

@@ -62,6 +62,15 @@ describe("App types", () => {
     void main;
   });
 
+  it("hands main and helpers the app's signal, and nobody replaces it", () => {
+    const waits = (app: App.Has<Counter>) => app.signal;
+    const app = new App.App(environment, { counter: counter() });
+    expectTypeOf(waits(app)).toEqualTypeOf<AbortSignal>();
+    expectTypeOf(app.signal).toEqualTypeOf<AbortSignal>();
+    // @ts-expect-error the signal belongs to the app
+    app.signal = new AbortController().signal;
+  });
+
   it("takes exit handlers that take the reason or nothing", () => {
     const app = new App.App(environment, { counter: counter() });
     app.onExit(() => undefined);

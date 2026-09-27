@@ -55,5 +55,6 @@ export type Io = {
 // Any app with at least these services: what a helper takes.
 export interface Has<T extends AnyService> {
   readonly services: Needs<T>;
+  readonly signal: AbortSignal;
   onExit(handler: OnExit): () => void;
 }
