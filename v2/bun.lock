@@ -45,17 +45,6 @@
         "vitest": "catalog:",
       },
     },
-    "packages/driver": {
-      "name": "@oligarchy/driver",
-      "dependencies": {
-        "@oligarchy/env": "workspace:*",
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-      },
-    },
     "packages/env": {
       "name": "@oligarchy/env",
       "dependencies": {
@@ -117,8 +106,6 @@
     "@oligarchy/async": ["@oligarchy/async@workspace:packages/async"],
 
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
-
-    "@oligarchy/driver": ["@oligarchy/driver@workspace:packages/driver"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
