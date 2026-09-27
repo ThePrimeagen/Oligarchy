@@ -44,19 +44,6 @@
         "typescript": "catalog:",
       },
     },
-    "packages/diagnosis": {
-      "name": "@oligarchy/diagnosis",
-      "dependencies": {
-        "@oligarchy/app": "workspace:*",
-        "@oligarchy/db": "workspace:*",
-        "drizzle-orm": "catalog:",
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-      },
-    },
     "packages/env": {
       "name": "@oligarchy/env",
       "dependencies": {
@@ -69,34 +56,8 @@
         "vitest": "catalog:",
       },
     },
-    "packages/logs": {
-      "name": "@oligarchy/logs",
-      "dependencies": {
-        "@oligarchy/app": "workspace:*",
-        "@oligarchy/db": "workspace:*",
-        "drizzle-orm": "catalog:",
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-      },
-    },
-    "packages/process-stats": {
-      "name": "@oligarchy/process-stats",
-      "dependencies": {
-        "@oligarchy/app": "workspace:*",
-        "@oligarchy/db": "workspace:*",
-        "drizzle-orm": "catalog:",
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-      },
-    },
-    "packages/servers": {
-      "name": "@oligarchy/servers",
+    "packages/stores": {
+      "name": "@oligarchy/stores",
       "dependencies": {
         "@oligarchy/app": "workspace:*",
         "@oligarchy/db": "workspace:*",
@@ -200,15 +161,9 @@
 
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
-    "@oligarchy/diagnosis": ["@oligarchy/diagnosis@workspace:packages/diagnosis"],
-
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
-    "@oligarchy/logs": ["@oligarchy/logs@workspace:packages/logs"],
-
-    "@oligarchy/process-stats": ["@oligarchy/process-stats@workspace:packages/process-stats"],
-
-    "@oligarchy/servers": ["@oligarchy/servers@workspace:packages/servers"],
+    "@oligarchy/stores": ["@oligarchy/stores@workspace:packages/stores"],
 
     "@oligarchy/tester": ["@oligarchy/tester@workspace:packages/tester"],
 

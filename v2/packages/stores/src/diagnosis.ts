@@ -2,7 +2,7 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { eq } from "drizzle-orm";
-import type * as jarl from "jarl";
+import type { Answer } from "./answer.ts";
 
 export type Verdict = (typeof DbSchema.diagnosisVerdict.enumValues)[number];
 
@@ -18,8 +18,6 @@ export type DiagnosisInput = {
   readonly summary: string;
   readonly model: string;
 };
-
-type Answer<T> = Promise<jarl.Result<T, Db.DatabaseError>>;
 
 export type Diagnosis = {
   readonly service: "diagnosis";

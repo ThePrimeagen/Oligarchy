@@ -1,5 +1,5 @@
 {
-  "name": "@oligarchy/process-stats",
+  "name": "@oligarchy/stores",
   "private": true,
   "type": "module",
   "exports": {
