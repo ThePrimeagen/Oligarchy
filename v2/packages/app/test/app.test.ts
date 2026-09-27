@@ -6,19 +6,30 @@ import { counter, type Counter } from "./support.ts";
 type Reads = { readonly flags: { readonly name: string } };
 const environment = { flags: { name: "ada" } };
 
+// The process as a test drives it: who is listening for signals, and every exit code asked for.
 const fakeIo = () => {
   const codes: Array<number> = [];
-  let send: (signal: App.Signal) => void = () => undefined;
+  const listeners = new Set<(signal: App.Signal) => void>();
   const io: App.Io = {
     onSignal: (handler) => {
-      send = handler;
-      return () => undefined;
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
     },
     exit: (code) => {
       codes.push(code);
     },
   };
-  return { io, codes, signal: (signal: App.Signal) => send(signal) };
+  const signal = (name: App.Signal) => {
+    if (listeners.size === 0) {
+      throw new Error(`nothing is listening for ${name}`);
+    }
+    for (const listener of listeners) {
+      listener(name);
+    }
+  };
+  return { io, codes, signal, listening: () => listeners.size };
 };
 
 describe("App", () => {
@@ -28,10 +39,11 @@ describe("App", () => {
       return jarl.ok(app.environment.flags.name);
     };
     const app = new App.App(environment, { counter: counter() });
-    const { io, codes } = fakeIo();
+    const { io, codes, listening } = fakeIo();
     await app.main(main, io);
     expect(app.services.counter.read()).toBe(1);
     expect(codes).toEqual([0]);
+    expect(listening()).toBe(0);
   });
 
   it("exits 1 when main returns an error, after running the handlers (unhappy)", async () => {
@@ -66,6 +78,22 @@ describe("App", () => {
     expect(codes).toEqual([0]);
   });
 
+  it("runs a handler added during exit at once, and waits for it before exiting (unhappy)", async () => {
+    const app = new App.App(environment, { counter: counter() });
+    const order: Array<string> = [];
+    app.onExit(() => {
+      order.push("first");
+      app.onExit(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        order.push("added during exit");
+      });
+    });
+    const { io, codes } = fakeIo();
+    await app.main(async () => jarl.ok(undefined), io);
+    expect(order).toEqual(["first", "added during exit"]);
+    expect(codes).toEqual([0]);
+  });
+
   it("still runs every handler when one throws, and exits 1 (unhappy)", async () => {
     const app = new App.App(environment, { counter: counter() });
     const order: Array<string> = [];
@@ -84,17 +112,15 @@ describe("App", () => {
   it("on a signal runs the handlers, then waits for main to return, then exits 0 (happy)", async () => {
     const app = new App.App(environment, { counter: counter() });
     const order: Array<string> = [];
-    let closed: () => void = () => undefined;
-    const services = new Promise<void>((resolve) => {
-      closed = resolve;
+    const closed = new Promise<void>((resolve) => {
+      app.onExit((reason) => {
+        order.push(`close services on ${reason.kind === "signal" ? reason.signal : reason.kind}`);
+        resolve();
+      });
     });
-    app.onExit((reason) => {
-      order.push(`close services on ${reason.kind === "signal" ? reason.signal : reason.kind}`);
-      closed();
-    });
-    const { io, codes, signal } = fakeIo();
+    const { io, codes, signal, listening } = fakeIo();
     const running = app.main(async () => {
-      await services;
+      await closed;
       order.push("main returned");
       return jarl.ok(undefined);
     }, io);
@@ -102,6 +128,7 @@ describe("App", () => {
     await running;
     expect(order).toEqual(["close services on SIGTERM", "main returned"]);
     expect(codes).toEqual([0]);
+    expect(listening()).toBe(0);
   });
 
   it("exits 1 at once on a second signal (unhappy)", () => {

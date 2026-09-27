@@ -18,12 +18,13 @@ type Main<Environment, Wants extends AnyService> = (
 ) => Promise<jarl.Result<unknown, unknown>>;
 
 // What an app has done so far. Each registration is its own entry, so a remover takes off only
-// its own.
+// its own. `late` holds handlers added after exit began: they run at once, and main waits for them.
 export type State = {
   started: boolean;
   exiting: ExitReason | undefined;
   failed: boolean;
   readonly handlers: Array<{ readonly handler: OnExit }>;
+  readonly late: Array<Promise<void>>;
 };
 
 const processIo: Io = {
@@ -74,7 +75,13 @@ const run = async <Environment, S extends Provided | AnyService>(
 export class App<const Environment, const S extends Provided | AnyService> {
   readonly environment: Environment;
   readonly services: ServicesOf<S>;
-  readonly state: State = { started: false, exiting: undefined, failed: false, handlers: [] };
+  readonly state: State = {
+    started: false,
+    exiting: undefined,
+    failed: false,
+    handlers: [],
+    late: [],
+  };
 
   // The overloads are the typed face; the bodies below take what they already checked.
   constructor(environment: Environment, services: S & NotAService);
@@ -86,7 +93,8 @@ export class App<const Environment, const S extends Provided | AnyService> {
   onExit(handler: OnExit): () => void {
     const reason = this.state.exiting;
     if (reason !== undefined) {
-      void call(this.state, handler, reason);
+      this.state.late.push(call(this.state, handler, reason));
+      // It is already running, so there is nothing left to remove.
       return () => undefined;
     }
     const entry = { handler };
@@ -122,6 +130,7 @@ export class App<const Environment, const S extends Provided | AnyService> {
     const ok = await run(this, main);
     exiting ??= exit(this.state, { kind: "returned" });
     await exiting;
+    await Promise.all(this.state.late);
     stopListening();
     io.exit(ok && !this.state.failed ? 0 : 1);
     return jarl.ok(undefined);
