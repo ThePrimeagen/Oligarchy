@@ -38,7 +38,7 @@ export type Provides<Wants extends AnyService, Names> = [Missing<Wants, Names>] 
   ? unknown
   : { readonly missing: Missing<Wants, Names> };
 
-export type Signal = "SIGINT" | "SIGTERM";
+export type Signal = "SIGINT" | "SIGTERM" | "SIGHUP";
 
 export type ExitReason =
   | { readonly kind: "returned" }
@@ -50,6 +50,7 @@ export type OnExit = (reason: ExitReason) => void | Promise<void>;
 export type Io = {
   readonly onSignal: (handler: (signal: Signal) => void) => () => void;
   readonly exit: (code: number) => void;
+  readonly stderr: (text: string) => void;
 };
 
 // Any app with at least these services: what a helper takes.
