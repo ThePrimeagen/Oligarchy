@@ -1,13 +1,18 @@
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as jarl from "jarl";
 import * as z from "zod";
 import * as Errors from "./errors.ts";
 import type * as Io from "./io.ts";
 
-// The harness's non-secret configuration, checked in beside the package. There is no default: a
-// guessed model or ceiling would run the fleet on the wrong one. A token key is refused; it stays
-// in the environment.
-export const PATH = fileURLToPath(new URL("../../../../oligarchy.json", import.meta.url));
+// The repository's root, four directories up from these sources: a path the project names, such
+// as a migrations folder, is written relative to it.
+export const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
+
+// The harness's non-secret configuration, checked in at the root. There is no default: a guessed
+// model or ceiling would run the fleet on the wrong one. A token key is refused; it stays in the
+// environment.
+export const PATH = join(ROOT, "oligarchy.json");
 
 const UNIT_MS: Readonly<Record<string, number>> = {
   milli: 1,

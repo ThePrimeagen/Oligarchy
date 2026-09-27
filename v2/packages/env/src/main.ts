@@ -30,6 +30,8 @@ export type { Name } from "./vars.ts";
 
 export * as args from "./args.ts";
 
+export const ROOT = Config.ROOT;
+
 export const CONFIG_PATH = Config.PATH;
 
 export const fakeIo = Io.fake;

@@ -1,5 +1,5 @@
 {
-  "name": "@oligarchy/driver",
+  "name": "@oligarchy/tester",
   "private": true,
   "type": "module",
   "exports": {
@@ -10,7 +10,10 @@
     "check:types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
+    "drizzle-orm": "catalog:",
     "jarl": "catalog:"
   },
   "devDependencies": {
