@@ -30,12 +30,14 @@ const freshDatabase = async (): Promise<string> => {
 };
 
 // The program as its wrapper runs it, with only the variables given and from an empty directory,
-// so no .env of the machine's is read.
+// so no .env of the machine's is read. spawnSync blocks the worker, so vitest's own timeout cannot
+// end a hung child; this one kills it.
 const migrate = (env: Readonly<Record<string, string>>) => {
   const ran = spawnSync(process.execPath, ["--no-env-file", MAIN], {
     cwd: mkdtempSync(join(tmpdir(), "migrate-")),
     env: { PATH: process.env.PATH ?? "", ...env },
     encoding: "utf8",
+    timeout: 30_000,
   });
   return { code: ran.status, stdout: ran.stdout, stderr: ran.stderr };
 };
