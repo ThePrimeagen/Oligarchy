@@ -1,14 +1,9 @@
 import * as App from "@oligarchy/app";
 import * as Db from "@oligarchy/db";
+import { testResults, testRuns } from "@oligarchy/db/schema";
 import * as Env from "@oligarchy/env";
 import { eq } from "drizzle-orm";
-import { pgTable, text } from "drizzle-orm/pg-core";
 import * as jarl from "jarl";
-
-// v1's test_runs and test_results (packages/db/src/schema.ts), with only the column read here.
-// status is an enum in Postgres; text is enough to compare it.
-const testRuns = pgTable("test_runs", { status: text("status").notNull() });
-const testResults = pgTable("test_results", { status: text("status").notNull() });
 
 const environment = Env.cli({
   name: "tester",
