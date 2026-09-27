@@ -1,7 +1,7 @@
 import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
-import { and, count, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import type * as jarl from "jarl";
 
 export type DefinitionRow = typeof DbSchema.testDefinitions.$inferSelect;
@@ -127,14 +127,14 @@ export const create = (db: Db.Database): Tests => ({
           .insert(DbSchema.testDefinitions)
           .values(input)
           .returning({ id: DbSchema.testDefinitions.id });
-        const [counted] = await tx
-          .select({ version: count() })
-          .from(DbSchema.testDefinitions)
-          .where(eq(DbSchema.testDefinitions.name, input.name));
-        if (row === undefined || counted === undefined) {
+        if (row === undefined) {
           throw new Error("defineTestDefinition: the insert returned no row");
         }
-        return { id: row.id, version: counted.version };
+        const version = await tx.$count(
+          DbSchema.testDefinitions,
+          eq(DbSchema.testDefinitions.name, input.name),
+        );
+        return { id: row.id, version };
       }),
     ),
 
