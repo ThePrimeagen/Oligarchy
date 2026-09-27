@@ -87,20 +87,21 @@ export interface Services {
 }
 
 // @oligarchy/app
-export type Kill = () => void | Promise<void>;
 export type Signal = "SIGINT" | "SIGTERM";
 export type ExitReason =
   | { readonly kind: "returned" }
   | { readonly kind: "signal"; readonly signal: Signal };
+export type OnExit = (reason: ExitReason) => void | Promise<void>;
 export type Io = {
   readonly onSignal: (handler: (signal: Signal) => void) => () => void;
   readonly exit: (code: number) => void;
 };
+export class MainCalledTwice extends jarl.error.define("MainCalledTwice") {}
 
 // Any app with at least these services.
 export interface Has<T extends AnyService> {
   readonly services: Needs<T>; // app.services.db is the Db.Database in the list
-  killable(kill: Kill): () => void;
+  onExit(handler: OnExit): () => void;
 }
 
 export class App<Environment, T extends AnyService> implements Has<T> {
@@ -110,18 +111,19 @@ export class App<Environment, T extends AnyService> implements Has<T> {
   constructor(options: {
     readonly environment: Environment;
     readonly services: ReadonlyArray<T>; // each files itself under its `service` name
-    readonly main: (app: App<Environment, T>) => Promise<jarl.Result<unknown, unknown>>;
-    readonly onExit: (app: App<Environment, T>, reason: ExitReason) => Promise<jarl.Result<void, unknown>>;
   });
 
-  // Runs when everything is over: newest first, each awaited, before onExit. Returns remove.
-  killable(kill: Kill): () => void;
+  // Any number of times. Handlers run newest first, each awaited. Returns remove.
+  onExit(handler: OnExit): () => void;
 
-  // 1. listen for SIGINT and SIGTERM   2. await main
-  // 3. on the first signal, or when main returns: kills newest first, then onExit
-  // 4. after a signal, wait for main to return   5. exit 0 if main, every kill and onExit were ok, else 1
-  // A second signal exits 1 at once. io defaults to the process.
-  run(io?: Io): Promise<void>;
+  // Once. 1. listen for SIGINT and SIGTERM   2. await run(app)
+  // 3. on the first signal, or when run returns: the exit handlers, newest first
+  // 4. after a signal, wait for run to return   5. exit 0 if run was ok and no handler threw, else 1
+  // A second signal exits 1 at once. A second call returns MainCalledTwice. io defaults to the process.
+  main(
+    run: (app: App<Environment, T>) => Promise<jarl.Result<unknown, unknown>>,
+    io?: Io,
+  ): Promise<jarl.Result<void, MainCalledTwice>>;
 }
 ```
 
@@ -188,7 +190,6 @@ export const close = async (app: App.Has<Common>) => {
   await Log.flush(app.services.log);
   await Sentry.flush(app.services.sentry);
   await Db.close(app.services.db);
-  return jarl.ok(undefined);
 };
 
 export const report = (app: App.Has<Log.Log | Sentry.Sentry>, error: unknown) => {
@@ -203,7 +204,7 @@ export const heartbeat = (app: App.Has<Db.Database | Log.Log>, name: string) => 
       Log.error(app.services.log, "heartbeat failed", written.error);
     }
   }, 30_000);
-  app.killable(stop);
+  app.onExit(stop);
 };
 ```
 
@@ -241,12 +242,9 @@ const environment = await Common.load(definition);
 const [log, db, sentry] = Common.open("driver", environment.vars.databaseUrl);
 const openRouter = OpenRouter.open({ token: environment.vars.openRouterToken });
 
-await new App.App({
-  environment,
-  services: [log, db, sentry, openRouter],
-  main,
-  onExit: Common.close,
-}).run();
+const app = new App.App({ environment, services: [log, db, sentry, openRouter] });
+app.onExit(() => Common.close(app)); // registered first: runs last
+await app.main(main);
 ```
 
 ## Example 2: qemu-server, long-running
@@ -285,10 +283,10 @@ const main = async (app: App.App<Reads, Common.Common | Sessions.Sessions>) => {
     return server;
   }
   Common.heartbeat(app, app.environment.flags.name);
-  app.killable(async () => {
+  app.onExit(async () => {
     await jarl.unwrap(Sessions.drain(app)); // a session that refuses to stop: exit 1
   });
-  app.killable(() => Http.stop(server.value)); // newest first: stop taking requests first
+  app.onExit(() => Http.stop(server.value)); // newest first: stop taking requests first
   await Http.stopped(server.value);
   return jarl.ok(undefined);
 };
@@ -300,12 +298,9 @@ const sessions = Sessions.open({
   maxJobs: environment.flags.maxJobs,
 });
 
-await new App.App({
-  environment,
-  services: [log, db, sentry, sessions],
-  main,
-  onExit: Common.close,
-}).run();
+const app = new App.App({ environment, services: [log, db, sentry, sessions] });
+app.onExit(() => Common.close(app));
+await app.main(main);
 ```
 
 ## Example 3: ctrl, several commands
@@ -355,19 +350,13 @@ if (environment.command === "test run") {
     token: environment.vars.linearApiToken,
     team: environment.vars.linearTeam,
   });
-  await new App.App({
-    environment,
-    services: [log, db, sentry, linear],
-    main: testRun,
-    onExit: Common.close,
-  }).run();
+  const app = new App.App({ environment, services: [log, db, sentry, linear] });
+  app.onExit(() => Common.close(app));
+  await app.main(testRun);
 } else {
-  await new App.App({
-    environment,
-    services: [log, db, sentry],
-    main: session,
-    onExit: Common.close,
-  }).run();
+  const app = new App.App({ environment, services: [log, db, sentry] });
+  app.onExit(() => Common.close(app));
+  await app.main(session);
 }
 ```
 
@@ -397,7 +386,6 @@ export const session = async (app: App.App<SessionReads, Common.Common>) => {
 ```ts
 // ctrl/test/session.test.ts
 import * as App from "@oligarchy/app";
-import * as Common from "@oligarchy/common";
 import type * as Db from "@oligarchy/db";
 import type * as Log from "@oligarchy/log";
 import type * as Sentry from "@oligarchy/sentry";
@@ -426,7 +414,7 @@ it("prints the session it found (happy)", async () => {
     flush: async () => undefined,
   };
   const environment: SessionReads = { command: "session", flags: { sessionId: "s1" } };
-  const app = new App.App({ environment, services: [log, db, sentry], main: session, onExit: Common.close });
+  const app = new App.App({ environment, services: [log, db, sentry] });
 
   expect(await session(app)).toEqual(jarl.ok({ id: "s1", status: "ended" }));
   expect(lines).toEqual(['{"id":"s1","status":"ended"}']);
@@ -453,9 +441,10 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
   and `passWithNoTests: false`.
 - A service package never imports `@oligarchy/app`. `@oligarchy/app` imports service types only
   (`import type`), for the `Services` list.
-- `App`'s constructor infers `Environment` and `T` from `environment` and `services` only
-  (`NoInfer` on `main` and `onExit`). Without it, a `main` that needs a service the list lacks
-  compiles.
+- `App`'s type arguments come from the constructor alone (`environment`, `services`). `main` and
+  `onExit` are checked against them at the call; they never widen them.
+- v2's `lib` is ES2023: `Promise.withResolvers` is ES2024. Use a small helper, or raise `lib`
+  for every package at once.
 - CI installs only the root, so root oxlint type-checks `v2/` without `v2/node_modules`. An
   imported type in a union with `undefined` then fails `no-redundant-type-constituents`: write an
   optional parameter (`x?: X`), not `x: X | undefined`. Reproduce by moving `v2/node_modules` and
@@ -479,17 +468,17 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
 - [ ] The existing `tick` tests still pass with `cancel` returning a promise.
 
 `@oligarchy/app` (test services added with `declare module "../src/main.ts"` in the test)
-- [ ] Services are filed under their names, and `main` receives them (happy).
+- [ ] Services are filed under their names, and `main`'s function receives them (happy).
 - [ ] Two services with the same name throw at construction (unhappy).
-- [ ] `main` returns ok: kills newest first, then `onExit` with `returned`, then exit 0 (happy).
-- [ ] `main` returns an error: kills and `onExit` still run; exit 1 (unhappy).
-- [ ] A signal: kills, then `onExit` with that signal, then `run` waits for `main`, then exit 0 (happy).
-- [ ] A kill that throws: the rest still run, `onExit` runs, exit 1 (unhappy).
-- [ ] `onExit` returns an error: exit 1 (unhappy).
-- [ ] A removed kill does not run; removing twice does nothing (unhappy).
-- [ ] A kill registered after exit started runs at once (unhappy).
+- [ ] `main`'s function returns ok: exit handlers newest first, each given `returned`, then exit 0 (happy).
+- [ ] `main`'s function returns an error: the handlers still run; exit 1 (unhappy).
+- [ ] A signal: the handlers run with that signal, then `main` waits for its function to return, then exit 0 (happy).
+- [ ] A handler that throws: the rest still run; exit 1 (unhappy).
+- [ ] A second call to `main` returns `MainCalledTwice` and runs nothing (unhappy).
+- [ ] A removed handler does not run; removing twice does nothing (unhappy).
+- [ ] A handler added after exit started runs at once (unhappy).
 - [ ] A second signal exits 1 without waiting (unhappy).
-- [ ] Types: a `main`, a helper, or an `onExit` that needs a service the list lacks does not compile; a `main` that reads a flag the environment lacks does not compile; a kill that takes an argument does not compile (unhappy).
+- [ ] Types: a function passed to `main`, or a helper, that needs a service the list lacks does not compile; one that reads a flag the environment lacks does not compile; an exit handler that takes something other than the reason does not compile (unhappy).
 
 Each service (`log`, `sentry`, `db`, `openrouter`, `linear`)
 - [ ] `open` returns a service whose operations work against the real dependency, where the v1 package tests it that way (`db`: Postgres, as `packages/integration-testing` does) (happy).
@@ -500,7 +489,7 @@ Each service (`log`, `sentry`, `db`, `openrouter`, `linear`)
 - [ ] `load` returns the environment (happy); help prints and exits 0, a usage error prints and exits 1 (unhappy). `load` takes an io like `Env.create` so the test reads the output and the code.
 - [ ] `close` flushes the log, then Sentry, then closes the database (happy); a failing flush still closes the database (unhappy).
 - [ ] `report` writes to the log and to Sentry (happy).
-- [ ] `heartbeat` writes each interval and stops when the app's kills run (happy); a failed write is logged and the next one still happens (unhappy).
+- [ ] `heartbeat` writes each interval and stops when the app's exit handlers run (happy); a failed write is logged and the next one still happens (unhappy).
 
 Programs
 - [ ] driver `main` with fakes: the answer is logged (happy); an OpenRouter error is reported and returned (unhappy).
@@ -510,7 +499,7 @@ Programs
 
 1. `@oligarchy/env`: export `Result` and `Vars`.
 2. `@oligarchy/async`: `tick` awaits `fn`; `cancel` returns a promise that waits for a run in flight.
-3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Kill`, `Signal`, `ExitReason`, `Io`, `App`), `src/main.ts` exporting them.
+3. `@oligarchy/app`: `src/services.ts` (the `Services` interface, empty until the first service lands), `src/app.ts` (`Needs`, `Has`, `Register`, `Signal`, `ExitReason`, `OnExit`, `Io`, `MainCalledTwice`, `App`), `src/main.ts` exporting them.
 4. Services, one package each, added to `Services` as each lands: `log`, `sentry`, `db` (a port of `packages/db`: the pool, `run`, `transaction`, `ping` and the stores as operations; `DatabaseError` keeps `operation` and `cause`), `openrouter`, `linear`.
 5. `@oligarchy/common`.
 6. driver: replace `v2/packages/driver/src/main.ts`'s print with Example 1.
