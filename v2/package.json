@@ -20,6 +20,7 @@
   "type": "module",
   "scripts": {
     "db:migrate": "bun --no-env-file packages/migrate/src/main.ts",
+    "tester": "bun --no-env-file packages/tester/src/main.ts",
     "check:types": "bun run --workspaces check:types",
     "test:unit": "bun run --workspaces --if-present test:unit",
     "test:integration": "bun run --workspaces --if-present test:integration"

@@ -74,6 +74,20 @@
         "vitest": "catalog:",
       },
     },
+    "packages/tester": {
+      "name": "@oligarchy/tester",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@testcontainers/postgresql": "^11.14.0",
@@ -110,6 +124,8 @@
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
     "@oligarchy/migrate": ["@oligarchy/migrate@workspace:packages/migrate"],
+
+    "@oligarchy/tester": ["@oligarchy/tester@workspace:packages/tester"],
 
     "@oxc-project/types": ["@oxc-project/types@0.151.0", "", {}, "sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA=="],
 
