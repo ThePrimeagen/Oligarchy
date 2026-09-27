@@ -24,6 +24,16 @@ describe("App types", () => {
     void new App.App(environment, counter());
     // @ts-expect-error the fake has no read
     void new App.App(environment, { counter: { service: "counter", increment: () => undefined } });
+    // @ts-expect-error clock is not a service, even beside one that is
+    void new App.App(environment, { counter: counter(), clock: counter() });
+  });
+
+  it("counts only the services an app certainly has", () => {
+    const greets = async (app: App.App<Reads, Greeter>) => jarl.ok(app.services.greeter.greet("x"));
+    const loose: App.Provided = { counter: counter() };
+    const app = new App.App(environment, loose);
+    // @ts-expect-error a Provided object may have no greeter
+    void (() => app.main(greets));
   });
 
   it("checks main against the app", () => {

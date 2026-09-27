@@ -6,25 +6,27 @@ import type {
   NamesOf,
   NotAService,
   OnExit,
+  OnlyServices,
   Provided,
   Provides,
   ServicesOf,
 } from "./types.ts";
 
-export class MainCalledTwice extends jarl.error.define("MainCalledTwice") {}
+export const MainCalledTwice = jarl.error.define("MainCalledTwice");
+export type MainCalledTwice = InstanceType<typeof MainCalledTwice>;
 
 type Main<Environment, Wants extends AnyService> = (
   app: App<Environment, Wants>,
 ) => Promise<jarl.Result<unknown, unknown>>;
 
 // What an app has done so far. Each registration is its own entry, so a remover takes off only
-// its own. `late` holds handlers added after exit began: they run at once, and main waits for them.
+// its own. `drained` settles once every handler queued so far has run.
 export type State = {
   started: boolean;
   exiting: ExitReason | undefined;
   failed: boolean;
   readonly handlers: Array<{ readonly handler: OnExit }>;
-  readonly late: Array<Promise<void>>;
+  drained: Promise<void>;
 };
 
 const processIo: Io = {
@@ -52,11 +54,24 @@ const call = async (state: State, handler: OnExit, reason: ExitReason): Promise<
   }
 };
 
-const exit = async (state: State, reason: ExitReason): Promise<void> => {
-  state.exiting = reason;
+// Newest first, one at a time, until none are left: a handler added meanwhile runs next.
+const drain = async (state: State, reason: ExitReason): Promise<void> => {
   for (let entry = state.handlers.pop(); entry !== undefined; entry = state.handlers.pop()) {
     await call(state, entry.handler, reason);
   }
+};
+
+const schedule = (state: State, reason: ExitReason): void => {
+  state.drained = state.drained.then(() => drain(state, reason));
+};
+
+// A handler added while the others run extends `drained`; wait until it stops growing.
+const settled = async (state: State): Promise<void> => {
+  let current: Promise<void>;
+  do {
+    current = state.drained;
+    await current;
+  } while (current !== state.drained);
 };
 
 const run = async <Environment, S extends Provided | AnyService>(
@@ -80,25 +95,22 @@ export class App<const Environment, const S extends Provided | AnyService> {
     exiting: undefined,
     failed: false,
     handlers: [],
-    late: [],
+    drained: Promise.resolve(),
   };
 
   // The overloads are the typed face; the bodies below take what they already checked.
-  constructor(environment: Environment, services: S & NotAService);
+  constructor(environment: Environment, services: S & NotAService & OnlyServices<S>);
   constructor(environment: Environment, services: ServicesOf<S>) {
     this.environment = environment;
     this.services = services;
   }
 
   onExit(handler: OnExit): () => void {
-    const reason = this.state.exiting;
-    if (reason !== undefined) {
-      this.state.late.push(call(this.state, handler, reason));
-      // It is already running, so there is nothing left to remove.
-      return () => undefined;
-    }
     const entry = { handler };
     this.state.handlers.push(entry);
+    if (this.state.exiting !== undefined) {
+      schedule(this.state, this.state.exiting);
+    }
     return () => {
       const at = this.state.handlers.indexOf(entry);
       if (at !== -1) {
@@ -119,20 +131,27 @@ export class App<const Environment, const S extends Provided | AnyService> {
       return jarl.err(new MainCalledTwice("main was already called"));
     }
     this.state.started = true;
-    let exiting: Promise<void> | undefined;
+    let signals = 0;
     const stopListening = io.onSignal((signal) => {
-      if (exiting !== undefined) {
+      signals += 1;
+      if (signals === 2) {
         io.exit(1);
-        return;
       }
-      exiting = exit(this.state, { kind: "signal", signal });
+      if (this.state.exiting === undefined) {
+        this.state.exiting = { kind: "signal", signal };
+        schedule(this.state, this.state.exiting);
+      }
     });
     const ok = await run(this, main);
-    exiting ??= exit(this.state, { kind: "returned" });
-    await exiting;
-    await Promise.all(this.state.late);
+    if (this.state.exiting === undefined) {
+      this.state.exiting = { kind: "returned" };
+      schedule(this.state, this.state.exiting);
+    }
+    await settled(this.state);
     stopListening();
-    io.exit(ok && !this.state.failed ? 0 : 1);
+    if (signals < 2) {
+      io.exit(ok && !this.state.failed ? 0 : 1);
+    }
     return jarl.ok(undefined);
   }
 }
