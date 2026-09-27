@@ -1,0 +1,26 @@
+{
+  "name": "@oligarchy/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run --project unit",
+    "test:integration": "bun --bun vitest run --project integration"
+  },
+  "dependencies": {
+    "@oligarchy/env": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "jarl": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

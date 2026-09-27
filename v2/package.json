@@ -6,8 +6,12 @@
       "packages/*"
     ],
     "catalog": {
+      "@testcontainers/postgresql": "^11.14.0",
       "@types/node": "^26.4.0",
+      "@types/pg": "^8.23.1",
+      "drizzle-orm": "^0.45.2",
       "jarl": "github:ThePrimeagen/jarl",
+      "pg": "^8.23.0",
       "typescript": "7.0.2",
       "vitest": "^4.1.11",
       "zod": "^4.1.12"
@@ -17,6 +21,7 @@
   "scripts": {
     "driver": "bun --no-env-file packages/driver/src/main.ts",
     "check:types": "bun run --workspaces check:types",
-    "test:unit": "bun run --workspaces --if-present test:unit"
+    "test:unit": "bun run --workspaces --if-present test:unit",
+    "test:integration": "bun run --workspaces --if-present test:integration"
   }
 }
