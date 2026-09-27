@@ -7,19 +7,19 @@ needs it. Programs (driver, ctrl, the servers) are built from these and are not 
 
 ## @oligarchy/app
 
-- [ ] `app.signal`, one `AbortSignal` owned by the app, aborted on the first signal and when `main`
-      returns. Every operation that can hang takes it per call, `{ signal }`, the way `fetch` does,
-      because services are built before the app exists.
-- [ ] On a signal: abort, wait for `main` to settle, then run the exit handlers newest first. Today
-      the handlers run while `main` still runs, so the pool can close under a query in flight.
-- [ ] Exit handlers never use `app.signal`: stopping a session, deleting a heartbeat row and the
-      flushes make requests of their own. Each gets a deadline of its own instead.
-- [ ] One `Aborted` error for cancelled work: never logged as a failure, never reported to Sentry,
-      and after a signal `main` returning it exits 0.
-- [ ] `Has<T>` exposes `signal`, so a helper can pass it on.
+- [x] `app.signal`, one `AbortSignal` owned by the app, aborted on the first signal and when `main`
+      returns (#263). Every operation that can hang takes it per call, `{ signal }`, the way
+      `fetch` does, because services are built before the app exists.
+- [x] On a signal: abort, wait for `main` to settle, then run the exit handlers newest first (#263).
+- [x] `Aborted`, the signal's reason: after a signal, `main` returning or throwing it exits 0 (#263).
+      The log and Sentry must not count it as a failure; that is theirs, below.
+- [x] `Has<T>` exposes `signal`, so a helper can pass it on (#263).
+- [x] A server's `main` waits for exit by waiting on `app.signal`.
+- [ ] A deadline for each exit handler: they run after the signal aborts, and stopping a session,
+      deleting a heartbeat row and the flushes make requests of their own. Built on `timeout` in
+      `@oligarchy/async`.
 - [ ] Signals a program chooses: the session REPL answers SIGHUP.
 - [ ] stdout drained before `process.exit`, so a piped PNG is not cut short.
-- [ ] A way for a server's `main` to wait until exit.
 - [ ] An exported fake `Io` for tests, and stderr through `Io` rather than `console.error`.
 
 ## @oligarchy/async
