@@ -39,3 +39,18 @@ export const tick = (fn: () => unknown, interval: number): (() => void) => {
     clearTimeout(timer);
   };
 };
+
+// Calls fn once after delay milliseconds. Cancel clears that timeout.
+export const sleep = (fn: () => unknown, delay: number): (() => void) => {
+  function run() {
+    try {
+      fn();
+    } catch {
+      // A throw stays in this turn.
+    }
+  }
+  const timer = setTimeout(run, delay);
+  return () => {
+    clearTimeout(timer);
+  };
+};
