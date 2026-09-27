@@ -104,11 +104,16 @@ export interface Has<T extends AnyService> {
   onExit(handler: OnExit): () => void;
 }
 
-export class App<const Environment, T extends AnyService> implements Has<T> {
-  readonly environment: Environment; // what Env.create returned
-  readonly services: Needs<T>;       // each service in the list, under its `service` name
+// What the entry passes: each key a service's name, its value that service. { db: log } and
+// { database: db } do not compile, and a fake written inline is checked against its key.
+export type Provided = { readonly [K in keyof Services]?: Services[K] };
 
-  constructor(services: ReadonlyArray<T>, environment: Environment);
+// App.App<Reads, Log.Log | Db.Database> is an app with those services: what main and helpers ask for.
+export class App<const Environment, const S> {
+  readonly environment: Environment; // what Env.create returned
+  readonly services: S;              // the object passed in: app.services.db, app.services.log
+
+  constructor(services: S & Provided, environment: Environment);
 
   // Any number of times. Handlers run newest first, each awaited. Returns remove.
   onExit(handler: OnExit): () => void;
@@ -241,7 +246,7 @@ const environment = await Common.load(definition);
 const [log, db, sentry] = Common.open("driver", environment.vars.databaseUrl);
 const openRouter = OpenRouter.open({ token: environment.vars.openRouterToken });
 
-const app = new App.App([log, db, sentry, openRouter], environment);
+const app = new App.App({ log, db, sentry, openRouter }, environment);
 app.onExit(() => Common.close(app)); // registered first: runs last
 await app.main(main);
 ```
@@ -297,7 +302,7 @@ const sessions = Sessions.open({
   maxJobs: environment.flags.maxJobs,
 });
 
-const app = new App.App([log, db, sentry, sessions], environment);
+const app = new App.App({ log, db, sentry, sessions }, environment);
 app.onExit(() => Common.close(app));
 await app.main(main);
 ```
@@ -349,11 +354,11 @@ if (environment.command === "test run") {
     token: environment.vars.linearApiToken,
     team: environment.vars.linearTeam,
   });
-  const app = new App.App([log, db, sentry, linear], environment);
+  const app = new App.App({ log, db, sentry, linear }, environment);
   app.onExit(() => Common.close(app));
   await app.main(testRun);
 } else {
-  const app = new App.App([log, db, sentry], environment);
+  const app = new App.App({ log, db, sentry }, environment);
   app.onExit(() => Common.close(app));
   await app.main(session);
 }
@@ -385,34 +390,32 @@ export const session = async (app: App.App<SessionReads, Common.Common>) => {
 ```ts
 // ctrl/test/session.test.ts
 import * as App from "@oligarchy/app";
-import type * as Db from "@oligarchy/db";
-import type * as Log from "@oligarchy/log";
-import type * as Sentry from "@oligarchy/sentry";
 import * as jarl from "jarl";
 import { expect, it } from "vitest";
 import { session } from "../src/session.ts";
 
 it("prints the session it found (happy)", async () => {
   const lines: Array<string> = [];
-  const log: Log.Log = {
-    service: "log",
-    info: (text) => void lines.push(text),
-    error: () => undefined,
-    flush: async () => undefined,
-  };
-  const db: Db.Database = {
-    service: "db",
-    heartbeat: async () => jarl.ok(undefined),
-    session: async (id) => jarl.ok({ id, status: "ended" }),
-    saveRun: async (run) => jarl.ok(run.ticket),
-    close: async () => undefined,
-  };
-  const sentry: Sentry.Sentry = {
-    service: "sentry",
-    capture: () => undefined,
-    flush: async () => undefined,
-  };
-  const app = new App.App([log, db, sentry], { command: "session", flags: { sessionId: "s1" } });
+  // Each fake is checked against its key's service; no annotations needed.
+  const app = new App.App(
+    {
+      log: {
+        service: "log",
+        info: (text) => void lines.push(text),
+        error: () => undefined,
+        flush: async () => undefined,
+      },
+      db: {
+        service: "db",
+        heartbeat: async () => jarl.ok(undefined),
+        session: async (id) => jarl.ok({ id, status: "ended" }),
+        saveRun: async (run) => jarl.ok(run.ticket),
+        close: async () => undefined,
+      },
+      sentry: { service: "sentry", capture: () => undefined, flush: async () => undefined },
+    },
+    { command: "session", flags: { sessionId: "s1" } },
+  );
 
   expect(await session(app)).toEqual(jarl.ok({ id: "s1", status: "ended" }));
   expect(lines).toEqual(['{"id":"s1","status":"ended"}']);
@@ -439,10 +442,15 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
   and `passWithNoTests: false`.
 - A service package never imports `@oligarchy/app`. `@oligarchy/app` imports service types only
   (`import type`), for the `Services` list.
-- `new App(services, environment)` takes its types from its two arguments. `Environment` is a
-  `const` type parameter, so a literal environment in a test keeps `command: "session"`.
+- `new App(services, environment)` takes its types from its two arguments, both `const` type
+  parameters, so a literal environment in a test keeps `command: "session"`. `services` is an
+  object checked against `Provided`: each key a service's name, its value that service. It also
+  refuses a bare service in place of the object (`services: S & { readonly service?: never }`).
+- `App.App<Reads, Log.Log | Db.Database>`, the form `main` and helpers write, reads the same as an
+  app built from `{ log, db }`: the second type argument is either a union of services or the
+  object, and `services` is `{ log: Log.Log; db: Db.Database }` both ways.
 - `app.main(main)` infers what `main` needs from its parameter. It checks the app has each service
-  by name, so a missing one fails on that call as `{ missing: "name" }`, and it checks the
+  by key, so a missing one fails on that call as `{ missing: "name" }`, and it checks the
   environment the ordinary way, so a missing flag fails as `Property 'iso' is missing`.
 - v2's `lib` is ES2023: `Promise.withResolvers` is ES2024. Use a small helper, or raise `lib`
   for every package at once.
@@ -469,8 +477,8 @@ For the agent that builds this. Work in `v2/` on a branch off `master`.
 - [ ] The existing `tick` tests still pass with `cancel` returning a promise.
 
 `@oligarchy/app` (test services added with `declare module "../src/main.ts"` in the test)
-- [ ] Services are filed under their names, and `main` receives them (happy).
-- [ ] Two services with the same name throw in the constructor (unhappy).
+- [ ] `main` receives the object's services under their keys (happy).
+- [ ] A service under another service's key, a key that is not a service, an inline fake missing an operation, and a bare service in place of the object do not compile (unhappy).
 - [ ] `app.main(main)` on an app missing a service `main` asks for does not compile, and the error names it (unhappy).
 - [ ] `app.main(main)` on an app whose environment lacks a flag `main` reads does not compile (unhappy).
 - [ ] `main` returns ok: exit handlers newest first, each given `returned`, then exit 0 (happy).
