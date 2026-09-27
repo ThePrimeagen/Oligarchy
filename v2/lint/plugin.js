@@ -1,13 +1,27 @@
 // Oligarchy's own lint rules. The root .oxlintrc.json loads this file for v2/**. Plain JavaScript:
 // oxlint runs plugins under Node, and Node before 22.18 cannot strip TypeScript.
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
-// A package's name ("@oligarchy/app"), or its src/main.ts from inside it. An augmentation through
-// any other file lands on a separate declaration, and the list and the addition stop seeing each
-// other.
-const throughEntry = (specifier) =>
-  specifier.startsWith(".")
-    ? specifier.endsWith("/src/main.ts")
-    : /^(@[^/]+\/)?[^/]+$/.test(specifier);
+const packageRoot = (file) => {
+  for (let dir = dirname(file); dir !== dirname(dir); dir = dirname(dir)) {
+    if (existsSync(join(dir, "package.json"))) {
+      return dir;
+    }
+  }
+  return undefined;
+};
+
+// A package's name ("@oligarchy/app"), or a relative path to the declaring package's own
+// src/main.ts. An augmentation through any other file lands on a separate declaration, and the
+// list and the addition stop seeing each other.
+const throughEntry = (specifier, file) => {
+  if (!specifier.startsWith(".")) {
+    return /^(@[^/]+\/)?[^/]+$/.test(specifier);
+  }
+  const root = packageRoot(file);
+  return root !== undefined && resolve(dirname(file), specifier) === join(root, "src/main.ts");
+};
 
 export default {
   meta: { name: "oligarchy" },
@@ -27,7 +41,7 @@ export default {
             if (node.id.type !== "Literal" || typeof node.id.value !== "string") {
               return;
             }
-            if (!throughEntry(node.id.value)) {
+            if (!throughEntry(node.id.value, context.filename)) {
               context.report({
                 node: node.id,
                 messageId: "entry",
