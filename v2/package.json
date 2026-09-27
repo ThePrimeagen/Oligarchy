@@ -17,6 +17,6 @@
   "scripts": {
     "driver": "bun --no-env-file packages/driver/src/main.ts",
     "check:types": "bun run --workspaces check:types",
-    "test:unit": "bun run --workspaces test:unit"
+    "test:unit": "bun run --workspaces --if-present test:unit"
   }
 }

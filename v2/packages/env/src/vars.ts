@@ -27,15 +27,15 @@ const withDefault = (name: string, value: string): Var<string> => ({
   fallback: { value },
 });
 
-// Every variable an oligarchy process reads, declared once. An app names the ones it needs, and
-// only those are required.
+// Every variable an oligarchy process reads, declared once. A command names the ones it needs,
+// and only those are required.
 export const all = {
   oligarchyToken: secret("OLIGARCHY_TOKEN"),
   // The harness talks to OpenRouter as itself. The token stays out of oligarchy.json.
   openRouterToken: secret("OPENROUTER_API_KEY"),
   databaseUrl: secret("DATABASE_URL"),
-  // `db:migrate` only. Kept off DATABASE_URL so the app can use a pooler while migrations stay on
-  // a direct connection.
+  // `db:migrate` only. Kept off DATABASE_URL so the programs can use a pooler while migrations
+  // stay on a direct connection.
   databaseMigrationUrl: secret("DATABASE_MIGRATION_URL"),
   automationServerUrl: required("AUTOMATION_SERVER_URL"),
   linearApiToken: secret("LINEAR_API_TOKEN"),
@@ -52,7 +52,7 @@ export type Values<N extends Name> = {
   -readonly [K in N]: (typeof all)[K] extends Var<infer T> ? T : never;
 };
 
-// In the order the app names them, so the first variable reported is always the same one. The
+// In the order they are named, so the first variable reported is always the same one. The
 // overload is the typed face: the body sets every named key with that variable's own type.
 async function resolveValues<N extends Name>(
   names: ReadonlyArray<N>,
