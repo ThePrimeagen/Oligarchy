@@ -39,6 +39,22 @@ export const stepsOf = (instruction: string): ReadonlyArray<string> => {
   return lines.map(stepText);
 };
 
+// 27 of the 471 newest definitions close on this line. It asks for no action: a driver checks
+// it on the screen the step before it leaves, and 39 of 41 runs never open it.
+const DESKTOP_RETURN = new Set([
+  "the desktop must return exactly as left",
+  "the desktop must return exactly as left.",
+]);
+
+// 1-based place of the last step that asks the guest for an action: the step before a closing
+// desktop-return line, or else the last step. 0 for no steps.
+export const lastActionOf = (steps: ReadonlyArray<string>): number => {
+  const last = steps.at(-1);
+  return steps.length > 1 && last !== undefined && DESKTOP_RETURN.has(last)
+    ? steps.length - 1
+    : steps.length;
+};
+
 // 1-based place of a message that is a step, or 0 when it is not. A copied asterisk still
 // matches: the driver is told to drop only that mark. A line that appears twice is the first
 // copy; a walk that has already passed that copy uses placeOf.

@@ -44,6 +44,18 @@ describe("steps happy path", () => {
     expect(Steps.indexOf(STEPS, "  Press Super+Escape. The System menu opens.  ")).toBe(1);
   });
 
+  it("takes the step before a closing desktop-return line as the last one with an action", () => {
+    expect(Steps.lastActionOf(STEPS)).toBe(2);
+    expect(
+      Steps.lastActionOf([
+        "Open a terminal.",
+        "Close it.",
+        "the desktop must return exactly as left",
+      ]),
+    ).toBe(2);
+    expect(Steps.lastActionOf(["Open a terminal.", "Type the command.", "Close it."])).toBe(3);
+  });
+
   it("places a repeated line at the copy still ahead of the ones already said", () => {
     const repeated = [
       "Press Super+Space. The menu opens.",
@@ -79,6 +91,24 @@ describe("steps unhappy path", () => {
     expect(Steps.indexOf(STEPS, "always take a screen shot of every step")).toBe(0);
     expect(Steps.indexOf(STEPS, "any crashes or erroneous behavior must be reported.")).toBe(0);
     expect(Steps.indexOf(STEPS, "Super+Escape is <M-ESC>.")).toBe(0);
+  });
+
+  it("keeps the last step when no earlier one can stand for a desktop-return line", () => {
+    expect(Steps.lastActionOf([])).toBe(0);
+    expect(Steps.lastActionOf(["the desktop must return exactly as left."])).toBe(1);
+    expect(
+      Steps.lastActionOf([
+        "Open a terminal.",
+        "the desktop must return exactly as left.",
+        "Close it.",
+      ]),
+    ).toBe(3);
+    expect(
+      Steps.lastActionOf([
+        "Open a terminal.",
+        "The desktop must return exactly as left and then some.",
+      ]),
+    ).toBe(2);
   });
 
   it("does not place a repeated line that has no copy left, or a paraphrase said last", () => {

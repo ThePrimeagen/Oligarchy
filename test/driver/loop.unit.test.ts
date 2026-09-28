@@ -1085,6 +1085,87 @@ describe("driver loop", () => {
       }),
     );
 
+    const RETURN_CHECK =
+      "<ActionList>\n* Open a terminal.\n* Type the command.\n* Close the terminal.\n* the desktop must return exactly as left.\n* any crashes or erroneous behavior must be reported.\n</ActionList>";
+
+    it.effect(
+      "a list closing on the desktop-return line ends as Done once the step before it was worked",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(
+            answers(
+              sendKeys("open it", 1),
+              sendKeys("type it", 2),
+              sendKeys("close it", 3),
+              sendKeys("open it again", 1),
+              done(),
+            ),
+          );
+          const { stopped, spawner } = yield* run(
+            config(),
+            recorder.layer,
+            () => ({ exitCode: 0 }),
+            [],
+            { seed: { instruction: RETURN_CHECK } },
+          );
+          expect(stopped).toEqual({ reason: "result-closed" });
+          expect(
+            guestPaths(recorder.requests).filter((path) => path === "/send-keys"),
+          ).toHaveLength(3);
+          expect(JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}")).toMatchObject({
+            status: "succeeded",
+            reason: RESTARTED,
+          });
+          expect(closes(spawner.spawned)).toEqual([
+            expect.arrayContaining(["--status", "success", "--reason", RESTARTED]),
+          ]);
+        }),
+    );
+
+    it.effect(
+      "a list closing on the desktop-return line keeps driving on a return before the step before it (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(
+            answers(
+              sendKeys("open it", 1),
+              sendKeys("type it", 2),
+              sendKeys("open it again", 1),
+              done(),
+            ),
+          );
+          const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+            seed: { instruction: RETURN_CHECK },
+          });
+          expect(stopped).toEqual({ reason: "result-closed" });
+          expect(
+            guestPaths(recorder.requests).filter((path) => path === "/send-keys"),
+          ).toHaveLength(3);
+          const stop = JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}");
+          expect(stop).not.toHaveProperty("reason");
+        }),
+    );
+
+    it.effect(
+      "one action and the desktop-return line stays on step 1 and never ends early (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(
+            answers(sendKeys("open it", 1), sendKeys("look again", 1), done()),
+          );
+          const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+            seed: {
+              instruction:
+                "<ActionList>\n* Open a terminal.\n* the desktop must return exactly as left.\n</ActionList>",
+            },
+          });
+          expect(stopped).toEqual({ reason: "result-closed" });
+          expect(
+            guestPaths(recorder.requests).filter((path) => path === "/send-keys"),
+          ).toHaveLength(2);
+        }),
+    );
+
     it.effect("a one-line ActionList stays on step 1 and never ends early (unhappy)", () =>
       Effect.gen(function* () {
         const recorder = routed(answers(sendKeys("open it", 1), sendKeys("look again", 1), done()));
