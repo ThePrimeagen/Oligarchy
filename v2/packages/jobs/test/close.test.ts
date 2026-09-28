@@ -159,7 +159,7 @@ const failing = (times: number, then: boolean) => {
 };
 
 describe("closing an action", () => {
-  it("a completed drive clears ready and goes to Needs Review; its passed diagnose to Succeeded (happy)", async () => {
+  it("a completed drive goes to Needs Review; its passed diagnose to Succeeded (happy)", async () => {
     const stores = await database();
     const { linear, asked } = fakeLinear();
     const { lines, logger } = logging();
@@ -175,7 +175,7 @@ describe("closing an action", () => {
     const drove = await close(needs, drive, COMPLETED);
 
     expect(drove).toEqual(jarl.ok(true));
-    expect(asked).toEqual(["clearReady OLI-42", "moveToNeedsReview OLI-42"]);
+    expect(asked).toEqual(["readyForReview OLI-42"]);
     expect(await stores.automation.jobStatus(job.id, "drive")).toEqual(jarl.ok("completed"));
 
     jarl.unwrap(
@@ -193,7 +193,7 @@ describe("closing an action", () => {
     const diagnosed = await close(needs, diagnose, SUCCEEDED);
 
     expect(diagnosed).toEqual(jarl.ok(true));
-    expect(asked.slice(2)).toEqual(["moveToSucceeded OLI-42"]);
+    expect(asked.slice(1)).toEqual(["markSucceeded OLI-42"]);
     expect(await stores.automation.jobStatus(job.id, "diagnose")).toEqual(jarl.ok("succeeded"));
     expect(lines).toEqual([
       "[INFO] [global] automation: drive completed",
@@ -207,7 +207,7 @@ describe("closing an action", () => {
     });
 
     expect(await close(needs, DIAGNOSE, SUCCEEDED)).toEqual(jarl.ok(true));
-    expect(asked).toEqual(["moveToFailed OLI-42"]);
+    expect(asked).toEqual(["markFailed OLI-42"]);
   });
 
   it("says a diagnose with no session, or no verdict row, has no verdict, and moves nothing (error)", async () => {
@@ -271,7 +271,7 @@ describe("closing an action", () => {
     });
 
     expect(await close(needs, DRIVE, COMPLETED)).toEqual(jarl.ok(true));
-    expect(asked).toEqual(["clearReady OLI-42", "moveToNeedsReview OLI-42"]);
+    expect(asked).toEqual(["readyForReview OLI-42"]);
     expect(lines).toEqual(["[INFO] [global] automation: drive completed"]);
   });
 
@@ -285,13 +285,13 @@ describe("closing an action", () => {
     expect(lines).toEqual([]);
   });
 
-  it("errors an errored drive's result, clears ready, and moves it to Errored with the reason (error)", async () => {
+  it("errors an errored drive's result and moves it to Errored with the reason (error)", async () => {
     const { needs, asked, lines, calls } = closing();
     const reason = "driver exited; result result-1 is running";
 
     expect(await close(needs, DRIVE, { status: "errored", reason })).toEqual(jarl.ok(true));
     expect(calls).toEqual([`finish action-1 errored ${reason}`, `errorResult result-1 ${reason}`]);
-    expect(asked).toEqual(["clearReady OLI-42", `moveToErrored OLI-42: drive errored; ${reason}`]);
+    expect(asked).toEqual([`markErrored OLI-42: drive errored; ${reason}`]);
     expect(lines).toEqual([`[ERROR] [global] automation: drive errored; ${reason}`]);
   });
 
@@ -302,7 +302,7 @@ describe("closing an action", () => {
 
     expect(closed).toEqual(jarl.ok(true));
     expect(calls).toEqual(["finish action-2 errored agent quit"]);
-    expect(asked).toEqual(["moveToErrored OLI-42: diagnose errored; agent quit"]);
+    expect(asked).toEqual(["markErrored OLI-42: diagnose errored; agent quit"]);
   });
 
   it("still moves the ticket to Errored when the result's errored write fails three times, in one line (error)", async () => {
@@ -318,32 +318,32 @@ describe("closing an action", () => {
 
     expect(await close(needs, DRIVE, { status: "errored", reason: "lost" })).toEqual(jarl.ok(true));
     expect(writes).toBe(3);
-    expect(asked).toEqual(["clearReady OLI-42", "moveToErrored OLI-42: drive errored; lost"]);
+    expect(asked).toEqual(["markErrored OLI-42: drive errored; lost"]);
     expect(lines).toEqual([
       "[ERROR] [global] automation: drive errored; lost",
       "[ERROR] [OLI-42] automation: result errored write failed; result-1: connection reset",
     ]);
   });
 
-  it("keeps the row closed when the move fails three times, in one line (error)", async () => {
+  it("keeps the row closed when the move fails, asked once, in one line (error)", async () => {
     const no = jarl.err(refused("linear: moving OLI-42 to Needs Review failed"));
-    const { needs, asked, lines } = closing({ linear: { moveToNeedsReview: [no, no, no] } });
+    const { needs, asked, lines } = closing({ linear: { readyForReview: [no] } });
 
     expect(await close(needs, DRIVE, COMPLETED)).toEqual(jarl.ok(true));
-    expect(asked.filter((call) => call === "moveToNeedsReview OLI-42")).toHaveLength(3);
+    expect(asked).toEqual(["readyForReview OLI-42"]);
     expect(lines).toEqual([
       "[INFO] [global] automation: drive completed",
       "[ERROR] [OLI-42] automation: move to Needs Review failed: linear: moving OLI-42 to Needs Review failed",
     ]);
   });
 
-  it("clears an aborted drive's ready label and leaves its ticket where it is (error)", async () => {
+  it("leaves an aborted drive's ticket where it is (error)", async () => {
     const { needs, asked, lines } = closing();
 
     const closed = await close(needs, DRIVE, { status: "aborted", reason: "aborted" });
 
     expect(closed).toEqual(jarl.ok(true));
-    expect(asked).toEqual(["clearReady OLI-42"]);
+    expect(asked).toEqual([]);
     expect(lines).toEqual(["[INFO] [global] automation: drive aborted"]);
   });
 

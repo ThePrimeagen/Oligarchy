@@ -36,15 +36,33 @@ describe("whether a job can be diagnosed", () => {
     );
   });
 
-  it("a drive that ended otherwise, or none at all, is never diagnosed, saying why (error)", async () => {
-    expect(await diagnosable(actions({ drive: "errored", mint: "completed" }), JOB)).toEqual(
-      jarl.ok({ kind: "never", reason: "not diagnosed; drive errored" }),
+  it("a drive that ended otherwise, or none at all, strands the diagnose, saying all it can (error)", async () => {
+    const judged = resultRow({ status: "failed", reason: "wifi never joined", sessionId: "s-1" });
+    const stranded = async (statuses: Statuses, job = JOB) => {
+      const store = only<Needs["automation"]>({
+        jobStatus: async (_resultId, action) => jarl.ok(statuses[action]),
+      });
+      return diagnosable({ automation: store }, job);
+    };
+
+    expect(await stranded({ drive: "errored", mint: "completed" }, judged)).toEqual(
+      jarl.ok({
+        kind: "stranded",
+        reason:
+          "stranded; drive errored; result result-1 is failed: wifi never joined; session s-1",
+      }),
     );
-    expect(await diagnosable(actions({ mint: "aborted" }), JOB)).toEqual(
-      jarl.ok({ kind: "never", reason: "not diagnosed; mint aborted" }),
+    expect(await stranded({ mint: "aborted" })).toEqual(
+      jarl.ok({
+        kind: "stranded",
+        reason: "stranded; mint aborted; result result-1 is passed; session none",
+      }),
     );
-    expect(await diagnosable(actions({}), JOB)).toEqual(
-      jarl.ok({ kind: "never", reason: "not diagnosed; no drive" }),
+    expect(await stranded({})).toEqual(
+      jarl.ok({
+        kind: "stranded",
+        reason: "stranded; no drive or mint; result result-1 is passed; session none",
+      }),
     );
   });
 

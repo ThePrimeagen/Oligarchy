@@ -5,7 +5,6 @@ import * as Close from "./close.ts";
 import * as Find from "./find.ts";
 import type { Needs } from "./needs.ts";
 import * as Open from "./open.ts";
-import * as Ready from "./ready.ts";
 import * as Reclaim from "./reclaim.ts";
 
 // A function of jobs with its needs already given.
@@ -20,9 +19,8 @@ export type Jobs = {
   readonly actionFor: Bound<typeof Board.actionFor>;
   readonly driveOrMint: Bound<typeof Board.driveOrMint>;
   readonly enqueue: Bound<typeof Board.enqueue>;
+  readonly queue: Bound<typeof Board.queue>;
   readonly diagnosable: Bound<typeof Find.diagnosable>;
-  readonly mark: Bound<typeof Ready.mark>;
-  readonly release: Bound<typeof Ready.release>;
   readonly judge: Bound<typeof Close.judge>;
   readonly close: Bound<typeof Close.close>;
   readonly fail: Bound<typeof Close.fail>;
@@ -46,9 +44,8 @@ export const create = (needs: Needs): Jobs => ({
   actionFor: (column, job) => Board.actionFor(needs, column, job),
   driveOrMint: (job) => Board.driveOrMint(needs, job),
   enqueue: (job, action) => Board.enqueue(needs, job, action),
+  queue: (ticket, column) => Board.queue(needs, ticket, column),
   diagnosable: (job) => Find.diagnosable(needs, job),
-  mark: (ticket) => Ready.mark(needs, ticket),
-  release: (ticket) => Ready.release(needs, ticket),
   judge: (action) => Close.judge(needs, action),
   close: (action, outcome) => Close.close(needs, action, outcome),
   fail: (action, ticket, reason) => Close.fail(needs, action, ticket, reason),

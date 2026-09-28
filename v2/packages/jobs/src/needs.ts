@@ -27,20 +27,14 @@ export type Needs = {
   readonly servers: Pick<Stores.Servers.Servers, "findServer">;
   readonly linear: Pick<
     Linear.Linear,
-    | "teamId"
-    | "labelIds"
-    | "assigneeId"
-    | "stateIds"
-    | "createIssue"
-    | "describeIssue"
-    | "issueStateId"
-    | "markReady"
-    | "clearReady"
-    | "moveToErrored"
-    | "moveToNeedsReview"
-    | "moveToFailed"
-    | "moveToSucceeded"
-    | "moveToAborted"
+    | "createTicket"
+    | "setDescription"
+    | "readyForAutomation"
+    | "readyForReview"
+    | "markSucceeded"
+    | "markFailed"
+    | "markErrored"
+    | "markAborted"
   >;
   readonly logger: Logger.Logger;
   readonly prompts: Templates.Prompts;

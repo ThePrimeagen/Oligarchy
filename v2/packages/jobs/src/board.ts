@@ -2,6 +2,7 @@ import type * as Db from "@oligarchy/db";
 import * as Linear from "@oligarchy/linear";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
+import * as Errors from "./errors.ts";
 import type { Job, Needs } from "./needs.ts";
 import { MINT_DEFINITION } from "./open.ts";
 
@@ -73,4 +74,89 @@ export const enqueue = async (
   // The row the insert hit was deleted before it could be read, by the old-row sweep. Its
   // status is unknown, so it reads as the queue this insert would have joined.
   return jarl.ok({ result: "duplicate", action, status: kept.value ?? "pending" });
+};
+
+export type Queued =
+  | Enqueued
+  | { readonly result: "unknown" }
+  | { readonly result: "errored"; readonly reason: string };
+
+// A step of queueing failed. A drive's or mint's result is errored with it, since it will not
+// run; a diagnose leaves the job it would judge alone. The ticket moves to Errored with the
+// reason. One line says it all, a write or a move that failed too included.
+const refuse = async (
+  needs: Pick<Needs, "tests" | "linear" | "logger">,
+  ticket: string,
+  resultId: string | undefined,
+  why: string,
+): Promise<Queued> => {
+  const reason = `queue errored; ${why}`;
+  const also: Array<string> = [];
+  if (resultId !== undefined) {
+    const written = await needs.tests.errorResult(resultId, reason);
+    if (!written.ok) {
+      also.push(`result errored write failed: ${Errors.detail(written.error)}`);
+    }
+  }
+  const moved = await needs.linear.markErrored(ticket, reason);
+  if (!moved.ok) {
+    also.push(`move to Errored failed: ${Errors.detail(moved.error)}`);
+  }
+  needs.logger.error([reason, ...also].join("; "), {
+    location: Errors.AUTOMATION,
+    agentId: ticket,
+  });
+  return { result: "errored", reason };
+};
+
+// A ticket moved into a column that asks an action of its job: the webhook, or the watch that
+// catches one it missed. Automation Needed readies the ticket in Linear first, so that column
+// never holds a ticket without the ready label; then the database queues the action. A step that
+// fails moves the ticket to Errored, saying which step and why. A ticket no job carries is not
+// ours, and is left alone.
+export const queue = async (
+  needs: Pick<Needs, "tests" | "automation" | "linear" | "logger">,
+  ticket: string,
+  column: Asking,
+): Promise<Queued> => {
+  const found = await needs.tests.findResultByLinearId(ticket);
+  if (!found.ok) {
+    return refuse(
+      needs,
+      ticket,
+      undefined,
+      `finding its job failed; ${Errors.detail(found.error)}`,
+    );
+  }
+  const job = found.value;
+  if (job === undefined) {
+    return { result: "unknown" };
+  }
+  const driving = column === Linear.AUTOMATION_NEEDED_STATE;
+  const resultId = driving ? job.id : undefined;
+  if (driving) {
+    const ready = await needs.linear.readyForAutomation(ticket);
+    if (!ready.ok) {
+      return refuse(needs, ticket, resultId, `readying it failed; ${Errors.detail(ready.error)}`);
+    }
+  }
+  const action = await actionFor(needs, column, job);
+  if (!action.ok) {
+    return refuse(
+      needs,
+      ticket,
+      resultId,
+      `choosing its action failed; ${Errors.detail(action.error)}`,
+    );
+  }
+  const placed = await enqueue(needs, job, action.value);
+  if (!placed.ok) {
+    return refuse(
+      needs,
+      ticket,
+      resultId,
+      `queueing its ${action.value} failed; ${Errors.detail(placed.error)}`,
+    );
+  }
+  return placed.value;
 };

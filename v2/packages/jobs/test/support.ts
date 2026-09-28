@@ -131,15 +131,9 @@ export const timedOut = () => new Http.HttpTimedOut(LINEAR_API, 10_000);
 export const refused = (message = "linear: Entity not found") => new Linear.LinearError(message);
 
 export const ticketNamed = (identifier: string): Linear.Ticket => ({
-  id: `issue-${identifier}`,
   identifier,
   url: `https://linear.app/${identifier}`,
 });
-
-export const STATES: Linear.WorkflowStateIds = {
-  backlog: "state-backlog",
-  automationNeeded: "state-automation-needed",
-};
 
 type LinearNeeds = Needs["linear"];
 
@@ -154,10 +148,10 @@ export type Script = {
 export const NO_ANSWER: Promise<never> = new Promise(() => undefined);
 
 // A Linear that files OLI-42 upward, one number per create asked (an unanswered one included),
-// and keeps every request in `asked`, in order.
+// and keeps every step asked of it in `asked`, in order.
 export const fakeLinear = (script: Script = {}) => {
   const asked: Array<string> = [];
-  const created: Array<Linear.CreateIssueInput> = [];
+  const filed: Array<{ readonly title: string; readonly label: string }> = [];
   const described = new Map<string, string>();
   const made = new Map<keyof LinearNeeds, number>();
   const answer = async <K extends keyof LinearNeeds>(
@@ -173,32 +167,29 @@ export const fakeLinear = (script: Script = {}) => {
   };
   const done = jarl.ok(undefined);
   const linear: LinearNeeds = {
-    teamId: () => answer("teamId", "teamId", jarl.ok("team-1")),
-    labelIds: (_teamId, version) =>
-      answer("labelIds", `labelIds ${version}`, jarl.ok(["label-agent-test", `label-${version}`])),
-    assigneeId: () => answer("assigneeId", "assigneeId", jarl.ok("user-1")),
-    stateIds: () => answer("stateIds", "stateIds", jarl.ok(STATES)),
-    createIssue: (input) => {
-      created.push(input);
-      const identifier = `OLI-${String(42 + (made.get("createIssue") ?? 0))}`;
-      return answer("createIssue", `createIssue ${input.title}`, jarl.ok(ticketNamed(identifier)));
+    createTicket: (input) => {
+      filed.push(input);
+      const identifier = `OLI-${String(42 + (made.get("createTicket") ?? 0))}`;
+      return answer(
+        "createTicket",
+        `createTicket ${input.title} [${input.label}]`,
+        jarl.ok(ticketNamed(identifier)),
+      );
     },
-    describeIssue: (ticket, description, stateId) => {
-      described.set(ticket.identifier, description);
-      return answer("describeIssue", `describeIssue ${ticket.identifier} ${stateId}`, done);
+    setDescription: (ticket, body) => {
+      described.set(ticket, body);
+      return answer("setDescription", `setDescription ${ticket}`, done);
     },
-    issueStateId: (ticket) =>
-      answer("issueStateId", `issueStateId ${ticket.identifier}`, jarl.ok(STATES.automationNeeded)),
-    markReady: (ticket) => answer("markReady", `markReady ${ticket}`, done),
-    clearReady: (ticket) => answer("clearReady", `clearReady ${ticket}`, done),
-    moveToErrored: (ticket, message) =>
-      answer("moveToErrored", `moveToErrored ${ticket}: ${message}`, done),
-    moveToNeedsReview: (ticket) => answer("moveToNeedsReview", `moveToNeedsReview ${ticket}`, done),
-    moveToFailed: (ticket) => answer("moveToFailed", `moveToFailed ${ticket}`, done),
-    moveToSucceeded: (ticket) => answer("moveToSucceeded", `moveToSucceeded ${ticket}`, done),
-    moveToAborted: (ticket) => answer("moveToAborted", `moveToAborted ${ticket}`, done),
+    readyForAutomation: (ticket) =>
+      answer("readyForAutomation", `readyForAutomation ${ticket}`, done),
+    readyForReview: (ticket) => answer("readyForReview", `readyForReview ${ticket}`, done),
+    markSucceeded: (ticket) => answer("markSucceeded", `markSucceeded ${ticket}`, done),
+    markFailed: (ticket) => answer("markFailed", `markFailed ${ticket}`, done),
+    markErrored: (ticket, reason) =>
+      answer("markErrored", `markErrored ${ticket}: ${reason}`, done),
+    markAborted: (ticket) => answer("markAborted", `markAborted ${ticket}`, done),
   };
-  return { linear, asked, created, described };
+  return { linear, asked, filed, described };
 };
 
 export const TEST_TEMPLATE =

@@ -4,7 +4,6 @@ import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import * as Errors from "./errors.ts";
 import type { Needs } from "./needs.ts";
-import { linearRead } from "./retry.ts";
 import * as Templates from "./templates.ts";
 
 // The one definition a mint installs from, and the label its tickets carry beside the agent test
@@ -84,99 +83,48 @@ export const mintDefinition = async (
     : jarl.ok(found.value);
 };
 
-// Where a run's tickets go: the team, the labels (the agent test label and the run's own), the
-// assignee, and the columns.
-type Team = {
-  readonly teamId: string;
-  readonly labelIds: ReadonlyArray<string>;
-  readonly assigneeId: string;
-  readonly states: Linear.WorkflowStateIds;
-};
-
-// The lookups are asked again once when Linear did not answer. The labels are not: a missing one
-// is created, and a create whose answer was lost is not safe to send twice.
-const team = async (
-  linear: Needs["linear"],
-  label: string,
-): Promise<jarl.Result<Team, Linear.LinearFailure>> => {
-  const teamId = await linearRead(() => linear.teamId());
-  if (!teamId.ok) {
-    return teamId;
-  }
-  const labelIds = await linear.labelIds(teamId.value, label);
-  if (!labelIds.ok) {
-    return labelIds;
-  }
-  const assigneeId = await linearRead(() => linear.assigneeId());
-  if (!assigneeId.ok) {
-    return assigneeId;
-  }
-  const states = await linearRead(() => linear.stateIds(teamId.value));
-  if (!states.ok) {
-    return states;
-  }
-  return jarl.ok({
-    teamId: teamId.value,
-    labelIds: labelIds.value,
-    assigneeId: assigneeId.value,
-    states: states.value,
-  });
-};
-
-// The one update that writes a new ticket's description and moves it out of Backlog, which
-// queues its action. It is never sent twice: when Linear does not answer, the update may still
-// have landed, so the ticket's column is read instead (asked once more if that read gets no
-// answer either). A ticket that has left Backlog was handed off; one still in Backlog, or one
-// whose column cannot be read, is the hand-off failing.
-const handOff = async (
+// The steps that follow a ticket's creation: `body` writes what must land before the action can be
+// queued, then renders the description, which names the ticket and so waits for its creation. The
+// description is written while the ticket is still in Backlog, where nothing drives it; ready for
+// automation goes last, as that move queues the action.
+const handOff = async <E extends Error>(
   linear: Needs["linear"],
   created: Linear.Ticket,
-  description: string,
-  states: Linear.WorkflowStateIds,
-): Promise<jarl.Result<void, Linear.LinearFailure>> => {
-  const described = await linear.describeIssue(created, description, states.automationNeeded);
-  if (described.ok || !Linear.retryable(described.error)) {
-    return described;
+  body: (ticket: Linear.Ticket) => Promise<jarl.Result<string, E>>,
+): Promise<jarl.Result<void, E | Linear.LinearFailure>> => {
+  const description = await body(created);
+  if (!description.ok) {
+    return description;
   }
-  const state = await linearRead(() => linear.issueStateId(created));
-  return state.ok && state.value !== states.backlog ? jarl.ok(undefined) : described;
+  const described = await linear.setDescription(created.identifier, description.value);
+  return described.ok ? linear.readyForAutomation(created.identifier) : described;
 };
 
-// One ticket, born in Backlog: the automation server queues nothing there, so the create webhook
-// cannot beat the job's Linear id to the row. `body` writes what must land before the action can
-// be queued, then renders the description, which names the ticket and so waits for its creation.
-// The move into Automation Needed rides with the description and goes last: it queues the action.
-// Every ticket Linear creates is pushed onto `tickets` first, so a failure can name it; one left
-// in Backlog is a line, so it can be found and cleaned up by hand.
+// One ticket: created, described, then ready for automation. Every ticket Linear creates is pushed
+// onto `tickets` first, so a failure can name it. A step after the creation that fails moves the
+// ticket to Errored with why, wherever it stands, and is a line; nothing is sent again.
 const ticket = async <E extends Error>(
   needs: Pick<Needs, "linear" | "logger">,
-  to: Team,
   title: string,
+  label: string,
   tickets: Array<Linear.Ticket>,
   body: (ticket: Linear.Ticket) => Promise<jarl.Result<string, E>>,
 ): Promise<jarl.Result<Linear.Ticket, E | Linear.LinearFailure>> => {
-  const created = await needs.linear.createIssue({
-    teamId: to.teamId,
-    title,
-    labelIds: to.labelIds,
-    assigneeId: to.assigneeId,
-    stateId: to.states.backlog,
-  });
+  const created = await needs.linear.createTicket({ title, label });
   if (!created.ok) {
     return created;
   }
+  const { identifier } = created.value;
   tickets.push(created.value);
-  const description = await body(created.value);
-  const handed = description.ok
-    ? await handOff(needs.linear, created.value, description.value, to.states)
-    : description;
-  if (!handed.ok) {
-    needs.logger.error(`ticket trapped in Backlog; ${Errors.detail(handed.error)}`, {
-      agentId: created.value.identifier,
-    });
-    return handed;
+  const handed = await handOff(needs.linear, created.value, body);
+  if (handed.ok) {
+    return created;
   }
-  return created;
+  const why = Errors.detail(handed.error);
+  const moved = await needs.linear.markErrored(identifier, `filing errored; ${why}`);
+  const unmoved = moved.ok ? "" : `; move to Errored failed: ${Errors.detail(moved.error)}`;
+  needs.logger.error(`ticket filing failed; ${why}${unmoved}`, { agentId: identifier });
+  return handed;
 };
 
 // A failure fails the run and the jobs in `failed`, the ones whose tickets were not handed off,
@@ -209,7 +157,7 @@ const failRun = async <E extends Error>(
 
 // One ticket per job, in order. A ticket Linear did not answer for is that ticket's failure: the
 // suite files the rest, and fails once every definition has been tried. A second one in a row is
-// Linear down, and stops the suite rather than leave a Backlog ticket, or an unanswered create,
+// Linear down, and stops the suite rather than leave an errored ticket, or an unanswered create,
 // per definition; so does any other failure, which every ticket after it would repeat.
 const fileSuite = async (
   needs: Filing,
@@ -219,17 +167,13 @@ const fileSuite = async (
   tickets: Array<Linear.Ticket>,
   opened: Array<{ readonly id: string; readonly linear: Linear.Ticket }>,
 ): Promise<jarl.Result<void, Refused>> => {
-  const to = await team(needs.linear, input.version);
-  if (!to.ok) {
-    return to;
-  }
   let lost: Refused | undefined;
   let lostLast = false;
   for (const { id, definition } of jobs) {
     const filed = await ticket<Errors.PromptError | Db.DatabaseError>(
       needs,
-      to.value,
       `Omarchy: ${definition.name}`,
+      input.version,
       tickets,
       async (issued) => {
         // Webhooks name the ticket by its identifier; the job carries it so the automation queue
@@ -325,9 +269,9 @@ export const open = async (
 };
 
 // Not a test: one install, its own run with one job, and a ticket pinned to the server that ends
-// up holding the iso's minted disk. `pin` writes what must land beside the job's Linear id before
-// the ticket reaches Automation Needed. A failure fails this run, naming every ticket in
-// `tickets`; runs already whole for earlier servers stand.
+// up holding the iso's minted disk, labeled mint. `pin` writes what must land beside the job's
+// Linear id before the ticket reaches Automation Needed. A failure fails this run, naming every
+// ticket in `tickets`; runs already whole for earlier servers stand.
 const mintJob = async (
   needs: Filing,
   input: {
@@ -335,7 +279,6 @@ const mintJob = async (
     readonly serverUrl: string;
     readonly definition: Definition;
     readonly pinned: string;
-    readonly to: Team;
     readonly tickets: Array<Linear.Ticket>;
     readonly pin: (
       result: string,
@@ -359,7 +302,7 @@ const mintJob = async (
   }
   const issued = await ticket<
     Errors.PromptError | Db.DatabaseError | Errors.SetupGone | Errors.SetupHeld
-  >(needs, input.to, `Omarchy mint: ${input.pinned}`, input.tickets, async (made) => {
+  >(needs, `Omarchy mint: ${input.pinned}`, MINT_LABEL, input.tickets, async (made) => {
     const linked = await needs.tests.setLinearId(result.id, made.identifier);
     if (!linked.ok) {
       return linked;
@@ -390,7 +333,7 @@ const mintJob = async (
 // The proxy's first reserve of an iso on a qemu server: one mint job and its ticket, pinned to
 // that server. The pin goes on the setup row before the ticket reaches Automation Needed, or the
 // dispatcher would reserve the mint with no server; a setup row gone by then is SetupGone and the
-// ticket stays in Backlog. Linear refusing the team opens no run.
+// ticket moves to Errored.
 export const openMint = async (
   needs: Filing & Pick<Needs, "setupRequests">,
   input: { readonly iso: string; readonly serverUrl: string; readonly pinned: string },
@@ -404,14 +347,9 @@ export const openMint = async (
   if (!definition.ok) {
     return definition;
   }
-  const to = await team(needs.linear, MINT_LABEL);
-  if (!to.ok) {
-    return to;
-  }
   const opened = await mintJob(needs, {
     ...input,
     definition: definition.value,
-    to: to.value,
     tickets: [],
     pin: async (result) => {
       const stored = await needs.setupRequests.setResult(input.iso, input.pinned, result);
@@ -428,7 +366,7 @@ export const openMint = async (
     : opened;
 };
 
-// `./ctrl mint`: one mint job and its ticket per server, in order, the team asked for once. Each
+// `./ctrl mint`: one mint job and its ticket per server, in order. Each
 // claims that server's setup lock with its result before the ticket moves, since the lock is where
 // the dispatcher reads a mint's pin; ctrl has no hold of the proxy's, so the lock and its result
 // go in one write. A lock a mint in flight holds is refused. The first failure stops the rest.
@@ -444,10 +382,6 @@ export const openMints = async (
   if (input.servers.length === 0) {
     return jarl.ok([]);
   }
-  const to = await team(needs.linear, MINT_LABEL);
-  if (!to.ok) {
-    return to;
-  }
   const tickets: Array<Linear.Ticket> = [];
   const opened: Array<Minted> = [];
   for (const pinned of input.servers) {
@@ -456,7 +390,6 @@ export const openMints = async (
       serverUrl: input.serverUrl,
       definition: input.definition,
       pinned,
-      to: to.value,
       tickets,
       pin: async (result) => {
         const claimed = await needs.setupRequests.claim(input.iso, pinned, result);

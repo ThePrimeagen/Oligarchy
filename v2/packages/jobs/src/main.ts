@@ -1,4 +1,4 @@
-export { already, asks, type Asking, type Duplicate, type Enqueued } from "./board.ts";
+export { already, asks, type Asking, type Duplicate, type Enqueued, type Queued } from "./board.ts";
 export type { Outcome } from "./close.ts";
 export * as Errors from "./errors.ts";
 export { type Diagnosable, isOpen } from "./find.ts";
@@ -12,5 +12,4 @@ export {
   type Opened,
   type Refused,
 } from "./open.ts";
-export { linearRead } from "./retry.ts";
 export * as Templates from "./templates.ts";

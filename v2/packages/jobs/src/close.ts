@@ -6,7 +6,6 @@ import * as jarl from "jarl";
 import * as Errors from "./errors.ts";
 import { isOpen } from "./find.ts";
 import type { Action, Needs } from "./needs.ts";
-import * as Ready from "./ready.ts";
 
 // errored is the system failing the action, never the test, and always says why.
 export type Outcome =
@@ -65,15 +64,15 @@ export const judge = async (
   return jarl.ok(finished(action));
 };
 
-// Three attempts, then a line. The action is already closed; a board that will not move does
-// not reopen it.
+// Asked once; a move that fails is a line. The action is already closed; a board that will not
+// move does not reopen it.
 export const moveTicket = async (
   needs: Pick<Needs, "logger">,
   ticket: string,
   column: string,
   move: () => Promise<jarl.Result<void, unknown>>,
 ): Promise<void> => {
-  const moved = await Async.repeat(move, ATTEMPTS)();
+  const moved = await move();
   if (!moved.ok) {
     needs.logger.error(`move to ${column} failed: ${Errors.detail(moved.error)}`, {
       location: Errors.AUTOMATION,
@@ -109,7 +108,7 @@ export const fail = async (
     return;
   }
   await moveTicket(needs, ticket, Linear.ERRORED_STATE, () =>
-    needs.linear.moveToErrored(ticket, `${action.action} errored; ${reason}`),
+    needs.linear.markErrored(ticket, `${action.action} errored; ${reason}`),
   );
 };
 
@@ -141,18 +140,18 @@ const verdict = async (
   }
   if (read.value.verdict === "passed") {
     await moveTicket(needs, ticket, Linear.SUCCEEDED_STATE, () =>
-      needs.linear.moveToSucceeded(ticket),
+      needs.linear.markSucceeded(ticket),
     );
     return;
   }
-  await moveTicket(needs, ticket, Linear.FAILED_STATE, () => needs.linear.moveToFailed(ticket));
+  await moveTicket(needs, ticket, Linear.FAILED_STATE, () => needs.linear.markFailed(ticket));
 };
 
 // True when this call closed the row. Three attempts at the write; a row that still will not
 // close stays running for an operator to mark, and the line names the status it should have.
-// Then the ticket: a drive or mint gives up its ready label; errored moves to Errored; a drive
-// or mint that completed goes to Needs Review; a diagnose that succeeded goes to Succeeded or
-// Failed by its verdict; aborted stays where it was.
+// Then the ticket: errored moves to Errored; a drive or mint that completed goes to Needs Review;
+// a diagnose that succeeded goes to Succeeded or Failed by its verdict; aborted stays where it
+// was.
 export const close = async (
   needs: Pick<Needs, "automation" | "tests" | "diagnosis" | "linear" | "logger">,
   action: Action,
@@ -184,15 +183,12 @@ export const close = async (
     return job;
   }
   const ticket = job.value?.linearId ?? null;
-  if (action.action !== "diagnose" && ticket !== null) {
-    await Ready.release(needs, ticket);
-  }
   if (outcome.status === "errored") {
     await fail(needs, action, ticket, outcome.reason);
   }
   if (ticket !== null && outcome.status === "completed") {
     await moveTicket(needs, ticket, Linear.NEEDS_REVIEW_STATE, () =>
-      needs.linear.moveToNeedsReview(ticket),
+      needs.linear.readyForReview(ticket),
     );
   }
   if (ticket !== null && outcome.status === "succeeded" && action.action === "diagnose") {

@@ -5,20 +5,11 @@ import * as jarl from "jarl";
 import { moveTicket } from "./close.ts";
 import * as Errors from "./errors.ts";
 import type { Action, Needs } from "./needs.ts";
-import * as Ready from "./ready.ts";
 
-// The ticket of an aborted action: a drive or mint gives up its ready label, then the ticket
-// moves to Aborted, three attempts, then a line. The row is already closed.
-const settle = async (
-  needs: Pick<Needs, "linear" | "logger">,
-  ticket: string,
-  action: Stores.Automation.AutomationAction,
-) => {
-  if (action !== "diagnose") {
-    await Ready.release(needs, ticket);
-  }
-  await moveTicket(needs, ticket, Linear.ABORTED_STATE, () => needs.linear.moveToAborted(ticket));
-};
+// The ticket of an aborted action moves to Aborted, asked once; a move that fails is a line. The
+// row is already closed.
+const settle = (needs: Pick<Needs, "linear" | "logger">, ticket: string) =>
+  moveTicket(needs, ticket, Linear.ABORTED_STATE, () => needs.linear.markAborted(ticket));
 
 // A pending action has no driver to stop, so closing its row is the whole abort; a placement
 // that reserved after this wins nothing, because running is written only while the row is still
@@ -50,7 +41,7 @@ export const abort = async (
     location: Errors.AUTOMATION,
     agentId: ticket,
   });
-  await settle(needs, ticket, action);
+  await settle(needs, ticket);
   return jarl.ok(undefined);
 };
 
@@ -65,6 +56,6 @@ export const running = async (
   if (!closed.ok || !closed.value) {
     return closed;
   }
-  await settle(needs, ticket, action.action);
+  await settle(needs, ticket);
   return closed;
 };

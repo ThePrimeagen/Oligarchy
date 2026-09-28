@@ -88,7 +88,7 @@ describe("reclaiming an action the last automation server left running", () => {
     expect(reclaimed).toEqual(jarl.ok(undefined));
     expect(stopped).toEqual([]);
     expect(await stores.automation.jobStatus(job.id, "drive")).toEqual(jarl.ok("completed"));
-    expect(asked).toEqual(["clearReady OLI-42", "moveToNeedsReview OLI-42"]);
+    expect(asked).toEqual(["readyForReview OLI-42"]);
     expect(lines).toEqual(["[INFO] [global] automation: drive completed"]);
   });
 
@@ -101,10 +101,7 @@ describe("reclaiming an action the last automation server left running", () => {
       `finish action-1 errored ${RESTARTED}`,
       `errorResult result-1 ${RESTARTED}`,
     ]);
-    expect(asked).toEqual([
-      "clearReady OLI-42",
-      `moveToErrored OLI-42: drive errored; ${RESTARTED}`,
-    ]);
+    expect(asked).toEqual([`markErrored OLI-42: drive errored; ${RESTARTED}`]);
   });
 
   it("stops and errors a diagnose though its result is closed (error)", async () => {
@@ -119,7 +116,7 @@ describe("reclaiming an action the last automation server left running", () => {
       "stop http://client-1:7000 OLI-42",
       `finish action-1 errored ${RESTARTED}`,
     ]);
-    expect(asked).toEqual([`moveToErrored OLI-42: diagnose errored; ${RESTARTED}`]);
+    expect(asked).toEqual([`markErrored OLI-42: diagnose errored; ${RESTARTED}`]);
   });
 
   it("stops nothing with no client recorded, the client's row gone, or no ticket, and still errors it (error)", async () => {

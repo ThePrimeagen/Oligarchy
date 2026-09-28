@@ -8,11 +8,12 @@ export const isOpen = (job: Job): boolean => job.status === "pending" || job.sta
 export type Diagnosable =
   | { readonly kind: "ready" }
   | { readonly kind: "held" }
-  | { readonly kind: "never"; readonly reason: string };
+  | { readonly kind: "stranded"; readonly reason: string };
 
 // A diagnose judges a drive or mint that ran to its end, so only a completed one is diagnosed.
-// One still pending or running holds the diagnose; one that ended any other way, or none at all,
-// means it never will be.
+// One still pending or running holds the diagnose. One that ended any other way, or none at all,
+// strands it: the diagnose is closed errored with the reason, which says all the job can, and its
+// ticket moves to Errored.
 export const diagnosable = async (
   needs: Pick<Needs, "automation">,
   job: Job,
@@ -37,8 +38,14 @@ export const diagnosable = async (
   if (ran === "pending" || ran === "running") {
     return jarl.ok({ kind: "held" });
   }
+  const why = job.reason === null ? "" : `: ${job.reason}`;
   return jarl.ok({
-    kind: "never",
-    reason: `not diagnosed; ${ran === undefined ? "no drive" : `${action} ${ran}`}`,
+    kind: "stranded",
+    reason: [
+      "stranded",
+      ran === undefined ? "no drive or mint" : `${action} ${ran}`,
+      `result ${job.id} is ${job.status}${why}`,
+      `session ${job.sessionId ?? "none"}`,
+    ].join("; "),
   });
 };

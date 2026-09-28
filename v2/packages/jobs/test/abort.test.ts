@@ -10,8 +10,10 @@ import {
   fakeLinear,
   logging,
   only,
+  refused,
   refusedWrite,
   resultRow,
+  type Script,
   storedJob,
 } from "./support.ts";
 
@@ -21,9 +23,10 @@ const aborting = (
   given: {
     readonly tests?: Partial<Needs["tests"]>;
     readonly automation?: Partial<Needs["automation"]>;
+    readonly linear?: Script;
   } = {},
 ) => {
-  const { linear, asked } = fakeLinear();
+  const { linear, asked } = fakeLinear(given.linear);
   const { lines, logger } = logging();
   const finished: Array<string> = [];
   const needs = {
@@ -52,7 +55,7 @@ const expectNoPending = (error: unknown, message: string) => {
 };
 
 describe("aborting a pending action", () => {
-  it("closes its row aborted, says so, clears ready, and moves the ticket to Aborted (happy)", async () => {
+  it("closes its row aborted, says so, and moves the ticket to Aborted (happy)", async () => {
     const stores = await database();
     const { linear, asked } = fakeLinear();
     const { lines, logger } = logging();
@@ -64,7 +67,7 @@ describe("aborting a pending action", () => {
     expect(aborted).toEqual(jarl.ok(undefined));
     expect(await stores.automation.jobStatus(job.id, "drive")).toEqual(jarl.ok("aborted"));
     expect(lines).toEqual(["[INFO] [OLI-42] automation: aborted pending drive"]);
-    expect(asked).toEqual(["clearReady OLI-42", "moveToAborted OLI-42"]);
+    expect(asked).toEqual(["markAborted OLI-42"]);
   });
 
   it("is NoPendingAction for a ticket with no job, or no pending action, and moves nothing (error)", async () => {
@@ -92,23 +95,35 @@ describe("aborting a pending action", () => {
     expect([...lookup.asked, ...write.asked]).toEqual([]);
   });
 
-  it("clears no ready label for a pending diagnose (error)", async () => {
+  it("moves a pending diagnose's ticket to Aborted the same way (error)", async () => {
     const { needs, asked } = aborting();
 
     expect(await abort(needs, "OLI-42", "diagnose")).toEqual(jarl.ok(undefined));
-    expect(asked).toEqual(["moveToAborted OLI-42"]);
+    expect(asked).toEqual(["markAborted OLI-42"]);
+  });
+
+  it("keeps the row aborted when the move to Aborted fails, asked once, in one line (error)", async () => {
+    const no = jarl.err(refused("linear: moving OLI-42 to Aborted failed"));
+    const { needs, asked, lines } = aborting({ linear: { markAborted: [no] } });
+
+    expect(await abort(needs, "OLI-42", "drive")).toEqual(jarl.ok(undefined));
+    expect(asked).toEqual(["markAborted OLI-42"]);
+    expect(lines).toEqual([
+      "[INFO] [OLI-42] automation: aborted pending drive",
+      "[ERROR] [OLI-42] automation: move to Aborted failed: linear: moving OLI-42 to Aborted failed",
+    ]);
   });
 });
 
 describe("aborting a running action once its driver stopped", () => {
   const RUNNING = actionRow({ status: "running" });
 
-  it("closes the row aborted, clears ready, moves the ticket to Aborted, and is true (happy)", async () => {
+  it("closes the row aborted, moves the ticket to Aborted, and is true (happy)", async () => {
     const { needs, asked, finished } = aborting();
 
     expect(await running(needs, "OLI-42", RUNNING)).toEqual(jarl.ok(true));
     expect(finished).toEqual(["action-1 aborted aborted"]);
-    expect(asked).toEqual(["clearReady OLI-42", "moveToAborted OLI-42"]);
+    expect(asked).toEqual(["markAborted OLI-42"]);
   });
 
   it("is false, and moves nothing, for a row closed some other way first (error)", async () => {

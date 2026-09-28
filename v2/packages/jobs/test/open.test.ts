@@ -1,7 +1,7 @@
 import * as Linear from "@oligarchy/linear";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as Errors from "../src/errors.ts";
 import type { Needs } from "../src/needs.ts";
 import { open, openMint, openMints } from "../src/open.ts";
@@ -20,7 +20,6 @@ import {
   refusedWrite,
   type Script,
   SERVER_URL,
-  STATES,
   timedOut,
   unavailable,
 } from "./support.ts";
@@ -50,7 +49,7 @@ const filing = (
   } = {},
 ) => {
   const { tests, failed, linked } = fakeTests(given.definitions ?? [ALPHA, BETA], given.tests);
-  const { linear, asked, created, described } = fakeLinear(given.linear);
+  const { linear, asked, filed, described } = fakeLinear(given.linear);
   const { prompts } = fakePrompts(given.files);
   const { lines, logger } = logging();
   const pinned: Array<string> = [];
@@ -69,26 +68,27 @@ const filing = (
       ...given.setupRequests,
     }),
   };
-  return { needs, asked, created, described, lines, failed, linked, pinned };
+  return { needs, asked, filed, described, lines, failed, linked, pinned };
 };
 
-const created = (...identifiers: ReadonlyArray<string>) =>
-  identifiers.map((identifier) => `createIssue Omarchy: ${identifier}`);
+const created = (...names: ReadonlyArray<string>) =>
+  names.map((name) => `createTicket Omarchy: ${name} [3.4.0]`);
 
-const TEAM = ["teamId", "labelIds 3.4.0", "assigneeId", "stateIds"];
+// The three steps that file one ticket, once Linear has created it.
+const filedAs = (title: string, label: string, ticket: string) => [
+  `createTicket ${title} [${label}]`,
+  `setDescription ${ticket}`,
+  `readyForAutomation ${ticket}`,
+];
 
 const never = async (): Promise<never> => {
   throw new Error("asked for a run it should not create");
 };
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 describe("opening a test run", () => {
   it("opens one run and one job per definition but mint, each ticketed and handed off, in one line (happy)", async () => {
     const stores = await database();
-    const { linear, asked, created: inputs, described } = fakeLinear();
+    const { linear, asked, filed, described } = fakeLinear();
     const { lines, logger } = logging();
     const { prompts } = fakePrompts();
     await define(stores, "alpha");
@@ -106,19 +106,10 @@ describe("opening a test run", () => {
     });
     expect(jarl.unwrap(await stores.tests.findResultByLinearId("OLI-43"))?.id).toBe(beta?.id);
     expect(asked).toEqual([
-      ...TEAM,
-      "createIssue Omarchy: alpha",
-      "describeIssue OLI-42 state-automation-needed",
-      "createIssue Omarchy: beta",
-      "describeIssue OLI-43 state-automation-needed",
+      ...filedAs("Omarchy: alpha", "3.4.0", "OLI-42"),
+      ...filedAs("Omarchy: beta", "3.4.0", "OLI-43"),
     ]);
-    expect(inputs[0]).toEqual({
-      teamId: "team-1",
-      title: "Omarchy: alpha",
-      labelIds: ["label-agent-test", "label-3.4.0"],
-      assigneeId: "user-1",
-      stateId: STATES.backlog,
-    });
+    expect(filed[0]).toEqual({ title: "Omarchy: alpha", label: "3.4.0" });
     expect(described.get("OLI-42")).toContain(
       `<p>OLI-42 alpha v3.4.0 run ${opened.id} result ${alpha?.id ?? ""}</p>`,
     );
@@ -154,33 +145,12 @@ describe("opening a test run", () => {
     expect([...listing.asked, ...finding.asked, ...writing.asked]).toEqual([]);
   });
 
-  it("asks a team lookup Linear did not answer once again, and the run opens (error)", async () => {
-    vi.useFakeTimers();
-    const { needs, asked, failed } = filing({ linear: { teamId: [jarl.err(unavailable())] } });
-
-    const opening = open(needs, INPUT);
-    await vi.runAllTimersAsync();
-    const opened = jarl.unwrap(await opening);
-
-    expect(opened.tests).toHaveLength(2);
-    expect(asked.slice(0, 2)).toEqual(["teamId", "teamId"]);
-    expect(failed).toEqual([]);
-  });
-
-  it("does not ask a label lookup Linear did not answer again, and fails the run with it (error)", async () => {
-    const lost = unavailable();
-    const { needs, asked, failed } = filing({ linear: { labelIds: [jarl.err(lost)] } });
-
-    expect(errorOf(await open(needs, INPUT))).toBe(lost);
-    expect(asked).toEqual(["teamId", "labelIds 3.4.0"]);
-    expect(failed).toEqual([{ runId: "run-1", reason: BUSY, resultIds: ["result-1", "result-2"] }]);
-  });
-
-  it("fails the run and every job with a refusal before any ticket, that same error (error)", async () => {
+  it("fails the run and every job with a refusal of the first ticket, that same error, creating no more (error)", async () => {
     const refusal = refused("linear: no user prime@terminal.shop");
-    const { needs, failed } = filing({ linear: { assigneeId: [jarl.err(refusal)] } });
+    const { needs, asked, failed } = filing({ linear: { createTicket: [jarl.err(refusal)] } });
 
     expect(errorOf(await open(needs, INPUT))).toBe(refusal);
+    expect(asked).toEqual(created("alpha"));
     expect(failed).toEqual([
       { runId: "run-1", reason: refusal.message, resultIds: ["result-1", "result-2"] },
     ]);
@@ -189,7 +159,7 @@ describe("opening a test run", () => {
   it("says so in one line when the run will not take its failure, and the failure goes on (error)", async () => {
     const refusal = refused("linear: no team named Oligarchy");
     const { needs, lines } = filing({
-      linear: { teamId: [jarl.err(refusal)] },
+      linear: { createTicket: [jarl.err(refusal)] },
       tests: { failRun: async () => jarl.err(refusedWrite("connection reset")) },
     });
 
@@ -200,7 +170,7 @@ describe("opening a test run", () => {
   it("fails a job whose create Linear did not answer alone, never sent again, and files the rest (error)", async () => {
     const { needs, asked, failed, lines } = filing({
       definitions: [ALPHA, BETA, GAMMA],
-      linear: { createIssue: [undefined, jarl.err(unavailable())] },
+      linear: { createTicket: [undefined, jarl.err(unavailable())] },
     });
 
     const error = errorOf(await open(needs, INPUT));
@@ -208,10 +178,10 @@ describe("opening a test run", () => {
     const reason = `${BUSY}; created OLI-42, OLI-44; failed beta`;
     expect(error).toMatchObject({ name: "HttpServerError", message: reason, status: 503 });
     expect(Linear.retryable(error)).toBe(true);
-    expect(asked.filter((call) => call.startsWith("createIssue"))).toEqual(
+    expect(asked.filter((call) => call.startsWith("createTicket"))).toEqual(
       created("alpha", "beta", "gamma"),
     );
-    expect(asked).toContain("describeIssue OLI-44 state-automation-needed");
+    expect(asked).toContain("readyForAutomation OLI-44");
     expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-2"] }]);
     expect(lines).toEqual([]);
   });
@@ -220,7 +190,7 @@ describe("opening a test run", () => {
     const { needs, asked, failed } = filing({
       definitions: [ALPHA, BETA, GAMMA, definitionRow(4, "delta")],
       linear: {
-        createIssue: [undefined, jarl.err(unavailable()), jarl.err(timedOut())],
+        createTicket: [undefined, jarl.err(unavailable()), jarl.err(timedOut())],
       },
     });
 
@@ -228,7 +198,7 @@ describe("opening a test run", () => {
 
     const reason = `${TIMED_OUT}; created OLI-42; failed beta, gamma, delta`;
     expect(error).toMatchObject({ name: "HttpTimedOut", message: reason });
-    expect(asked.filter((call) => call.startsWith("createIssue"))).toEqual(
+    expect(asked.filter((call) => call.startsWith("createTicket"))).toEqual(
       created("alpha", "beta", "gamma"),
     );
     expect(failed).toEqual([
@@ -240,7 +210,7 @@ describe("opening a test run", () => {
     const { needs, failed } = filing({
       definitions: [ALPHA, BETA, GAMMA],
       linear: {
-        createIssue: [
+        createTicket: [
           undefined,
           jarl.err(unavailable()),
           jarl.err(refused("linear: issue creation failed")),
@@ -255,11 +225,11 @@ describe("opening a test run", () => {
     expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-2", "result-3"] }]);
   });
 
-  it("stops the suite at a refused hand-off, naming the tickets and definitions, in one trapped line (error)", async () => {
+  it("moves a ticket whose description Linear refused to Errored, and stops the suite, naming the tickets and definitions (error)", async () => {
     const { needs, asked, failed, lines } = filing({
       definitions: [ALPHA, BETA, GAMMA],
       linear: {
-        describeIssue: [undefined, jarl.err(refused("linear: describing OLI-43 failed"))],
+        setDescription: [undefined, jarl.err(refused("linear: describing OLI-43 failed"))],
       },
     });
 
@@ -267,50 +237,51 @@ describe("opening a test run", () => {
 
     const reason = "linear: describing OLI-43 failed; created OLI-42, OLI-43; failed beta, gamma";
     expect(error).toMatchObject({ name: "LinearError", message: reason });
-    expect(asked.filter((call) => call.startsWith("createIssue"))).toEqual(
-      created("alpha", "beta"),
-    );
+    expect(asked.slice(3)).toEqual([
+      ...created("beta"),
+      "setDescription OLI-43",
+      "markErrored OLI-43: filing errored; linear: describing OLI-43 failed",
+    ]);
     expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-2", "result-3"] }]);
     expect(lines).toEqual([
-      "[ERROR] [OLI-43] ticket trapped in Backlog; linear: describing OLI-43 failed",
+      "[ERROR] [OLI-43] ticket filing failed; linear: describing OLI-43 failed",
     ]);
   });
 
-  it("opens a ticket whose hand-off answer was lost but that left Backlog, as answered (error)", async () => {
+  it("moves a ticket Linear did not answer readying to Errored, never sent again, and files the rest (error)", async () => {
     const { needs, asked, failed, lines } = filing({
-      definitions: [ALPHA],
-      linear: { describeIssue: [jarl.err(unavailable())] },
+      definitions: [ALPHA, BETA, GAMMA],
+      linear: { readyForAutomation: [undefined, jarl.err(unavailable())] },
     });
 
-    const opened = jarl.unwrap(await open(needs, INPUT));
+    const error = errorOf(await open(needs, INPUT));
 
-    expect(opened.tests.map((test) => test.linear.identifier)).toEqual(["OLI-42"]);
-    expect(asked.slice(-2)).toEqual([
-      "describeIssue OLI-42 state-automation-needed",
-      "issueStateId OLI-42",
+    const reason = `${BUSY}; created OLI-42, OLI-43, OLI-44; failed beta`;
+    expect(error).toMatchObject({ name: "HttpServerError", message: reason });
+    expect(asked.filter((call) => call === "readyForAutomation OLI-43")).toHaveLength(1);
+    expect(asked).toContain(`markErrored OLI-43: filing errored; ${BUSY}`);
+    expect(asked).toContain("readyForAutomation OLI-44");
+    expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-2"] }]);
+    expect(lines).toEqual([`[ERROR] [OLI-43] ticket filing failed; ${BUSY}`]);
+  });
+
+  it("says in one line that a ticket stands wherever it was when its move to Errored fails too (error)", async () => {
+    const { needs, lines } = filing({
+      definitions: [ALPHA],
+      linear: {
+        setDescription: [jarl.err(refused("linear: describing OLI-42 failed"))],
+        markErrored: [jarl.err(refused("linear: moving OLI-42 to Errored failed"))],
+      },
+    });
+
+    errorOf(await open(needs, INPUT));
+
+    expect(lines).toEqual([
+      "[ERROR] [OLI-42] ticket filing failed; linear: describing OLI-42 failed; move to Errored failed: linear: moving OLI-42 to Errored failed",
     ]);
-    expect(failed).toEqual([]);
-    expect(lines).toEqual(["[INFO] [global] test run-1 created; 1 tests; OLI-42"]);
   });
 
-  it("fails with the hand-off's own failure when its answer was lost and the ticket is still in Backlog, or its column will not read (error)", async () => {
-    const lost = unavailable();
-    const reason = `${BUSY}; created OLI-42`;
-    for (const column of [jarl.ok(STATES.backlog), jarl.err(refused("linear: Entity not found"))]) {
-      const { needs, failed, lines } = filing({
-        definitions: [ALPHA],
-        linear: { describeIssue: [jarl.err(lost)], issueStateId: [column] },
-      });
-
-      const error = errorOf(await open(needs, INPUT));
-
-      expect(error).toMatchObject({ name: "HttpServerError", message: reason });
-      expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-1"] }]);
-      expect(lines).toEqual([`[ERROR] [OLI-42] ticket trapped in Backlog; ${BUSY}`]);
-    }
-  });
-
-  it("traps the ticket and names it when its Linear id write fails (error)", async () => {
+  it("moves the ticket to Errored and names it when its Linear id write fails (error)", async () => {
     const failure = refusedWrite("connection reset");
     const { needs, asked, failed, lines } = filing({
       tests: { setLinearId: async () => jarl.err(failure) },
@@ -321,27 +292,31 @@ describe("opening a test run", () => {
     const reason = `${failure.message}; created OLI-42`;
     expect(error).toMatchObject({ name: "DatabaseError", message: reason });
     expect(error.cause).toBe(failure.cause);
-    expect(asked).not.toContain("describeIssue OLI-42 state-automation-needed");
+    expect(asked).toEqual([
+      ...created("alpha"),
+      "markErrored OLI-42: filing errored; connection reset",
+    ]);
     expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-1", "result-2"] }]);
-    expect(lines).toEqual(["[ERROR] [OLI-42] ticket trapped in Backlog; connection reset"]);
+    expect(lines).toEqual(["[ERROR] [OLI-42] ticket filing failed; connection reset"]);
   });
 
-  it("traps the ticket and names it when its template will not render (error)", async () => {
-    const { needs, failed, lines } = filing({ files: {} });
+  it("moves the ticket to Errored and names it when its template will not render (error)", async () => {
+    const { needs, asked, failed, lines } = filing({ files: {} });
 
     const error = errorOf(await open(needs, INPUT));
 
     const why = "prompt: ENOENT: no such file or directory, open 'prompts/linear-issue.html'";
     expect(error).toMatchObject({ name: "PromptError", message: `${why}; created OLI-42` });
     expect(failed.map((each) => each.reason)).toEqual([`${why}; created OLI-42`]);
-    expect(lines).toEqual([`[ERROR] [OLI-42] ticket trapped in Backlog; ${why}`]);
+    expect(asked).toContain(`markErrored OLI-42: filing errored; ${why}`);
+    expect(lines).toEqual([`[ERROR] [OLI-42] ticket filing failed; ${why}`]);
   });
 
   it("fails a single test whose create was not answered with that bare error (error)", async () => {
     const lost = unavailable();
     const { needs, failed } = filing({
       definitions: [ALPHA],
-      linear: { createIssue: [jarl.err(lost)] },
+      linear: { createTicket: [jarl.err(lost)] },
     });
 
     expect(errorOf(await open(needs, INPUT))).toBe(lost);
@@ -350,8 +325,6 @@ describe("opening a test run", () => {
 });
 
 const MINT_INPUT = { iso: ISO, serverUrl: SERVER_URL, pinned: QEMU_1 };
-
-const MINT_TEAM = ["teamId", "labelIds mint", "assigneeId", "stateIds"];
 
 describe("opening a mint for the proxy", () => {
   it("pins its result on the setup row, then hands its ticket off (happy)", async () => {
@@ -367,37 +340,37 @@ describe("opening a mint for the proxy", () => {
     expect(opened.linear.identifier).toBe("OLI-42");
     expect(await stores.setupRequests.serverForResult(opened.result)).toEqual(jarl.ok(QEMU_1));
     expect(jarl.unwrap(await stores.tests.findResultByLinearId("OLI-42"))?.id).toBe(opened.result);
-    expect(asked).toEqual([
-      ...MINT_TEAM,
-      `createIssue Omarchy mint: ${QEMU_1}`,
-      "describeIssue OLI-42 state-automation-needed",
-    ]);
+    expect(asked).toEqual(filedAs(`Omarchy mint: ${QEMU_1}`, "mint", "OLI-42"));
     expect(described.get("OLI-42")).toContain(
       `<p>OLI-42 mint on ${QEMU_1} run ${opened.id} result ${opened.result}</p>`,
     );
     expect(lines).toEqual([]);
   });
 
-  it("opens no run with no mint definition, or with Linear refusing the team (error)", async () => {
-    const unminted = filing({ definitions: [ALPHA], tests: { createRun: never } });
-    const refusal = refused("linear: no team named Oligarchy");
-    const teamless = filing({
-      definitions: [MINT],
-      tests: { createRun: never },
-      linear: { teamId: [jarl.err(refusal)] },
-    });
+  it("opens no run with no mint definition (error)", async () => {
+    const { needs, asked } = filing({ definitions: [ALPHA], tests: { createRun: never } });
 
-    const missing = errorOf(await openMint(unminted.needs, MINT_INPUT));
+    const missing = errorOf(await openMint(needs, MINT_INPUT));
 
     expect(jarl.error.is(missing, Errors.NoDefinition)).toBe(true);
     expect(missing.message).toBe(
       "mint: no test definition named mint; define the install once with ./ctrl test define --name mint",
     );
-    expect(unminted.asked).toEqual([]);
-    expect(errorOf(await openMint(teamless.needs, MINT_INPUT))).toBe(refusal);
+    expect(asked).toEqual([]);
   });
 
-  it("is SetupGone for a setup row gone before the pin, and its ticket stays in Backlog (error)", async () => {
+  it("fails the run it opened when Linear refuses the ticket, with that same error (error)", async () => {
+    const refusal = refused("linear: no team named Oligarchy");
+    const { needs, failed } = filing({
+      definitions: [MINT],
+      linear: { createTicket: [jarl.err(refusal)] },
+    });
+
+    expect(errorOf(await openMint(needs, MINT_INPUT))).toBe(refusal);
+    expect(failed).toEqual([{ runId: "run-1", reason: refusal.message, resultIds: ["result-1"] }]);
+  });
+
+  it("is SetupGone for a setup row gone before the pin, and its ticket moves to Errored (error)", async () => {
     const { needs, asked, failed, lines } = filing({
       definitions: [MINT],
       setupRequests: { setResult: async () => jarl.ok(false) },
@@ -408,10 +381,13 @@ describe("opening a mint for the proxy", () => {
     const reason = "setup row gone before its result was stored; created OLI-42";
     expect(jarl.error.is(error, Errors.SetupGone)).toBe(true);
     expect(error.message).toBe(reason);
-    expect(asked).not.toContain("describeIssue OLI-42 state-automation-needed");
+    expect(asked).toEqual([
+      `createTicket Omarchy mint: ${QEMU_1} [mint]`,
+      "markErrored OLI-42: filing errored; setup row gone before its result was stored",
+    ]);
     expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-1"] }]);
     expect(lines).toEqual([
-      "[ERROR] [OLI-42] ticket trapped in Backlog; setup row gone before its result was stored",
+      "[ERROR] [OLI-42] ticket filing failed; setup row gone before its result was stored",
     ]);
   });
 });
@@ -419,7 +395,7 @@ describe("opening a mint for the proxy", () => {
 const MINTS_INPUT = { iso: ISO, serverUrl: SERVER_URL, definition: MINT };
 
 describe("opening a mint per server for ./ctrl mint", () => {
-  it("opens one pinned run, job and ticket per server, the team asked once, in one line (happy)", async () => {
+  it("opens one pinned run, job and ticket per server, in one line (happy)", async () => {
     const stores = await database();
     const { linear, asked } = fakeLinear();
     const { lines, logger } = logging();
@@ -440,7 +416,10 @@ describe("opening a mint per server for ./ctrl mint", () => {
     for (const mint of opened) {
       expect(await stores.setupRequests.serverForResult(mint.result)).toEqual(jarl.ok(mint.server));
     }
-    expect(asked.filter((call) => MINT_TEAM.includes(call))).toEqual(MINT_TEAM);
+    expect(asked).toEqual([
+      ...filedAs(`Omarchy mint: ${QEMU_1}`, "mint", "OLI-42"),
+      ...filedAs(`Omarchy mint: ${QEMU_2}`, "mint", "OLI-43"),
+    ]);
     expect(lines).toEqual([`[INFO] [global] mint ${ISO} created; 2 servers; OLI-42, OLI-43`]);
   });
 
@@ -466,14 +445,17 @@ describe("opening a mint per server for ./ctrl mint", () => {
     const reason = `${QEMU_2} is held by a mint still being created or run; created OLI-42, OLI-43`;
     expect(jarl.error.is(error, Errors.SetupHeld)).toBe(true);
     expect(error.message).toBe(reason);
-    expect(asked.filter((call) => call.startsWith("createIssue"))).toEqual([
-      `createIssue Omarchy mint: ${QEMU_1}`,
-      `createIssue Omarchy mint: ${QEMU_2}`,
+    expect(asked.filter((call) => call.startsWith("createTicket"))).toEqual([
+      `createTicket Omarchy mint: ${QEMU_1} [mint]`,
+      `createTicket Omarchy mint: ${QEMU_2} [mint]`,
     ]);
+    expect(asked).toContain(
+      `markErrored OLI-43: filing errored; ${QEMU_2} is held by a mint still being created or run`,
+    );
     expect(failed).toEqual([{ runId: "run-2", reason, resultIds: ["result-2"] }]);
   });
 
-  it("fails the run whose lock write fails, and its ticket never leaves Backlog (error)", async () => {
+  it("fails the run whose lock write fails, and its ticket moves to Errored (error)", async () => {
     const failure = refusedWrite("connection reset");
     const { needs, asked, failed } = filing({
       setupRequests: { claim: async () => jarl.err(failure) },
@@ -483,7 +465,10 @@ describe("opening a mint per server for ./ctrl mint", () => {
 
     const reason = `${failure.message}; created OLI-42`;
     expect(error).toMatchObject({ name: "DatabaseError", message: reason });
-    expect(asked).not.toContain("describeIssue OLI-42 state-automation-needed");
+    expect(asked).toEqual([
+      `createTicket Omarchy mint: ${QEMU_1} [mint]`,
+      "markErrored OLI-42: filing errored; connection reset",
+    ]);
     expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-1"] }]);
   });
 });
