@@ -9,12 +9,32 @@ const TOKEN = "linear-token-s3ntinel";
 const TEAM = "Fixture Team";
 const API = "https://linear.example/graphql";
 const WHERE = `POST ${API}`;
+const READY = Fake.labelId("ready");
 
 const client = (fake: { readonly http: Http.Http }, team = TEAM) =>
   Linear.create({ token: { reveal: () => TOKEN }, team, apiUrl: API, http: fake.http });
 
 const sent = (fake: { readonly asked: ReadonlyArray<Fake.Asked> }) =>
   fake.asked.map((asked) => ({ field: asked.field, variables: asked.variables }));
+
+const fields = (fake: { readonly asked: ReadonlyArray<Fake.Asked> }) =>
+  fake.asked.map((asked) => asked.field);
+
+// What the ticket was asked to become: every update's input, and every comment's body.
+type Write =
+  | { readonly update: unknown; readonly input: Readonly<Record<string, unknown>> }
+  | { readonly comment: Readonly<Record<string, unknown>> };
+
+const writes = (fake: { readonly asked: ReadonlyArray<Fake.Asked> }): ReadonlyArray<Write> =>
+  fake.asked.flatMap((asked): ReadonlyArray<Write> => {
+    if (asked.field === "issueUpdate") {
+      return [{ update: asked.variables["id"], input: Fake.input(asked) }];
+    }
+    if (asked.field === "commentCreate") {
+      return [{ comment: Fake.input(asked) }];
+    }
+    return [];
+  });
 
 type Ctor<C> = abstract new (...args: never[]) => C;
 
@@ -50,27 +70,46 @@ const track = <T>(promise: Promise<T>) => {
   return state;
 };
 
-describe("creating a ticket", () => {
-  it("creates it in Backlog, then moves it to Automation Needed with its body in one update (happy)", async () => {
+// Every move the app makes, the column it lands in, and what it does to the ready label.
+const transitions = [
+  ["readyForAutomation", "Automation Needed", { addedLabelIds: [READY] }],
+  ["startDrive", "In Progress", { removedLabelIds: [READY] }],
+  ["readyForReview", "Needs Review", {}],
+  ["startDiagnosis", "In Review", {}],
+  ["markSucceeded", "Succeeded", {}],
+  ["markFailed", "Failed", {}],
+  ["markErrored", "Errored", { removedLabelIds: [READY] }],
+  ["markAborted", "Aborted", { removedLabelIds: [READY] }],
+] as const;
+
+type Transition = (typeof transitions)[number][0];
+
+const move = (linear: Linear.Linear, name: Transition, ticket = "OLI-42") =>
+  name === "markErrored" ? linear.markErrored(ticket, "drive errored; why") : linear[name](ticket);
+
+// The moves that leave Automation Needed, and so take the ready label off.
+const dropping = [
+  ["startDrive", "In Progress"],
+  ["markErrored", "Errored"],
+  ["markAborted", "Aborted"],
+] as const;
+
+describe("a ticket's life", () => {
+  it("is filed in Backlog, described, readied, driven, reviewed and judged, each lookup asked once (happy)", async () => {
     const fake = Fake.linear(Fake.happy);
     const linear = client(fake);
 
-    const team = jarl.unwrap(await linear.teamId());
-    const labelIds = jarl.unwrap(await linear.labelIds(team, "1.2.3"));
-    const assigneeId = jarl.unwrap(await linear.assigneeId());
-    const states = jarl.unwrap(await linear.stateIds(team));
     const ticket = jarl.unwrap(
-      await linear.createIssue({
-        teamId: team,
-        title: "Omarchy: boot",
-        labelIds,
-        assigneeId,
-        stateId: states.backlog,
-      }),
+      await linear.createTicket({ title: "Omarchy: boot", label: "1.2.3" }),
     );
-    jarl.unwrap(await linear.describeIssue(ticket, "the body", states.automationNeeded));
+    jarl.unwrap(await linear.setDescription(ticket.identifier, "the body"));
+    jarl.unwrap(await linear.readyForAutomation(ticket.identifier));
+    jarl.unwrap(await linear.startDrive(ticket.identifier));
+    jarl.unwrap(await linear.readyForReview(ticket.identifier));
+    jarl.unwrap(await linear.startDiagnosis(ticket.identifier));
+    jarl.unwrap(await linear.markSucceeded(ticket.identifier));
 
-    expect(ticket).toEqual(Fake.TICKET);
+    expect(ticket).toEqual({ identifier: "OLI-42", url: "https://linear.app/OLI-42" });
     for (const asked of fake.asked) {
       expect(asked.url).toBe(API);
       expect(asked.method).toBe("POST");
@@ -78,13 +117,20 @@ describe("creating a ticket", () => {
       expect(asked.headers["authorization"]).toBe(TOKEN);
       expect(asked.headers["content-type"]).toBe("application/json");
     }
+    const state = (name: string) => ({
+      field: "workflowStates",
+      variables: { name, teamId: "team-id" },
+    });
+    const update = (input: Record<string, unknown>) => ({
+      field: "issueUpdate",
+      variables: { id: "OLI-42", input },
+    });
     expect(sent(fake)).toEqual([
       { field: "teams", variables: { name: TEAM } },
       { field: "issueLabels", variables: { name: "agent test", teamId: "team-id" } },
       { field: "issueLabels", variables: { name: "1.2.3", teamId: "team-id" } },
       { field: "users", variables: { email: "prime@terminal.shop" } },
-      { field: "workflowStates", variables: { name: "Backlog", teamId: "team-id" } },
-      { field: "workflowStates", variables: { name: "Automation Needed", teamId: "team-id" } },
+      state("Backlog"),
       {
         field: "issueCreate",
         variables: {
@@ -97,36 +143,92 @@ describe("creating a ticket", () => {
           },
         },
       },
-      {
-        field: "issueUpdate",
-        variables: {
-          id: Fake.TICKET.id,
-          input: { description: "the body", stateId: Fake.stateId("Automation Needed") },
-        },
-      },
+      update({ description: "the body" }),
+      state("Automation Needed"),
+      { field: "issueLabels", variables: { name: "ready", teamId: "team-id" } },
+      update({ stateId: Fake.stateId("Automation Needed"), addedLabelIds: [READY] }),
+      state("In Progress"),
+      update({ stateId: Fake.stateId("In Progress"), removedLabelIds: [READY] }),
+      state("Needs Review"),
+      update({ stateId: Fake.stateId("Needs Review") }),
+      state("In Review"),
+      update({ stateId: Fake.stateId("In Review") }),
+      state("Succeeded"),
+      update({ stateId: Fake.stateId("Succeeded") }),
     ]);
   });
 
-  it("stops at the first label it cannot find, asking nothing more (unhappy)", async () => {
-    const fake = Fake.linear(except("issueLabels", () => HttpFake.status(503, "busy")));
+  it.each(transitions)(
+    "%s moves the ticket to %s in one update, with what it does to ready (happy)",
+    async (name, column, label) => {
+      const fake = Fake.linear(Fake.happy);
 
-    failed(
-      await client(fake).labelIds("team-id", "1.2.3"),
-      Http.HttpServerError,
-      `${WHERE}: 503: busy`,
-      true,
+      jarl.unwrap(await move(client(fake), name));
+
+      const moved = { update: "OLI-42", input: { stateId: Fake.stateId(column), ...label } };
+      expect(writes(fake)).toEqual(
+        name === "markErrored"
+          ? [moved, { comment: { issueId: "OLI-42", body: "drive errored; why" } }]
+          : [moved],
+      );
+    },
+  );
+});
+
+describe("filing a ticket", () => {
+  it("refuses a team the token cannot see, in one request, creating nothing (unhappy)", async () => {
+    const fake = Fake.linear(except("teams", () => Fake.noNodes("teams")));
+
+    refused(
+      await client(fake, "Other Board").createTicket({ title: "t", label: "1.2.3" }),
+      "linear: no team named Other Board",
     );
     expect(fake.asked).toHaveLength(1);
   });
 
-  it("stops at the first board state it cannot find, asking nothing more (unhappy)", async () => {
-    const fake = Fake.linear(except("workflowStates", () => Fake.noNodes("workflowStates")));
+  it("refuses an assignee who is not a workspace user, creating nothing (unhappy)", async () => {
+    const fake = Fake.linear(except("users", () => Fake.noNodes("users")));
 
-    refused(await client(fake).stateIds("team-id"), "linear: no state named Backlog");
-    expect(fake.asked).toHaveLength(1);
+    refused(
+      await client(fake).createTicket({ title: "t", label: "1.2.3" }),
+      "linear: no user prime@terminal.shop",
+    );
+    expect(fields(fake)).not.toContain("issueCreate");
   });
 
-  it("refuses a label Linear did not create (unhappy)", async () => {
+  it("refuses a board without Backlog, creating nothing (unhappy)", async () => {
+    const fake = Fake.linear(except("workflowStates", () => Fake.noNodes("workflowStates")));
+
+    refused(
+      await client(fake).createTicket({ title: "t", label: "1.2.3" }),
+      "linear: no state named Backlog",
+    );
+    expect(fields(fake)).not.toContain("issueCreate");
+  });
+
+  it("creates a label the board lacks and files the ticket under it", async () => {
+    const fake = Fake.linear((asked) => {
+      if (asked.field === "issueLabels" && asked.variables["name"] === "1.2.4") {
+        return Fake.noNodes("issueLabels");
+      }
+      if (asked.field === "issueLabelCreate") {
+        return Fake.data({ issueLabelCreate: { success: true, issueLabel: { id: "made" } } });
+      }
+      return Fake.happy(asked);
+    });
+
+    jarl.unwrap(await client(fake).createTicket({ title: "t", label: "1.2.4" }));
+
+    const made = fake.asked.find((asked) => asked.field === "issueLabelCreate");
+    expect(made?.variables).toEqual({ input: { name: "1.2.4", teamId: "team-id" } });
+    const created = fake.asked.find((asked) => asked.field === "issueCreate");
+    expect(created === undefined ? undefined : Fake.input(created)["labelIds"]).toEqual([
+      Fake.labelId("agent test"),
+      "made",
+    ]);
+  });
+
+  it("refuses a label Linear did not create, creating no ticket (unhappy)", async () => {
     const fake = Fake.linear((asked) => {
       if (asked.field === "issueLabels") {
         return Fake.noNodes("issueLabels");
@@ -137,56 +239,146 @@ describe("creating a ticket", () => {
       return Fake.happy(asked);
     });
 
-    refused(await client(fake).labelIds("team-id", "1.2.3"), "linear: label creation failed");
-  });
-
-  it("names a team the token cannot see, in one request (unhappy)", async () => {
-    const fake = Fake.linear(except("teams", () => Fake.noNodes("teams")));
-
-    refused(await client(fake, "Other Board").teamId(), "linear: no team named Other Board");
-    expect(fake.asked).toHaveLength(1);
-  });
-
-  it("names an assignee who is not a workspace user (unhappy)", async () => {
-    const fake = Fake.linear(except("users", () => Fake.noNodes("users")));
-
-    refused(await client(fake).assigneeId(), "linear: no user prime@terminal.shop");
-  });
-
-  it("names a board state the team lacks (unhappy)", async () => {
-    const fake = Fake.linear(
-      except("workflowStates", (asked) =>
-        asked.variables["name"] === "Automation Needed"
-          ? Fake.noNodes("workflowStates")
-          : Fake.happy(asked),
-      ),
+    refused(
+      await client(fake).createTicket({ title: "t", label: "1.2.3" }),
+      "linear: label creation failed",
     );
-
-    refused(await client(fake).stateIds("team-id"), "linear: no state named Automation Needed");
+    expect(fields(fake)).not.toContain("issueCreate");
   });
 
   it("refuses an issue Linear did not create (unhappy)", async () => {
     const fake = Fake.linear(
       except("issueCreate", () => Fake.data({ issueCreate: { success: false, issue: null } })),
     );
-    const input = { teamId: "t", title: "x", labelIds: [], assigneeId: "u", stateId: "s" };
 
-    refused(await client(fake).createIssue(input), "linear: issue creation failed");
+    refused(
+      await client(fake).createTicket({ title: "t", label: "1.2.3" }),
+      "linear: issue creation failed",
+    );
   });
 
   it("names the ticket whose description did not land (unhappy)", async () => {
     const fake = Fake.linear(except("issueUpdate", () => Fake.updated(false)));
 
     refused(
-      await client(fake).describeIssue(Fake.TICKET, "the body", "state"),
+      await client(fake).setDescription("OLI-42", "the body"),
       "linear: describing OLI-42 failed",
     );
   });
+});
 
-  it("moveIssue names the ticket that did not move (unhappy)", async () => {
-    const fake = Fake.linear(except("issueUpdate", () => Fake.updated(false)));
+describe("moving a ticket", () => {
+  it.each(transitions)(
+    "%s refuses a board without %s before any update (unhappy)",
+    async (name, column) => {
+      const fake = Fake.linear(except("workflowStates", () => Fake.noNodes("workflowStates")));
 
-    refused(await client(fake).moveIssue(Fake.TICKET, "state-x"), "linear: moving OLI-42 failed");
+      refused(await move(client(fake), name), `linear: no state named ${column}`);
+      expect(fields(fake)).toEqual(["teams", "workflowStates"]);
+    },
+  );
+
+  it.each(transitions)(
+    "%s names the ticket that did not move to %s (unhappy)",
+    async (name, column) => {
+      const fake = Fake.linear(except("issueUpdate", () => Fake.updated(false)));
+
+      refused(await move(client(fake), name), `linear: moving OLI-42 to ${column} failed`);
+      expect(fields(fake)).not.toContain("commentCreate");
+    },
+  );
+
+  it("refuses a team the token cannot see before looking for the column (unhappy)", async () => {
+    const fake = Fake.linear(except("teams", () => Fake.noNodes("teams")));
+
+    refused(
+      await client(fake, "Other Board").startDrive("OLI-42"),
+      "linear: no team named Other Board",
+    );
+    expect(fake.asked).toHaveLength(1);
+  });
+
+  // A ticket that does not carry ready: Linear refuses its removal, and answers the move alone
+  // with `then`.
+  const withoutReady = (then: () => HttpFake.Reply) => (asked: Fake.Asked) => {
+    if (asked.field !== "issueUpdate") {
+      return Fake.happy(asked);
+    }
+    return "removedLabelIds" in Fake.input(asked) ? Fake.errors("Label not on issue") : then();
+  };
+
+  it.each(dropping)(
+    "%s on a ticket without the ready label sends the move to %s alone (unhappy)",
+    async (name, column) => {
+      const fake = Fake.linear(withoutReady(() => Fake.updated()));
+
+      expect(await move(client(fake), name)).toEqual(jarl.ok(undefined));
+      const moved = { update: "OLI-42", input: { stateId: Fake.stateId(column) } };
+      expect(writes(fake).filter((write) => "update" in write)).toEqual([
+        { update: "OLI-42", input: { stateId: Fake.stateId(column), removedLabelIds: [READY] } },
+        moved,
+      ]);
+    },
+  );
+
+  it.each(dropping)(
+    "%s fails when the move to %s sent alone is not taken either (unhappy)",
+    async (name, column) => {
+      const fake = Fake.linear(withoutReady(() => Fake.updated(false)));
+
+      refused(await move(client(fake), name), `linear: moving OLI-42 to ${column} failed`);
+    },
+  );
+
+  it("a missing label beside another refusal is the failure, and nothing is sent again (unhappy)", async () => {
+    const fake = Fake.linear(
+      except("issueUpdate", () => Fake.errors("Label not on issue", "Entity not found: Issue")),
+    );
+
+    refused(
+      await client(fake).markAborted("OLI-42"),
+      "linear: Label not on issue; Entity not found: Issue",
+    );
+    expect(fields(fake).filter((field) => field === "issueUpdate")).toHaveLength(1);
+  });
+
+  it("markErrored names the ticket whose comment did not land, after it moved (unhappy)", async () => {
+    const fake = Fake.linear(except("commentCreate", () => Fake.commented(false)));
+
+    refused(
+      await client(fake).markErrored("OLI-42", "drive errored; why"),
+      "linear: commenting on OLI-42 failed",
+    );
+    expect(fields(fake).slice(-2)).toEqual(["issueUpdate", "commentCreate"]);
+  });
+});
+
+describe("the board's ids", () => {
+  it("a lookup that failed is not kept: the next move looks again (unhappy)", async () => {
+    let teams = 0;
+    const fake = Fake.linear(
+      except("teams", () => {
+        teams += 1;
+        return teams === 1 ? HttpFake.status(503, "busy") : Fake.team();
+      }),
+    );
+    const linear = client(fake);
+
+    failed(await linear.startDrive("OLI-45"), Http.HttpServerError, `${WHERE}: 503: busy`, true);
+    expect(await linear.startDrive("OLI-46")).toEqual(jarl.ok(undefined));
+    expect(teams).toBe(2);
+  });
+
+  it("moves asked at once share one lookup of each id", async () => {
+    const fake = Fake.linear(Fake.happy);
+    const linear = client(fake);
+
+    const both = await Promise.all([linear.startDrive("OLI-45"), linear.startDrive("OLI-46")]);
+
+    expect(both).toEqual([jarl.ok(undefined), jarl.ok(undefined)]);
+    expect(fields(fake).sort()).toEqual(
+      ["teams", "workflowStates", "issueLabels", "issueUpdate", "issueUpdate"].sort(),
+    );
   });
 });
 
@@ -195,17 +387,10 @@ describe("what a failed request says", () => {
     vi.useRealTimers();
   });
 
-  // Linear adds nothing to a failure of the request itself: it comes back as Http made it, from
-  // one request, and retryable says whether asking again could answer.
+  // Linear adds nothing to a failure of the request itself, and sends nothing again: it comes
+  // back as Http made it, and retryable says whether asking again could answer.
   it.each([
     ["a 5xx", HttpFake.status(503, "busy"), Http.HttpServerError, `${WHERE}: 503: busy`, true],
-    [
-      "a 429",
-      HttpFake.status(429, "slow down"),
-      Http.HttpUnhandled,
-      `${WHERE}: 429: slow down`,
-      true,
-    ],
     [
       "a 400",
       HttpFake.status(400, "bad query"),
@@ -226,15 +411,45 @@ describe("what a failed request says", () => {
     async (_, reply, error, message, retryable) => {
       const fake = Fake.linear(() => reply);
 
-      failed(await client(fake).teamId(), error, message, retryable);
+      failed(await client(fake).listNeedsReview(), error, message, retryable);
       expect(fake.asked).toHaveLength(1);
     },
   );
 
+  it("a 429 waits five seconds and is asked once more (unhappy)", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fake = Fake.linear((asked) => {
+      calls += 1;
+      return calls === 1 ? HttpFake.status(429, "slow down") : Fake.happy(asked);
+    });
+    const asked = client(fake).readyForReview("OLI-42");
+    const result = track(asked);
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(result.settled).toBe(false);
+    expect(fake.asked).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(await asked).toEqual(jarl.ok(undefined));
+    expect(fields(fake)).toEqual(["teams", "teams", "workflowStates", "issueUpdate"]);
+  });
+
+  it("a second 429 is the failure, from two requests (unhappy)", async () => {
+    vi.useFakeTimers();
+    const fake = Fake.linear(() => HttpFake.status(429, "slow down"));
+    const asked = client(fake).readyForReview("OLI-42");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    failed(await asked, Http.HttpUnhandled, `${WHERE}: 429: slow down`, true);
+    expect(fake.asked).toHaveLength(2);
+  });
+
   it("GraphQL errors are joined and are not worth asking again (unhappy)", async () => {
     const fake = Fake.linear(() => Fake.errors("API key has no access", "and more"));
 
-    refused(await client(fake).teamId(), "linear: API key has no access; and more");
+    refused(await client(fake).listNeedsReview(), "linear: API key has no access; and more");
   });
 
   it.each([
@@ -243,20 +458,24 @@ describe("what a failed request says", () => {
     ["an envelope that is not GraphQL's", () => HttpFake.json([]), "linear: invalid response"],
     ["data of the wrong shape", () => Fake.data({ teams: "nope" }), "linear: invalid response"],
   ])("%s is an invalid response (unhappy)", async (_, answer, reason) => {
-    const error = HttpFake.failure(await client(Fake.linear(answer)).teamId(), Http.HttpInvalid);
+    const fake = Fake.linear(answer);
+    const error = HttpFake.failure(await client(fake).listNeedsReview(), Http.HttpInvalid);
     expect(error.message).toContain(`${WHERE}: ${reason}`);
     expect(Linear.retryable(error)).toBe(false);
+    expect(fake.asked).toHaveLength(1);
   });
 
-  it("no answer within ten seconds is worth asking again (unhappy)", async () => {
+  it("no answer within ten seconds is the failure, and nothing is sent again (unhappy)", async () => {
     vi.useFakeTimers();
-    const asked = client(Fake.linear(() => "hang")).teamId();
+    const fake = Fake.linear(() => "hang");
+    const asked = client(fake).listNeedsReview();
     const result = track(asked);
     await vi.advanceTimersByTimeAsync(9_999);
     expect(result.settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
 
     failed(await asked, Http.HttpTimedOut, `${WHERE}: no answer within 10000 ms`, true);
+    expect(fake.asked).toHaveLength(1);
   });
 
   it("the token appears in no error (unhappy)", async () => {
@@ -267,7 +486,7 @@ describe("what a failed request says", () => {
       () => "unreachable",
     ];
     for (const answer of answers) {
-      const result = await client(Fake.linear(answer)).teamId();
+      const result = await client(Fake.linear(answer)).listNeedsReview();
       const error = HttpFake.failure(result, Error);
       const rendered = `${error.message}\n${String(error.stack)}\n${String(error.cause)}\n${JSON.stringify(error)}`;
       expect(rendered).not.toContain(TOKEN);
@@ -275,145 +494,42 @@ describe("what a failed request says", () => {
   });
 });
 
-const moves = [
-  ["moveToInProgress", "In Progress"],
-  ["moveToInReview", "In Review"],
-  ["moveToNeedsReview", "Needs Review"],
-  ["moveToFailed", "Failed"],
-  ["moveToSucceeded", "Succeeded"],
-] as const;
-
-describe("moving a ticket by identifier", () => {
-  const everyMove = [
-    ...moves.map(
-      ([move, state]) => [move, state, (linear: Linear.Linear) => linear[move]("OLI-45")] as const,
-    ),
-    [
-      "moveToErrored",
-      "Errored",
-      (linear: Linear.Linear) => linear.moveToErrored("OLI-45", "why"),
-    ] as const,
-  ];
-
-  it.each(everyMove)(
-    "%s refuses a board without %s before any update (unhappy)",
-    async (_, state, move) => {
-      const fake = Fake.linear(except("workflowStates", () => Fake.noNodes("workflowStates")));
-
-      refused(await move(client(fake)), `linear: no state named ${state}`);
-      expect(fake.asked.map((asked) => asked.field)).toEqual(["teams", "workflowStates"]);
-    },
-  );
-
-  it.each(everyMove)(
-    "%s refuses a team the token cannot see before looking for %s (unhappy)",
-    async (_, __, move) => {
-      const fake = Fake.linear(except("teams", () => Fake.noNodes("teams")));
-
-      refused(await move(client(fake, "Other Board")), "linear: no team named Other Board");
-      expect(fake.asked).toHaveLength(1);
-    },
-  );
-
-  it.each(everyMove)(
-    "%s names the ticket that did not move to %s (unhappy)",
-    async (_, state, move) => {
-      const fake = Fake.linear(except("issueUpdate", () => Fake.updated(false)));
-
-      refused(await move(client(fake)), `linear: moving OLI-45 to ${state} failed`);
-    },
-  );
-
-  it("moveToErrored names the ticket whose comment did not land (unhappy)", async () => {
-    const fake = Fake.linear(except("commentCreate", () => Fake.commented(false)));
-
-    refused(
-      await client(fake).moveToErrored("OLI-45", "why"),
-      "linear: commenting on OLI-45 failed",
-    );
-  });
-
-  it("moveToAborted stops at the first request for a ticket Linear does not know (unhappy)", async () => {
-    const fake = Fake.linear(() => Fake.errors("Entity not found: Issue"));
-
-    refused(await client(fake).moveToAborted("OLI-404"), "linear: Entity not found: Issue");
-    expect(fake.asked).toHaveLength(1);
-  });
-
-  it("moveToAborted refuses a team without Aborted before any update (unhappy)", async () => {
-    const fake = Fake.linear(
-      except("issue", () => Fake.data({ issue: { team: { states: { nodes: [] } } } })),
-    );
-
-    refused(await client(fake).moveToAborted("OLI-45"), "linear: no state named Aborted");
-    expect(fake.asked).toHaveLength(1);
-  });
-
-  it("moveToAborted names the ticket that did not move to Aborted (unhappy)", async () => {
-    const fake = Fake.linear(except("issueUpdate", () => Fake.updated(false)));
-
-    refused(await client(fake).moveToAborted("OLI-45"), "linear: moving OLI-45 to Aborted failed");
-  });
-
-  it("issueStateId reports a ticket Linear will not answer for (unhappy)", async () => {
-    const fake = Fake.linear(() => Fake.errors("Entity not found: Issue"));
-
-    refused(await client(fake).issueStateId(Fake.TICKET), "linear: Entity not found: Issue");
-  });
-});
-
-describe("the ready label", () => {
-  it("a lookup that failed is not kept: the next ticket looks again (unhappy)", async () => {
-    let teams = 0;
-    const fake = Fake.linear(
-      except("teams", () => {
-        teams += 1;
-        return teams === 1 ? HttpFake.status(503, "busy") : Fake.team();
-      }),
-    );
-    const linear = client(fake);
-
-    failed(await linear.markReady("OLI-45"), Http.HttpServerError, `${WHERE}: 503: busy`, true);
-    expect(await linear.markReady("OLI-46")).toEqual(jarl.ok(undefined));
-    expect(teams).toBe(2);
-  });
-
-  it("clearReady on a ticket that does not carry the label is done: Linear's refusal is not a failure (unhappy)", async () => {
-    const fake = Fake.linear(except("issueUpdate", () => Fake.errors("Label not on issue")));
-
-    expect(await client(fake).clearReady("OLI-45")).toEqual(jarl.ok(undefined));
-  });
-
-  it("clearReady fails on any other refusal (unhappy)", async () => {
-    const fake = Fake.linear(except("issueUpdate", () => Fake.errors("Entity not found: Issue")));
-
-    refused(await client(fake).clearReady("OLI-45"), "linear: Entity not found: Issue");
-  });
-
-  it("clearReady fails when the missing label comes with another refusal (unhappy)", async () => {
-    const fake = Fake.linear(
-      except("issueUpdate", () => Fake.errors("Label not on issue", "Rate limited")),
-    );
-
-    refused(await client(fake).clearReady("OLI-45"), "linear: Label not on issue; Rate limited");
-  });
-
-  it("markReady and clearReady name the ticket whose label update did not succeed (unhappy)", async () => {
-    const fake = Fake.linear(except("issueUpdate", () => Fake.updated(false)));
-    const linear = client(fake);
-
-    refused(await linear.markReady("OLI-45"), "linear: labeling OLI-45 ready failed");
-    refused(await linear.clearReady("OLI-45"), "linear: clearing OLI-45 ready failed");
-  });
-});
-
-describe("listing tickets", () => {
+describe("listing the board", () => {
   const ticket = (n: number) => ({
     id: `issue-${String(n)}`,
     identifier: `OLI-${String(n)}`,
     title: `ticket ${String(n)}`,
     url: `https://linear.app/OLI-${String(n)}`,
     updatedAt: "2026-09-27T00:00:00.000Z",
+  });
+
+  const listed = (n: number) => ({
+    identifier: `OLI-${String(n)}`,
+    title: `ticket ${String(n)}`,
+    url: `https://linear.app/OLI-${String(n)}`,
+    updatedAt: "2026-09-27T00:00:00.000Z",
+  });
+
+  const team = { name: { eq: TEAM } };
+
+  it.each([
+    ["listBacklog", { team, state: { type: { eq: "backlog" } } }],
+    ["listAutomationNeeded", { team, state: { name: { eq: "Automation Needed" } } }],
+    ["listNeedsReview", { team, state: { name: { eq: "Needs Review" } } }],
+  ] as const)("%s reads every page of its column", async (name, filter) => {
+    const fake = Fake.linear(
+      except("issues", (asked) =>
+        asked.variables["after"] === undefined
+          ? Fake.page([ticket(1)], "cursor-1")
+          : Fake.page([ticket(2)], undefined),
+      ),
+    );
+
+    expect(await client(fake)[name]()).toEqual(jarl.ok([listed(1), listed(2)]));
+    expect(sent(fake).filter((asked) => asked.field === "issues")).toEqual([
+      { field: "issues", variables: { filter } },
+      { field: "issues", variables: { filter, after: "cursor-1" } },
+    ]);
   });
 
   it("a further page without a cursor is an invalid response (unhappy)", async () => {

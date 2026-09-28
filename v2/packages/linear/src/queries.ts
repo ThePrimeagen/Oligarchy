@@ -19,18 +19,10 @@ export const ASSIGNEE =
 export const STATE =
   "query ExperimentState($name: String!, $teamId: ID!) { workflowStates(filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }, first: 1) { nodes { id } } }";
 
-// A ticket Linear does not know is a 200 with one error and a null data.
-export const TICKET_STATE =
-  "query ExperimentTicketState($ticket: String!, $state: String!) { issue(id: $ticket) { team { states(filter: { name: { eq: $state } }, first: 1) { nodes { id } } } } }";
-
-export const ISSUE_STATE =
-  "query ExperimentIssueState($id: String!) { issue(id: $id) { state { id } } }";
-
 export const ISSUE_CREATE = `mutation ExperimentIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     success
     issue {
-      id
       identifier
       url
     }
@@ -52,7 +44,6 @@ export const COMMENT_CREATE = `mutation ExperimentCommentCreate($input: CommentC
 export const ISSUES = `query ExperimentIssues($filter: IssueFilter!, $after: String) {
   issues(first: 100, after: $after, filter: $filter) {
     nodes {
-      id
       identifier
       title
       url

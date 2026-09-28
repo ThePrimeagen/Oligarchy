@@ -29,44 +29,45 @@ export const ERRORED_STATE = "Errored";
 export const FAILED_STATE = "Failed";
 export const SUCCEEDED_STATE = "Succeeded";
 export const ABORTED_STATE = "Aborted";
-// A ticket in Automation Needed that already has its pending job.
+// On a ticket while it waits in Automation Needed: it goes on with the move there, and comes off
+// with every move out of it.
 export const READY_LABEL = "ready";
 
-const TicketShape = z.object({ id: z.string(), identifier: z.string(), url: z.string() });
+const TicketShape = z.object({ identifier: z.string(), url: z.string() });
+// A ticket is named by its identifier (OLI-42): Linear takes it wherever it takes the issue's id.
 export type Ticket = Readonly<z.infer<typeof TicketShape>>;
 
 const ListedTicketShape = TicketShape.extend({ title: z.string(), updatedAt: z.string() });
 export type ListedTicket = Readonly<z.infer<typeof ListedTicketShape>>;
 
-export type CreateIssueInput = {
-  readonly teamId: string;
-  readonly title: string;
-  readonly labelIds: ReadonlyArray<string>;
-  readonly assigneeId: string;
-  readonly stateId: string;
-};
-
-export type WorkflowStateIds = { readonly backlog: string; readonly automationNeeded: string };
-
+// Every step the app takes on the board, and nothing else. Each is whole: the team, labels,
+// states and assignee it needs are looked up inside it, once for the life of the process.
 export type Linear = {
   readonly service: "linear";
-  readonly teamId: () => Answer<string>;
-  readonly labelIds: (teamId: string, version: string) => Answer<ReadonlyArray<string>>;
-  readonly assigneeId: () => Answer<string>;
-  readonly stateIds: (teamId: string) => Answer<WorkflowStateIds>;
-  readonly createIssue: (input: CreateIssueInput) => Answer<Ticket>;
-  readonly describeIssue: (ticket: Ticket, description: string, stateId: string) => Answer<void>;
-  readonly moveIssue: (ticket: Ticket, stateId: string) => Answer<void>;
-  readonly issueStateId: (ticket: Ticket) => Answer<string>;
-  readonly markReady: (identifier: string) => Answer<void>;
-  readonly clearReady: (identifier: string) => Answer<void>;
-  readonly moveToErrored: (identifier: string, message: string) => Answer<void>;
-  readonly moveToInProgress: (identifier: string) => Answer<void>;
-  readonly moveToInReview: (identifier: string) => Answer<void>;
-  readonly moveToNeedsReview: (identifier: string) => Answer<void>;
-  readonly moveToFailed: (identifier: string) => Answer<void>;
-  readonly moveToSucceeded: (identifier: string) => Answer<void>;
-  readonly moveToAborted: (identifier: string) => Answer<void>;
+  // Filed on the team, assigned, labeled `agent test` and `label` (the version, or `mint`), in
+  // Backlog, where nothing drives it. Never sent twice: a create whose answer was lost may stand.
+  readonly createTicket: (input: {
+    readonly title: string;
+    readonly label: string;
+  }) => Answer<Ticket>;
+  // The body names the ticket, so it is written once the ticket exists. The column is left alone.
+  readonly setDescription: (ticket: string, body: string) => Answer<void>;
+  // Ready, and into Automation Needed, in one update.
+  readonly readyForAutomation: (ticket: string) => Answer<void>;
+  // A drive or mint was placed: out of Automation Needed, so ready comes off, into In Progress.
+  readonly startDrive: (ticket: string) => Answer<void>;
+  // The drive or mint ran to its end: Needs Review, for its diagnosis.
+  readonly readyForReview: (ticket: string) => Answer<void>;
+  // A diagnose was placed: In Review.
+  readonly startDiagnosis: (ticket: string) => Answer<void>;
+  // The diagnosis verdict: passed is Succeeded, failed is Failed.
+  readonly markSucceeded: (ticket: string) => Answer<void>;
+  readonly markFailed: (ticket: string) => Answer<void>;
+  // The system failed the ticket: ready comes off, into Errored, then `reason` as a comment.
+  readonly markErrored: (ticket: string, reason: string) => Answer<void>;
+  // The ticket's action was aborted: ready comes off, into Aborted.
+  readonly markAborted: (ticket: string) => Answer<void>;
+  // The team's tickets whose status type is backlog.
   readonly listBacklog: () => Answer<ReadonlyArray<ListedTicket>>;
   readonly listAutomationNeeded: () => Answer<ReadonlyArray<ListedTicket>>;
   readonly listNeedsReview: () => Answer<ReadonlyArray<ListedTicket>>;
@@ -81,7 +82,12 @@ declare module "@oligarchy/app" {
 // A request Linear never answers must not hold the automation server's dispatch or its watches.
 const TIMEOUT_MS = 10_000;
 
-// What Linear answers a label removal from a ticket that does not carry it.
+// A request Linear rate limited is sent once more after this wait; a second 429 is the failure.
+// Nothing else is sent again.
+export const RATE_LIMIT_WAIT_MS = 5_000;
+
+// What Linear answers a label removal from a ticket that does not carry it. The update carrying
+// the removal is refused whole, its move with it.
 const NOT_LABELED = "linear: Label not on issue";
 
 const Nodes = z.object({ nodes: z.array(z.object({ id: z.string() })) });
@@ -128,6 +134,34 @@ const first = (found: z.infer<typeof Nodes>, missing: string) => {
   return node === undefined ? refused(missing) : jarl.ok(node.id);
 };
 
+const rateLimited = (error: unknown): boolean =>
+  jarl.error.is(error, Http.HttpUnhandled) && error.status === 429;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+// An id by name, kept once Linear gave it: it does not change for the life of the process.
+// Callers asking at once share one lookup, and a failed lookup is not kept, so the next asks again.
+const kept = <T>(ask: (name: string) => Answer<T>) => {
+  const answers = new Map<string, Answer<T>>();
+  return (name: string): Answer<T> => {
+    const known = answers.get(name);
+    if (known !== undefined) {
+      return known;
+    }
+    const asked = ask(name).then((answer) => {
+      if (!answer.ok) {
+        answers.delete(name);
+      }
+      return answer;
+    });
+    answers.set(name, asked);
+    return asked;
+  };
+};
+
 export const create = (options: {
   readonly token: Pick<Env.Secret, "reveal">;
   readonly team: string;
@@ -136,7 +170,7 @@ export const create = (options: {
 }): Linear => {
   const { token, team, apiUrl, http } = options;
 
-  const request = <S extends z.ZodType>(
+  const send = <S extends z.ZodType>(
     query: string,
     variables: Readonly<Record<string, unknown>>,
     shape: S,
@@ -153,25 +187,51 @@ export const create = (options: {
       { decode: decoder(shape) },
     );
 
+  const request = async <S extends z.ZodType>(
+    query: string,
+    variables: Readonly<Record<string, unknown>>,
+    shape: S,
+  ): Answer<z.infer<S>> => {
+    const answer = await send(query, variables, shape);
+    if (answer.ok || !rateLimited(answer.error)) {
+      return answer;
+    }
+    await wait(RATE_LIMIT_WAIT_MS);
+    return send(query, variables, shape);
+  };
+
   const update = async (
-    id: string,
+    ticket: string,
     input: Readonly<Record<string, unknown>>,
     failed: string,
   ): Answer<void> => {
-    const updated = await request(Queries.ISSUE_UPDATE, { id, input }, IssueUpdate);
+    const updated = await request(Queries.ISSUE_UPDATE, { id: ticket, input }, IssueUpdate);
     if (!updated.ok) {
       return updated;
     }
     return updated.value.issueUpdate.success ? jarl.ok(undefined) : refused(failed);
   };
 
-  const findTeam = async (): Answer<string> => {
-    const found = await request(Queries.TEAM, { name: team }, z.object({ teams: Nodes }));
-    return found.ok ? first(found.value.teams, `linear: no team named ${team}`) : found;
-  };
+  const teams = kept(async (name) => {
+    const found = await request(Queries.TEAM, { name }, z.object({ teams: Nodes }));
+    return found.ok ? first(found.value.teams, `linear: no team named ${name}`) : found;
+  });
+  const teamId = () => teams(team);
 
-  const labelId = async (teamId: string, name: string): Answer<string> => {
-    const found = await request(Queries.LABEL, { name, teamId }, z.object({ issueLabels: Nodes }));
+  // A lookup on the team, which is asked first.
+  const onTeam = <T>(ask: (board: string, name: string) => Answer<T>) =>
+    kept(async (name) => {
+      const found = await teamId();
+      return found.ok ? ask(found.value, name) : found;
+    });
+
+  // A label the board lacks is created.
+  const labelId = onTeam(async (board, name) => {
+    const found = await request(
+      Queries.LABEL,
+      { name, teamId: board },
+      z.object({ issueLabels: Nodes }),
+    );
     if (!found.ok) {
       return found;
     }
@@ -181,7 +241,7 @@ export const create = (options: {
     }
     const created = await request(
       Queries.LABEL_CREATE,
-      { input: { name, teamId } },
+      { input: { name, teamId: board } },
       z.object({
         issueLabelCreate: Success.extend({ issueLabel: z.object({ id: z.string() }).nullable() }),
       }),
@@ -193,53 +253,55 @@ export const create = (options: {
     return success && issueLabel !== null
       ? jarl.ok(issueLabel.id)
       : refused("linear: label creation failed");
-  };
+  });
 
-  const stateNamed = async (teamId: string, name: string): Answer<string> => {
+  // Each column is looked up when first moved into, so filing does not need the columns only the
+  // automation server moves a ticket through.
+  const stateId = onTeam(async (board, name) => {
     const found = await request(
       Queries.STATE,
-      { name, teamId },
+      { name, teamId: board },
       z.object({ workflowStates: Nodes }),
     );
     return found.ok ? first(found.value.workflowStates, `linear: no state named ${name}`) : found;
-  };
+  });
 
-  const moveTo = (identifier: string, stateName: string, stateId: string): Answer<void> =>
-    update(identifier, { stateId }, `linear: moving ${identifier} to ${stateName} failed`);
+  const assigneeId = kept(async (email) => {
+    const found = await request(Queries.ASSIGNEE, { email }, z.object({ users: Nodes }));
+    return found.ok ? first(found.value.users, `linear: no user ${email}`) : found;
+  });
 
-  // Looked up on their own, not in stateIds: `test run` and `mint` must not need the columns the
-  // automation server moves a ticket through.
-  const moveByName =
-    (stateName: string) =>
-    async (identifier: string): Answer<void> => {
-      const found = await findTeam();
-      if (!found.ok) {
-        return found;
+  // Into `column`, with ready put on, taken off, or left as it is.
+  const moveTo =
+    (column: string, ready: "on" | "off" | "kept") =>
+    async (ticket: string): Answer<void> => {
+      const state = await stateId(column);
+      if (!state.ok) {
+        return state;
       }
-      const stateId = await stateNamed(found.value, stateName);
-      return stateId.ok ? moveTo(identifier, stateName, stateId.value) : stateId;
+      const failed = `linear: moving ${ticket} to ${column} failed`;
+      const moved = { stateId: state.value };
+      if (ready === "kept") {
+        return update(ticket, moved, failed);
+      }
+      const label = await labelId(READY_LABEL);
+      if (!label.ok) {
+        return label;
+      }
+      if (ready === "on") {
+        return update(ticket, { ...moved, addedLabelIds: [label.value] }, failed);
+      }
+      const dropped = await update(ticket, { ...moved, removedLabelIds: [label.value] }, failed);
+      return !dropped.ok && dropped.error.message === NOT_LABELED
+        ? update(ticket, moved, failed)
+        : dropped;
     };
-
-  // The id does not change for the life of the process. Callers asking at once share one lookup,
-  // and a failed lookup is not kept, so the next ticket asks again.
-  let ready: Answer<string> | undefined;
-  const readyLabelId = (): Answer<string> => {
-    ready ??= findTeam()
-      .then((found) => (found.ok ? labelId(found.value, READY_LABEL) : found))
-      .then((answer) => {
-        if (!answer.ok) {
-          ready = undefined;
-        }
-        return answer;
-      });
-    return ready;
-  };
 
   const listOnTeam = async (
     filter: Readonly<Record<string, unknown>>,
   ): Answer<ReadonlyArray<ListedTicket>> => {
     // A name Linear does not have lists nothing rather than failing, so the team is asked first.
-    const found = await findTeam();
+    const found = await teamId();
     if (!found.ok) {
       return found;
     }
@@ -271,44 +333,43 @@ export const create = (options: {
     state: { name: { eq: name } },
   });
 
+  const toErrored = moveTo(ERRORED_STATE, "off");
+
   return {
     service: "linear",
 
-    teamId: findTeam,
-
-    labelIds: async (teamId, version) => {
-      const agentTest = await labelId(teamId, AGENT_TEST_LABEL);
+    createTicket: async ({ title, label }) => {
+      const found = await teamId();
+      if (!found.ok) {
+        return found;
+      }
+      const agentTest = await labelId(AGENT_TEST_LABEL);
       if (!agentTest.ok) {
         return agentTest;
       }
-      const versioned = await labelId(teamId, version);
-      return versioned.ok ? jarl.ok([agentTest.value, versioned.value]) : versioned;
-    },
-
-    assigneeId: async () => {
-      const found = await request(
-        Queries.ASSIGNEE,
-        { email: ASSIGNEE_EMAIL },
-        z.object({ users: Nodes }),
-      );
-      return found.ok ? first(found.value.users, `linear: no user ${ASSIGNEE_EMAIL}`) : found;
-    },
-
-    stateIds: async (teamId) => {
-      const backlog = await stateNamed(teamId, BACKLOG_STATE);
+      const own = await labelId(label);
+      if (!own.ok) {
+        return own;
+      }
+      const assignee = await assigneeId(ASSIGNEE_EMAIL);
+      if (!assignee.ok) {
+        return assignee;
+      }
+      const backlog = await stateId(BACKLOG_STATE);
       if (!backlog.ok) {
         return backlog;
       }
-      const automationNeeded = await stateNamed(teamId, AUTOMATION_NEEDED_STATE);
-      return automationNeeded.ok
-        ? jarl.ok({ backlog: backlog.value, automationNeeded: automationNeeded.value })
-        : automationNeeded;
-    },
-
-    createIssue: async (input) => {
       const created = await request(
         Queries.ISSUE_CREATE,
-        { input },
+        {
+          input: {
+            teamId: found.value,
+            title,
+            labelIds: [agentTest.value, own.value],
+            assigneeId: assignee.value,
+            stateId: backlog.value,
+          },
+        },
         z.object({ issueCreate: Success.extend({ issue: TicketShape.nullable() }) }),
       );
       if (!created.ok) {
@@ -318,58 +379,26 @@ export const create = (options: {
       return success && issue !== null ? jarl.ok(issue) : refused("linear: issue creation failed");
     },
 
-    // The body and the move land in one update, so the ticket is never in the new state without it.
-    describeIssue: (ticket, description, stateId) =>
-      update(ticket.id, { description, stateId }, `linear: describing ${ticket.identifier} failed`),
+    // The body alone: a column in the same update would move a ticket whose body might not land.
+    setDescription: (ticket, body) =>
+      update(ticket, { description: body }, `linear: describing ${ticket} failed`),
 
-    // State only: a description of "" would wipe a body the caller does not have.
-    moveIssue: (ticket, stateId) =>
-      update(ticket.id, { stateId }, `linear: moving ${ticket.identifier} failed`),
+    readyForAutomation: moveTo(AUTOMATION_NEEDED_STATE, "on"),
+    startDrive: moveTo(IN_PROGRESS_STATE, "off"),
+    readyForReview: moveTo(NEEDS_REVIEW_STATE, "kept"),
+    startDiagnosis: moveTo(IN_REVIEW_STATE, "kept"),
+    markSucceeded: moveTo(SUCCEEDED_STATE, "kept"),
+    markFailed: moveTo(FAILED_STATE, "kept"),
 
-    issueStateId: async (ticket) => {
-      const found = await request(
-        Queries.ISSUE_STATE,
-        { id: ticket.id },
-        z.object({ issue: z.object({ state: z.object({ id: z.string() }) }) }),
-      );
-      return found.ok ? jarl.ok(found.value.issue.state.id) : found;
-    },
-
-    markReady: async (identifier) => {
-      const id = await readyLabelId();
-      if (!id.ok) {
-        return id;
-      }
-      return update(
-        identifier,
-        { addedLabelIds: [id.value] },
-        `linear: labeling ${identifier} ready failed`,
-      );
-    },
-
-    // A ticket whose label never landed is already clear.
-    clearReady: async (identifier) => {
-      const id = await readyLabelId();
-      if (!id.ok) {
-        return id;
-      }
-      const cleared = await update(
-        identifier,
-        { removedLabelIds: [id.value] },
-        `linear: clearing ${identifier} ready failed`,
-      );
-      return !cleared.ok && cleared.error.message === NOT_LABELED ? jarl.ok(undefined) : cleared;
-    },
-
-    // The move lands before the comment, so a retry after a refused comment moves nothing new.
-    moveToErrored: async (identifier, message) => {
-      const moved = await moveByName(ERRORED_STATE)(identifier);
+    // The move lands before the comment, so the column says Errored even when the comment fails.
+    markErrored: async (ticket, reason) => {
+      const moved = await toErrored(ticket);
       if (!moved.ok) {
         return moved;
       }
       const commented = await request(
         Queries.COMMENT_CREATE,
-        { input: { issueId: identifier, body: message } },
+        { input: { issueId: ticket, body: reason } },
         z.object({ commentCreate: Success }),
       );
       if (!commented.ok) {
@@ -377,42 +406,14 @@ export const create = (options: {
       }
       return commented.value.commentCreate.success
         ? jarl.ok(undefined)
-        : refused(`linear: commenting on ${identifier} failed`);
+        : refused(`linear: commenting on ${ticket} failed`);
     },
 
-    moveToInProgress: moveByName(IN_PROGRESS_STATE),
-    moveToInReview: moveByName(IN_REVIEW_STATE),
-    moveToNeedsReview: moveByName(NEEDS_REVIEW_STATE),
-    moveToFailed: moveByName(FAILED_STATE),
-    moveToSucceeded: moveByName(SUCCEEDED_STATE),
-
-    // The state is the ticket's own team's: the dashboard aborts by identifier alone, knowing the
-    // ticket and not the board.
-    moveToAborted: async (identifier) => {
-      const found = await request(
-        Queries.TICKET_STATE,
-        { ticket: identifier, state: ABORTED_STATE },
-        z.object({ issue: z.object({ team: z.object({ states: Nodes }) }) }),
-      );
-      if (!found.ok) {
-        return found;
-      }
-      const stateId = first(
-        found.value.issue.team.states,
-        `linear: no state named ${ABORTED_STATE}`,
-      );
-      return stateId.ok ? moveTo(identifier, ABORTED_STATE, stateId.value) : stateId;
-    },
+    markAborted: moveTo(ABORTED_STATE, "off"),
 
     listBacklog: () =>
       listOnTeam({ team: { name: { eq: team } }, state: { type: { eq: "backlog" } } }),
-
-    listAutomationNeeded: () =>
-      listOnTeam({
-        ...onState(AUTOMATION_NEEDED_STATE),
-        labels: { or: [{ null: true }, { every: { name: { neq: READY_LABEL } } }] },
-      }),
-
+    listAutomationNeeded: () => listOnTeam(onState(AUTOMATION_NEEDED_STATE)),
     listNeedsReview: () => listOnTeam(onState(NEEDS_REVIEW_STATE)),
   };
 };

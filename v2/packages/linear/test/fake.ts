@@ -44,7 +44,8 @@ export const data = (value: unknown): Response => HttpFake.json({ data: value })
 export const errors = (...messages: ReadonlyArray<string>): Response =>
   HttpFake.json({ errors: messages.map((message) => ({ message })), data: null });
 
-export const TICKET = {
+// What Linear answers a create with: the issue's own id beside the identifier the app uses.
+export const ISSUE = {
   id: "issue-OLI-42",
   identifier: "OLI-42",
   url: "https://linear.app/OLI-42",
@@ -65,8 +66,14 @@ export const page = (nodes: ReadonlyArray<unknown>, next: string | null | undefi
 
 const named = (asked: Asked, key: string): string => String(asked.variables[key]);
 
+const Input = z.record(z.string(), z.unknown());
+
+// What an update or a create was asked to write.
+export const input = (asked: Asked): Readonly<Record<string, unknown>> =>
+  Input.parse(asked.variables["input"]);
+
 // Every request answered as a board that has everything: the team, each label and state asked
-// for by name, and every update and comment taken.
+// for by name, and every create, update and comment taken.
 export const happy: Answer = (asked) => {
   switch (asked.field) {
     case "teams":
@@ -77,16 +84,14 @@ export const happy: Answer = (asked) => {
       return data({ users: { nodes: [{ id: "user-id" }] } });
     case "workflowStates":
       return data({ workflowStates: { nodes: [{ id: stateId(named(asked, "name")) }] } });
-    case "issue":
-      return "ticket" in asked.variables
-        ? data({ issue: { team: { states: { nodes: [{ id: stateId(named(asked, "state")) }] } } } })
-        : data({ issue: { state: { id: stateId("Now") } } });
     case "issueCreate":
-      return data({ issueCreate: { success: true, issue: TICKET } });
+      return data({ issueCreate: { success: true, issue: ISSUE } });
     case "issueUpdate":
       return updated();
     case "commentCreate":
       return commented();
+    case "issues":
+      return page([], undefined);
     default:
       throw new Error(`the fake has no answer for ${asked.field}`);
   }
