@@ -20,7 +20,10 @@
     "jarl": "catalog:"
   },
   "devDependencies": {
+    "@oligarchy/fake-postgres": "workspace:*",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
