@@ -101,6 +101,19 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).toMatch(/unlocking the disk is not step 1/i);
   });
 
+  it("warns that a Ctrl chord at the passphrase prompt or while the disk unlocks aborts the boot", () => {
+    const text = file();
+    expect(text).toMatch(
+      /chord with Ctrl in it \(Ctrl\+C, Ctrl\+D\) sent at the passphrase prompt or while the disk unlocks aborts the boot/,
+    );
+  });
+
+  it("does not forbid Ctrl chords once the desktop shows (unhappy)", () => {
+    const text = file();
+    expect(text).not.toMatch(/never (press|send|use) (a )?Ctrl/i);
+    expect(text).not.toMatch(/Ctrl[^.]*is not allowed/i);
+  });
+
   it("keeps a step that is about the boot menu or the passphrase prompt on that screen (unhappy)", () => {
     const text = file();
     expect(text).toMatch(
