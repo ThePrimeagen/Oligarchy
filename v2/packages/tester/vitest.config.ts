@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     passWithNoTests: false,
     include: ["test/**/*.test.ts"],
-    // Each fake postgres boots PGlite and migrates it, and the tester is a process of its own.
+    // Without a cached template, the first fake postgres builds one, and the tester is a process.
     testTimeout: 30_000,
   },
 });
