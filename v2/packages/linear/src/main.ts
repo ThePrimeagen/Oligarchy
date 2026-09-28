@@ -12,8 +12,8 @@ export type LinearError = InstanceType<typeof LinearError>;
 // Everything else is the request's own failure, as Http made it.
 export type LinearFailure = LinearError | Http.HttpFailure;
 
-// Asking again could answer.
-export const retryable = (error: LinearFailure): boolean =>
+// Asking again could answer. As Http.retryable, any error may be asked about.
+export const retryable = (error: unknown): boolean =>
   !jarl.error.is(error, LinearError) && Http.retryable(error);
 
 type Answer<T> = Promise<jarl.Result<T, LinearFailure>>;
