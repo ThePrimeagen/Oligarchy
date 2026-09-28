@@ -124,16 +124,32 @@ describe("creating a ticket", () => {
     const labelIds = await client(fake).labelIds("team-id", "1.2.3");
 
     expect(labelIds).toEqual(jarl.ok([Fake.labelId("agent test"), Fake.labelId("1.2.3")]));
-    const created = fake.asked
-      .filter((asked) => asked.field === "issueLabelCreate")
-      .map((asked) => asked.variables["input"]);
-    expect(created).toHaveLength(2);
-    expect(created).toEqual(
-      expect.arrayContaining([
-        { name: "agent test", teamId: "team-id" },
-        { name: "1.2.3", teamId: "team-id" },
-      ]),
+    expect(sent(fake)).toEqual([
+      { field: "issueLabels", variables: { name: "agent test", teamId: "team-id" } },
+      {
+        field: "issueLabelCreate",
+        variables: { input: { name: "agent test", teamId: "team-id" } },
+      },
+      { field: "issueLabels", variables: { name: "1.2.3", teamId: "team-id" } },
+      { field: "issueLabelCreate", variables: { input: { name: "1.2.3", teamId: "team-id" } } },
+    ]);
+  });
+
+  it("stops at the first label it cannot find, asking nothing more (unhappy)", async () => {
+    const fake = Fake.linear(except("issueLabels", () => new Response("busy", { status: 503 })));
+
+    unavailable(
+      await client(fake).labelIds("team-id", "1.2.3"),
+      "linear: request failed (503): busy",
     );
+    expect(fake.asked).toHaveLength(1);
+  });
+
+  it("stops at the first board state it cannot find, asking nothing more (unhappy)", async () => {
+    const fake = Fake.linear(except("workflowStates", () => Fake.noNodes("workflowStates")));
+
+    refused(await client(fake).stateIds("team-id"), "linear: no state named Backlog");
+    expect(fake.asked).toHaveLength(1);
   });
 
   it("refuses a label Linear did not create (unhappy)", async () => {
@@ -236,6 +252,37 @@ describe("what a failed request says", () => {
       await client(Fake.linear(() => new Response(null, { status: 500 }))).teamId(),
       "linear: request failed (500)",
     );
+  });
+
+  it("a body that breaks off mid-read is an invalid response (unhappy)", async () => {
+    const broken = () =>
+      new Response(
+        new ReadableStream({
+          start: (controller) => {
+            controller.enqueue(new TextEncoder().encode('{"data":'));
+            controller.error(new Error("socket hang up"));
+          },
+        }),
+      );
+
+    refused(await client(Fake.linear(broken)).teamId(), "linear: invalid response");
+  });
+
+  it("a body that never finishes is no answer within ten seconds (unhappy)", async () => {
+    vi.useFakeTimers();
+    const stalled = () =>
+      new Response(
+        new ReadableStream({
+          start: (controller) => {
+            controller.enqueue(new TextEncoder().encode('{"data":'));
+          },
+        }),
+      );
+
+    const asked = client(Fake.linear(stalled)).teamId();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    unavailable(await asked, "linear: request failed: no answer within 10 seconds");
   });
 
   it("GraphQL errors are joined and are not worth asking again (unhappy)", async () => {
@@ -492,6 +539,14 @@ describe("the ready label", () => {
     const fake = Fake.linear(except("issueUpdate", () => Fake.errors("Entity not found: Issue")));
 
     refused(await client(fake).clearReady("OLI-45"), "linear: Entity not found: Issue");
+  });
+
+  it("clearReady fails when the missing label comes with another refusal (unhappy)", async () => {
+    const fake = Fake.linear(
+      except("issueUpdate", () => Fake.errors("Label not on issue", "Rate limited")),
+    );
+
+    refused(await client(fake).clearReady("OLI-45"), "linear: Label not on issue; Rate limited");
   });
 
   it("markReady and clearReady name the ticket whose label update did not succeed (unhappy)", async () => {

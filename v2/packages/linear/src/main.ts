@@ -299,13 +299,11 @@ export const create = (options: {
     teamId: findTeam,
 
     labelIds: async (teamId, version) => {
-      const [agentTest, versioned] = await Promise.all([
-        labelId(teamId, AGENT_TEST_LABEL),
-        labelId(teamId, version),
-      ]);
+      const agentTest = await labelId(teamId, AGENT_TEST_LABEL);
       if (!agentTest.ok) {
         return agentTest;
       }
+      const versioned = await labelId(teamId, version);
       return versioned.ok ? jarl.ok([agentTest.value, versioned.value]) : versioned;
     },
 
@@ -319,13 +317,11 @@ export const create = (options: {
     },
 
     stateIds: async (teamId) => {
-      const [backlog, automationNeeded] = await Promise.all([
-        stateNamed(teamId, BACKLOG_STATE),
-        stateNamed(teamId, AUTOMATION_NEEDED_STATE),
-      ]);
+      const backlog = await stateNamed(teamId, BACKLOG_STATE);
       if (!backlog.ok) {
         return backlog;
       }
+      const automationNeeded = await stateNamed(teamId, AUTOMATION_NEEDED_STATE);
       return automationNeeded.ok
         ? jarl.ok({ backlog: backlog.value, automationNeeded: automationNeeded.value })
         : automationNeeded;
