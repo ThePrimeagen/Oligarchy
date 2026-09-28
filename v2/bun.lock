@@ -56,6 +56,21 @@
         "vitest": "catalog:",
       },
     },
+    "packages/linear": {
+      "name": "@oligarchy/linear",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/async": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "jarl": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/stores": {
       "name": "@oligarchy/stores",
       "dependencies": {
@@ -162,6 +177,8 @@
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
+
+    "@oligarchy/linear": ["@oligarchy/linear@workspace:packages/linear"],
 
     "@oligarchy/stores": ["@oligarchy/stores@workspace:packages/stores"],
 
