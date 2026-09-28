@@ -11,8 +11,7 @@ export type Asked = {
   readonly variables: Readonly<Record<string, unknown>>;
 };
 
-// `index` counts the requests this Linear was asked, from 0.
-export type Answer = (asked: Asked, index: number) => HttpFake.Reply | Promise<HttpFake.Reply>;
+export type Answer = (asked: Asked) => HttpFake.Reply | Promise<HttpFake.Reply>;
 
 const Body = z.object({
   query: z.string(),
@@ -35,7 +34,7 @@ export const linear = (answer: Answer) => {
       variables: body.variables ?? {},
     };
     asked.push(one);
-    return answer(one, asked.length - 1);
+    return answer(one);
   });
   return { asked, http };
 };
@@ -45,83 +44,53 @@ export const data = (value: unknown): Response => HttpFake.json({ data: value })
 export const errors = (...messages: ReadonlyArray<string>): Response =>
   HttpFake.json({ errors: messages.map((message) => ({ message })), data: null });
 
-export const labelId = (name: string): string => `label-${name}`;
-export const stateId = (name: string): string => `state-${name}`;
-
-export const noNodes = (field: string): Response => data({ [field]: { nodes: [] } });
-export const updated = (success = true): Response => data({ issueUpdate: { success } });
-export const commented = (success = true): Response => data({ commentCreate: { success } });
-
-export const page = (nodes: ReadonlyArray<unknown>, next: string | null | undefined): Response =>
-  data({
-    issues: { nodes, pageInfo: { hasNextPage: next !== undefined, endCursor: next ?? null } },
-  });
-
 const Input = z.record(z.string(), z.unknown());
 
 // What an update or a create was asked to write.
-export const input = (asked: { readonly variables: Readonly<Record<string, unknown>> }) =>
+export const input = (asked: Asked): Readonly<Record<string, unknown>> =>
   Input.parse(asked.variables["input"]);
 
 const named = (asked: Asked, key: string): string => String(asked.variables[key]);
 
-const listed = (n: number) => ({
-  identifier: `OLI-${String(n)}`,
-  title: `ticket ${String(n)}`,
-  url: `https://linear.app/OLI-${String(n)}`,
-  updatedAt: "2026-09-27T00:00:00.000Z",
-});
+// A board that has everything: the team, the user, each label and state asked for by name, and
+// every create, update and comment taken.
+export const happy: Answer = (asked) => {
+  switch (asked.field) {
+    case "teams":
+      return data({ teams: { nodes: [{ id: "team-id" }] } });
+    case "issueLabels":
+      return data({ issueLabels: { nodes: [{ id: `label-${named(asked, "name")}` }] } });
+    case "users":
+      return data({ users: { nodes: [{ id: "user-id" }] } });
+    case "workflowStates":
+      return data({ workflowStates: { nodes: [{ id: `state-${named(asked, "name")}` }] } });
+    case "issueCreate":
+      return data({
+        issueCreate: {
+          success: true,
+          issue: { id: "issue-OLI-42", identifier: "OLI-42", url: "https://linear.app/OLI-42" },
+        },
+      });
+    case "issueUpdate":
+      return data({ issueUpdate: { success: true } });
+    case "commentCreate":
+      return data({ commentCreate: { success: true } });
+    case "issues":
+      return data({ issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
+    default:
+      throw new Error(`the fake has no answer for ${asked.field}`);
+  }
+};
 
-// A board that has everything but the labels named in `missing`, which it creates when asked: the
-// team, the user, each state asked for by name, every create, update and comment taken, and two
-// pages of tickets in every column.
-export const board =
-  (missing: ReadonlyArray<string> = []): Answer =>
-  (asked) => {
-    switch (asked.field) {
-      case "teams":
-        return data({ teams: { nodes: [{ id: "team-id" }] } });
-      case "issueLabels":
-        return missing.includes(named(asked, "name"))
-          ? noNodes("issueLabels")
-          : data({ issueLabels: { nodes: [{ id: labelId(named(asked, "name")) }] } });
-      case "issueLabelCreate":
-        return data({
-          issueLabelCreate: {
-            success: true,
-            issueLabel: { id: labelId(String(input(asked)["name"])) },
-          },
-        });
-      case "users":
-        return data({ users: { nodes: [{ id: "user-id" }] } });
-      case "workflowStates":
-        return data({ workflowStates: { nodes: [{ id: stateId(named(asked, "name")) }] } });
-      case "issueCreate":
-        return data({
-          issueCreate: {
-            success: true,
-            issue: { id: "issue-OLI-42", identifier: "OLI-42", url: "https://linear.app/OLI-42" },
-          },
-        });
-      case "issueUpdate":
-        return updated();
-      case "commentCreate":
-        return commented();
-      case "issues":
-        return asked.variables["after"] === undefined
-          ? page([listed(1)], "cursor-1")
-          : page([listed(2)], undefined);
-      default:
-        throw new Error(`the fake has no answer for ${asked.field}`);
+// The happy board, except the requests for `field`, which take `replies` in turn, one per send.
+export const failing = (field: string, replies: ReadonlyArray<Answer>) => {
+  let sends = 0;
+  return linear((asked) => {
+    if (asked.field !== field) {
+      return happy(asked);
     }
-  };
-
-export const happy = board();
-
-// `on` answers every request, except those from the `at`th (from 0) on, which take `replies` in
-// turn: a fault, and what the request is answered when it is sent again.
-export const faulted = (on: Answer, at: number, replies: ReadonlyArray<() => HttpFake.Reply>) =>
-  linear((asked, index) => {
-    const reply = replies[index - at];
-    return reply === undefined ? on(asked, index) : reply();
+    const reply = replies[sends] ?? happy;
+    sends += 1;
+    return reply(asked);
   });
+};
