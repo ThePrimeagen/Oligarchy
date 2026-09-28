@@ -86,6 +86,25 @@ describe("parseKeys happy path", () => {
     expect(chords("<kp_enter>")).toEqual([["kp_enter"]]);
     expect(chords("<caps_lock>")).toEqual([["caps_lock"]]);
     expect(chords("<unmapped>")).toEqual([["unmapped"]]);
+    expect(chords("<asterisk>")).toEqual([["asterisk"]]);
+    expect(chords("<compose>")).toEqual([["compose"]]);
+    expect(chords("<META_R>")).toEqual([["meta_r"]]);
+    expect(chords("<ALT_R>")).toEqual([["alt_r"]]);
+  });
+
+  it("reads the left-hand Alt, Ctrl and Shift as QEMU's unsuffixed keys", () => {
+    expect(chords("<ALT_L>")).toEqual([["alt"]]);
+    expect(chords("<alt_l>")).toEqual([["alt"]]);
+    expect(chords("<CTRL_L>")).toEqual([["ctrl"]]);
+    expect(chords("<SHIFT_L>")).toEqual([["shift"]]);
+  });
+
+  it("holds a left or right Alt, Ctrl or Shift as a modifier", () => {
+    expect(chords("<A-ALT_R>")).toEqual([["alt", "alt_r"]]);
+    expect(chords("<ALT_L-ALT_R>")).toEqual([["alt", "alt_r"]]);
+    expect(chords("<ALT_R-x>")).toEqual([["alt_r", "x"]]);
+    expect(chords("<CTRL_R-c>")).toEqual([["ctrl_r", "c"]]);
+    expect(chords("<SHIFT_L-SHIFT_R>")).toEqual([["shift", "shift_r"]]);
   });
 
   it("keeps literal and angle chords in input order", () => {
@@ -132,6 +151,15 @@ describe("parseKeys unhappy path", () => {
     expect(failure("<f}>")).toBe('qemu: unknown key "f}"');
     expect(failure("<f{>")).toBe('qemu: unknown key "f{"');
     expect(failure("<foo bar>")).toBe('qemu: unknown key "foo bar"');
+  });
+
+  it("fails on a name QEMU has no qcode for, before anything is typed", () => {
+    expect(failure("<A_L>")).toBe('qemu: unknown key "A_L"');
+    expect(failure("<os_l>")).toBe('qemu: unknown key "os_l"');
+    expect(failure("<foo_bar>")).toBe('qemu: unknown key "foo_bar"');
+    expect(failure("<focus>")).toBe('qemu: unknown key "focus"');
+    expect(failure("<f25>")).toBe('qemu: unknown key "f25"');
+    expect(failure("<A-ALT_L_R>")).toBe('qemu: unknown key "ALT_L_R"');
   });
 
   it("fails on unknown keys and unsupported characters", () => {
