@@ -59,8 +59,11 @@ export const start = async (options: {
   return jarl.ok({
     url: `postgres://postgres@${server.getServerConn()}/postgres`,
     stop: async () => {
-      await server.stop();
-      await pg.close();
+      try {
+        await server.stop();
+      } finally {
+        await pg.close();
+      }
     },
   });
 };
