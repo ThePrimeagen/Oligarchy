@@ -2,7 +2,7 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import type * as jarl from "jarl";
+import type { Answer } from "./answer.ts";
 
 // A qemu server boots guests; an automation-client is a host that announces itself the same way.
 export type ServerType = (typeof DbSchema.serverType.enumValues)[number];
@@ -21,8 +21,6 @@ export type Machine = {
   readonly heartbeatAt: Date | null;
   readonly queriedAt: Date;
 };
-
-type Answer<T> = Promise<jarl.Result<T, Db.DatabaseError>>;
 
 export type Servers = {
   readonly service: "servers";

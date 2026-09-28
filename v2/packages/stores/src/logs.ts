@@ -2,7 +2,7 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, desc, eq, like, or } from "drizzle-orm";
-import type * as jarl from "jarl";
+import type { Answer } from "./answer.ts";
 
 export type LogLevel = (typeof DbSchema.logLevel.enumValues)[number];
 
@@ -16,8 +16,6 @@ export type LogInput = {
 };
 
 export type Intent = { readonly text: string; readonly createdAt: Date };
-
-type Answer<T> = Promise<jarl.Result<T, Db.DatabaseError>>;
 
 export type Logs = {
   readonly service: "logs";
