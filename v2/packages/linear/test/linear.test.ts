@@ -199,6 +199,14 @@ describe("what a failed request says", () => {
     expect(fake.asked).toHaveLength(1);
   });
 
+  it("a status past 5xx is not worth asking again (unhappy)", async () => {
+    // Response refuses to be built with a status above 599, but fetch hands one through from a server.
+    const past = () =>
+      Object.defineProperty(new Response("odd", { status: 599 }), "status", { value: 600 });
+
+    refused(await client(Fake.linear(past)).teamId(), "linear: request failed (600): odd");
+  });
+
   it("a refusal is not worth asking again and carries the status and body (unhappy)", async () => {
     const fake = Fake.linear(() => new Response("unauthorized", { status: 401 }));
 

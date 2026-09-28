@@ -143,7 +143,7 @@ export const create = (options: {
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       const message = `linear: request failed (${String(response.status)})${text === "" ? "" : `: ${text}`}`;
-      const busy = response.status === 429 || response.status >= 500;
+      const busy = response.status === 429 || (response.status >= 500 && response.status < 600);
       return jarl.err(busy ? new LinearUnavailable(message) : new LinearError(message));
     }
     const body = await jarl.parseJSON(response.text());
