@@ -1,19 +1,12 @@
 import * as App from "@oligarchy/app";
-import * as Db from "@oligarchy/db";
+import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Env from "@oligarchy/env";
-import * as Log from "@oligarchy/log";
-import * as Stores from "@oligarchy/stores";
+import type * as Log from "@oligarchy/log";
 import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
 import { report } from "./report.ts";
-
-const environment = Env.cli({
-  name: "tester",
-  description: "Log how many test suites are running, then how many tests passed and failed",
-})
-  .needs("databaseUrl")
-  .done();
+import { environment, wire } from "./wire.ts";
 
 const main = async (app: App.App<unknown, Db.Database | Log.Log>) => {
   const counted = await app.services.db.run(async (db) => ({
@@ -39,28 +32,20 @@ if (jarl.is_err(created)) {
   process.exit(1);
 }
 
-const db = Db.open({
+const wired = wire({
   url: created.value.vars.databaseUrl,
-  onPoolError: (error) => {
-    process.stderr.write(`db: pool error: ${error.message}\n`);
-  },
+  write: (line) => process.stdout.write(`${line}\n`),
+  colors: process.stdout.isTTY,
 });
-if (!db.ok) {
-  process.stderr.write(`${db.error.message}\n`);
+if (!wired.ok) {
+  process.stderr.write(`${wired.error.message}\n`);
   process.exit(1);
 }
 
-const logs = Stores.Logs.create(db.value);
-const log = Log.create({
-  write: (line) => process.stdout.write(`${line}\n`),
-  colors: process.stdout.isTTY,
-  store: logs.insertLog,
-});
-
-const app = new App.App(created.value, { db: db.value, logs, log });
+const app = new App.App(created.value, wired.value);
 app.onExit(async () => {
   // Every line waits on its insert, so the pool stays open until the last one lands.
-  await log.flush();
+  await app.services.log.flush();
   const closed = await app.services.db.close();
   if (!closed.ok) {
     process.stderr.write(`${closed.error.message}\n`);

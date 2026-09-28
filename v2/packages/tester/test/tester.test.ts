@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 const started = async () => {
-  const fake = jarl.unwrap(await FakePostgres.start({ port: 0 }));
+  const fake = jarl.unwrap(await FakePostgres.start());
   running.push(fake);
   return fake;
 };
@@ -86,7 +86,7 @@ describe("the tester against a fake postgres", () => {
   });
 
   it("with the database gone, says it could not count, that the line was not stored, and exits 1 (unhappy)", async () => {
-    const fake = jarl.unwrap(await FakePostgres.start({ port: 0 }));
+    const fake = jarl.unwrap(await FakePostgres.start());
     await fake.stop();
 
     const ran = await tester(fake.url);
