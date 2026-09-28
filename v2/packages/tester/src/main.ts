@@ -2,31 +2,26 @@ import * as App from "@oligarchy/app";
 import * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Env from "@oligarchy/env";
+import * as Log from "@oligarchy/log";
+import * as Stores from "@oligarchy/stores";
 import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
+import { report } from "./report.ts";
 
 const environment = Env.cli({
   name: "tester",
-  description: "Print how many test suites are running, then how many tests passed and failed",
+  description: "Log how many test suites are running, then how many tests passed and failed",
 })
   .needs("databaseUrl")
   .done();
 
-const main = async (app: App.App<unknown, Db.Database>) => {
+const main = async (app: App.App<unknown, Db.Database | Log.Log>) => {
   const counted = await app.services.db.run(async (db) => ({
     running: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "running")),
     passing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "passed")),
     failing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "failed")),
   }));
-  if (!counted.ok) {
-    process.stderr.write(`${counted.error.message}\n`);
-    return counted;
-  }
-  const { running, passing, failing } = counted.value;
-  process.stdout.write(
-    `running test suites: ${running}\npassing tests: ${passing}\nfailing tests: ${failing}\n`,
-  );
-  return jarl.ok(undefined);
+  return report(app.services.log, counted);
 };
 
 const created = await Env.create(environment);
@@ -55,8 +50,17 @@ if (!db.ok) {
   process.exit(1);
 }
 
-const app = new App.App(created.value, { db: db.value });
+const logs = Stores.Logs.create(db.value);
+const log = Log.create({
+  write: (line) => process.stdout.write(`${line}\n`),
+  colors: process.stdout.isTTY,
+  store: logs.insertLog,
+});
+
+const app = new App.App(created.value, { db: db.value, logs, log });
 app.onExit(async () => {
+  // Every line waits on its insert, so the pool stays open until the last one lands.
+  await log.flush();
   const closed = await app.services.db.close();
   if (!closed.ok) {
     process.stderr.write(`${closed.error.message}\n`);
