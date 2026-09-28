@@ -110,6 +110,60 @@ describe("Board.enqueue happy path", () => {
   );
 });
 
+describe("Board.enqueue for a diagnose that errored", () => {
+  it.effect("queues it again in place, its last run's client, times and reason cleared", () =>
+    Effect.gen(function* () {
+      const h = H.harness();
+      const job = H.seedResult(h.tests);
+      const errored = H.seedAction(h.automation, {
+        action: "diagnose",
+        status: "errored",
+        reason:
+          "automation client: POST http://127.0.0.1:54322/run failed: opencode run exceeded 1.5 hours",
+        serverId: H.CLIENT,
+        startedAt: new Date(1),
+        finishedAt: new Date(2),
+      });
+      const placed = yield* Board.enqueue(job, "diagnose").pipe(Effect.provide(h.layer));
+      expect(placed).toEqual({ result: "queued", action: "diagnose" });
+      expect(h.automation.jobs).toHaveLength(1);
+      expect(h.automation.jobs[0]).toMatchObject({
+        id: errored.id,
+        action: "diagnose",
+        status: "pending",
+        reason: null,
+        serverId: null,
+        startedAt: null,
+        finishedAt: null,
+      });
+    }),
+  );
+
+  it.effect("leaves an errored drive as it is: a drive runs again as a new run (unhappy)", () =>
+    Effect.gen(function* () {
+      const h = H.harness();
+      const job = H.seedResult(h.tests);
+      H.seedAction(h.automation, { action: "drive", status: "errored", reason: "error code: 502" });
+      const placed = yield* Board.enqueue(job, "drive").pipe(Effect.provide(h.layer));
+      expect(placed).toEqual({ result: "duplicate", action: "drive", status: "errored" });
+      expect(h.automation.jobs[0]).toMatchObject({ status: "errored", reason: "error code: 502" });
+    }),
+  );
+
+  it.effect("leaves a diagnose that is queued, running or done as it is (unhappy)", () =>
+    Effect.gen(function* () {
+      for (const status of ["pending", "running", "succeeded", "aborted"] as const) {
+        const h = H.harness();
+        const job = H.seedResult(h.tests);
+        H.seedAction(h.automation, { action: "diagnose", status });
+        const placed = yield* Board.enqueue(job, "diagnose").pipe(Effect.provide(h.layer));
+        expect(placed).toEqual({ result: "duplicate", action: "diagnose", status });
+        expect(h.automation.jobs[0]?.status).toBe(status);
+      }
+    }),
+  );
+});
+
 describe("Board.enqueue unhappy path", () => {
   it.effect(
     "a second insert for the same result and action is named by the status the index kept",

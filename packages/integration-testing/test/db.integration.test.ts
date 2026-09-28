@@ -1388,6 +1388,68 @@ Postgres.describeWithDatabase("database", () => {
         }),
     );
 
+    scoped.effect(
+      "AutomationStore requeueErrored puts an errored job back in the queue in place, its last run cleared",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const database = yield* Client.Database;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          const job = yield* automation.enqueue({ resultId, action: "diagnose" });
+          const client = crypto.randomUUID();
+          expect(yield* automation.markRunning(job.id, client)).toBe(true);
+          expect(
+            yield* automation.finish(job.id, "errored", "opencode run exceeded 1.5 hours"),
+          ).toBe(true);
+          expect(yield* automation.requeueErrored(resultId, "diagnose")).toBe(true);
+          const [row] = yield* database.run("readRequeued", (db) =>
+            db.select().from(DbSchema.automationJobs).where(eq(DbSchema.automationJobs.id, job.id)),
+          );
+          expect(row).toMatchObject({
+            id: job.id,
+            status: "pending",
+            reason: null,
+            serverId: null,
+            startedAt: null,
+            finishedAt: null,
+          });
+          expect(row?.createdAt.getTime()).toBeGreaterThanOrEqual(job.createdAt.getTime());
+        }),
+    );
+
+    scoped.effect(
+      "AutomationStore requeueErrored leaves a job that did not error, and one of another action (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const tests = yield* Tests.TestStore;
+          const automation = yield* Automation.AutomationStore;
+          const definition = Option.getOrThrow(yield* tests.findTestDefinition("lock-screen"));
+          const created = yield* tests.createRun({
+            iso: "https://example.com/omarchy.iso",
+            serverUrl: "http://127.0.0.1:42069",
+            definitions: [{ id: definition.id }],
+          });
+          const resultId = created.results[0].id;
+          expect(yield* automation.requeueErrored(resultId, "diagnose")).toBe(false);
+          const job = yield* automation.enqueue({ resultId, action: "diagnose" });
+          expect(yield* automation.requeueErrored(resultId, "diagnose")).toBe(false);
+          expect(yield* automation.finish(job.id, "failed", "the proof did not land")).toBe(true);
+          expect(yield* automation.requeueErrored(resultId, "diagnose")).toBe(false);
+          expect(yield* automation.jobStatus(resultId, "diagnose")).toEqual(Option.some("failed"));
+          const drive = yield* automation.enqueue({ resultId, action: "drive" });
+          expect(yield* automation.finish(drive.id, "errored", "error code: 502")).toBe(true);
+          expect(yield* automation.requeueErrored(resultId, "diagnose")).toBe(false);
+          expect(yield* automation.jobStatus(resultId, "drive")).toEqual(Option.some("errored"));
+        }),
+    );
+
     // The integration files share one database, and claim takes the oldest pending job in the
     // table: the empty queue these tests expect is their own to arrange.
     const emptyQueue = Effect.gen(function* () {
