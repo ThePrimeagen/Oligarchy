@@ -19,9 +19,15 @@ export class OpenRouterRefusal extends Schema.TaggedError<OpenRouterRefusal>(
   "@oligarchy/shared/errors/OpenRouterRefusal",
 )("OpenRouterRefusal", { status: Schema.Int, message: Schema.String }) {}
 
-// OpenRouter did not produce a completion: nothing was listening, a 429, a 5xx or a header or
-// chunk timeout could not be retried inside the run ceiling, or the stream died. A refused
-// request is OpenRouterRefusal, not this.
+// OpenRouter did not produce a completion: nothing was listening, or the stream died. A refused
+// request is OpenRouterRefusal, and a retry that would run past the ceiling OpenRouterPastCeiling,
+// not this.
 export class OpenRouterUnreachable extends Schema.TaggedError<OpenRouterUnreachable>(
   "@oligarchy/shared/errors/OpenRouterUnreachable",
 )("OpenRouterUnreachable", { message: Schema.String, cause: Schema.Defect() }) {}
+
+// A 429, a 5xx or a header or chunk timeout whose retry would wait past the run ceiling: the run
+// has spent its time, which is the test's limit, as the ceiling is, not the service being down.
+export class OpenRouterPastCeiling extends Schema.TaggedError<OpenRouterPastCeiling>(
+  "@oligarchy/shared/errors/OpenRouterPastCeiling",
+)("OpenRouterPastCeiling", { message: Schema.String }) {}

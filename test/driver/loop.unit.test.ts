@@ -1467,6 +1467,43 @@ describe("driver loop", () => {
     }),
   );
 
+  it.effect(
+    "a model whose next retry would pass the run ceiling ends the test at its ceiling: the guest stops failed, the result closes failed",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          () =>
+            new Response(JSON.stringify({ error: { message: "Provider returned error" } }), {
+              status: 503,
+              headers: { "content-type": "application/json", "retry-after": "7200" },
+            }),
+        );
+        const closed: Array<ReadonlyArray<string>> = [];
+        const log: Array<string> = [];
+        const ran = yield* run(
+          config(),
+          recorder.layer,
+          (_command, args) => {
+            if (args[0] === "test-results") {
+              closed.push(args);
+            }
+            return { exitCode: 0 };
+          },
+          log,
+        );
+        const why =
+          "openrouter: retry delay of 2h would pass the run ceiling: Provider returned error";
+        expect(ran.stopped).toEqual({ reason: "limit-reached" });
+        expect(modelRequests(recorder.requests)).toHaveLength(1);
+        expect(guestPaths(recorder.requests).at(-1)).toBe("/stop");
+        expect(JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}")).toMatchObject({
+          status: "failed",
+          reason: why,
+        });
+        expect(closed).toEqual([expect.arrayContaining(["--status", "failed", "--reason", why])]);
+      }),
+  );
+
   // The model ran out of steps: that is the test's verdict, not the system failing. The guest
   // stops failed, the result closes failed with the reason, and the drive ends so it is judged.
   it.effect("the step limit fails the test: the guest stops failed, the result closes failed", () =>

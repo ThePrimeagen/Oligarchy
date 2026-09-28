@@ -14,14 +14,18 @@ import * as Errors from "./errors.ts";
 // timeout the wait for the next stream event: OpenRouter's own stream has neither, which is what
 // the three-minute OpenCode options were papering over. A 429 or 5xx is retried for the
 // Retry-After the response names, or the configured default when it names none, and not at all
-// when that wait would run past the run ceiling. One reported inside the stream, after the 200,
+// when that wait would run past the run ceiling, which is OpenRouterPastCeiling: the run's limit,
+// not an outage. One reported inside the stream, after the 200,
 // is retried the same way after the configured default, and so is either timeout: a completion
 // has no side effect but its cost. A stream that closes before its completion is not, since it
 // ends at once and a provider cutting every answer short would be billed every default.
 // A 4xx other than 429 refused the request. Anything that never produced a completion left the
 // service unreachable.
 
-export type Failure = Errors.OpenRouterRefusal | Errors.OpenRouterUnreachable;
+export type Failure =
+  | Errors.OpenRouterRefusal
+  | Errors.OpenRouterUnreachable
+  | Errors.OpenRouterPastCeiling;
 
 export type Options = {
   readonly baseUrl: string;
@@ -197,10 +201,9 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
         Duration.millis(now - options.startedAtMillis),
       );
       if (Duration.Order(delay, remaining) >= 0) {
-        return yield* unreachable(
-          `openrouter: retry delay of ${Duration.format(delay)} would pass the run ceiling: ${message}`,
-          null,
-        );
+        return yield* Errors.OpenRouterPastCeiling.make({
+          message: `openrouter: retry delay of ${Duration.format(delay)} would pass the run ceiling: ${message}`,
+        });
       }
       return yield* RetryWait.make({ delayMillis: Duration.toMillis(delay) });
     });

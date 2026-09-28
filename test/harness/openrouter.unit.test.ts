@@ -314,7 +314,7 @@ describe("OpenRouter client", () => {
       yield* TestClock.adjust("3 minutes");
       const error = yield* Effect.flip(Fiber.join(fiber));
       expect(error).toMatchObject({
-        _tag: "OpenRouterUnreachable",
+        _tag: "OpenRouterPastCeiling",
         message:
           "openrouter: retry delay of 1m would pass the run ceiling: no response within header timeout",
       });
@@ -402,7 +402,7 @@ describe("OpenRouter client", () => {
       yield* TestClock.adjust("3 minutes");
       const error = yield* Effect.flip(Fiber.join(fiber));
       expect(error).toMatchObject({
-        _tag: "OpenRouterUnreachable",
+        _tag: "OpenRouterPastCeiling",
         message:
           "openrouter: retry delay of 1m would pass the run ceiling: no chunk within chunk timeout",
       });
@@ -454,7 +454,7 @@ describe("OpenRouter client", () => {
       yield* TestClock.adjust("1 minute");
       expect(fiber.pollUnsafe()).toBeDefined();
       const error = yield* Effect.flip(Fiber.join(fiber));
-      expect(error).toMatchObject({ _tag: "OpenRouterUnreachable", message: lastStall });
+      expect(error).toMatchObject({ _tag: "OpenRouterPastCeiling", message: lastStall });
     }),
   );
 
@@ -644,7 +644,7 @@ describe("OpenRouter client", () => {
     Effect.gen(function* () {
       const recorder = TestingHttp.recordRequests(() => jsonError(429, "slow down", "7200"));
       const error = yield* Effect.flip(run(recorder.layer));
-      expect(error._tag).toBe("OpenRouterUnreachable");
+      expect(error._tag).toBe("OpenRouterPastCeiling");
       expect(error.message).toBe(
         "openrouter: retry delay of 2h would pass the run ceiling: slow down",
       );
@@ -698,7 +698,7 @@ describe("OpenRouter client", () => {
     Effect.gen(function* () {
       const recorder = TestingHttp.recordRequests(() => jsonError(503, "unavailable"));
       const error = yield* Effect.flip(run(recorder.layer, { defaultRetry: Duration.hours(2) }));
-      expect(error._tag).toBe("OpenRouterUnreachable");
+      expect(error._tag).toBe("OpenRouterPastCeiling");
       expect(error.message).toBe(
         "openrouter: retry delay of 2h would pass the run ceiling: unavailable",
       );
@@ -749,7 +749,7 @@ describe("OpenRouter client", () => {
       yield* TestClock.adjust("3 minutes");
       const error = yield* Effect.flip(Fiber.join(fiber));
       expect(error).toMatchObject({
-        _tag: "OpenRouterUnreachable",
+        _tag: "OpenRouterPastCeiling",
         message:
           "openrouter: retry delay of 1s would pass the run ceiling: no chunk within chunk timeout",
       });
@@ -930,7 +930,7 @@ describe("OpenRouter client", () => {
       );
       const error = yield* Effect.flip(run(recorder.layer, { defaultRetry: Duration.hours(2) }));
       expect(error).toMatchObject({
-        _tag: "OpenRouterUnreachable",
+        _tag: "OpenRouterPastCeiling",
         message: "openrouter: retry delay of 2h would pass the run ceiling: error code: 502",
       });
       expect(recorder.requests).toHaveLength(1);

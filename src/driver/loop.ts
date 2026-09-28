@@ -54,8 +54,8 @@ export type Stopped = {
     | "not-powered-off";
 };
 
-// The step limit, the run ceiling or three bad replies in a row: the model did not finish in its
-// budget. That is the test's failure, not the system's: the guest stops failed, the result closes failed with `why`, and
+// The step limit, the run ceiling (reached, or a model retry that would wait past it) or three bad
+// replies in a row: the model did not finish in its budget. That is the test's failure, not the system's: the guest stops failed, the result closes failed with `why`, and
 // the drive ends so the diagnosis judges it.
 type Limited = { readonly reason: "limit-reached"; readonly why: string };
 
@@ -431,7 +431,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             PREVIOUS: screen === undefined ? Option.none() : previous,
           });
           yield* log(input, turn, "request", input.model);
-          const answer = yield* OpenRouter.complete({
+          const answered = yield* OpenRouter.complete({
             baseUrl: input.config.openRouterBaseUrl,
             token: input.token,
             model: input.model,
@@ -459,7 +459,19 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             runCeiling: input.config.runCeiling,
             defaultRetry: input.config.harness.defaultRetry,
             startedAtMillis: startedAt,
-          }).pipe(Effect.tapError((error) => log(input, turn, "failure", Render.headline(error))));
+          }).pipe(
+            Effect.tapError((error) => log(input, turn, "failure", Render.headline(error))),
+            Effect.map((answer) => ({ _tag: "answer" as const, answer })),
+            // The model's retry would wait past the run ceiling: the run's time is spent, as when
+            // the ceiling check above ends it, and the evidence so far is judged.
+            Effect.catchTag("OpenRouterPastCeiling", (error) =>
+              Effect.succeed({ _tag: "past-ceiling" as const, why: error.message }),
+            ),
+          );
+          if (answered._tag === "past-ceiling") {
+            return { reason: "limit-reached", why: answered.why } satisfies Limited;
+          }
+          const answer = answered.answer;
           const text = answer.content ?? "";
           yield* log(input, turn, "assistant", text);
           lastResponse = Option.some(text);
