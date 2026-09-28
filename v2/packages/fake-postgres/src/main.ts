@@ -25,12 +25,14 @@ const refused = (message: string, cause: unknown): FakePostgresError => {
   return error;
 };
 
-// An in-memory Postgres (PGlite) with v2's migrations applied, speaking the wire protocol on
-// HOST:port so node-postgres, psql, and the programs reach it like any other database. Port 0
-// takes a free one; the url names it. Nothing is kept once it stops.
-export const start = async (options: {
-  readonly port: number;
-}): Promise<jarl.Result<FakePostgres, FakePostgresError>> => {
+// For tests only: the one real thing a test may start. An in-memory Postgres (PGlite) with v2's
+// migrations applied, speaking the wire protocol on HOST so node-postgres reaches it like any
+// other database. Each start is a fresh, empty database on a free port unless one is named; the
+// url says which. Stopping it drops every connection, as a database shutting down does.
+export const start = async (
+  options: { readonly port?: number } = {},
+): Promise<jarl.Result<FakePostgres, FakePostgresError>> => {
+  const port = options.port ?? 0;
   const pg = new PGlite();
   try {
     await migrate(drizzle({ client: pg }), {
@@ -45,25 +47,26 @@ export const start = async (options: {
   const server = new PGLiteSocketServer({
     db: pg,
     host: HOST,
-    port: options.port,
+    port,
     maxConnections: 10,
   });
   try {
     await server.start();
   } catch (thrown) {
     await pg.close();
-    return jarl.err(
-      refused(`fake-postgres: could not listen on ${HOST}:${String(options.port)}`, thrown),
-    );
+    return jarl.err(refused(`fake-postgres: could not listen on ${HOST}:${String(port)}`, thrown));
   }
+  let stopped: Promise<void> | undefined;
   return jarl.ok({
     url: `postgres://postgres@${server.getServerConn()}/postgres`,
-    stop: async () => {
-      try {
-        await server.stop();
-      } finally {
-        await pg.close();
-      }
-    },
+    // A test may stop it to see what a shutdown does, and its cleanup stops it again.
+    stop: () =>
+      (stopped ??= (async () => {
+        try {
+          await server.stop();
+        } finally {
+          await pg.close();
+        }
+      })()),
   });
 };

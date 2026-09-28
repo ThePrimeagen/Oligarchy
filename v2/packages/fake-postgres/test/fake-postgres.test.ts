@@ -10,7 +10,7 @@ afterEach(async () => {
 });
 
 const started = async () => {
-  const fake = jarl.unwrap(await FakePostgres.start({ port: 0 }));
+  const fake = jarl.unwrap(await FakePostgres.start());
   running.push(fake);
   return fake;
 };
@@ -39,11 +39,20 @@ describe("the fake postgres", () => {
     ]);
   });
 
-  it("port 0 listens on a free port, and the url names it (happy)", async () => {
-    const fake = await started();
+  it("each start is a fresh database on a free port of its own, sharing nothing with another (happy)", async () => {
+    const first = await started();
+    const second = await started();
+    const client = await connected(first.url);
+    await client.query("insert into logs (text) values ('only in the first')");
+    await client.end();
 
-    const port = Number(new URL(fake.url).port);
-    expect(port).toBeGreaterThan(0);
+    const other = await connected(second.url);
+    const read = await other.query("select text from logs");
+    await other.end();
+
+    expect(new URL(first.url).port).not.toBe(new URL(second.url).port);
+    expect(Number(new URL(second.url).port)).toBeGreaterThan(0);
+    expect(read.rows).toEqual([]);
   });
 
   it("a port already held is refused, naming the port, and the holder keeps serving (unhappy)", async () => {
@@ -61,9 +70,20 @@ describe("the fake postgres", () => {
   });
 
   it("once stopped, the url refuses connections (unhappy)", async () => {
-    const fake = jarl.unwrap(await FakePostgres.start({ port: 0 }));
+    const fake = jarl.unwrap(await FakePostgres.start());
     await fake.stop();
 
     await expect(connected(fake.url)).rejects.toThrow(/ECONNREFUSED/);
+  });
+
+  it("stopping drops a connection already open, and stopping again does nothing (unhappy)", async () => {
+    const fake = await started();
+    const client = await connected(fake.url);
+    const dropped = new Promise<Error>((resolve) => client.once("error", resolve));
+
+    await fake.stop();
+
+    expect((await dropped).message).toMatch(/terminated/i);
+    await expect(fake.stop()).resolves.toBeUndefined();
   });
 });

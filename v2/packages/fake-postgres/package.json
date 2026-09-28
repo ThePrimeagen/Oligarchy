@@ -6,14 +6,12 @@
     ".": "./src/main.ts"
   },
   "scripts": {
-    "start": "bun --no-env-file src/cli.ts",
     "check:types": "tsc --noEmit -p tsconfig.json",
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-socket": "^0.2.11",
-    "@oligarchy/app": "workspace:*",
     "drizzle-orm": "catalog:",
     "jarl": "catalog:"
   },

@@ -24,7 +24,6 @@
     "test:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.env run db:migrate",
     "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.prod-env run db:migrate",
     "tester": "bun --no-env-file packages/tester/src/main.ts",
-    "fake:db": "bun --no-env-file packages/fake-postgres/src/cli.ts",
     "check:types": "bun run --workspaces check:types",
     "test:unit": "bun run --workspaces --if-present test:unit"
   }
