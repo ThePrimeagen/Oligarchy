@@ -104,7 +104,7 @@ describe("fetch", () => {
     expect(failed.message).toBe(
       `${WHERE}: 429: translating the status failed: Unexpected token < in JSON`,
     );
-    expect(String(failed)).not.toContain("s3cret");
+    expect(JSON.stringify(failed)).not.toContain("s3cret");
     expect(Http.retryable(failed)).toBe(false);
   });
 
