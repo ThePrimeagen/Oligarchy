@@ -47,6 +47,3 @@ export const touch = (
   agents.set(agentId, { color: pick.color, seenAt: now });
   return { palette: { ...current, agents, next: (pick.index + 1) % count }, color: pick.color };
 };
-
-export const colorOf = (palette: Palette, agentId: string): string | undefined =>
-  palette.agents.get(agentId)?.color;
