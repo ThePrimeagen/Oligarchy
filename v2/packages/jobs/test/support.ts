@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import * as Db from "@oligarchy/db";
 import * as Env from "@oligarchy/env";
 import * as FakePostgres from "@oligarchy/fake-postgres";
+import * as Http from "@oligarchy/http";
 import * as Linear from "@oligarchy/linear";
 import * as Logger from "@oligarchy/logger";
 import * as Stores from "@oligarchy/stores";
@@ -119,8 +120,13 @@ export const duplicateKey = () =>
     'duplicate key value violates unique constraint "automation_jobs_result_action_idx"',
   );
 
-export const unavailable = (message = "linear: request failed (503): busy") =>
-  new Linear.LinearUnavailable(message);
+const LINEAR_API = { method: "POST", url: "https://api.linear.app/graphql" };
+
+// Linear did not answer: a 503, as Http names it.
+export const unavailable = () => new Http.HttpServerError(LINEAR_API, 503, "busy");
+
+// Linear did not answer within the ten seconds Linear gives a request.
+export const timedOut = () => new Http.HttpTimedOut(LINEAR_API, 10_000);
 
 export const refused = (message = "linear: Entity not found") => new Linear.LinearError(message);
 

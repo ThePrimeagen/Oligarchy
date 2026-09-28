@@ -12,9 +12,11 @@ import * as Templates from "./templates.ts";
 export const MINT_DEFINITION = "mint";
 export const MINT_LABEL = "mint";
 
-type LinearFailure = Linear.LinearError | Linear.LinearUnavailable;
-
-export type Refused = Errors.NoDefinition | Errors.PromptError | Db.DatabaseError | LinearFailure;
+export type Refused =
+  | Errors.NoDefinition
+  | Errors.PromptError
+  | Db.DatabaseError
+  | Linear.LinearFailure;
 
 // A mint's failures: the run's, or its pin's.
 export type MintRefused = Refused | Errors.SetupGone | Errors.SetupHeld;
@@ -96,7 +98,7 @@ type Team = {
 const team = async (
   linear: Needs["linear"],
   label: string,
-): Promise<jarl.Result<Team, LinearFailure>> => {
+): Promise<jarl.Result<Team, Linear.LinearFailure>> => {
   const teamId = await linearRead(() => linear.teamId());
   if (!teamId.ok) {
     return teamId;
@@ -131,9 +133,9 @@ const handOff = async (
   created: Linear.Ticket,
   description: string,
   states: Linear.WorkflowStateIds,
-): Promise<jarl.Result<void, LinearFailure>> => {
+): Promise<jarl.Result<void, Linear.LinearFailure>> => {
   const described = await linear.describeIssue(created, description, states.automationNeeded);
-  if (!jarl.error.is(described, Linear.LinearUnavailable)) {
+  if (described.ok || !Linear.retryable(described.error)) {
     return described;
   }
   const state = await linearRead(() => linear.issueStateId(created));
@@ -152,7 +154,7 @@ const ticket = async <E extends Error>(
   title: string,
   tickets: Array<Linear.Ticket>,
   body: (ticket: Linear.Ticket) => Promise<jarl.Result<string, E>>,
-): Promise<jarl.Result<Linear.Ticket, E | LinearFailure>> => {
+): Promise<jarl.Result<Linear.Ticket, E | Linear.LinearFailure>> => {
   const created = await needs.linear.createIssue({
     teamId: to.teamId,
     title,
@@ -221,7 +223,7 @@ const fileSuite = async (
   if (!to.ok) {
     return to;
   }
-  let lost: Linear.LinearUnavailable | undefined;
+  let lost: Refused | undefined;
   let lostLast = false;
   for (const { id, definition } of jobs) {
     const filed = await ticket<Errors.PromptError | Db.DatabaseError>(
@@ -255,7 +257,7 @@ const fileSuite = async (
       lostLast = false;
       continue;
     }
-    if (!jarl.error.is(filed.error, Linear.LinearUnavailable) || lostLast) {
+    if (!Linear.retryable(filed.error) || lostLast) {
       return filed;
     }
     lost = filed.error;

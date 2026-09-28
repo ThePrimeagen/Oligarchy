@@ -1,3 +1,4 @@
+import * as Linear from "@oligarchy/linear";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +21,7 @@ import {
   type Script,
   SERVER_URL,
   STATES,
+  timedOut,
   unavailable,
 } from "./support.ts";
 
@@ -33,7 +35,8 @@ const BETA = definitionRow(2, "beta");
 const GAMMA = definitionRow(3, "gamma");
 const MINT = definitionRow(9, "mint");
 
-const BUSY = "linear: request failed (503): busy";
+const BUSY = "POST https://api.linear.app/graphql: 503: busy";
+const TIMED_OUT = "POST https://api.linear.app/graphql: no answer within 10000 ms";
 
 // Every need opening has, faked: the tests store over `definitions`, a Linear that answers, the
 // prompts, and setup rows that take their pin, unless a test says otherwise.
@@ -203,7 +206,8 @@ describe("opening a test run", () => {
     const error = errorOf(await open(needs, INPUT));
 
     const reason = `${BUSY}; created OLI-42, OLI-44; failed beta`;
-    expect(error).toMatchObject({ name: "LinearUnavailable", message: reason });
+    expect(error).toMatchObject({ name: "HttpServerError", message: reason, status: 503 });
+    expect(Linear.retryable(error)).toBe(true);
     expect(asked.filter((call) => call.startsWith("createIssue"))).toEqual(
       created("alpha", "beta", "gamma"),
     );
@@ -216,19 +220,14 @@ describe("opening a test run", () => {
     const { needs, asked, failed } = filing({
       definitions: [ALPHA, BETA, GAMMA, definitionRow(4, "delta")],
       linear: {
-        createIssue: [
-          undefined,
-          jarl.err(unavailable()),
-          jarl.err(unavailable("linear: request failed: no answer within 10 seconds")),
-        ],
+        createIssue: [undefined, jarl.err(unavailable()), jarl.err(timedOut())],
       },
     });
 
     const error = errorOf(await open(needs, INPUT));
 
-    const reason =
-      "linear: request failed: no answer within 10 seconds; created OLI-42; failed beta, gamma, delta";
-    expect(error).toMatchObject({ name: "LinearUnavailable", message: reason });
+    const reason = `${TIMED_OUT}; created OLI-42; failed beta, gamma, delta`;
+    expect(error).toMatchObject({ name: "HttpTimedOut", message: reason });
     expect(asked.filter((call) => call.startsWith("createIssue"))).toEqual(
       created("alpha", "beta", "gamma"),
     );
@@ -305,7 +304,7 @@ describe("opening a test run", () => {
 
       const error = errorOf(await open(needs, INPUT));
 
-      expect(error).toMatchObject({ name: "LinearUnavailable", message: reason });
+      expect(error).toMatchObject({ name: "HttpServerError", message: reason });
       expect(failed).toEqual([{ runId: "run-1", reason, resultIds: ["result-1"] }]);
       expect(lines).toEqual([`[ERROR] [OLI-42] ticket trapped in Backlog; ${BUSY}`]);
     }

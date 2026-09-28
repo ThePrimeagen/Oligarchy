@@ -2,9 +2,9 @@ import type * as Linear from "@oligarchy/linear";
 import * as jarl from "jarl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { linearRead, READ_AGAIN_MS } from "../src/retry.ts";
-import { errorOf, refused, unavailable } from "./support.ts";
+import { errorOf, refused, timedOut, unavailable } from "./support.ts";
 
-type Read = jarl.Result<string, Linear.LinearError | Linear.LinearUnavailable>;
+type Read = jarl.Result<string, Linear.LinearFailure>;
 
 // A read answering `answers` in turn, counting the times it was asked.
 const reading = (...answers: ReadonlyArray<Read>) => {
@@ -39,7 +39,7 @@ describe("a Linear read", () => {
   });
 
   it("a second one Linear did not answer is the failure, asked twice in all (error)", async () => {
-    const second = unavailable("linear: request failed: no answer within 10 seconds");
+    const second = timedOut();
     const read = reading(jarl.err(unavailable()), jarl.err(second));
 
     const answered = linearRead(read);

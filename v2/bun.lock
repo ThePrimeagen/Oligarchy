@@ -118,6 +118,7 @@
       "devDependencies": {
         "@oligarchy/env": "workspace:*",
         "@oligarchy/fake-postgres": "workspace:*",
+        "@oligarchy/http": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",

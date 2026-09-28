@@ -44,9 +44,28 @@ export const detail = (error: unknown): string => {
   return String(error);
 };
 
-// The same error, of the same kind and cause, saying message.
+// The class under Error that `error` descends from: the one whose constructor takes a message.
+const messageClass = (error: Error): Function => {
+  let found: Function = error.constructor;
+  for (
+    let above = Object.getPrototypeOf(found);
+    above !== Error;
+    above = Object.getPrototypeOf(found)
+  ) {
+    if (typeof above !== "function" || above === Function.prototype) {
+      return error.constructor;
+    }
+    found = above;
+  }
+  return found;
+};
+
+// The same error, of the same kind, fields and cause, saying message. It is built by the class
+// that takes a message, so a kind whose constructor takes more (Http's take what was asked, the
+// status and the body) is still made whole; its fields are then copied from `error`.
 export const renamed = <E extends Error>(error: E, message: string): E => {
-  const named: E = Reflect.construct(error.constructor, [message]);
+  const named: E = Reflect.construct(messageClass(error), [message], error.constructor);
+  Object.assign(named, error);
   named.cause = error.cause;
   return named;
 };

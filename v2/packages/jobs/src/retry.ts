@@ -14,7 +14,7 @@ export const linearRead = async <R extends jarl.Result<unknown, unknown>>(
   read: () => Promise<R>,
 ): Promise<R> => {
   const first = await read();
-  if (!jarl.error.is(first, Linear.LinearUnavailable)) {
+  if (first.ok || !Linear.retryable(first.error)) {
     return first;
   }
   await Async.sleep(READ_AGAIN_MS, NEVER);
