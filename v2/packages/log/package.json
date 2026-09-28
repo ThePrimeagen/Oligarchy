@@ -1,0 +1,21 @@
+{
+  "name": "@oligarchy/log",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "jarl": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
