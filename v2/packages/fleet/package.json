@@ -1,0 +1,28 @@
+{
+  "name": "@oligarchy/fleet",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/async": "workspace:*",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/logger": "workspace:*",
+    "@oligarchy/stores": "workspace:*",
+    "jarl": "catalog:"
+  },
+  "devDependencies": {
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/fake-postgres": "workspace:*",
+    "@types/node": "catalog:",
+    "drizzle-orm": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
