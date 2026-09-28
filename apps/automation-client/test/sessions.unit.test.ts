@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, FileSystem, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
 import * as ApiErrors from "@oligarchy/http/errors";
@@ -211,8 +211,12 @@ describe("Sessions.run happy path", () => {
 });
 
 describe("Sessions.run ceiling", () => {
+  // appConfig's runCeiling: the driver's own, which the client's kill waits the grace beyond.
+  const RUN_CEILING = "1.5 hours";
+  const KILL_AT = Duration.sum(Duration.fromInputUnsafe(RUN_CEILING), Driver.GRACE);
+
   it.effect(
-    "a run that outlives the ceiling is killed, fails as RunFailed naming it, and frees its slot",
+    "a drive that outlives its run ceiling and the grace is killed, fails as RunFailed naming it, and frees its slot",
     () => {
       const spawner = TestingSpawner.fakeSpawner(() => ({}));
       return Effect.gen(function* () {
@@ -222,11 +226,11 @@ describe("Sessions.run ceiling", () => {
         for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
           yield* Effect.yieldNow;
         }
-        yield* TestClock.adjust(Driver.CEILING);
+        yield* TestClock.adjust(KILL_AT);
         const error = yield* Fiber.join(running);
         expect(error).toMatchObject({
           _tag: "RunFailed",
-          message: `driver exceeded ${Driver.CEILING}`,
+          message: `driver exceeded ${Duration.format(KILL_AT)}`,
         });
         expect(spawner.spawned[0]?.isReleased()).toBe(true);
         expect(spawner.spawned[0]?.kills).toEqual(["SIGTERM"]);
@@ -235,6 +239,45 @@ describe("Sessions.run ceiling", () => {
       }).pipe(Effect.provide(layer(spawner, 1)));
     },
   );
+
+  it.effect(
+    "a drive past its own run ceiling is not killed during the grace, and ends on its own",
+    () => {
+      const spawner = TestingSpawner.fakeSpawner(() => ({}));
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions.Sessions;
+        yield* sessions.reserve(TICKET, "drive");
+        const running = yield* Effect.forkChild(sessions.run(TICKET, "do the work"));
+        for (let i = 0; i < 100 && spawner.spawned[0] === undefined; i++) {
+          yield* Effect.yieldNow;
+        }
+        // The driver's own ceiling passed; its last turn, stop and result close are still landing.
+        yield* TestClock.adjust(RUN_CEILING);
+        yield* TestClock.adjust("5 minutes");
+        expect(spawner.spawned[0]?.kills).toEqual([]);
+        yield* spawner.spawned[0]?.exit(0) ?? Effect.void;
+        yield* Fiber.join(running);
+        expect(spawner.spawned[0]?.kills).toEqual([]);
+      }).pipe(Effect.provide(layer(spawner)));
+    },
+  );
+
+  it.effect("a drive with no oligarchy.json fails and spawns nothing (unhappy)", () => {
+    const spawner = TestingSpawner.fakeSpawner(() => ({ exitCode: 0 }));
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions.Sessions;
+      yield* sessions.reserve(TICKET, "drive");
+      const error = yield* Effect.flip(sessions.run(TICKET, "do the work"));
+      expect(error._tag).toBe("RunFailed");
+      if (error._tag === "RunFailed") {
+        expect(error.message).toContain(Oligarchy.PATH);
+      }
+      expect(spawner.spawned).toEqual([]);
+      yield* sessions.reserve(OTHER, "drive");
+    }).pipe(
+      Effect.provide(layer(spawner, 1, qemuOk(), qemuRelinquishOk(), TestingLog.fakeLog(), false)),
+    );
+  });
 
   it.effect("a run that exits a second before the ceiling succeeds", () => {
     const spawner = TestingSpawner.fakeSpawner(() => ({}));
