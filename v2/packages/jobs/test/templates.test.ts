@@ -1,7 +1,9 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import { PromptError } from "../src/errors.ts";
-import { renderLinearIssue, renderMintIssue, SUB_AGENT } from "../src/templates.ts";
+import { files, renderLinearIssue, renderMintIssue, SUB_AGENT } from "../src/templates.ts";
 import { errorOf, fakePrompts, TEST_TEMPLATE } from "./support.ts";
 
 const VALUES = {
@@ -114,5 +116,25 @@ describe("rendering a ticket body", () => {
       "prompt: prompts/mint-issue.html uses {{VERSION}}, which has no value",
     );
     expect(read).toEqual(["prompts/mint-issue.html"]);
+  });
+});
+
+describe("the checkout's own prompt files", () => {
+  it("fill every placeholder of both templates (happy)", async () => {
+    const test = jarl.unwrap(await renderLinearIssue(files(), VALUES));
+    const mint = jarl.unwrap(await renderMintIssue(files(), MINT_VALUES));
+
+    expect(test).toContain(VALUES.TEST_INSTRUCTION);
+    expect(mint).toContain(MINT_VALUES.PINNED_SERVER);
+    expect(`${test}${mint}`).not.toMatch(/\{\{[A-Z_]+\}\}/);
+  });
+
+  it("is a PromptError carrying the filesystem's own error when the checkout is not there (error)", async () => {
+    const error = errorOf(await renderLinearIssue(files(join(tmpdir(), "no-checkout")), VALUES));
+
+    expect(jarl.error.is(error, PromptError)).toBe(true);
+    expect(error.message).toMatch(/^prompt: ENOENT: no such file or directory/);
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(error.cause).toHaveProperty("code", "ENOENT");
   });
 });

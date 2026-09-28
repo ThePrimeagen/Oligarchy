@@ -164,7 +164,10 @@ export const close = async (
     ATTEMPTS,
   )();
   if (!written.ok) {
-    needs.logger.error(`close write failed; ${action.id} should be ${outcome.status}`, where);
+    needs.logger.error(
+      `close write failed; ${action.id} should be ${outcome.status}: ${Errors.detail(written.error)}`,
+      where,
+    );
     return jarl.ok(false);
   }
   // Something else, an abort or a shutdown, closed the row first.

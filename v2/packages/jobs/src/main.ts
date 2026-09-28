@@ -8,6 +8,7 @@ export {
   type Definition,
   MINT_DEFINITION,
   type Minted,
+  type MintRefused,
   type Opened,
   type Refused,
 } from "./open.ts";

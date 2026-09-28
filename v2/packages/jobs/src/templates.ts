@@ -62,7 +62,7 @@ export type MintValues = {
 export const files = (root = CHECKOUT): Prompts => ({
   read: jarl.fn(
     (path: string) => readFile(join(root, path), "utf8"),
-    (thrown) => ({ message: thrown instanceof Error ? thrown.message : String(thrown) }),
+    (thrown) => (thrown instanceof Error ? thrown : { message: String(thrown) }),
   ),
 });
 

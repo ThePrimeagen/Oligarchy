@@ -261,7 +261,7 @@ describe("closing an action", () => {
     expect(writes).toBe(3);
     expect(asked).toEqual([]);
     expect(lines).toEqual([
-      "[ERROR] [global] automation: close write failed; action-1 should be completed",
+      "[ERROR] [global] automation: close write failed; action-1 should be completed: connection reset",
     ]);
   });
 
