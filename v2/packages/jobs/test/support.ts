@@ -85,14 +85,16 @@ export const storedJob = async (
 };
 
 // A store with only the methods a test gives; any other it is asked for throws, naming itself.
-export const only = <T extends object>(given: Partial<T>): T =>
-  new Proxy(given, {
-    get: (target, key) =>
-      Reflect.get(target, key) ??
+export const only = <T extends object>(given: Partial<T>): T => {
+  const stub: T = new Proxy(Object.create(null), {
+    get: (_target, key) =>
+      Reflect.get(given, key) ??
       (() => {
         throw new Error(`unexpected call: ${String(key)}`);
       }),
-  }) as T;
+  });
+  return stub;
+};
 
 // The error a result failed with; a result that did not fail fails the test.
 export const errorOf = <R extends jarl.Result<unknown, unknown>>(

@@ -1,5 +1,7 @@
-import type * as jarl from "jarl";
-import type * as Errors from "./errors.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import * as jarl from "jarl";
+import * as Errors from "./errors.ts";
 
 // A Linear ticket body is a template under `prompts/` with `{{NAME}}` placeholders, filled from
 // the ticket's values: `linear-issue.html` for a test, `mint-issue.html` for a mint. The
@@ -7,6 +9,20 @@ import type * as Errors from "./errors.ts";
 // template names them.
 
 export const SUB_AGENT = "Grok 4.6 high fast (cursor-grok-4.6-high-fast)";
+const TEST_TEMPLATE = "linear-issue.html";
+const MINT_TEMPLATE = "mint-issue.html";
+
+// The guides a template may embed, by the name it uses. Read only when named, so an unreadable
+// guide cannot stop a command whose template does not embed it.
+const GUIDES: Readonly<Record<string, string>> = {
+  CLIENT_MD: "client.md",
+  CTRL_MD: "ctrl-linear.md",
+};
+
+const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
+
+// src, the package, packages, v2: the checkout is four up.
+const CHECKOUT = join(import.meta.dirname, "..", "..", "..", "..");
 
 // The checkout's files, by their path from its root.
 export type Prompts = {
@@ -43,20 +59,78 @@ export type MintValues = {
 };
 
 // The checkout this package sits in, read from disk.
-export const files = (_root?: string): Prompts => {
-  throw new Error("not implemented");
+export const files = (root = CHECKOUT): Prompts => ({
+  read: jarl.fn(
+    (path: string) => readFile(join(root, path), "utf8"),
+    (thrown) => ({ message: thrown instanceof Error ? thrown.message : String(thrown) }),
+  ),
+});
+
+const read = async (
+  prompts: Prompts,
+  path: string,
+): Promise<jarl.Result<string, Errors.PromptError>> => {
+  const text = await prompts.read(path);
+  if (text.ok) {
+    return text;
+  }
+  const error = new Errors.PromptError(`prompt: ${text.error.message}`);
+  error.cause = text.error;
+  return jarl.err(error);
 };
 
-export const renderLinearIssue = async (
-  _prompts: Prompts,
-  _values: Values,
-): Promise<jarl.Result<string, Errors.PromptError>> => {
-  throw new Error("not implemented");
+// Fills every `{{NAME}}`; the first name without a value fails the rendering, naming the template.
+const fill = (
+  template: string,
+  text: string,
+  values: Readonly<Record<string, string>>,
+): jarl.Result<string, Errors.PromptError> => {
+  const missing: Array<string> = [];
+  const filled = text.replace(PLACEHOLDER, (match: string, name: string) => {
+    const value = values[name];
+    if (value === undefined) {
+      missing.push(name);
+      return match;
+    }
+    return value;
+  });
+  const [first] = missing;
+  return first === undefined
+    ? jarl.ok(filled)
+    : jarl.err(
+        new Errors.PromptError(`prompt: prompts/${template} uses {{${first}}}, which has no value`),
+      );
 };
 
-export const renderMintIssue = async (
-  _prompts: Prompts,
-  _values: MintValues,
+const render = async (
+  prompts: Prompts,
+  template: string,
+  values: Readonly<Record<string, string>>,
 ): Promise<jarl.Result<string, Errors.PromptError>> => {
-  throw new Error("not implemented");
+  const text = await read(prompts, `prompts/${template}`);
+  if (!text.ok) {
+    return text;
+  }
+  const known: Record<string, string> = { SUB_AGENT, ...values };
+  for (const [name, path] of Object.entries(GUIDES)) {
+    if (text.value.includes(`{{${name}}}`)) {
+      const guide = await read(prompts, path);
+      if (!guide.ok) {
+        return guide;
+      }
+      // A guide ends in a newline the template's closing tag should sit under, not after.
+      known[name] = guide.value.trimEnd();
+    }
+  }
+  return fill(template, text.value, known);
 };
+
+export const renderLinearIssue = (
+  prompts: Prompts,
+  values: Values,
+): Promise<jarl.Result<string, Errors.PromptError>> => render(prompts, TEST_TEMPLATE, values);
+
+export const renderMintIssue = (
+  prompts: Prompts,
+  values: MintValues,
+): Promise<jarl.Result<string, Errors.PromptError>> => render(prompts, MINT_TEMPLATE, values);

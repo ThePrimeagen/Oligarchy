@@ -150,7 +150,7 @@ const closing = (
 };
 
 // A write the database refuses `times` times, then answers `then`.
-const failing = <T>(times: number, then: T) => {
+const failing = (times: number, then: boolean) => {
   let made = 0;
   return async () => {
     made += 1;

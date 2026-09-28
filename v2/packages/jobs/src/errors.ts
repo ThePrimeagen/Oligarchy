@@ -1,3 +1,4 @@
+import * as Db from "@oligarchy/db";
 import * as jarl from "jarl";
 
 // Where the automation server's own lines go.
@@ -28,11 +29,24 @@ export type SetupHeld = InstanceType<typeof SetupHeld>;
 
 // What a line says went wrong. A DatabaseError's own message is the failed SQL; the driver's
 // reason (ECONNREFUSED etc.) is its cause.
-export const detail = (_error: unknown): string => {
-  throw new Error("not implemented");
+export const detail = (error: unknown): string => {
+  if (jarl.error.is(error, Db.DatabaseError) && error.cause instanceof Error) {
+    return error.cause.message;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return String(error);
 };
 
 // The same error, of the same kind and cause, saying message.
-export const renamed = <E extends Error>(_error: E, _message: string): E => {
-  throw new Error("not implemented");
+export const renamed = <E extends Error>(error: E, message: string): E => {
+  const named: E = Reflect.construct(error.constructor, [message]);
+  named.cause = error.cause;
+  return named;
 };
