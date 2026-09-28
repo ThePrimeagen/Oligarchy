@@ -1417,6 +1417,53 @@ describe("driver loop", () => {
       }),
   );
 
+  describe("a bad reply in the failure", () => {
+    // Not JSON: the closing brace is missing, after args, where a tool call's mistake usually is.
+    const unclosed = (marker: string): Response =>
+      sse([
+        frame({
+          choices: [
+            {
+              delta: {
+                content: `{"name":"client","arguments":{"step":1,"reason":"${"Open the Menu (Super+Space) and wait for the installer. ".repeat(5)}","args":["send-keys","--keys","${marker}"]}`,
+              },
+              finish_reason: null,
+            },
+          ],
+        }),
+        frame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+        "[DONE]",
+      ]);
+
+    it.effect("a long one is quoted by its start and its end, so its args still show", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(unclosed("ARGS-1"), unclosed("ARGS-2"), unclosed("ARGS-3")),
+        );
+        const log: Array<string> = [];
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+        expect(stopped).toEqual({ reason: "limit-reached" });
+        const failure = events(log).find((event) => event.kind === "failure")?.text ?? "";
+        expect(failure).toContain('(replied {"name":"client","arguments":{"step":1,"reason":"Open');
+        for (const marker of ["ARGS-1", "ARGS-2", "ARGS-3"]) {
+          expect(failure).toContain(`"args":["send-keys","--keys","${marker}"]})`);
+        }
+        expect(failure).toContain("…");
+      }),
+    );
+
+    it.effect("a short one is quoted whole (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(notACall(), notACall(), notACall()));
+        const log: Array<string> = [];
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), log);
+        const failure = events(log).find((event) => event.kind === "failure")?.text ?? "";
+        expect(failure).toContain("(replied hello)");
+        expect(failure).not.toContain("…");
+      }),
+    );
+  });
+
   it.effect("a refused OpenRouter request exits with the reason and stops the session", () =>
     Effect.gen(function* () {
       const recorder = routed(
