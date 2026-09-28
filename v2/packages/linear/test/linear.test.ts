@@ -69,6 +69,16 @@ describe.each(actions)("%s", (_, field, call) => {
     expect(Linear.retryable(error)).toBe(false);
     expect(sends(fake, field)).toBe(1);
   });
+
+  it("an answer of the wrong shape is an invalid response, from one send (unhappy)", async () => {
+    const fake = Fake.failing(field, [() => Fake.data({ [field]: "nope" })]);
+
+    const error = HttpFake.failure(await call(client(fake)), Http.HttpInvalid);
+
+    expect(error.message).toBe(`${WHERE}: linear: invalid response`);
+    expect(Linear.retryable(error)).toBe(false);
+    expect(sends(fake, field)).toBe(1);
+  });
 });
 
 describe("a 429", () => {
