@@ -1,3 +1,11 @@
+import type * as Db from "@oligarchy/db";
+import type * as jarl from "jarl";
+
+// Global so the store files name it without an import; any package importing this one sees it too.
+declare global {
+  type Answer<T> = Promise<jarl.Result<T, Db.DatabaseError>>;
+}
+
 export * as Actions from "./actions.ts";
 export * as Automation from "./automation.ts";
 export * as Diagnosis from "./diagnosis.ts";

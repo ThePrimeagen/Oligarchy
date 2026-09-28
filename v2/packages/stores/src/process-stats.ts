@@ -2,7 +2,6 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { sql } from "drizzle-orm";
-import type { Answer } from "./answer.ts";
 import type { ServerType } from "./servers.ts";
 
 // One heartbeat's word on a process: what the graphs plot.

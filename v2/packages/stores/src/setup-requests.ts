@@ -2,7 +2,6 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import type { Answer } from "./answer.ts";
 
 export type ResultStatus = (typeof DbSchema.testResults.$inferSelect)["status"];
 

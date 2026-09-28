@@ -2,7 +2,6 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import type { Answer } from "./answer.ts";
 
 // A qemu server boots guests; an automation-client is a host that announces itself the same way.
 export type ServerType = (typeof DbSchema.serverType.enumValues)[number];

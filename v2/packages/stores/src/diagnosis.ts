@@ -2,7 +2,6 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { eq } from "drizzle-orm";
-import type { Answer } from "./answer.ts";
 
 export type Verdict = (typeof DbSchema.diagnosisVerdict.enumValues)[number];
 

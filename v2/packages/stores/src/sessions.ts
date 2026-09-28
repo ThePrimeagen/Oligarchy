@@ -2,7 +2,6 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import type { Answer } from "./answer.ts";
 
 export type SessionStatus = (typeof DbSchema.sessionStatus.enumValues)[number];
 
