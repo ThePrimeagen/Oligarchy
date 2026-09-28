@@ -10,6 +10,7 @@ const WHERE = "POST https://api.example/graphql";
 
 const NoTeam = jarl.error.define("NoTeam");
 const RateLimited = jarl.error.define("RateLimited");
+const Unauthorized = jarl.error.define("Unauthorized");
 
 const init = {
   method: "POST",
@@ -60,6 +61,51 @@ describe("fetch", () => {
     })();
     expect(retried).toEqual(jarl.ok({ id: "team-1" }));
     expect(fake.asked).toHaveLength(3);
+  });
+
+  it.each([
+    [401, "Unauthorized", "bad key", "unauthorized: bad key"],
+    [429, "RateLimited", "slow down", "limited: slow down"],
+  ] as const)(
+    "looks up the handler of a %i among those named (sad)",
+    async (code, name, body, said) => {
+      const fake = Fake.http(Fake.status(code, body));
+
+      const team = await fake.http.fetch(URL, init, {
+        decode: decodeTeam,
+        status: {
+          401: (text) => new Unauthorized(`unauthorized: ${text}`),
+          429: (text) => new RateLimited(`limited: ${text}`),
+        },
+      });
+
+      const failed = Fake.failure(team, Error);
+      expect(failed.name).toBe(name);
+      expect(failed.message).toBe(said);
+    },
+  );
+
+  it("a handler that throws is HttpTranslationFailed, its cause what the handler threw (sad)", async () => {
+    const thrown = new SyntaxError("Unexpected token < in JSON");
+    const fake = Fake.http(Fake.status(429, "<html>"));
+
+    const team = await fake.http.fetch(URL, init, {
+      decode: decodeTeam,
+      status: {
+        429: (): InstanceType<typeof RateLimited> => {
+          throw thrown;
+        },
+      },
+    });
+
+    const failed = Fake.failure(team, Http.HttpTranslationFailed);
+    expect(failed.cause).toBe(thrown);
+    expect(failed.status).toBe(429);
+    expect(failed.message).toBe(
+      `${WHERE}: 429: translating the status failed: Unexpected token < in JSON`,
+    );
+    expect(String(failed)).not.toContain("s3cret");
+    expect(Http.retryable(failed)).toBe(false);
   });
 
   type Case = {
