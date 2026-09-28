@@ -1,17 +1,17 @@
+import * as HttpFake from "@oligarchy/http/testing";
 import * as z from "zod";
-import type * as Linear from "../src/main.ts";
 
 export type Asked = {
   readonly url: string;
   readonly method: string;
-  readonly headers: Headers;
+  readonly headers: Readonly<Record<string, string>>;
   // The query's first field, `teams` or `issueUpdate`: what the request asks for.
   readonly field: string;
   readonly query: string;
   readonly variables: Readonly<Record<string, unknown>>;
 };
 
-type Answer = (asked: Asked, signal: AbortSignal) => Response | Promise<Response>;
+type Answer = (asked: Asked) => HttpFake.Reply | Promise<HttpFake.Reply>;
 
 const Body = z.object({
   query: z.string(),
@@ -23,35 +23,26 @@ const fieldOf = (query: string): string => /\{\s*(\w+)/.exec(query)?.[1] ?? "";
 // A Linear answered by `answer`, keeping every request it was asked in the order it was asked.
 export const linear = (answer: Answer) => {
   const asked: Array<Asked> = [];
-  const fetch: Linear.Fetch = async (url, init) => {
-    const body = Body.parse(JSON.parse(z.string().parse(init.body)));
+  const { http } = HttpFake.http((request) => {
+    const body = Body.parse(request.body);
     const one: Asked = {
-      url,
-      method: init.method ?? "GET",
-      headers: new Headers(init.headers),
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
       field: fieldOf(body.query),
       query: body.query,
       variables: body.variables ?? {},
     };
     asked.push(one);
-    return answer(one, init.signal ?? new AbortController().signal);
-  };
-  return { asked, fetch };
+    return answer(one);
+  });
+  return { asked, http };
 };
 
-export const json = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-
-export const data = (value: unknown): Response => json({ data: value });
+export const data = (value: unknown): Response => HttpFake.json({ data: value });
 
 export const errors = (...messages: ReadonlyArray<string>): Response =>
-  json({ errors: messages.map((message) => ({ message })), data: null });
-
-// Settles only when the request's signal aborts, and then as fetch does: rejected with the reason.
-export const hang = (signal: AbortSignal): Promise<Response> =>
-  new Promise((_, reject) => {
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-  });
+  HttpFake.json({ errors: messages.map((message) => ({ message })), data: null });
 
 export const TICKET = {
   id: "issue-OLI-42",

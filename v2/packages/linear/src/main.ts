@@ -1,18 +1,22 @@
 import type * as App from "@oligarchy/app";
-import * as Async from "@oligarchy/async";
 import type * as Env from "@oligarchy/env";
+import * as Http from "@oligarchy/http";
 import * as jarl from "jarl";
 import * as z from "zod";
 import * as Queries from "./queries.ts";
 
+// Linear's own refusal: a GraphQL error, or a team, label, state or user the board lacks. Final.
 export const LinearError = jarl.error.define("LinearError");
 export type LinearError = InstanceType<typeof LinearError>;
 
-// Asking again could answer: no answer, no connection, a 429 or a 5xx.
-export const LinearUnavailable = jarl.error.define("LinearUnavailable");
-export type LinearUnavailable = InstanceType<typeof LinearUnavailable>;
+// Everything else is the request's own failure, as Http made it.
+export type LinearFailure = LinearError | Http.HttpFailure;
 
-type Answer<T> = Promise<jarl.Result<T, LinearError | LinearUnavailable>>;
+// Asking again could answer.
+export const retryable = (error: LinearFailure): boolean =>
+  !jarl.error.is(error, LinearError) && Http.retryable(error);
+
+type Answer<T> = Promise<jarl.Result<T, LinearFailure>>;
 
 export const AGENT_TEST_LABEL = "agent test";
 export const ASSIGNEE_EMAIL = "prime@terminal.shop";
@@ -43,8 +47,6 @@ export type CreateIssueInput = {
 };
 
 export type WorkflowStateIds = { readonly backlog: string; readonly automationNeeded: string };
-
-export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 export type Linear = {
   readonly service: "linear";
@@ -101,56 +103,15 @@ const Issues = z.object({
 
 const refused = (message: string) => jarl.err(new LinearError(message));
 
-const invalid = (cause?: unknown) => {
-  const error = new LinearError("linear: invalid response");
-  error.cause = cause;
-  return jarl.err(error);
-};
+const INVALID = "linear: invalid response";
 
-const first = (found: z.infer<typeof Nodes>, missing: string) => {
-  const node = found.nodes[0];
-  return node === undefined ? refused(missing) : jarl.ok(node.id);
-};
+const invalid = (cause?: unknown) => jarl.err(new Http.HttpInvalid(INVALID, { cause }));
 
-export const create = (options: {
-  readonly token: Pick<Env.Secret, "reveal">;
-  readonly team: string;
-  readonly apiUrl: string;
-  readonly fetch?: Fetch;
-}): Linear => {
-  const { token, team, apiUrl, fetch: send = fetch } = options;
-
-  const ask = async <S extends z.ZodType>(
-    query: string,
-    variables: Readonly<Record<string, unknown>>,
-    shape: S,
-    signal: AbortSignal,
-  ): Answer<z.infer<S>> => {
-    let response: Response;
-    try {
-      response = await send(apiUrl, {
-        method: "POST",
-        // Linear personal API keys take no `Bearer`.
-        headers: { Authorization: token.reveal(), "Content-Type": "application/json" },
-        body: JSON.stringify({ query, variables }),
-        signal,
-      });
-    } catch (caught) {
-      const error = new LinearUnavailable("linear: request failed");
-      error.cause = caught;
-      return jarl.err(error);
-    }
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      const message = `linear: request failed (${String(response.status)})${text === "" ? "" : `: ${text}`}`;
-      const busy = response.status === 429 || (response.status >= 500 && response.status < 600);
-      return jarl.err(busy ? new LinearUnavailable(message) : new LinearError(message));
-    }
-    const body = await jarl.parseJSON(response.text());
-    if (!body.ok) {
-      return invalid(body.error);
-    }
-    const envelope = Envelope.safeParse(body.value);
+// Reads a GraphQL answer: its errors are Linear's refusal, and its data must be shape.
+const decoder =
+  <S extends z.ZodType>(shape: S) =>
+  (body: unknown): jarl.Result<z.infer<S>, LinearError | Http.HttpInvalid> => {
+    const envelope = Envelope.safeParse(body);
     if (!envelope.success) {
       return invalid(envelope.error);
     }
@@ -162,18 +123,35 @@ export const create = (options: {
     return decoded.success ? jarl.ok(decoded.data) : invalid(decoded.error);
   };
 
-  const request = async <S extends z.ZodType>(
+const first = (found: z.infer<typeof Nodes>, missing: string) => {
+  const node = found.nodes[0];
+  return node === undefined ? refused(missing) : jarl.ok(node.id);
+};
+
+export const create = (options: {
+  readonly token: Pick<Env.Secret, "reveal">;
+  readonly team: string;
+  readonly apiUrl: string;
+  readonly http: Http.Http;
+}): Linear => {
+  const { token, team, apiUrl, http } = options;
+
+  const request = <S extends z.ZodType>(
     query: string,
     variables: Readonly<Record<string, unknown>>,
     shape: S,
-  ): Answer<z.infer<S>> => {
-    const answer = await Async.timeout((signal) => ask(query, variables, shape, signal), {
-      ms: TIMEOUT_MS,
-    });
-    return jarl.error.is(answer, Async.TimedOut)
-      ? jarl.err(new LinearUnavailable("linear: request failed: no answer within 10 seconds"))
-      : answer;
-  };
+  ): Answer<z.infer<S>> =>
+    http.fetch(
+      apiUrl,
+      {
+        method: "POST",
+        // Linear personal API keys take no `Bearer`.
+        headers: { Authorization: token.reveal(), "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+        timeoutMs: TIMEOUT_MS,
+      },
+      { decode: decoder(shape) },
+    );
 
   const update = async (
     id: string,

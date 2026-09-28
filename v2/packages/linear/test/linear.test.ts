@@ -1,3 +1,5 @@
+import * as Http from "@oligarchy/http";
+import * as HttpFake from "@oligarchy/http/testing";
 import * as jarl from "jarl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Linear from "../src/main.ts";
@@ -6,39 +8,38 @@ import * as Fake from "./fake.ts";
 const TOKEN = "linear-token-s3ntinel";
 const TEAM = "Fixture Team";
 const API = "https://linear.example/graphql";
+const WHERE = `POST ${API}`;
 
-const client = (fake: { readonly fetch: Linear.Fetch }, team = TEAM) =>
-  Linear.create({ token: { reveal: () => TOKEN }, team, apiUrl: API, fetch: fake.fetch });
+const client = (fake: { readonly http: Http.Http }, team = TEAM) =>
+  Linear.create({ token: { reveal: () => TOKEN }, team, apiUrl: API, http: fake.http });
 
 const sent = (fake: { readonly asked: ReadonlyArray<Fake.Asked> }) =>
   fake.asked.map((asked) => ({ field: asked.field, variables: asked.variables }));
 
-type Failed = Linear.LinearError | Linear.LinearUnavailable;
+type Ctor<C> = abstract new (...args: never[]) => C;
 
-const failure = <T>(result: jarl.Result<T, Failed>): Failed => {
-  if (result.ok) {
-    throw new Error(`expected a failure, got ${JSON.stringify(result.value)}`);
-  }
-  return result.error;
+// The result failed with an error of `error` saying `message`, and asking again is `retryable`.
+const failed = (
+  result: jarl.Result<unknown, Linear.LinearFailure>,
+  error: Ctor<Linear.LinearFailure>,
+  message: string,
+  retryable: boolean,
+) => {
+  const found = HttpFake.failure(result, error);
+  expect(found.message).toBe(message);
+  expect(Linear.retryable(found)).toBe(retryable);
+  return found;
 };
 
-const refused = <T>(result: jarl.Result<T, Failed>, message: string) => {
-  const error = failure(result);
-  expect(jarl.error.is(error, Linear.LinearError)).toBe(true);
-  expect(error.message).toBe(message);
-};
-
-const unavailable = <T>(result: jarl.Result<T, Failed>, message: string) => {
-  const error = failure(result);
-  expect(jarl.error.is(error, Linear.LinearUnavailable)).toBe(true);
-  expect(error.message).toBe(message);
-};
+// Linear's own refusal: final.
+const refused = (result: jarl.Result<unknown, Linear.LinearFailure>, message: string) =>
+  failed(result, Linear.LinearError, message, false);
 
 // Answers the requests for `field` with `answer`, and every other request as a full board does.
 const except =
-  (field: string, answer: (asked: Fake.Asked) => Response | Promise<Response>) =>
-  (asked: Fake.Asked, signal: AbortSignal) =>
-    asked.field === field ? answer(asked) : Fake.happy(asked, signal);
+  (field: string, answer: (asked: Fake.Asked) => HttpFake.Reply | Promise<HttpFake.Reply>) =>
+  (asked: Fake.Asked) =>
+    asked.field === field ? answer(asked) : Fake.happy(asked);
 
 const track = <T>(promise: Promise<T>) => {
   const state: { settled: boolean; value: T | undefined } = { settled: false, value: undefined };
@@ -74,8 +75,8 @@ describe("creating a ticket", () => {
       expect(asked.url).toBe(API);
       expect(asked.method).toBe("POST");
       // Linear personal API keys take no `Bearer`.
-      expect(asked.headers.get("authorization")).toBe(TOKEN);
-      expect(asked.headers.get("content-type")).toBe("application/json");
+      expect(asked.headers["authorization"]).toBe(TOKEN);
+      expect(asked.headers["content-type"]).toBe("application/json");
     }
     expect(sent(fake)).toEqual([
       { field: "teams", variables: { name: TEAM } },
@@ -107,11 +108,13 @@ describe("creating a ticket", () => {
   });
 
   it("stops at the first label it cannot find, asking nothing more (unhappy)", async () => {
-    const fake = Fake.linear(except("issueLabels", () => new Response("busy", { status: 503 })));
+    const fake = Fake.linear(except("issueLabels", () => HttpFake.status(503, "busy")));
 
-    unavailable(
+    failed(
       await client(fake).labelIds("team-id", "1.2.3"),
-      "linear: request failed (503): busy",
+      Http.HttpServerError,
+      `${WHERE}: 503: busy`,
+      true,
     );
     expect(fake.asked).toHaveLength(1);
   });
@@ -124,14 +127,14 @@ describe("creating a ticket", () => {
   });
 
   it("refuses a label Linear did not create (unhappy)", async () => {
-    const fake = Fake.linear((asked, signal) => {
+    const fake = Fake.linear((asked) => {
       if (asked.field === "issueLabels") {
         return Fake.noNodes("issueLabels");
       }
       if (asked.field === "issueLabelCreate") {
         return Fake.data({ issueLabelCreate: { success: false, issueLabel: null } });
       }
-      return Fake.happy(asked, signal);
+      return Fake.happy(asked);
     });
 
     refused(await client(fake).labelIds("team-id", "1.2.3"), "linear: label creation failed");
@@ -155,7 +158,7 @@ describe("creating a ticket", () => {
       except("workflowStates", (asked) =>
         asked.variables["name"] === "Automation Needed"
           ? Fake.noNodes("workflowStates")
-          : Fake.happy(asked, new AbortController().signal),
+          : Fake.happy(asked),
       ),
     );
 
@@ -192,68 +195,41 @@ describe("what a failed request says", () => {
     vi.useRealTimers();
   });
 
-  it.each([503, 429])("a %i is worth asking again, and is sent once (unhappy)", async (status) => {
-    const fake = Fake.linear(() => new Response("busy", { status }));
+  // Linear adds nothing to a failure of the request itself: it comes back as Http made it, from
+  // one request, and retryable says whether asking again could answer.
+  it.each([
+    ["a 5xx", HttpFake.status(503, "busy"), Http.HttpServerError, `${WHERE}: 503: busy`, true],
+    [
+      "a 429",
+      HttpFake.status(429, "slow down"),
+      Http.HttpUnhandled,
+      `${WHERE}: 429: slow down`,
+      true,
+    ],
+    [
+      "a 400",
+      HttpFake.status(400, "bad query"),
+      Http.HttpBadRequest,
+      `${WHERE}: 400: bad query`,
+      false,
+    ],
+    [
+      "a 401",
+      HttpFake.status(401, "unauthorized"),
+      Http.HttpUnhandled,
+      `${WHERE}: 401: unauthorized`,
+      false,
+    ],
+    ["no connection", "unreachable", Http.HttpUnreachable, `${WHERE}: fetch failed`, true],
+  ] as const)(
+    "%s comes back as it is, from one request (unhappy)",
+    async (_, reply, error, message, retryable) => {
+      const fake = Fake.linear(() => reply);
 
-    unavailable(await client(fake).teamId(), `linear: request failed (${String(status)}): busy`);
-    expect(fake.asked).toHaveLength(1);
-  });
-
-  it("a status past 5xx is not worth asking again (unhappy)", async () => {
-    // Response refuses to be built with a status above 599, but fetch hands one through from a server.
-    const past = () =>
-      Object.defineProperty(new Response("odd", { status: 599 }), "status", { value: 600 });
-
-    refused(await client(Fake.linear(past)).teamId(), "linear: request failed (600): odd");
-  });
-
-  it("a refusal is not worth asking again and carries the status and body (unhappy)", async () => {
-    const fake = Fake.linear(() => new Response("unauthorized", { status: 401 }));
-
-    refused(await client(fake).teamId(), "linear: request failed (401): unauthorized");
-  });
-
-  it("a failure with no body has no trailing colon (unhappy)", async () => {
-    refused(
-      await client(Fake.linear(() => new Response(null, { status: 404 }))).teamId(),
-      "linear: request failed (404)",
-    );
-    unavailable(
-      await client(Fake.linear(() => new Response(null, { status: 500 }))).teamId(),
-      "linear: request failed (500)",
-    );
-  });
-
-  it("a body that breaks off mid-read is an invalid response (unhappy)", async () => {
-    const broken = () =>
-      new Response(
-        new ReadableStream({
-          start: (controller) => {
-            controller.enqueue(new TextEncoder().encode('{"data":'));
-            controller.error(new Error("socket hang up"));
-          },
-        }),
-      );
-
-    refused(await client(Fake.linear(broken)).teamId(), "linear: invalid response");
-  });
-
-  it("a body that never finishes is no answer within ten seconds (unhappy)", async () => {
-    vi.useFakeTimers();
-    const stalled = () =>
-      new Response(
-        new ReadableStream({
-          start: (controller) => {
-            controller.enqueue(new TextEncoder().encode('{"data":'));
-          },
-        }),
-      );
-
-    const asked = client(Fake.linear(stalled)).teamId();
-    await vi.advanceTimersByTimeAsync(10_000);
-
-    unavailable(await asked, "linear: request failed: no answer within 10 seconds");
-  });
+      failed(await client(fake).teamId(), error, message, retryable);
+      expect(fake.asked).toHaveLength(1);
+    },
+  );
 
   it("GraphQL errors are joined and are not worth asking again (unhappy)", async () => {
     const fake = Fake.linear(() => Fake.errors("API key has no access", "and more"));
@@ -262,54 +238,37 @@ describe("what a failed request says", () => {
   });
 
   it.each([
-    ["a body that is not JSON", () => new Response("<html>", { status: 200 })],
-    ["JSON without data", () => Fake.json({})],
-    ["data of the wrong shape", () => Fake.data({ teams: "nope" })],
-  ])("%s is an invalid response (unhappy)", async (_, answer) => {
-    refused(await client(Fake.linear(answer)).teamId(), "linear: invalid response");
+    ["a body that is not JSON", () => HttpFake.status(200, "<html>"), "body is not JSON"],
+    ["JSON without data", () => HttpFake.json({}), "linear: invalid response"],
+    ["an envelope that is not GraphQL's", () => HttpFake.json([]), "linear: invalid response"],
+    ["data of the wrong shape", () => Fake.data({ teams: "nope" }), "linear: invalid response"],
+  ])("%s is an invalid response (unhappy)", async (_, answer, reason) => {
+    const error = HttpFake.failure(await client(Fake.linear(answer)).teamId(), Http.HttpInvalid);
+    expect(error.message).toContain(`${WHERE}: ${reason}`);
+    expect(Linear.retryable(error)).toBe(false);
   });
 
-  it("a request that never reaches Linear is worth asking again and keeps why (unhappy)", async () => {
-    const why = new TypeError("connect ECONNREFUSED 127.0.0.1:1");
-    const fake = Fake.linear(() => {
-      throw why;
-    });
-
-    const result = await client(fake).teamId();
-
-    unavailable(result, "linear: request failed");
-    expect(failure(result).cause).toBe(why);
-  });
-
-  it("no answer within ten seconds is worth asking again, and the request is dropped (unhappy)", async () => {
+  it("no answer within ten seconds is worth asking again (unhappy)", async () => {
     vi.useFakeTimers();
-    let seen: AbortSignal | undefined;
-    const fake = Fake.linear((_, signal) => {
-      seen = signal;
-      return Fake.hang(signal);
-    });
-
-    const asked = client(fake).teamId();
+    const asked = client(Fake.linear(() => "hang")).teamId();
     const result = track(asked);
     await vi.advanceTimersByTimeAsync(9_999);
     expect(result.settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
 
-    unavailable(await asked, "linear: request failed: no answer within 10 seconds");
-    expect(seen?.aborted).toBe(true);
+    failed(await asked, Http.HttpTimedOut, `${WHERE}: no answer within 10000 ms`, true);
   });
 
   it("the token appears in no error (unhappy)", async () => {
-    const answers: ReadonlyArray<() => Response> = [
-      () => new Response(`bad key ${"*".repeat(4)}`, { status: 401 }),
+    const answers: ReadonlyArray<() => HttpFake.Reply> = [
+      () => HttpFake.status(401, `bad key ${"*".repeat(4)}`),
       () => Fake.errors("Authentication required"),
-      () => new Response("<html>"),
-      () => {
-        throw new TypeError("fetch failed");
-      },
+      () => HttpFake.status(200, "<html>"),
+      () => "unreachable",
     ];
     for (const answer of answers) {
-      const error = failure(await client(Fake.linear(answer)).teamId());
+      const result = await client(Fake.linear(answer)).teamId();
+      const error = HttpFake.failure(result, Error);
       const rendered = `${error.message}\n${String(error.stack)}\n${String(error.cause)}\n${JSON.stringify(error)}`;
       expect(rendered).not.toContain(TOKEN);
     }
@@ -409,12 +368,12 @@ describe("the ready label", () => {
     const fake = Fake.linear(
       except("teams", () => {
         teams += 1;
-        return teams === 1 ? new Response("busy", { status: 503 }) : Fake.team();
+        return teams === 1 ? HttpFake.status(503, "busy") : Fake.team();
       }),
     );
     const linear = client(fake);
 
-    unavailable(await linear.markReady("OLI-45"), "linear: request failed (503): busy");
+    failed(await linear.markReady("OLI-45"), Http.HttpServerError, `${WHERE}: 503: busy`, true);
     expect(await linear.markReady("OLI-46")).toEqual(jarl.ok(undefined));
     expect(teams).toBe(2);
   });
@@ -460,7 +419,7 @@ describe("listing tickets", () => {
   it("a further page without a cursor is an invalid response (unhappy)", async () => {
     const fake = Fake.linear(except("issues", () => Fake.page([], null)));
 
-    refused(await client(fake).listBacklog(), "linear: invalid response");
+    failed(await client(fake).listBacklog(), Http.HttpInvalid, "linear: invalid response", false);
     expect(fake.asked).toHaveLength(2);
   });
 
@@ -469,11 +428,11 @@ describe("listing tickets", () => {
       except("issues", (asked) =>
         asked.variables["after"] === undefined
           ? Fake.page([ticket(1)], "cursor-1")
-          : new Response("busy", { status: 503 }),
+          : HttpFake.status(503, "busy"),
       ),
     );
 
-    unavailable(await client(fake).listBacklog(), "linear: request failed (503): busy");
+    failed(await client(fake).listBacklog(), Http.HttpServerError, `${WHERE}: 503: busy`, true);
     expect(fake.asked).toHaveLength(3);
   });
 
