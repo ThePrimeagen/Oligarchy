@@ -1459,8 +1459,14 @@ describe("driver loop", () => {
           : TestingHttp.json({ ok: "true" });
       });
       const log: Array<string> = [];
-      const error = yield* Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), log));
+      // A refused connection is sent again twice, a second apart, before it is the loop's failure.
+      const fiber = yield* Effect.forkChild(
+        Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), log)),
+      );
+      yield* TestClock.adjust("1 minute");
+      const error = yield* Fiber.join(fiber);
       expect(error._tag).toBe("OpenRouterUnreachable");
+      expect(modelRequests(recorder.requests)).toHaveLength(3);
       expect(guestPaths(recorder.requests)).toEqual(["/start", "/intent/start", "/stop"]);
       expect(events(log).some((event) => event.kind === "failure")).toBe(true);
       expect(log.join("")).not.toContain(TOKEN);
