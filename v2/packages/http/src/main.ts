@@ -83,8 +83,9 @@ export type HttpFailure =
   | HttpInvalid
   | Async.Aborted;
 
-// Asking again could answer.
-export const retryable = (error: HttpFailure): boolean =>
+// Asking again could answer. Any error may be asked about, so a caller whose union holds its own
+// errors beside Http's needs no guard first; one that is not Http's is not worth asking again.
+export const retryable = (error: unknown): boolean =>
   jarl.error.is(error, HttpUnreachable) ||
   jarl.error.is(error, HttpTimedOut) ||
   jarl.error.is(error, HttpServerError) ||

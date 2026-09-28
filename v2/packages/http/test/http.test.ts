@@ -138,6 +138,10 @@ describe("fetch", () => {
     },
   ];
 
+  it("an error that is not Http's is not worth asking again, so a caller's own errors can be asked about (sad)", () => {
+    expect(Http.retryable(new NoTeam("no team"))).toBe(false);
+  });
+
   it.each(cases)("$name (sad)", async ({ reply, signal, error, said, retryable }) => {
     const fake = Fake.http(reply, { timeoutMs: 5 });
 
