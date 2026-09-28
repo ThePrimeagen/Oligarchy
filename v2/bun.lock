@@ -108,8 +108,8 @@
       "name": "@oligarchy/linear",
       "dependencies": {
         "@oligarchy/app": "workspace:*",
-        "@oligarchy/async": "workspace:*",
         "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
         "jarl": "catalog:",
         "zod": "catalog:",
       },
@@ -517,8 +517,6 @@
     "@oligarchy/fake-postgres/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/fleet/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
-
-    "@oligarchy/http/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/logger/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
