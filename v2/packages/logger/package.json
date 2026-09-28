@@ -1,5 +1,5 @@
 {
-  "name": "@oligarchy/log",
+  "name": "@oligarchy/logger",
   "private": true,
   "type": "module",
   "exports": {

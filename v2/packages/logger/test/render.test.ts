@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type * as Log from "../src/main.ts";
+import type * as Logger from "../src/main.ts";
 import * as Render from "../src/render.ts";
 
 // The words a coloured line says, with its colour sequences taken out.
@@ -7,7 +7,7 @@ import * as Render from "../src/render.ts";
 const words = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("a log line", () => {
-  it.each<[Log.Level, string]>([
+  it.each<[Logger.Level, string]>([
     ["info", "[INFO]"],
     ["warning", "[WARN]"],
     ["error", "[ERROR]"],

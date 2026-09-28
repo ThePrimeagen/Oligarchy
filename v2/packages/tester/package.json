@@ -14,7 +14,7 @@
     "@oligarchy/app": "workspace:*",
     "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
-    "@oligarchy/log": "workspace:*",
+    "@oligarchy/logger": "workspace:*",
     "@oligarchy/stores": "workspace:*",
     "drizzle-orm": "catalog:",
     "jarl": "catalog:"

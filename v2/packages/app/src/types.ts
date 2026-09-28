@@ -5,7 +5,7 @@ import type { Services } from "./services.ts";
 // Any registered service: a fixed `service` name and its operations.
 export type AnyService = Services[keyof Services];
 
-// Services filed under their own names: Needs<Log | Database> is { log: Log; db: Database }.
+// Services filed under their own names: Needs<Logger | Database> is { logger: Logger; db: Database }.
 export type Needs<T extends AnyService> = { readonly [S in T as S["service"]]: S };
 
 // An entry in Services, whose key must be the service's own name.

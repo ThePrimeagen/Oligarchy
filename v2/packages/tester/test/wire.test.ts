@@ -40,8 +40,8 @@ describe("the tester's services", () => {
   it("a line is printed and lands in the logs table (happy)", async () => {
     const { lines, services } = await wired();
 
-    services.log.warning("failing tests: 2", { location: "tester" });
-    await services.log.flush();
+    services.logger.warning("failing tests: 2", { location: "tester" });
+    await services.logger.flush();
 
     expect(lines).toEqual(["[WARN] [global] tester: failing tests: 2"]);
     expect(await stored(services)).toEqual([["warning", "tester", "failing tests: 2"]]);
@@ -49,15 +49,15 @@ describe("the tester's services", () => {
 
   it("when the database shuts down, the dropped connection and the refused insert are both said, and lines still print (unhappy)", async () => {
     const { fake, lines, services } = await wired();
-    services.log.info("before", { location: "tester" });
-    await services.log.flush();
+    services.logger.info("before", { location: "tester" });
+    await services.logger.flush();
 
     await fake.stop();
     await vi.waitFor(() => {
       expect(lines.some((line) => line.startsWith("[ERROR] [global] db: pool error: "))).toBe(true);
     });
-    services.log.info("after", { location: "tester" });
-    await services.log.flush();
+    services.logger.info("after", { location: "tester" });
+    await services.logger.flush();
 
     const afterAt = lines.indexOf("[INFO] [global] tester: after");
     expect(afterAt).toBeGreaterThan(0);

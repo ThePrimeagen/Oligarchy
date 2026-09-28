@@ -1,20 +1,20 @@
 import * as Db from "@oligarchy/db";
-import * as Log from "@oligarchy/log";
+import * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import { report } from "../src/report.ts";
 
 const logging = () => {
   const lines: Array<string> = [];
-  const log = Log.create({ write: (line) => lines.push(line), colors: false });
-  return { lines, log };
+  const logger = Logger.create({ write: (line) => lines.push(line), colors: false });
+  return { lines, logger };
 };
 
 describe("the tester's report", () => {
   it("says the running suites and the passing and failing tests as info when nothing fails (happy)", () => {
-    const { lines, log } = logging();
+    const { lines, logger } = logging();
 
-    const reported = report(log, jarl.ok({ running: 2, passing: 5, failing: 0 }));
+    const reported = report(logger, jarl.ok({ running: 2, passing: 5, failing: 0 }));
 
     expect(reported.ok).toBe(true);
     expect(lines).toEqual([
@@ -25,18 +25,18 @@ describe("the tester's report", () => {
   });
 
   it("failing tests are a warning (unhappy)", () => {
-    const { lines, log } = logging();
+    const { lines, logger } = logging();
 
-    report(log, jarl.ok({ running: 0, passing: 5, failing: 3 }));
+    report(logger, jarl.ok({ running: 0, passing: 5, failing: 3 }));
 
     expect(lines.at(-1)).toBe("[WARN] [global] tester: failing tests: 3");
   });
 
   it("a database that cannot count is an error line, and the error comes back (unhappy)", () => {
-    const { lines, log } = logging();
+    const { lines, logger } = logging();
     const refused = new Db.DatabaseError("Failed query: select count(*): connect ECONNREFUSED");
 
-    const reported = report(log, jarl.err(refused));
+    const reported = report(logger, jarl.err(refused));
 
     expect(lines).toEqual([
       "[ERROR] [global] tester: could not count tests: Failed query: select count(*): connect ECONNREFUSED",

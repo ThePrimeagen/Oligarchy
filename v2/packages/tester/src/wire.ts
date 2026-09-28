@@ -1,6 +1,6 @@
 import * as Db from "@oligarchy/db";
 import * as Env from "@oligarchy/env";
-import * as Log from "@oligarchy/log";
+import * as Logger from "@oligarchy/logger";
 import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 
@@ -14,7 +14,7 @@ export const environment = Env.cli({
 export type Wired = {
   readonly db: Db.Database;
   readonly logs: Stores.Logs.Logs;
-  readonly log: Log.Log;
+  readonly logger: Logger.Logger;
 };
 
 // Every line is printed and stored in the logs table; a connection the database drops is a line
@@ -27,13 +27,17 @@ export const wire = (options: {
   const db = Db.open({
     url: options.url,
     onPoolError: (error) => {
-      log.error(`db: pool error: ${error.message}`);
+      logger.error(`db: pool error: ${error.message}`);
     },
   });
   if (!db.ok) {
     return db;
   }
   const logs = Stores.Logs.create(db.value);
-  const log = Log.create({ write: options.write, colors: options.colors, store: logs.insertLog });
-  return jarl.ok({ db: db.value, logs, log });
+  const logger = Logger.create({
+    write: options.write,
+    colors: options.colors,
+    store: logs.insertLog,
+  });
+  return jarl.ok({ db: db.value, logs, logger });
 };

@@ -2,19 +2,19 @@ import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import * as Env from "@oligarchy/env";
-import type * as Log from "@oligarchy/log";
+import type * as Logger from "@oligarchy/logger";
 import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
 import { report } from "./report.ts";
 import { environment, wire } from "./wire.ts";
 
-const main = async (app: App.App<unknown, Db.Database | Log.Log>) => {
+const main = async (app: App.App<unknown, Db.Database | Logger.Logger>) => {
   const counted = await app.services.db.run(async (db) => ({
     running: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "running")),
     passing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "passed")),
     failing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "failed")),
   }));
-  return report(app.services.log, counted);
+  return report(app.services.logger, counted);
 };
 
 const created = await Env.create(environment);
@@ -45,7 +45,7 @@ if (!wired.ok) {
 const app = new App.App(created.value, wired.value);
 app.onExit(async () => {
   // Every line waits on its insert, so the pool stays open until the last one lands.
-  await app.services.log.flush();
+  await app.services.logger.flush();
   const closed = await app.services.db.close();
   if (!closed.ok) {
     process.stderr.write(`${closed.error.message}\n`);

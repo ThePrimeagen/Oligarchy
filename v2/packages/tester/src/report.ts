@@ -1,5 +1,5 @@
 import type * as Db from "@oligarchy/db";
-import type * as Log from "@oligarchy/log";
+import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
 
 export type Counts = {
@@ -11,16 +11,16 @@ export type Counts = {
 const AS = { location: "tester" } as const;
 
 export const report = (
-  log: Log.Log,
+  logger: Logger.Logger,
   counted: jarl.Result<Counts, Db.DatabaseError>,
 ): jarl.Result<void, Db.DatabaseError> => {
   if (!counted.ok) {
-    log.error(`could not count tests: ${counted.error.message}`, AS);
+    logger.error(`could not count tests: ${counted.error.message}`, AS);
     return counted;
   }
   const { running, passing, failing } = counted.value;
-  log.info(`running test suites: ${String(running)}`, AS);
-  log.info(`passing tests: ${String(passing)}`, AS);
-  (failing > 0 ? log.warning : log.info)(`failing tests: ${String(failing)}`, AS);
+  logger.info(`running test suites: ${String(running)}`, AS);
+  logger.info(`passing tests: ${String(passing)}`, AS);
+  (failing > 0 ? logger.warning : logger.info)(`failing tests: ${String(failing)}`, AS);
   return jarl.ok(undefined);
 };

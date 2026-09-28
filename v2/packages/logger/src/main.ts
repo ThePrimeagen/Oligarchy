@@ -19,8 +19,8 @@ export type Store = (row: Row) => Promise<jarl.Result<void, { readonly message: 
 
 type Write = (text: string, attribution?: Attribution) => void;
 
-export type Log = {
-  readonly service: "log";
+export type Logger = {
+  readonly service: "logger";
   readonly info: Write;
   readonly warning: Write;
   readonly error: Write;
@@ -30,7 +30,7 @@ export type Log = {
 
 declare module "@oligarchy/app" {
   interface Services {
-    log: App.Register<"log", Log>;
+    logger: App.Register<"logger", Logger>;
   }
 }
 
@@ -45,7 +45,7 @@ export const create = (options: {
   readonly colors: boolean;
   readonly store?: Store;
   readonly now?: () => number;
-}): Log => {
+}): Logger => {
   const { write, colors, store } = options;
   const now = options.now ?? Date.now;
   let palette = Palette.empty;
@@ -95,7 +95,7 @@ export const create = (options: {
     };
 
   return {
-    service: "log",
+    service: "logger",
     info: emit("info"),
     warning: emit("warning"),
     error: emit("error"),

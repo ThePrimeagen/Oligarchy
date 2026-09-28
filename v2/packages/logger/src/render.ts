@@ -1,4 +1,4 @@
-import type * as Log from "./main.ts";
+import type * as Logger from "./main.ts";
 
 export const ROSE_PINE_MAIN = {
   love: "#eb6f92",
@@ -26,7 +26,7 @@ const paint = (hex: string, text: string, colors: boolean): string =>
 
 export type Line = {
   readonly text: string;
-  readonly level: Log.Level;
+  readonly level: Logger.Level;
   readonly location?: string;
   readonly agentId?: string;
   readonly color?: string;
@@ -34,7 +34,7 @@ export type Line = {
 
 // An error's words are as red as its label; a warning keeps its words white.
 const LEVELS: Readonly<
-  Record<Log.Level, { readonly label: string; readonly color: string; readonly text: string }>
+  Record<Logger.Level, { readonly label: string; readonly color: string; readonly text: string }>
 > = {
   info: { label: "[INFO]", color: ROSE_PINE_MAIN.text, text: ROSE_PINE_MAIN.text },
   warning: { label: "[WARN]", color: ROSE_PINE_MAIN.gold, text: ROSE_PINE_MAIN.text },
