@@ -9,8 +9,8 @@ export class OpenRouterRefused extends jarl.error.define("OpenRouterRefused") {
   }
 }
 
-// No completion came: nothing answered, the stream broke or was not a completion, or the provider
-// failed in a way asking again will not mend.
+// No completion came: nothing answered, the answer was not a completion, or the provider failed
+// in a way asking again will not mend.
 export const OpenRouterUnreachable = jarl.error.define("OpenRouterUnreachable");
 export type OpenRouterUnreachable = InstanceType<typeof OpenRouterUnreachable>;
 
