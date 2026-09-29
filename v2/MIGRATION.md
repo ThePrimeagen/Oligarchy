@@ -20,12 +20,12 @@ meet plus one happy path, and every service is faked except the database.
 
 ## 1. Services to write
 
-- [ ] **Debug logs store** (`v2/packages/stores/src/debug-logs.ts`). V1:
+- [x] **Debug logs store** (`v2/packages/stores/src/debug-logs.ts`). V1:
       `packages/db/src/debug-logs.ts`. `saveDebugLog(jobId, { serial, qemu })` gathers the job's
       actions and log lines, keeps the last megabyte of each source, and writes one `debug_logs`
-      row; `getDebugLog(jobId)` reads it. The table is already in V2's schema. Logs are keyed by
-      test run, not job, so decide whether a job's debug log takes every line of its run or only
-      the lines written while the job ran.
+      row; `getDebugLog(jobId)` reads it. Logs are keyed by test run, so a job takes its run's
+      lines from when it was queued until the run's next job was queued, or until now for the
+      newest.
 - [ ] **OpenRouter client.** V1: `src/harness/openrouter.ts`. The driver's model call, on
       `@oligarchy/http`, with `OPENROUTER_API_KEY` and the models, reasoning efforts and timeouts
       that V2's env already reads from `oligarchy.json`. Its fake produces every error: a refusal,
