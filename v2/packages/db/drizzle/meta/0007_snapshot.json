@@ -1,6 +1,6 @@
 {
-  "id": "b4272b2e-0821-4b13-ba20-6a14d626f425",
-  "prevId": "4fa9437c-ffb8-4163-9639-93d9d822570a",
+  "id": "5cb7fc15-8ce7-4826-b375-f24b0825d943",
+  "prevId": "239ddaf9-c59e-44c5-8afd-06852fe806ab",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1023,12 +1023,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "linear_id": {
-          "name": "linear_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "status": {
           "name": "status",
           "type": "test_run_status",
@@ -1069,21 +1063,6 @@
             },
             {
               "expression": "definition_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "test_runs_linear_id_idx": {
-          "name": "test_runs_linear_id_idx",
-          "columns": [
-            {
-              "expression": "linear_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
