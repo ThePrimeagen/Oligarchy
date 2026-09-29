@@ -39,14 +39,12 @@ const statusError = <const Name extends string>(name: Name) =>
     readonly asked: Asked;
     readonly status: number;
     readonly body: string;
-    readonly headers: Headers;
-    constructor(asked: Asked, status: number, body: string, headers: Headers) {
+    constructor(asked: Asked, status: number, body: string) {
       const kept = body.slice(0, BODY_LIMIT);
       super(`${where(asked)}: ${String(status)}${kept === "" ? "" : `: ${kept}`}`);
       this.asked = asked;
       this.status = status;
       this.body = kept;
-      this.headers = headers;
     }
   };
 
@@ -96,16 +94,15 @@ type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 // The statuses every call already answers: a 2xx goes to decode, the rest have their own error.
 type Reserved = "400" | "404" | `2${Digit}${Digit}` | `5${Digit}${Digit}`;
 
-// Both are handed the response's headers beside its body.
-type Decode = (body: unknown, headers: Headers) => jarl.Result<unknown, unknown>;
-type Statuses = { readonly [code: number]: (body: string, headers: Headers) => Error };
+type Decode = (body: unknown) => jarl.Result<unknown, unknown>;
+type Statuses = { readonly [code: number]: (body: string) => Error };
 type Checked<S> = {
   readonly [K in keyof S]: `${K & (string | number)}` extends Reserved ? never : S[K];
 };
 
 type ValueOf<R> = R extends { readonly ok: true; readonly value: infer T } ? T : never;
 type ErrorOf<R> = R extends { readonly ok: false; readonly error: infer E } ? E : never;
-type Raised<F> = F extends (body: string, headers: Headers) => infer E ? E : never;
+type Raised<F> = F extends (body: string) => infer E ? E : never;
 
 export type Init = RequestInit & { readonly timeoutMs?: number };
 
@@ -174,19 +171,10 @@ export const create = (
 
     const exchange = async (
       inner: AbortSignal,
-    ): Promise<
-      jarl.Result<
-        { status: number; text: string; headers: Headers },
-        HttpUnreachable | Async.Aborted
-      >
-    > => {
+    ): Promise<jarl.Result<{ status: number; text: string }, HttpUnreachable | Async.Aborted>> => {
       try {
         const response = await send(url, { ...rest, signal: inner });
-        return jarl.ok({
-          status: response.status,
-          text: await response.text(),
-          headers: response.headers,
-        });
+        return jarl.ok({ status: response.status, text: await response.text() });
       } catch (caught) {
         return jarl.err(outer.aborted ? abortedBy(outer) : new HttpUnreachable(asked, caught));
       }
@@ -199,14 +187,14 @@ export const create = (
     if (!answered.ok) {
       return answered;
     }
-    const { status, text, headers } = jarl.value(answered);
+    const { status, text } = jarl.value(answered);
 
     if (status >= 200 && status < 300) {
       const body = parsed(text, asked);
       if (!body.ok) {
         return body;
       }
-      const decoded = answers.decode(jarl.value(body), headers);
+      const decoded = answers.decode(jarl.value(body));
       if (jarl.error.is(decoded, HttpInvalid)) {
         const { reason, cause } = decoded.error;
         return jarl.err(new HttpInvalid(reason, { asked, cause }));
@@ -214,18 +202,16 @@ export const create = (
       return decoded;
     }
     if (status === 400) {
-      return jarl.err(new HttpBadRequest(asked, status, text, headers));
+      return jarl.err(new HttpBadRequest(asked, status, text));
     }
     if (status === 404) {
-      return jarl.err(new HttpNotFound(asked, status, text, headers));
+      return jarl.err(new HttpNotFound(asked, status, text));
     }
     if (status >= 500 && status < 600) {
-      return jarl.err(new HttpServerError(asked, status, text, headers));
+      return jarl.err(new HttpServerError(asked, status, text));
     }
     const named = answers.status?.[status];
-    return jarl.err(
-      named === undefined ? new HttpUnhandled(asked, status, text, headers) : named(text, headers),
-    );
+    return jarl.err(named === undefined ? new HttpUnhandled(asked, status, text) : named(text));
   }
 
   return { service: "http", fetch: request };

@@ -76,48 +76,17 @@ describe("complete", () => {
   });
 
   it.each([
-    {
-      name: "a 429 waits its Retry-After in seconds",
-      reply: Fake.status(429, "", { "Retry-After": "3" }),
-      waited: 3_000,
-    },
-    {
-      name: "a 503 waits an HTTP-date Retry-After, read on the clock",
-      reply: Fake.status(503, "busy", { "Retry-After": new Date(NOW + 5_000).toUTCString() }),
-      waited: 5_000,
-    },
-    {
-      name: "a Retry-After of zero waits a millisecond",
-      reply: Fake.status(429, "", { "Retry-After": "0" }),
-      waited: 1,
-    },
-    {
-      name: "an HTTP-date already past waits a millisecond",
-      reply: Fake.status(502, "", { "Retry-After": new Date(NOW - 5_000).toUTCString() }),
-      waited: 1,
-    },
-    {
-      name: "a 500 with no Retry-After waits the default",
-      reply: Fake.status(500),
-      waited: DEFAULT_RETRY_MS,
-    },
-    {
-      name: "a malformed Retry-After waits the default",
-      reply: Fake.status(429, "", { "Retry-After": "soon" }),
-      waited: DEFAULT_RETRY_MS,
-    },
-    {
-      name: "no answer within the timeout waits the default",
-      reply: "hang" as const,
-      waited: DEFAULT_RETRY_MS,
-    },
-  ])("$name, then asks again (retry)", async ({ reply, waited }) => {
+    { name: "a 429", reply: Fake.status(429, JSON.stringify({ error: "slow down" })) },
+    { name: "a 500", reply: Fake.status(500) },
+    { name: "a 503", reply: Fake.status(503, "busy") },
+    { name: "no answer within the timeout", reply: "hang" as const },
+  ])("$name is sent again after the default wait (retry)", async ({ reply }) => {
     const { openRouter, asked, slept } = await client([reply, completion("kept")]);
 
     const turn = await openRouter.complete(REQUEST);
 
     expect(turn).toEqual(KEPT);
-    expect(slept).toEqual([waited]);
+    expect(slept).toEqual([DEFAULT_RETRY_MS]);
     expect(asked).toHaveLength(2);
   });
 
@@ -243,49 +212,38 @@ describe("complete", () => {
 
   it.each([
     {
-      name: "a Retry-After past it",
-      reply: Fake.status(429, JSON.stringify({ error: "slow down" }), { "Retry-After": "120" }),
-      deadline: NOW + 60_000,
-      wait: 120_000,
-      why: "slow down",
-    },
-    {
-      name: "the default after a 429",
+      name: "after a 429",
       reply: Fake.status(429, JSON.stringify({ error: "slow down" })),
       deadline: NOW + 500,
-      wait: DEFAULT_RETRY_MS,
       why: "slow down",
     },
     {
-      name: "the default landing on it",
+      name: "landing on it",
       reply: Fake.status(429, JSON.stringify({ error: "slow down" })),
       deadline: NOW + DEFAULT_RETRY_MS,
-      wait: DEFAULT_RETRY_MS,
       why: "slow down",
     },
     {
-      name: "the default after no answer within the timeout",
+      name: "after no answer within the timeout",
       reply: "hang" as const,
       deadline: NOW + 500,
-      wait: DEFAULT_RETRY_MS,
       why: `POST ${ENDPOINT}: no answer within 20 ms`,
     },
     {
-      name: "the default after a provider failure",
+      name: "after a provider failure",
       reply: Fake.json({ error: { message: "provider down", code: 502 } }),
       deadline: NOW + 500,
-      wait: DEFAULT_RETRY_MS,
       why: "provider down",
     },
   ])(
     "a wait to ask again that reaches the deadline, $name, is out of time, and is not sent (unhappy)",
-    async ({ reply, deadline, wait, why }) => {
+    async ({ reply, deadline, why }) => {
       const { openRouter, asked, slept } = await client([reply, completion("never")]);
 
       const turn = await openRouter.complete({ ...REQUEST, deadline });
 
       expect(Fake.failure(turn, OpenRouter.OpenRouterOutOfTime).message).toBe(
-        `openrouter: a retry in ${String(wait)} ms would reach the deadline: ${why}`,
+        `openrouter: a retry in ${String(DEFAULT_RETRY_MS)} ms would reach the deadline: ${why}`,
       );
       expect(asked).toHaveLength(1);
       expect(slept).toEqual([]);

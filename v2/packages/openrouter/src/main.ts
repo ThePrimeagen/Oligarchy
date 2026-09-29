@@ -104,15 +104,12 @@ const refusalMessage = (body: string): string => {
   return typeof error === "string" ? error : error.message;
 };
 
-// Why to ask again, and for a 429 or 5xx the response's headers, whose Retry-After is the wait.
-type Again = { readonly again: string; readonly headers?: Headers };
-
 // Asking again is for what could mend: a 429, a 5xx, no answer in time, or a provider failure
-// naming one of those statuses. A completion has no side effect but its cost, so asking again is
-// safe; anything else is the failure handed back.
-const judge = (error: Asked): Again | Failure => {
+// naming one of those statuses. The answer is its why. A completion has no side effect but its
+// cost, so asking again is safe; anything else is the failure handed back.
+const judge = (error: Asked): { readonly again: string } | Failure => {
   if (jarl.error.is(error, Http.HttpServerError)) {
-    return { again: refusalMessage(error.body), headers: error.headers };
+    return { again: refusalMessage(error.body) };
   }
   if (jarl.error.is(error, Http.HttpTimedOut)) {
     return { again: error.message };
@@ -123,7 +120,7 @@ const judge = (error: Asked): Again | Failure => {
       : Errors.unreachable(`openrouter: ${error.message}`);
   }
   if (jarl.error.is(error, Http.HttpUnhandled) && error.status === 429) {
-    return { again: refusalMessage(error.body), headers: error.headers };
+    return { again: refusalMessage(error.body) };
   }
   if (
     jarl.error.is(error, Http.HttpUnhandled) ||
@@ -138,9 +135,8 @@ const judge = (error: Asked): Again | Failure => {
   return Errors.unreachable(`openrouter: ${error.message}`, error);
 };
 
-// One chat completion, asked once and read whole. timeoutMs bounds each ask. A wait to ask again
-// is a 429's or 5xx's Retry-After, or else the default; one that would reach the request's
-// deadline is not waited.
+// One chat completion, asked once and read whole. timeoutMs bounds each ask; a wait to ask again
+// is the default, and one that would reach the request's deadline is not waited.
 export const create = (options: {
   readonly token: Env.Secret;
   readonly baseUrl: string;
@@ -154,20 +150,6 @@ export const create = (options: {
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? Async.sleep;
   const url = chatCompletions(options.baseUrl);
-
-  // Seconds, or an HTTP-date on the client's clock. Zero, or a date already past, waits a
-  // millisecond; a missing or malformed Retry-After waits the default.
-  const waitFor = (again: Again): number => {
-    const header = again.headers?.get("retry-after")?.trim();
-    if (header === undefined) {
-      return defaultRetry;
-    }
-    if (/^\d+$/.test(header)) {
-      return Math.max(Number(header) * 1_000, 1);
-    }
-    const at = Date.parse(header);
-    return Number.isNaN(at) ? defaultRetry : Math.max(at - now(), 1);
-  };
 
   const ask = (request: Request, signal: AbortSignal) =>
     http.fetch(
@@ -200,15 +182,14 @@ export const create = (options: {
         if (!("again" in judged)) {
           return jarl.err(judged);
         }
-        const waitMs = waitFor(judged);
-        if (now() + waitMs >= request.deadline) {
+        if (now() + defaultRetry >= request.deadline) {
           return jarl.err(
             new Errors.OpenRouterOutOfTime(
-              `openrouter: a retry in ${String(waitMs)} ms would reach the deadline: ${judged.again}`,
+              `openrouter: a retry in ${String(defaultRetry)} ms would reach the deadline: ${judged.again}`,
             ),
           );
         }
-        const slept = await sleep(waitMs, signal);
+        const slept = await sleep(defaultRetry, signal);
         if (jarl.is_err(slept)) {
           return slept;
         }

@@ -18,21 +18,11 @@ export type Asked = {
 // One reply for every request, one per request in order, or one made from the request.
 type Replies = Reply | ReadonlyArray<Reply> | ((asked: Asked) => Reply | Promise<Reply>);
 
-export const json = (
-  body: unknown,
-  status = 200,
-  headers: Readonly<Record<string, string>> = {},
-): Response =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...headers },
-  });
+export const json = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-export const status = (
-  code: number,
-  body = "",
-  headers: Readonly<Record<string, string>> = {},
-): Response => new Response(body === "" ? null : body, { status: code, headers });
+export const status = (code: number, body = ""): Response =>
+  new Response(body === "" ? null : body, { status: code });
 
 const NEVER = new AbortController().signal;
 

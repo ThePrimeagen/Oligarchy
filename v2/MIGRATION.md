@@ -28,9 +28,8 @@ meet plus one happy path, and every service is faked except the database.
       newest.
 - [x] **OpenRouter client** (`v2/packages/openrouter`). V1: `src/harness/openrouter.ts`. The
       driver's model call: `complete(request)` asks once through `Http.fetch` and reads the whole
-      answer, with no stream. It asks again after a 429 or 5xx, waiting the Retry-After it names or
-      else the default, and after no answer within its timeout or a provider failure naming one of
-      those statuses, waiting the default. It fails with
+      answer, with no stream. It asks again after a 429, a 5xx, no answer within its timeout, or a
+      provider failure naming one of those statuses, always after the default wait. It fails with
       `OpenRouterRefused`, `OpenRouterUnreachable`, `OpenRouterOutOfTime` (a wait to ask again
       that would reach the request's deadline) or `Aborted`.
 - [ ] **Proxy client.** V1: `packages/http/src/proxy-client.ts`. The calls the driver, `./client`
