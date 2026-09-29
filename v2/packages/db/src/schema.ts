@@ -51,7 +51,7 @@ export const testRunStatus = pgEnum("test_run_status", [
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
 export const actionState = pgEnum("action_state", ["completed", "failed"]);
-// The reviewer's own answer to "did the proof land": the test's vocabulary, not the session's.
+// The reviewer's own answer to "did the proof land": the test's vocabulary, not the job's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
 // What kind of machine a server boots, and so which reverse proxy fronts it. qemu servers
@@ -105,18 +105,16 @@ export const actions = pgTable(
   "actions",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-    sessionId: uuid("session_id")
+    jobId: uuid("job_id")
       .notNull()
-      .references(() => sessions.id),
-    // Nullable for historical rows only; the proxy now always writes an agent id.
-    agentId: text("agent_id").references(() => agentRuns.agentId),
+      .references(() => jobs.id),
     request: jsonb("request").notNull(),
     state: actionState("state"),
     response: jsonb("response"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (table) => [index("actions_session_id_idx").on(table.sessionId)],
+  (table) => [index("actions_job_id_idx").on(table.jobId)],
 );
 
 export const images = pgTable(
@@ -133,7 +131,7 @@ export const images = pgTable(
 
 // location and agent_id are attribution, not relations: a log must never be refused
 // because the row it names is missing or already gone, so neither is a foreign key.
-// location is a text bucket: a session UUID, "server" (qemu-server-wide), or "automation".
+// location is a text bucket: a job UUID, "server" (qemu-server-wide), or "automation".
 export const logs = pgTable(
   "logs",
   {
@@ -147,9 +145,9 @@ export const logs = pgTable(
   (table) => [index("logs_location_idx").on(table.location)],
 );
 
-// One snapshot per failed session, keyed by origin. journalctl / dmesg / compositor
+// One snapshot per failed job, keyed by origin. journalctl / dmesg / compositor
 // crashes are not separate streams: they appear in `serial` only if the guest wrote
-// them to the UART. session_id is the key; a second save is a database error by design.
+// them to the UART. job_id is the key; a second save is a database error by design.
 export type DebugLogSources = {
   readonly serial: string;
   readonly proxy: string;
@@ -158,9 +156,9 @@ export type DebugLogSources = {
 };
 
 export const debugLogs = pgTable("debug_logs", {
-  sessionId: uuid("session_id")
+  jobId: uuid("job_id")
     .primaryKey()
-    .references(() => sessions.id),
+    .references(() => jobs.id),
   sources: jsonb("sources").$type<DebugLogSources>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -173,17 +171,17 @@ export const postRunErrorTypes = pgTable("post_run_error_types", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// One diagnosis per ended session, keyed by the session: a row absent is a session nobody has
-// reviewed. verdict is the reviewer's, written after reading the evidence, and may disagree with
+// One diagnosis per ended job, keyed by the job it reviews, a drive or a mint, never the diagnose
+// job that wrote it: a row absent is a job nobody has reviewed. verdict is the reviewer's, written after reading the evidence, and may disagree with
 // the driver's stop status and the test run's status. error_type names the cause of a failed verdict and is
 // null exactly when the verdict is passed: a pass has no cause to name, and the check keeps the two
 // columns honest. model wrote it.
 export const postRunDiagnosis = pgTable(
   "post_run_diagnosis",
   {
-    sessionId: uuid("session_id")
+    jobId: uuid("job_id")
       .primaryKey()
-      .references(() => sessions.id),
+      .references(() => jobs.id),
     verdict: diagnosisVerdict("verdict").notNull(),
     errorType: text("error_type").references(() => postRunErrorTypes.key, { onUpdate: "cascade" }),
     summary: text("summary").notNull(),
@@ -264,13 +262,15 @@ export const processStats = pgTable(
   (table) => [index("process_stats_name_reported_at_idx").on(table.name, table.reportedAt)],
 );
 
-// Which server started a session, so every later request for it finds the machine. The row
-// outlives the qemu reverse proxy process, which is why it is a row. server_url is attribution, not a
-// relation: forgetting a server must keep the sessions still running on it routable.
-export const sessionServers = pgTable("session_servers", {
-  sessionId: uuid("session_id")
+// Which qemu server holds a job's guest: written when the job's slot is reserved, before the
+// guest starts, so the start and every later request for the job find the machine. One server
+// per job. The row outlives the qemu reverse proxy process, which is why it is a row. server_url
+// is attribution, not a relation: forgetting a server must keep the jobs still running on it
+// routable.
+export const jobServers = pgTable("job_servers", {
+  jobId: uuid("job_id")
     .primaryKey()
-    .references(() => sessions.id),
+    .references(() => jobs.id),
   serverUrl: text("server_url").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -297,14 +297,6 @@ export const setupRequests = pgTable(
     uniqueIndex("setup_requests_run_id_idx").on(table.runId),
   ],
 );
-
-// Which server reserved a slot for an agent, so start finds that machine before a session id
-// exists. agent_id is the ticket. A racing second insert is one row.
-export const agentServers = pgTable("agent_servers", {
-  agentId: text("agent_id").primaryKey(),
-  serverUrl: text("server_url").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
 
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. A row is never updated: an edit is a new row with

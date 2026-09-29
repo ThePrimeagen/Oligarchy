@@ -36,6 +36,13 @@
       "when": 1790683516895,
       "tag": "0005_drop_test_runs_session_id",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790684048049,
+      "tag": "0006_rows_keyed_by_job",
+      "breakpoints": true
     }
   ]
 }
