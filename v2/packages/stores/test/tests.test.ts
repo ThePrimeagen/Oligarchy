@@ -27,7 +27,9 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 // What a call came to, in one line: ok, or the refusal's name and what it said, ids as <id>.
 const said = (result: jarl.Result<unknown, Error>) =>
-  result.ok ? "ok" : `${result.error.name}: ${result.error.message.replaceAll(UUID, "<id>")}`;
+  jarl.is_ok(result)
+    ? "ok"
+    : `${result.error.name}: ${result.error.message.replaceAll(UUID, "<id>")}`;
 
 const SUITE: Tests.SuiteInput = {
   name: "nightly",
@@ -91,8 +93,8 @@ const tryEach = async (
     const id = await make();
     const before = await read(id);
     const result = await move(setup.tests, id);
-    if (result.ok) {
-      seen[name] = result.value.status;
+    if (jarl.is_ok(result)) {
+      seen[name] = jarl.value(result).status;
     } else {
       seen[name] = isDeepStrictEqual(await read(id), before) ? said(result) : "CHANGED";
     }
