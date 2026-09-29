@@ -5,6 +5,7 @@ import * as FakePostgres from "@oligarchy/fake-postgres";
 import * as jarl from "jarl";
 import { afterEach } from "vitest";
 import * as Actions from "../src/actions.ts";
+import * as DebugLogs from "../src/debug-logs.ts";
 import * as Diagnosis from "../src/diagnosis.ts";
 import * as Logs from "../src/logs.ts";
 import * as Servers from "../src/servers.ts";
@@ -42,6 +43,7 @@ export const database = async () => {
     db,
     tests: Tests.create(db),
     actions: Actions.create(db),
+    debugLogs: DebugLogs.create(db),
     diagnosis: Diagnosis.create(db),
     logs: Logs.create(db),
     servers: Servers.create(db),
