@@ -90,10 +90,10 @@ export const load = jarl.fn(
   async (io: Io.Io): Promise<Config> => {
     const text = await jarl.unwrap(io.readFile(PATH));
     const parsed = await jarl.parseJSON(text);
-    if (!parsed.ok) {
+    if (jarl.is_err(parsed)) {
       throw new Errors.ConfigInvalid(PATH, parsed.error.message);
     }
-    const decoded = File.safeParse(parsed.value);
+    const decoded = File.safeParse(jarl.value(parsed));
     if (!decoded.success) {
       const issue = decoded.error.issues[0];
       const where =

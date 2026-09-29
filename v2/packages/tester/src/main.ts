@@ -32,19 +32,21 @@ if (jarl.is_err(created)) {
   process.exit(1);
 }
 
-const services = createServices(created.value);
-if (!services.ok) {
+const env = jarl.value(created);
+
+const services = createServices(env);
+if (jarl.is_err(services)) {
   process.stderr.write(`${services.error.message}\n`);
   process.exit(1);
 }
 
-const app = new App.App(created.value).main(main);
+const app = new App.App(env).main(main);
 app.onExit(async () => {
   // Every line waits on its insert, so the pool stays open until the last one lands.
   await app.services.logger.flush();
   return app.services.db.close();
 });
-await app.run(services.value, (errors) => {
+await app.run(jarl.value(services), (errors) => {
   for (const error of errors) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   }

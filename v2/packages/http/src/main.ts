@@ -135,14 +135,16 @@ const abortedBy = (signal: AbortSignal): Async.Aborted =>
 
 const printable = (url: string): string => url.split(/[?#]/, 1)[0] ?? url;
 
-const parsed = (text: string): jarl.Result<unknown, unknown> => {
+const parsed = (text: string, asked: Asked): jarl.Result<unknown, HttpInvalid> => {
   if (text === "") {
     return jarl.ok(undefined);
   }
   try {
     return jarl.ok(JSON.parse(text));
   } catch (caught) {
-    return jarl.err(caught);
+    return jarl.err(
+      new HttpInvalid(`body is not JSON: ${messageOf(caught)}`, { asked, cause: caught }),
+    );
   }
 };
 
@@ -179,25 +181,21 @@ export const create = (
     };
 
     const answered = await Async.timeout(exchange, { ms: timeoutMs, signal: outer });
-    if (!answered.ok) {
-      return jarl.error.is(answered.error, Async.TimedOut)
-        ? jarl.err(new HttpTimedOut(asked, timeoutMs))
-        : answered;
+    if (jarl.error.is(answered, Async.TimedOut)) {
+      return jarl.err(new HttpTimedOut(asked, timeoutMs));
     }
-    const { status, text } = answered.value;
+    if (!answered.ok) {
+      return answered;
+    }
+    const { status, text } = jarl.value(answered);
 
     if (status >= 200 && status < 300) {
-      const body = parsed(text);
+      const body = parsed(text, asked);
       if (!body.ok) {
-        return jarl.err(
-          new HttpInvalid(`body is not JSON: ${messageOf(body.error)}`, {
-            asked,
-            cause: body.error,
-          }),
-        );
+        return body;
       }
-      const decoded = answers.decode(body.value);
-      if (!decoded.ok && jarl.error.is(decoded.error, HttpInvalid)) {
+      const decoded = answers.decode(jarl.value(body));
+      if (jarl.error.is(decoded, HttpInvalid)) {
         const { reason, cause } = decoded.error;
         return jarl.err(new HttpInvalid(reason, { asked, cause }));
       }

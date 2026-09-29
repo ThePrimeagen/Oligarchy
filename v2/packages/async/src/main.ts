@@ -55,7 +55,7 @@ export const repeat = <A extends readonly unknown[], T, E>(
       return jarl.err(abortedBy(signal));
     }
     let result = await fn(...args);
-    for (let made = 1; made < count && !result.ok; made += 1) {
+    for (let made = 1; made < count && jarl.is_err(result); made += 1) {
       if (errorFilter !== undefined && !errorFilter(result.error)) {
         return result;
       }

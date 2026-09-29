@@ -121,7 +121,7 @@ const runMain = async (state: State): Promise<void> => {
   const { signal } = state.aborter;
   try {
     const result = await state.main();
-    if (!result.ok && !stopped(signal, result.error)) {
+    if (jarl.is_err(result) && !stopped(signal, result.error)) {
       report(state, result.error);
     }
   } catch (caught) {

@@ -9,10 +9,7 @@ const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.u
 describe("node readFile", () => {
   it("reads a file as text (happy)", async () => {
     const read = await Io.node().readFile(here("../package.json"));
-    if (!jarl.is_ok(read)) {
-      throw read.error;
-    }
-    expect(read.value).toContain('"name": "@oligarchy/env"');
+    expect(jarl.unwrap(read)).toContain('"name": "@oligarchy/env"');
   });
 
   it("answers FileMissing for a path that does not exist (unhappy)", async () => {
