@@ -6,12 +6,13 @@ import { describe, expect, it } from "vitest";
 
 const root = join(import.meta.dirname, "../..");
 
-// Lints the files with only oligarchy/augment-through-entry on: oxlint's exit status, and each
+// Lints the files with only the one oligarchy rule on: oxlint's exit status, and each
 // diagnostic's message, sorted. A plugin that fails to load exits 1 with no diagnostics.
 const lint = (
+  rule: string,
   files: Readonly<Record<string, string>>,
 ): { readonly status: number | null; readonly messages: Array<string> } => {
-  const dir = mkdtempSync(join(tmpdir(), "augment-through-entry-"));
+  const dir = mkdtempSync(join(tmpdir(), `${rule}-`));
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, name)), { recursive: true });
     writeFileSync(join(dir, name), text);
@@ -21,7 +22,7 @@ const lint = (
     config,
     JSON.stringify({
       jsPlugins: [join(root, "v2/lint/plugin.js")],
-      rules: { "oligarchy/augment-through-entry": "error" },
+      rules: { [`oligarchy/${rule}`]: "error" },
     }),
   );
   const run = spawnSync(
@@ -31,8 +32,8 @@ const lint = (
   );
   const messages = run.stdout
     .split("\n")
-    .map((line) => /^.+?:\d+:\d+: (.*augment-through-entry.*)$/.exec(line)?.[1])
-    .filter((message) => message !== undefined)
+    .map((line) => /^.+?:\d+:\d+: (.*)$/.exec(line)?.[1])
+    .filter((message): message is string => message?.includes(`oligarchy(${rule})`) === true)
     .sort();
   return { status: run.status, messages };
 };
@@ -100,7 +101,7 @@ describe("no-redundant-type-constituents", () => {
 describe("oligarchy/augment-through-entry", () => {
   it("accepts a package name, the package's own src/main.ts from any depth, and declare global (happy)", () => {
     expect(
-      lint({
+      lint("augment-through-entry", {
         "app/package.json": "{}",
         "app/test/name.ts": augment("@oligarchy/app"),
         "app/test/entry.ts": augment("../src/main.ts"),
@@ -112,7 +113,7 @@ describe("oligarchy/augment-through-entry", () => {
   });
 
   it("refuses a package's other files, a path that misses its entry, and another package's entry (unhappy)", () => {
-    const result = lint({
+    const result = lint("augment-through-entry", {
       "app/package.json": "{}",
       "other/package.json": "{}",
       "app/test/relative.ts": augment("../src/services.ts"),
@@ -127,5 +128,181 @@ describe("oligarchy/augment-through-entry", () => {
       refused("../src/services.ts"),
       refused("@oligarchy/app/src/services.ts"),
     ]);
+  });
+});
+
+const RESULTS = `import * as jarl from "jarl";
+
+class Boom extends jarl.error.define("Boom") {}
+declare const make: () => jarl.Result<number, Boom>;
+`;
+
+const valueRefused = (name: string) =>
+  `read ${name}.value with jarl.value(${name}) once every error is handled, or jarl.unwrap(${name}) to throw the rest [Error/oligarchy(result-through-jarl)]`;
+
+const errorRefused = (name: string) =>
+  `name ${name}'s error with jarl.error.is(${name}, ...) or jarl.is_err(${name}) before reading ${name}.error [Error/oligarchy(result-through-jarl)]`;
+
+describe("oligarchy/result-through-jarl", () => {
+  it("accepts jarl reading a result, .error once jarl has named it, and .value/.error on what is not a result (happy)", () => {
+    expect(
+      lint("result-through-jarl", {
+        "handled.ts": `${RESULTS}
+export const handled = () => {
+  const a = make();
+  if (jarl.error.is(a, Boom)) {
+    return a.error.message;
+  }
+  return jarl.value(a);
+};
+
+export const earlyExit = () => {
+  const b = make();
+  if (!jarl.error.is(b, Boom)) {
+    return jarl.unwrap(b);
+  }
+  return b.error.message;
+};
+
+export const either = () => {
+  const c = make();
+  if (jarl.is_ok(c)) {
+    return jarl.value(c);
+  } else {
+    return c.error.message;
+  }
+};
+
+export const inline = (d: jarl.Result<number, Boom>) => jarl.is_err(d) && d.error.message;
+
+export const ternary = (e: jarl.Result<number, Boom>) =>
+  jarl.is_ok(e) ? jarl.value(e) : e.error.message;
+
+export const loop = (f: jarl.Result<number, Boom>) => {
+  while (jarl.is_err(f)) {
+    console.log(f.error.message);
+    f = make();
+  }
+  return jarl.value(f);
+};
+
+export const passed = () => {
+  const g = make();
+  if (!g.ok) {
+    return g;
+  }
+  return jarl.ok(jarl.value(g) + 1);
+};
+
+export const exits = () => {
+  const h = make();
+  if (!jarl.is_err(h)) {
+    process.exit(0);
+  }
+  const { error } = h;
+  return error.message;
+};
+`,
+        "not-results.ts": `import * as jarl from "jarl";
+import * as z from "zod";
+
+export const zod = (text: string) => {
+  const parsed = z.string().safeParse(text);
+  return parsed.success ? parsed.data : parsed.error.message;
+};
+
+export const fallback = (v: { readonly fallback: { readonly value: number } }) => v.fallback.value;
+
+export const box = (promise: Promise<unknown>) => {
+  const state = { settled: false, value: undefined as unknown };
+  void promise.then((value) => {
+    state.value = value;
+  });
+  return jarl.error.is(state.value, Error);
+};
+`,
+      }),
+    ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("refuses .value on a result anywhere, and .error before jarl has named it (unhappy)", () => {
+    const result = lint("result-through-jarl", {
+      "refused.ts": `${RESULTS}
+export const afterOk = () => {
+  const a = make();
+  if (!a.ok) {
+    return 0;
+  }
+  return a.value;
+};
+
+export const afterIsOk = () => {
+  const b = make();
+  if (jarl.is_ok(b)) {
+    return b.value;
+  }
+  return 0;
+};
+
+export const ternary = () => {
+  const c = make();
+  return c.ok ? c.value : c.error.message;
+};
+
+export const notOk = () => {
+  const d = make();
+  if (!d.ok) {
+    return d.error.message;
+  }
+  return 0;
+};
+
+export const named = () => {
+  const e = make();
+  return jarl.error.is(e.error, Boom);
+};
+
+export const param = (f: jarl.Result<number, Boom>) => String(f.error);
+
+export const destructured = () => {
+  const g: jarl.Result<number, Boom> = make();
+  const { value, error } = g;
+  return [value, error];
+};
+
+export const another = () => {
+  const h = make();
+  const i: jarl.Result<number, Boom> = make();
+  if (jarl.is_err(h)) {
+    return i.error;
+  }
+  return 0;
+};
+
+export const wrongWay = () => {
+  const j = make();
+  if (jarl.is_err(j)) {
+    return 0;
+  }
+  return j.error;
+};
+`,
+    });
+    expect(result.status).toBe(1);
+    expect(result.messages).toEqual(
+      [
+        valueRefused("a"),
+        valueRefused("b"),
+        valueRefused("c"),
+        errorRefused("c"),
+        errorRefused("d"),
+        errorRefused("e"),
+        errorRefused("f"),
+        valueRefused("g"),
+        errorRefused("g"),
+        errorRefused("i"),
+        errorRefused("j"),
+      ].sort(),
+    );
   });
 });
