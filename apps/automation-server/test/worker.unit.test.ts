@@ -1811,6 +1811,95 @@ describe("dispatch unhappy path", () => {
     }),
   );
 
+  describe("a client whose reserve keeps failing", () => {
+    // The client's own 500 when its proxy's tunnel answers 502, as it did through three outages.
+    const tunnelDown = () => TestingHttp.json({ error: "error code: 502" }, 500);
+    const walk = (seconds: number) =>
+      Effect.gen(function* () {
+        for (let i = 0; i < seconds; i++) {
+          for (let j = 0; j < 20; j++) {
+            yield* Effect.yieldNow;
+          }
+          yield* TestClock.adjust("1 second");
+        }
+      });
+    const reserves = (requests: ReadonlyArray<TestingHttp.Recorded>) =>
+      requests.filter((request) => request.url.endsWith("/reserve"));
+    const warnings = (log: TestingLog.FakeLog) =>
+      log.lines.filter((line) => line.level === "warning");
+
+    it.effect(
+      "is asked again after a pause that doubles to half a minute; one error, then warnings",
+      () =>
+        Effect.gen(function* () {
+          const fixed = harness();
+          seedResult(fixed.tests);
+          seedJob(fixed.automation);
+          seedLiveClient(fixed.servers);
+          const http = TestingHttp.recordRequests(tunnelDown);
+          yield* start(fixed, http.layer);
+          yield* walk(70);
+          // Every tick would have been fifteen asks; 0, 5, 15, 35 and 65 seconds are five.
+          expect(reserves(http.requests).length).toBeGreaterThanOrEqual(4);
+          expect(reserves(http.requests).length).toBeLessThanOrEqual(6);
+          expect(sentryErrors(fixed.log).map((line) => line.text)).toEqual([
+            `reserve failed; ${URL}`,
+          ]);
+          expect(warnings(fixed.log).length).toBe(reserves(http.requests).length - 1);
+          expect(warnings(fixed.log)[0]).toMatchObject({
+            text: `reserve failed again; ${URL}; 2 in a row`,
+            location: "automation",
+            agentId: TICKET,
+          });
+          expect(fixed.automation.jobs[0]).toMatchObject({ status: "pending", serverId: null });
+        }),
+    );
+
+    it.effect("says once how long the streak lasted when it answers, and the job is placed", () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        let asked = 0;
+        const http = TestingHttp.recordRequests((request, url) => {
+          if (url.pathname === "/reserve") {
+            asked += 1;
+            return asked <= 3 ? tunnelDown() : TestingHttp.json({ ok: "true" });
+          }
+          return closing(fixed.tests);
+        });
+        yield* start(fixed, http.layer);
+        yield* walk(60);
+        yield* settle(fixed.automation.jobs, "completed");
+        expect(reserves(http.requests)).toHaveLength(4);
+        const answered = TestingLog.texts(fixed.log).filter((text) =>
+          text.startsWith("reserve answered again"),
+        );
+        // Failed at 0, 5 and 15 seconds; the pause after the third runs to 35, which answers.
+        expect(answered).toEqual([`reserve answered again; ${URL}; after 3 failures in 35s`]);
+        expect(sentryErrors(fixed.log)).toHaveLength(1);
+      }),
+    );
+
+    it.effect("a client at capacity is not paused: it is asked every tick (unhappy)", () =>
+      Effect.gen(function* () {
+        const fixed = harness();
+        seedResult(fixed.tests);
+        seedJob(fixed.automation);
+        seedLiveClient(fixed.servers);
+        const http = TestingHttp.recordRequests(() =>
+          TestingHttp.json({ error: "at capacity: max-jobs is 5" }, 503),
+        );
+        yield* start(fixed, http.layer);
+        yield* walk(30);
+        expect(reserves(http.requests).length).toBeGreaterThanOrEqual(6);
+        expect(warnings(fixed.log)).toEqual([]);
+        expect(sentryErrors(fixed.log)).toEqual([]);
+      }),
+    );
+  });
+
   it.effect("a pending abort that wins the race releases the accepted reservation", () =>
     Effect.gen(function* () {
       const fixed = harness();
