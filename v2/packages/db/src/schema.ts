@@ -19,16 +19,6 @@ import {
 // drizzle-orm has no built-in bytea column type for postgres.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
-export const sessionStatus = pgEnum("session_status", [
-  "downloading",
-  "running",
-  "succeeded",
-  "failed",
-  "aborted",
-  "timed_out",
-  "completed",
-  "errored",
-]);
 export const testSuiteStatus = pgEnum("test_suite_status", [
   "pending",
   "running",
@@ -69,37 +59,6 @@ export const jobStatus = pgEnum("job_status", [
   "completed",
   "errored",
 ]);
-
-// mode is the twin of Domain.SessionMode, maintained by hand with it; absent means fresh.
-export type SessionConfig = {
-  iso: string;
-  disk?: string;
-  mode?: "fresh" | "resume";
-};
-
-export const sessions = pgTable("sessions", {
-  id: uuid("id").primaryKey(),
-  config: jsonb("config").$type<SessionConfig>().notNull(),
-  status: sessionStatus("status").notNull().default("running"),
-  reason: text("reason"),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
-  endedAt: timestamp("ended_at", { withTimezone: true }),
-});
-
-export const agentRuns = pgTable(
-  "agent_runs",
-  {
-    // An agent drives exactly one session, so its id is the primary key:
-    // registering a second session is a database error by design.
-    agentId: text("agent_id").primaryKey(),
-    sessionId: uuid("session_id")
-      .notNull()
-      .references(() => sessions.id),
-    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
-    endedAt: timestamp("ended_at", { withTimezone: true }),
-  },
-  (table) => [index("agent_runs_session_id_idx").on(table.sessionId)],
-);
 
 export const actions = pgTable(
   "actions",
@@ -205,7 +164,7 @@ export type ServerStats = {
   readonly cpu: { readonly mean1m: number; readonly mean2m: number; readonly mean3m: number };
 };
 
-// The fleet the reverse proxy places sessions on: one row per server, keyed by the url exactly
+// The fleet the reverse proxy places jobs on: one row per server, keyed by the url exactly
 // as given, written by an operator (the dashboard, POST /servers) or by the server itself. A
 // server announces itself every thirty seconds: the write rewrites stats, stamps heartbeat_at
 // and counts generation up, and a shutdown deletes the row. A generation that stops moving is
