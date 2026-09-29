@@ -7,9 +7,9 @@ import * as OpenRouter from "../src/main.ts";
 
 export const TOKEN = "sk-or-s3cret";
 export const BASE_URL = "https://openrouter.example/api/v1";
+export const ENDPOINT = `${BASE_URL}/chat/completions`;
 export const NOW = Date.UTC(2026, 8, 29, 12);
-export const HEADER_MS = 20;
-export const CHUNK_MS = 50;
+export const TIMEOUT_MS = 20;
 export const DEFAULT_RETRY_MS = 1_000;
 
 export const REQUEST: OpenRouter.Request = {
@@ -48,52 +48,35 @@ const token = async () =>
     ),
   ).vars.openRouterToken;
 
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// A number waits that many milliseconds before the next piece; "stall" holds the stream open with
-// nothing more. Every other piece is sent as a chunk of its own, and the stream closes after the
-// last one.
-export type Piece = string | number | "stall";
-
-export const stream = (pieces: ReadonlyArray<Piece>, init: ResponseInit = {}): Response => {
-  const encoder = new TextEncoder();
-  const body = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      for (const piece of pieces) {
-        if (piece === "stall") {
-          return;
-        }
-        if (typeof piece === "number") {
-          await pause(piece);
-        } else {
-          controller.enqueue(encoder.encode(piece));
-        }
-      }
-      controller.close();
-    },
+// OpenRouter's answer: the assistant's message, with its tool calls when it made any.
+export const completion = (
+  content: string | null,
+  toolCalls: ReadonlyArray<OpenRouter.ToolCall> = [],
+): Response =>
+  Fake.json({
+    id: "gen-1",
+    choices: [
+      {
+        finish_reason: toolCalls.length === 0 ? "stop" : "tool_calls",
+        message: {
+          role: "assistant",
+          content,
+          ...(toolCalls.length === 0
+            ? {}
+            : {
+                tool_calls: toolCalls.map((call) => ({
+                  id: call.id,
+                  type: "function",
+                  function: { name: call.name, arguments: call.arguments },
+                })),
+              }),
+        },
+      },
+    ],
   });
-  return new Response(body, { status: 200, ...init });
-};
 
-export const event = (data: unknown): string =>
-  `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
-
-export const DONE = "data: [DONE]\n\n";
-
-export const KEEP_ALIVE = ": OPENROUTER PROCESSING\n\n";
-
-export const text = (content: string): string => event({ choices: [{ delta: { content } }] });
-
-export const finish = event({ choices: [{ delta: {}, finish_reason: "stop" }] });
-
-// A whole completion of one line of text.
-export const answer = (content: string): Response => stream([text(content), finish, DONE]);
-
-export const status = (code: number, body = "", headers: Record<string, string> = {}) =>
-  new Response(body === "" ? null : body, { status: code, headers });
-
-// The client over a fake transport, on a clock stopped at NOW. A retry's wait is recorded and not
-// slept; onSleep runs as each one starts.
+// The client over a fake transport, on a clock stopped at NOW. A wait to ask again is recorded
+// and not slept; onSleep runs as each one starts.
 export const client = async (
   replies: Fake.Reply | ReadonlyArray<Fake.Reply>,
   options: { readonly onSleep?: () => void } = {},
@@ -103,7 +86,7 @@ export const client = async (
   const openRouter = OpenRouter.create({
     token: await token(),
     baseUrl: BASE_URL,
-    timeouts: { header: HEADER_MS, chunk: CHUNK_MS },
+    timeoutMs: TIMEOUT_MS,
     defaultRetry: DEFAULT_RETRY_MS,
     http: fake.http,
     now: () => NOW,
