@@ -6,7 +6,8 @@
     ".": "./src/main.ts"
   },
   "scripts": {
-    "check:types": "tsc --noEmit -p tsconfig.json"
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
@@ -15,7 +16,10 @@
     "jarl": "catalog:"
   },
   "devDependencies": {
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/fake-postgres": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
