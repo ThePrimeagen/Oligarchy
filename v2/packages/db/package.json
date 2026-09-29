@@ -8,7 +8,6 @@
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
-    "test:unit": "bun --bun vitest run",
     "db:migrate": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check"
@@ -21,11 +20,9 @@
     "pg": "catalog:"
   },
   "devDependencies": {
-    "@oligarchy/fake-postgres": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   }
 }
