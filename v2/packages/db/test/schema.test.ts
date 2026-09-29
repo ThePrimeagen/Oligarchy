@@ -151,9 +151,7 @@ describe("a test run, and the jobs and setup lock that name it", () => {
     const url = await started();
     const run = await testRun(url);
 
-    await query(url, "insert into automation_jobs (run_id, action) values ($1, 'mint')", [
-      run["id"],
-    ]);
+    await query(url, "insert into jobs (run_id, action) values ($1, 'mint')", [run["id"]]);
     await query(
       url,
       "insert into setup_requests (iso, server_url, run_id) values ('omarchy.iso', 'http://s1', $1)",
@@ -161,7 +159,7 @@ describe("a test run, and the jobs and setup lock that name it", () => {
     );
 
     expect(run["status"]).toBe("pending");
-    expect(await query(url, "select run_id, action from automation_jobs")).toEqual([
+    expect(await query(url, "select run_id, action from jobs")).toEqual([
       { run_id: run["id"], action: "mint" },
     ]);
     expect(await query(url, "select run_id from setup_requests")).toEqual([{ run_id: run["id"] }]);
@@ -172,9 +170,7 @@ describe("a test run, and the jobs and setup lock that name it", () => {
     const missing = crypto.randomUUID();
 
     expect(
-      await refusal(url, "insert into automation_jobs (run_id, action) values ($1, 'drive')", [
-        missing,
-      ]),
+      await refusal(url, "insert into jobs (run_id, action) values ($1, 'drive')", [missing]),
     ).toMatchObject({
       code: "23503",
       detail: `Key (run_id)=(${missing}) is not present in table "test_runs".`,
@@ -235,6 +231,69 @@ describe("a test run, and the jobs and setup lock that name it", () => {
     ).toMatchObject({
       code: "22P02",
       message: 'invalid input value for enum test_run_status: "succeeded"',
+    });
+  });
+});
+
+const JOB = "insert into jobs (run_id, action) values ($1, $2) returning id, status";
+
+describe("a job, one mint, drive or diagnose for a test run", () => {
+  it("a job is queued pending for its test run (happy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+
+    expect(await query(url, JOB, [run["id"], "drive"])).toEqual([
+      { id: expect.any(String), status: "pending" },
+    ]);
+  });
+
+  it("a job whose action is not mint, drive or diagnose is refused (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+
+    expect(await refusal(url, JOB, [run["id"], "retry"])).toMatchObject({
+      code: "22P02",
+      message: 'invalid input value for enum job_action: "retry"',
+    });
+  });
+
+  it("a second drive for one test run is refused (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+    await query(url, JOB, [run["id"], "drive"]);
+
+    expect(await refusal(url, JOB, [run["id"], "drive"])).toMatchObject({
+      code: "23505",
+      detail: `Key (run_id, action)=(${String(run["id"])}, drive) already exists.`,
+    });
+  });
+
+  it("a job closed with a status only a test run has is refused (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+    const job = first(await query(url, JOB, [run["id"], "drive"]));
+
+    expect(
+      await refusal(url, "update jobs set status = 'passed' where id = $1", [job["id"]]),
+    ).toMatchObject({
+      code: "22P02",
+      message: 'invalid input value for enum job_status: "passed"',
+    });
+  });
+
+  it("a job whose id is taken is refused, and the refusal names jobs (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+    const job = first(await query(url, JOB, [run["id"], "drive"]));
+
+    expect(
+      await refusal(url, "insert into jobs (id, run_id, action) values ($1, $2, 'mint')", [
+        job["id"],
+        run["id"],
+      ]),
+    ).toMatchObject({
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "jobs_pkey"',
     });
   });
 });
