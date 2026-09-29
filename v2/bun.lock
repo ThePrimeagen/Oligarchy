@@ -127,8 +127,11 @@
         "jarl": "catalog:",
       },
       "devDependencies": {
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/fake-postgres": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/tester": {
@@ -502,8 +505,6 @@
     "@oligarchy/http/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/logger/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
-
-    "@oligarchy/stores/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/tester/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
