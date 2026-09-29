@@ -330,9 +330,7 @@ export const testRuns = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   // One test run per definition per suite: a second write is a database error by design.
-  (table) => [
-    uniqueIndex("test_runs_suite_definition_idx").on(table.suiteId, table.definitionId),
-  ],
+  (table) => [uniqueIndex("test_runs_suite_definition_idx").on(table.suiteId, table.definitionId)],
 );
 
 // One automation step for a test run: drive the guest, or diagnose after. Inserted
