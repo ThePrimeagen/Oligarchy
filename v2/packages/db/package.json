@@ -4,13 +4,15 @@
   "type": "module",
   "exports": {
     ".": "./src/main.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./v1": "./src/v1.ts"
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
     "db:migrate": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
-    "db:check": "drizzle-kit check"
+    "db:check": "drizzle-kit check",
+    "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
@@ -23,6 +25,7 @@
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

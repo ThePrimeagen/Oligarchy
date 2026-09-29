@@ -1,6 +1,6 @@
 import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
-import * as DbSchema from "@oligarchy/db/schema";
+import * as DbSchema from "@oligarchy/db/v1";
 import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Answer } from "./answer.ts";

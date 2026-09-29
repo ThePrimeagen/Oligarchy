@@ -1,6 +1,6 @@
 import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
-import * as DbSchema from "@oligarchy/db/schema";
+import * as DbSchema from "@oligarchy/db/v1";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
 import { eq } from "drizzle-orm";
