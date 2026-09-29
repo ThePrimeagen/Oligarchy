@@ -1176,6 +1176,34 @@ describe("driver loop", () => {
       }),
   );
 
+  it.effect("a stop a gateway drops once still closes the result as the run ended", () =>
+    Effect.gen(function* () {
+      let stops = 0;
+      const recorder = routed(answers(sendKeys("open it", 1), done()), (url) => {
+        if (url.pathname === "/start") {
+          return TestingHttp.json({ id: SESSION });
+        }
+        if (url.pathname === "/stop") {
+          stops += 1;
+          return stops === 1
+            ? new Response("error code: 502", { status: 502 })
+            : TestingHttp.json({ ok: "true" });
+        }
+        return TestingHttp.json({ ok: "true" });
+      });
+      const fiber = yield* Effect.forkChild(
+        run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
+      );
+      yield* TestClock.adjust("2 seconds");
+      const { stopped, spawner } = yield* Fiber.join(fiber);
+      expect(stopped).toEqual({ reason: "result-closed" });
+      expect(guestPaths(recorder.requests).filter((path) => path === "/stop")).toHaveLength(2);
+      const closed = spawner.spawned.at(-1)?.args ?? [];
+      expect(closed).toEqual(expect.arrayContaining(["test-results", "--status", "success"]));
+      expect(closed.join(" ")).not.toContain("502");
+    }),
+  );
+
   it.effect("an interrupt after the session starts still stops it", () =>
     Effect.gen(function* () {
       const recorder = routed(answers(done()));

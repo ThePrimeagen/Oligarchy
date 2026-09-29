@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Redacted, Schema, Stream } from "effect";
+import { Effect, Layer, Option, Redacted, Schedule, Schema, Stream } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -94,6 +94,20 @@ const classify = (error: HttpClientError.HttpClientError): Effect.Effect<never, 
     ? Effect.fail(unreachable(error))
     : refusal(response);
 };
+
+// Cloudflare's tunnel answering for the proxy: the request may never have reached it.
+const GATEWAY = new Set([502, 503, 504, 520, 521, 522, 523, 524, 530]);
+
+const throughGateway = (error: Failure): boolean =>
+  error._tag === "ProxyUnreachable" || GATEWAY.has(error.status);
+
+// A blip in the tunnel lasts seconds; four more sends, 2s apart and doubling, span thirty.
+const STOP_RESENDS = 4;
+
+const unknownSession = (error: Failure): boolean =>
+  error._tag === "ProxyRefusal" &&
+  error.status === 404 &&
+  error.message.startsWith("unknown session");
 
 const run = <A>(
   label: string,
@@ -235,8 +249,29 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
       Effect.asVoid,
     );
 
+  // Stopping twice is stopping once, so a stop the gateway answered for is sent again; the
+  // session a lost first send already ended answers unknown to the next. No other call is sent
+  // again: a send-keys that reached the guest would type twice.
   const stop = (body: Contract.StopBody) =>
-    run(label("POST", "/stop"), client.Sessions.stop({ payload: body })).pipe(Effect.asVoid);
+    Effect.gen(function* () {
+      let sends = 0;
+      const send = Effect.suspend(() => {
+        sends += 1;
+        return run(label("POST", "/stop"), client.Sessions.stop({ payload: body }));
+      });
+      return yield* send.pipe(
+        Effect.retry({
+          times: STOP_RESENDS,
+          schedule: Schedule.exponential("2 seconds"),
+          while: throughGateway,
+        }),
+        Effect.catchIf(
+          (error) => sends > 1 && unknownSession(error),
+          () => Effect.void,
+        ),
+        Effect.asVoid,
+      );
+    });
 
   // A save waits for the guest to power off and the disk to be copied; node:http has no ceiling
   // of its own, and the server bounds the power-off itself.

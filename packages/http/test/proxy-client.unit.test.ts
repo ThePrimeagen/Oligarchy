@@ -1,6 +1,6 @@
 import { describe, expect } from "vitest";
 import { it } from "@effect/vitest";
-import { Cause, Effect, Fiber, Redacted, Stream } from "effect";
+import { Cause, Duration, Effect, Exit, Fiber, Option, Redacted, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClientError } from "effect/unstable/http";
 import * as Render from "@oligarchy/log/render";
@@ -434,6 +434,116 @@ describe("ProxyClient transport", () => {
         `GET http://127.0.0.1:42069/image?id=${SESSION}&agent=${AGENT} failed`,
       );
     }),
+  );
+});
+
+describe("ProxyClient stop through a gateway", () => {
+  const STOP = Contract.StopBody.make({ id: SESSION, agent: AGENT, status: "succeeded" });
+  const gateway = () => new Response("error code: 502", { status: 502 });
+  const dropped = (request: Parameters<TestingHttp.Respond>[0]) =>
+    Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, cause: new Error("socket hang up") }),
+      }),
+    );
+  const gone = () => TestingHttp.json({ error: `unknown session "${SESSION}"` }, 404);
+  const answers = (...replies: ReadonlyArray<TestingHttp.Respond>) => {
+    let sent = 0;
+    return TestingHttp.recordRequests((request, url) => {
+      const reply = replies[Math.min(sent, replies.length - 1)] ?? ok;
+      sent += 1;
+      return reply(request, url);
+    });
+  };
+  const failureOf = (exit: Exit.Exit<void, ProxyClient.Failure>) =>
+    Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
+  const stopped = (recorder: TestingHttp.Recorder, waited: Duration.Input) =>
+    Effect.gen(function* () {
+      const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+      const fiber = yield* Effect.forkScoped(Effect.exit(proxy.stop(STOP)));
+      yield* TestClock.adjust(waited);
+      return yield* Fiber.join(fiber);
+    });
+
+  it.effect("a stop a gateway answers 502 for is sent again and lands", () =>
+    Effect.gen(function* () {
+      const recorder = answers(gateway, ok);
+      const exit = yield* stopped(recorder, "2 seconds");
+      expect(exit._tag).toBe("Success");
+      expect(recorder.requests).toHaveLength(2);
+      expect(recorder.requests[1]?.body).toBe(recorder.requests[0]?.body);
+    }),
+  );
+
+  it.effect("a stop that got no answer is sent again", () =>
+    Effect.gen(function* () {
+      const recorder = answers(dropped, ok);
+      const exit = yield* stopped(recorder, "2 seconds");
+      expect(exit._tag).toBe("Success");
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect("a stop sent again that finds the session gone is done: the first one landed", () =>
+    Effect.gen(function* () {
+      const recorder = answers(gateway, gone);
+      const exit = yield* stopped(recorder, "2 seconds");
+      expect(exit._tag).toBe("Success");
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect(
+    "a stop the gateway keeps refusing gives up after four more sends, with its answer (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = answers(gateway);
+        const exit = yield* stopped(recorder, "30 seconds");
+        expect(recorder.requests).toHaveLength(5);
+        expect(failureOf(exit)).toMatchObject({
+          _tag: "ProxyRefusal",
+          status: 502,
+          message: "error code: 502",
+        });
+      }),
+  );
+
+  it.effect(
+    "a stop the proxy itself refuses is not sent again, an unknown session included (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const unknown = answers(gone, ok);
+        const first = yield* stopped(unknown, "30 seconds");
+        expect(unknown.requests).toHaveLength(1);
+        expect(failureOf(first)).toMatchObject({
+          _tag: "ProxyRefusal",
+          status: 404,
+          message: `unknown session "${SESSION}"`,
+        });
+
+        const forbidden = answers(() => TestingHttp.json({ error: "not yours" }, 403), ok);
+        const refused = yield* stopped(forbidden, "30 seconds");
+        expect(forbidden.requests).toHaveLength(1);
+        expect(failureOf(refused)).toMatchObject({ _tag: "ProxyRefusal", status: 403 });
+      }),
+  );
+
+  it.effect(
+    "send-keys a gateway answers 502 for is not sent again: it may have typed (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = answers(gateway, ok);
+        const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+        const fiber = yield* Effect.forkScoped(
+          Effect.exit(
+            proxy.sendKeys(Contract.SendKeysBody.make({ id: SESSION, keys: "x", agent: AGENT })),
+          ),
+        );
+        yield* TestClock.adjust("30 seconds");
+        const exit = yield* Fiber.join(fiber);
+        expect(exit._tag).toBe("Failure");
+        expect(recorder.requests).toHaveLength(1);
+      }),
   );
 });
 
