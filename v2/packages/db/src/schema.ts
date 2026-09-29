@@ -88,20 +88,24 @@ export const images = pgTable(
   (table) => [uniqueIndex("images_id_idx").on(table.id)],
 );
 
-// location and agent_id are attribution, not relations: a log must never be refused
-// because the row it names is missing or already gone, so neither is a foreign key.
-// location is a text bucket: a job UUID, "server" (qemu-server-wide), or "automation".
+// location is the service that wrote the line (the tester writes "tester"); run_id is the
+// test run the line is about, null for a line about none. Both are attribution, not
+// relations: a log must never be refused because the row it names is missing or already
+// gone, so run_id is not a foreign key.
 export const logs = pgTable(
   "logs",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     location: text("location"),
-    agentId: text("agent_id"),
+    runId: uuid("run_id"),
     level: logLevel("level").notNull().default("info"),
     text: text("text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("logs_location_idx").on(table.location)],
+  (table) => [
+    index("logs_location_idx").on(table.location),
+    index("logs_run_id_idx").on(table.runId),
+  ],
 );
 
 // One snapshot per failed job, keyed by origin. journalctl / dmesg / compositor
@@ -235,25 +239,26 @@ export const jobServers = pgTable("job_servers", {
 });
 
 // One setup in flight, or finished and left in place, per iso and server. The primary key is
-// the lock: a second insert fails, so one mint per pair. run_id is null until that
-// mint's test run exists, then whoever watches the row reads the test run by it. Not a foreign
-// key, and server_url is not one either: forgetting a server does not cascade the row away, and
-// a success stays when retention sweeps the test run. A server deletes its own rows once, when it
-// comes online, so a restarted host cannot keep a stale lock. Many null run ids are allowed;
-// one test run is one setup. server_url is indexed
+// the lock: a second insert fails, so one mint per pair. job_id is the one mint job holding
+// the lock, null until that job exists. A job that ends without success releases the lock and
+// a new mint job takes it; a job that succeeded keeps it. Not a foreign key, and server_url is
+// not one either: forgetting a server does not cascade the row away, and a success stays when
+// retention sweeps the job. A server deletes its own rows once, when it comes online, so a
+// restarted host cannot keep a stale lock. Many null job ids are allowed; one mint job holds
+// one lock at most. server_url is indexed
 // on its own — the primary key leads with iso — for that delete. Not unique: one server, many isos.
 export const setupRequests = pgTable(
   "setup_requests",
   {
     iso: text("iso").notNull(),
     serverUrl: text("server_url").notNull(),
-    runId: uuid("run_id"),
+    jobId: uuid("job_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ columns: [table.iso, table.serverUrl] }),
     index("setup_requests_server_url_idx").on(table.serverUrl),
-    uniqueIndex("setup_requests_run_id_idx").on(table.runId),
+    uniqueIndex("setup_requests_job_id_idx").on(table.jobId),
   ],
 );
 
