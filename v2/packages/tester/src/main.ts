@@ -10,9 +10,9 @@ import { createServices, environment } from "./services.ts";
 
 const main = async (app: App.App<unknown, Db.Database | Logger.Logger>) => {
   const counted = await app.services.db.run(async (db) => ({
-    running: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "running")),
-    passing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "passed")),
-    failing: await db.$count(DbSchema.testResults, eq(DbSchema.testResults.status, "failed")),
+    running: await db.$count(DbSchema.testSuites, eq(DbSchema.testSuites.status, "running")),
+    passing: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "passed")),
+    failing: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "failed")),
   }));
   return report(app.services.logger, counted);
 };

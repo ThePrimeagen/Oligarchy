@@ -47,7 +47,8 @@ export const createServices = (
   const logger = Logger.create({
     write: terminal.write,
     colors: terminal.colors,
-    store: logs.insertLog,
+    store: (row) =>
+      logs.insertLog({ text: row.text, level: row.level, location: row.location, runId: null }),
   });
   return jarl.ok({ db, logs, logger });
 };
