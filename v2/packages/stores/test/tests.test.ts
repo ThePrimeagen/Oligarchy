@@ -354,6 +354,28 @@ describe("errorJob: the system failed the job", () => {
     },
   );
 
+  it("stamps the finish time of a job that errors while running (happy)", async () => {
+    const setup = await database();
+    const job = await jobIn(setup, "running");
+
+    const errored = jarl.unwrap(await setup.tests.errorJob(job.id, "harness died"));
+
+    expect(errored.finishedAt).toBeInstanceOf(Date);
+  });
+
+  it("keeps the finish time of a completed drive: the drive ended then, not when it was ruled errored (happy)", async () => {
+    const setup = await database();
+    const job = await jobIn(setup, "completed");
+    const ended = new Date(Date.UTC(2026, 8, 29, 12, 8));
+    await setup.db.run((d) =>
+      d.update(DbSchema.jobs).set({ finishedAt: ended }).where(eq(DbSchema.jobs.id, job.id)),
+    );
+
+    const errored = jarl.unwrap(await setup.tests.errorJob(job.id, "the guest lost its network"));
+
+    expect(errored.finishedAt).toEqual(ended);
+  });
+
   it("refuses a completed diagnose: its end is final (unhappy)", async () => {
     const setup = await database();
     const diagnose = await jobIn(setup, "completed", "diagnose");
