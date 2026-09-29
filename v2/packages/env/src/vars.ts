@@ -6,25 +6,16 @@ import type * as Sources from "./sources.ts";
 type Var<T> = {
   readonly name: string;
   readonly read: (text: string) => T;
-  readonly fallback: { readonly value: T } | undefined;
 };
 
 const required = (name: string): Var<string> => ({
   name,
   read: (text) => text,
-  fallback: undefined,
 });
 
 const secret = (name: string): Var<Secret.Secret> => ({
   name,
   read: (text) => new Secret.Secret(text),
-  fallback: undefined,
-});
-
-const withDefault = (name: string, value: string): Var<string> => ({
-  name,
-  read: (text) => text,
-  fallback: { value },
 });
 
 // Every variable an oligarchy process reads, declared once. A command names the ones it needs,
@@ -38,12 +29,6 @@ export const all = {
   // stay on a direct connection.
   databaseMigrationUrl: secret("DATABASE_MIGRATION_URL"),
   automationServerUrl: required("AUTOMATION_SERVER_URL"),
-  linearApiToken: secret("LINEAR_API_TOKEN"),
-  // No default: a local process and production name different teams.
-  linearTeam: required("LINEAR_TEAM"),
-  // Unset in production. A test points the automation server at a stub.
-  linearApiUrl: withDefault("LINEAR_API_URL", "https://api.linear.app/graphql"),
-  linearWebhookSecret: secret("LINEAR_WEBHOOK_SECRET"),
 };
 
 export type Name = keyof typeof all;
@@ -66,13 +51,10 @@ async function resolveValues(
   for (const name of names) {
     const variable: Var<unknown> = all[name];
     const text = vars[variable.name];
-    if (text !== undefined) {
-      values[name] = variable.read(text);
-    } else if (variable.fallback !== undefined) {
-      values[name] = variable.fallback.value;
-    } else {
+    if (text === undefined) {
       throw new Errors.MissingVariable(variable.name);
     }
+    values[name] = variable.read(text);
   }
   return values;
 }

@@ -51,7 +51,7 @@ export const envFile = flag({
   description: "Also read this env file: the process environment wins, then this file, then .env",
 });
 
-// Used exactly as given: it is stored on a run and written into its tickets.
+// Used exactly as given: it is stored on the test suite.
 export const serverUrl = flag({
   schema: httpUrl.default("http://127.0.0.1:42069"),
   description: "QEMU server the call goes to; SERVER_URL when omitted",
@@ -60,7 +60,7 @@ export const serverUrl = flag({
 
 export const agentId = flag({
   schema: words,
-  description: "The calling agent's id: the Linear ticket it works",
+  description: "The calling agent's id",
 });
 
 // A shell exports the id once: `SESSION_ID=$(./ctrl session --search ...)`.
@@ -72,7 +72,7 @@ export const sessionId = flag({
 
 export const testResultId = flag({
   schema: words,
-  description: "Test result id from the Linear ticket",
+  description: "Test result id",
 });
 
 // ---------------------------------------------------------------------------
@@ -196,15 +196,10 @@ export const iso = flag({
   description: "HTTPS URL of the ISO",
 });
 
-export const version = flag({
-  schema: words,
-  description: "Version label attached to every Linear ticket",
-});
-
 export const unminted = flag({
   schema: toggle,
   description:
-    "Ticket only the live qemu servers that do not hold the ISO's minted disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",
+    "Mint only on the live qemu servers that do not hold the ISO's minted disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",
 });
 
 export const model = flag({ schema: words, description: "Cursor model id doing the work" });
