@@ -17,7 +17,7 @@ const JOB_STATES = DbSchema.jobStatus.enumValues;
 const RUN_STATES = DbSchema.testRunStatus.enumValues;
 const SUITE_STATES = DbSchema.testSuiteStatus.enumValues;
 
-const except = <S extends string>(all: ReadonlyArray<S>, accepted: ReadonlyArray<S>) =>
+const except = <S extends string>(all: ReadonlyArray<S>, accepted: ReadonlyArray<NoInfer<S>>) =>
   all.filter((state) => !accepted.includes(state));
 
 // What a call came to, in one line: ok, or the refusal's name and what it said.
