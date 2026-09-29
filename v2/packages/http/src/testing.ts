@@ -78,20 +78,10 @@ export const http = (
     if (reply === "unreachable") {
       throw new TypeError("fetch failed");
     }
-    const signal = init.signal ?? NEVER;
     if (reply === "hang") {
-      return hang(signal);
+      return hang(init.signal ?? NEVER);
     }
-    const answer = reply.clone();
-    if (answer.body === null) {
-      return answer;
-    }
-    // As fetch's does, the body fails with the signal's reason once the request's signal aborts.
-    return new Response(answer.body.pipeThrough(new TransformStream(), { signal }), {
-      status: answer.status,
-      statusText: answer.statusText,
-      headers: answer.headers,
-    });
+    return reply.clone();
   };
 
   return { http: Http.create({ fetch, ...options }), asked };

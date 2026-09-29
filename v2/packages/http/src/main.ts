@@ -120,13 +120,6 @@ export type Http = {
     init: Init,
     answers: { readonly decode: D; readonly status?: Checked<S> },
   ) => Promise<jarl.Result<ValueOf<ReturnType<D>>, Failed<D, S>>>;
-  // The response once its status and headers are in, whatever the status, with its body left to
-  // read as it arrives. The timeout bounds the wait for the headers alone; the caller's signal
-  // still ends the body.
-  readonly open: (
-    url: string,
-    init: Init,
-  ) => Promise<jarl.Result<Response, HttpUnreachable | HttpTimedOut | Async.Aborted>>;
 };
 
 declare module "@oligarchy/app" {
@@ -141,11 +134,6 @@ const abortedBy = (signal: AbortSignal): Async.Aborted =>
   jarl.error.is(signal.reason, Async.Aborted) ? signal.reason : new Async.Aborted("aborted");
 
 const printable = (url: string): string => url.split(/[?#]/, 1)[0] ?? url;
-
-const askedOf = (url: string, method: string | undefined): Asked => ({
-  method: (method ?? "GET").toUpperCase(),
-  url: printable(url),
-});
 
 const parsed = (text: string, asked: Asked): jarl.Result<unknown, HttpInvalid> => {
   if (text === "") {
@@ -179,7 +167,7 @@ export const create = (
   ): Promise<jarl.Result<unknown, unknown>> {
     const { timeoutMs = defaultMs, signal, ...rest } = init;
     const outer = signal ?? NEVER;
-    const asked = askedOf(url, rest.method);
+    const asked: Asked = { method: (rest.method ?? "GET").toUpperCase(), url: printable(url) };
 
     const exchange = async (
       inner: AbortSignal,
@@ -226,29 +214,5 @@ export const create = (
     return jarl.err(named === undefined ? new HttpUnhandled(asked, status, text) : named(text));
   }
 
-  const open: Http["open"] = async (url, init) => {
-    const { timeoutMs = defaultMs, signal, ...rest } = init;
-    const outer = signal ?? NEVER;
-    const asked = askedOf(url, rest.method);
-    // The timeout's signal never aborts once the headers are in, so only the caller's ends the body.
-    const answered = await Async.timeout(
-      async (inner): Promise<jarl.Result<Response, HttpUnreachable | Async.Aborted>> => {
-        try {
-          return jarl.ok(await send(url, { ...rest, signal: AbortSignal.any([inner, outer]) }));
-        } catch (caught) {
-          return jarl.err(outer.aborted ? abortedBy(outer) : new HttpUnreachable(asked, caught));
-        }
-      },
-      { ms: timeoutMs, signal: outer },
-    );
-    if (jarl.is_ok(answered)) {
-      return answered;
-    }
-    const { error } = answered;
-    return jarl.err(
-      jarl.error.is(error, Async.TimedOut) ? new HttpTimedOut(asked, timeoutMs) : error,
-    );
-  };
-
-  return { service: "http", fetch: request, open };
+  return { service: "http", fetch: request };
 };
