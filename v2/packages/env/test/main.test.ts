@@ -19,11 +19,11 @@ const ctrl = Env.cli({ name: "ctrl", description: "Record and inspect test runs"
   .needs("databaseUrl")
   .command("mint", "Mint the ISO on every live qemu server")
   .flags({ iso: Env.args.iso(), unminted: Env.args.unminted(false) })
-  .needs("linearApiToken", "linearTeam")
+  .needs("oligarchyToken", "automationServerUrl")
   .done()
   .command("test", "Test definitions and their runs")
-  .command("run", "File runs and their Linear tickets")
-  .flags({ iso: Env.args.iso(), version: Env.args.version() })
+  .command("run", "File a test suite and its jobs")
+  .flags({ iso: Env.args.iso() })
   .command("one", "File a run of one definition")
   .flags({ name: Env.args.definitionName() })
   .done()
@@ -31,17 +31,7 @@ const ctrl = Env.cli({ name: "ctrl", description: "Record and inspect test runs"
   .done()
   .done();
 
-const RUN_ONE = [
-  "test",
-  "run",
-  "one",
-  "--name",
-  "lock-screen",
-  "--iso",
-  ISO,
-  "--version",
-  "2026.09.1",
-];
+const RUN_ONE = ["test", "run", "one", "--name", "lock-screen", "--iso", ISO];
 
 describe("create", () => {
   it("runs the command the words name, with its own flags and every one above it (happy)", async () => {
@@ -58,7 +48,6 @@ describe("create", () => {
       serverUrl: string;
       sessionId: string | undefined;
       iso: string;
-      version: string;
       name: string;
     }>();
     expectTypeOf(env.vars).toEqualTypeOf<{ databaseUrl: Env.Secret }>();
@@ -66,7 +55,6 @@ describe("create", () => {
       serverUrl: "http://127.0.0.1:42069",
       sessionId: "s-1",
       iso: ISO,
-      version: "2026.09.1",
       name: "lock-screen",
     });
     expect(env.vars.databaseUrl.reveal()).toBe(SENTINEL);
@@ -76,12 +64,15 @@ describe("create", () => {
   it("refuses a command whose needed variable is unset (unhappy)", async () => {
     const result = await Env.create(
       ctrl,
-      io({ argv: ["mint", "--iso", ISO], env: { DATABASE_URL: SENTINEL, LINEAR_TEAM: "Board" } }),
+      io({
+        argv: ["mint", "--iso", ISO],
+        env: { DATABASE_URL: SENTINEL, AUTOMATION_SERVER_URL: "http://automation" },
+      }),
     );
     if (!jarl.error.is(result, Env.MissingVariable)) {
       throw new Error("expected MissingVariable");
     }
-    expect(result.error.message).toBe("LINEAR_API_TOKEN is not set");
+    expect(result.error.message).toBe("OLIGARCHY_TOKEN is not set");
   });
 
   it("refuses a command whose required flag is not given (unhappy)", async () => {
@@ -101,10 +92,11 @@ describe("create", () => {
       ctrl,
       io({
         argv: ["mint", "--iso", ISO, "--env-file", ".prod-env"],
-        env: { LINEAR_TEAM: "from-env" },
+        env: { AUTOMATION_SERVER_URL: "from-env" },
         files: {
-          ".prod-env": "LINEAR_TEAM=from-file\nLINEAR_API_TOKEN=from-file\nSESSION_ID=from-file\n",
-          ".env": "LINEAR_TEAM=from-dot\nLINEAR_API_TOKEN=from-dot\nDATABASE_URL=from-dot\n",
+          ".prod-env":
+            "AUTOMATION_SERVER_URL=from-file\nOLIGARCHY_TOKEN=from-file\nSESSION_ID=from-file\n",
+          ".env": "AUTOMATION_SERVER_URL=from-dot\nOLIGARCHY_TOKEN=from-dot\nDATABASE_URL=from-dot\n",
         },
       }),
     );
@@ -112,8 +104,8 @@ describe("create", () => {
     if (env.command !== "mint") {
       throw new Error(`expected mint, got ${env.command}`);
     }
-    expect(env.vars.linearTeam).toBe("from-env");
-    expect(env.vars.linearApiToken.reveal()).toBe("from-file");
+    expect(env.vars.automationServerUrl).toBe("from-env");
+    expect(env.vars.oligarchyToken.reveal()).toBe("from-file");
     expect(env.vars.databaseUrl.reveal()).toBe("from-dot");
     expect(env.flags.sessionId).toBe("from-file");
   });
@@ -137,5 +129,16 @@ describe("create", () => {
     expect(config.models).toEqual(file.models);
     expect(config.stepLimit).toBe(7);
     expect(config.timeouts).toEqual({ header: 2_000, chunk: 5_000 });
+  });
+});
+
+describe("declared", () => {
+  it("has no Linear variable a command can need (unhappy)", () => {
+    expectTypeOf<Extract<Env.Name, `linear${string}`>>().toBeNever();
+  });
+
+  it("has no --version flag, the Linear ticket label (unhappy)", () => {
+    expectTypeOf(Env.args).not.toHaveProperty("version");
+    expect(Object.keys(Env.args)).not.toContain("version");
   });
 });

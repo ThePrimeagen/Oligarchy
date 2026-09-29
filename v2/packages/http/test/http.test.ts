@@ -49,11 +49,11 @@ describe("fetch", () => {
     const ask = () =>
       fake.http.fetch(URL, init, {
         decode: decodeTeam,
-        status: { 429: (body) => new RateLimited(`linear: ${body}`) },
+        status: { 429: (body) => new RateLimited(`rate limited: ${body}`) },
       });
 
     const limited = await ask();
-    expect(Fake.failure(limited, RateLimited).message).toBe("linear: slow down");
+    expect(Fake.failure(limited, RateLimited).message).toBe("rate limited: slow down");
 
     const retried = await Async.repeat(ask, 2, {
       errorFilter: (error) => jarl.error.is(error, RateLimited),
