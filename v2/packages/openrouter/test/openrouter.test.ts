@@ -26,8 +26,13 @@ const KEPT = jarl.ok({ content: "kept", toolCalls: [] });
 const call = (index: number, part: Record<string, unknown>) =>
   event({ choices: [{ delta: { tool_calls: [{ index, ...part }] } }] });
 
-// Sixty milliseconds of keep-alive comments, past the chunk timeout, and never an event.
+// Ninety milliseconds of keep-alive comments and never an event, then the stream closes: only a
+// chunk timeout the comments do not restart ends it first.
 const comments: ReadonlyArray<Piece> = [
+  KEEP_ALIVE,
+  15,
+  KEEP_ALIVE,
+  15,
   KEEP_ALIVE,
   15,
   KEEP_ALIVE,
@@ -174,11 +179,8 @@ describe("complete", () => {
 
   it.each([
     { name: "a stall after some text", pieces: [text("dropped "), "stall"] },
-    { name: "keep-alive comments alone", pieces: [...comments, "stall"] },
-    {
-      name: "keep-alive comments after some text",
-      pieces: [text("dropped "), ...comments, "stall"],
-    },
+    { name: "keep-alive comments alone", pieces: comments },
+    { name: "keep-alive comments after some text", pieces: [text("dropped "), ...comments] },
   ])(
     "no event within the chunk timeout, $name, is sent again after the default, and what streamed is dropped (retry)",
     async ({ pieces }) => {
