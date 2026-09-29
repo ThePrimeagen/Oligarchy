@@ -1,7 +1,7 @@
 import * as Render from "./render.ts";
 
-// A ticket seen within the last hour is active; the trim that drops the rest runs at most once
-// an hour, so a colour stays with its ticket for at least that long after its last line.
+// An agent seen within the last hour is active; the trim that drops the rest runs at most once
+// an hour, so a colour stays with its agent for at least that long after its last line.
 export const IDLE_MS = 3_600_000;
 
 type Held = { readonly color: string; readonly seenAt: number };
