@@ -22,6 +22,7 @@
     "pg": "catalog:"
   },
   "devDependencies": {
+    "@oligarchy/fake-postgres": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "drizzle-kit": "^0.31.10",
