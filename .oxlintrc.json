@@ -66,6 +66,7 @@
       "jsPlugins": ["./v2/lint/plugin.js"],
       "rules": {
         "oligarchy/augment-through-entry": "error",
+        "oligarchy/result-through-jarl": "error",
         "typescript/no-redundant-type-constituents": "off",
         "import/namespace": "off"
       }
