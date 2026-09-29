@@ -4,6 +4,11 @@ import * as Env from "@oligarchy/env";
 import * as FakePostgres from "@oligarchy/fake-postgres";
 import * as jarl from "jarl";
 import { afterEach } from "vitest";
+import * as Actions from "../src/actions.ts";
+import * as Diagnosis from "../src/diagnosis.ts";
+import * as Logs from "../src/logs.ts";
+import * as Servers from "../src/servers.ts";
+import * as SetupRequests from "../src/setup-requests.ts";
 import * as Tests from "../src/tests.ts";
 
 const cleanups: Array<() => Promise<unknown>> = [];
@@ -28,10 +33,41 @@ const opened = async (url: string) => {
   return db;
 };
 
-// A migrated database of the test's own, with the tests store over it.
+// A migrated database of the test's own, with every store over it.
 export const database = async () => {
   const fake = jarl.unwrap(await FakePostgres.start());
   cleanups.push(() => fake.stop());
   const db = await opened(fake.url);
-  return { db, tests: Tests.create(db) };
+  return {
+    db,
+    tests: Tests.create(db),
+    actions: Actions.create(db),
+    diagnosis: Diagnosis.create(db),
+    logs: Logs.create(db),
+    servers: Servers.create(db),
+    setupRequests: SetupRequests.create(db),
+  };
 };
+
+// A job on a test run of its own, in a suite of its own.
+export const newJob = async (tests: Tests.Tests, action: Tests.JobAction = "drive") => {
+  const suite = jarl.unwrap(
+    await tests.createTestSuite({
+      name: "nightly",
+      iso: "omarchy.iso",
+      serverUrl: "http://qemu-1",
+    }),
+  );
+  const definition = jarl.unwrap(
+    await tests.defineTestDefinition({
+      name: "lock-screen",
+      description: "",
+      instruction: "",
+      proof: "",
+    }),
+  );
+  const run = jarl.unwrap(await tests.createTestRun(suite.id, definition.id));
+  return jarl.unwrap(await tests.createJob(run.id, action));
+};
+
+export const MISSING = "00000000-0000-4000-8000-000000000000";

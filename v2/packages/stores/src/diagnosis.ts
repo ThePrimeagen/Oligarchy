@@ -12,7 +12,7 @@ export type DiagnosisRow = typeof DbSchema.postRunDiagnosis.$inferSelect;
 
 // errorType is null exactly when the verdict is passed; the table's check refuses anything else.
 export type DiagnosisInput = {
-  readonly sessionId: string;
+  readonly jobId: string;
   readonly verdict: Verdict;
   readonly errorType: string | null;
   readonly summary: string;
@@ -25,7 +25,7 @@ export type Diagnosis = {
   readonly listErrorTypes: () => Answer<ReadonlyArray<ErrorTypeRow>>;
   readonly findErrorType: (key: string) => Answer<ErrorTypeRow | undefined>;
   readonly saveDiagnosis: (input: DiagnosisInput) => Answer<boolean>;
-  readonly getDiagnosis: (sessionId: string) => Answer<DiagnosisRow | undefined>;
+  readonly getDiagnosis: (jobId: string) => Answer<DiagnosisRow | undefined>;
 };
 
 declare module "@oligarchy/app" {
@@ -67,16 +67,16 @@ export const create = (db: Db.Database): Diagnosis => ({
         .insert(DbSchema.postRunDiagnosis)
         .values(input)
         .onConflictDoNothing()
-        .returning({ sessionId: DbSchema.postRunDiagnosis.sessionId });
+        .returning({ jobId: DbSchema.postRunDiagnosis.jobId });
       return rows.length > 0;
     }),
 
-  getDiagnosis: (sessionId) =>
+  getDiagnosis: (jobId) =>
     db.run(async (d) => {
       const [row] = await d
         .select()
         .from(DbSchema.postRunDiagnosis)
-        .where(eq(DbSchema.postRunDiagnosis.sessionId, sessionId));
+        .where(eq(DbSchema.postRunDiagnosis.jobId, jobId));
       return row;
     }),
 });

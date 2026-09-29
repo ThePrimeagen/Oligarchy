@@ -26,16 +26,16 @@ describe("the fake postgres", () => {
     const fake = await started();
     const client = await connected(fake.url);
 
-    await client.query("insert into logs (text, level, agent_id) values ($1, $2, $3)", [
+    await client.query("insert into logs (text, level, location) values ($1, $2, $3)", [
       "booted",
       "warning",
-      "OLI-1",
+      "tester",
     ]);
-    const read = await client.query("select text, level, agent_id, location from logs");
+    const read = await client.query("select text, level, location, run_id from logs");
     await client.end();
 
     expect(read.rows).toEqual([
-      { text: "booted", level: "warning", agent_id: "OLI-1", location: null },
+      { text: "booted", level: "warning", location: "tester", run_id: null },
     ]);
   });
 

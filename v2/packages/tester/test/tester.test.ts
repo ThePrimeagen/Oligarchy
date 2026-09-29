@@ -51,9 +51,9 @@ const tester = (url: string) =>
 describe("the tester against a fake postgres", () => {
   it("prints its counts and stores each line in the logs table, failing tests as a warning (happy)", async () => {
     const fake = await started();
-    const [run] = await query(
+    const [suite] = await query(
       fake.url,
-      "insert into test_runs (name, iso, server_url, status) values ('nightly', 'omarchy.iso', 'http://s1', 'running') returning id",
+      "insert into test_suites (name, iso, server_url, status) values ('nightly', 'omarchy.iso', 'http://s1', 'running') returning id",
     );
     for (const status of ["passed", "failed"]) {
       const [definition] = await query(
@@ -63,8 +63,8 @@ describe("the tester against a fake postgres", () => {
       );
       await query(
         fake.url,
-        "insert into test_results (run_id, definition_id, status) values ($1, $2, $3)",
-        [run?.["id"], definition?.["id"], status],
+        "insert into test_runs (suite_id, definition_id, status) values ($1, $2, $3)",
+        [suite?.["id"], definition?.["id"], status],
       );
     }
 
@@ -77,11 +77,11 @@ describe("the tester against a fake postgres", () => {
       "[WARN] [global] tester: failing tests: 1",
     ]);
     expect(
-      await query(fake.url, "select level, location, agent_id, text from logs order by id"),
+      await query(fake.url, "select level, location, run_id, text from logs order by id"),
     ).toEqual([
-      { level: "info", location: "tester", agent_id: null, text: "running test suites: 1" },
-      { level: "info", location: "tester", agent_id: null, text: "passing tests: 1" },
-      { level: "warning", location: "tester", agent_id: null, text: "failing tests: 1" },
+      { level: "info", location: "tester", run_id: null, text: "running test suites: 1" },
+      { level: "info", location: "tester", run_id: null, text: "passing tests: 1" },
+      { level: "warning", location: "tester", run_id: null, text: "failing tests: 1" },
     ]);
   });
 
