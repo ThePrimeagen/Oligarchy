@@ -58,8 +58,8 @@ export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]
 // boot guests; an automation-client is a host that announces itself the same way.
 export const serverType = pgEnum("server_type", ["qemu", "automation-client"]);
 
-export const automationAction = pgEnum("automation_action", ["drive", "diagnose", "mint"]);
-export const automationJobStatus = pgEnum("automation_job_status", [
+export const jobAction = pgEnum("job_action", ["drive", "diagnose", "mint"]);
+export const jobStatus = pgEnum("job_status", [
   "pending",
   "running",
   "succeeded",
@@ -402,15 +402,15 @@ export const testRuns = pgTable(
 // server_id is the servers.id that claimed the job, so /abort can find that client after
 // a restart; null while the row is pending. Attribution, not a relation: forgetting a
 // server must keep the job row.
-export const automationJobs = pgTable(
-  "automation_jobs",
+export const jobs = pgTable(
+  "jobs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     runId: uuid("run_id")
       .notNull()
       .references(() => testRuns.id),
-    action: automationAction("action").notNull(),
-    status: automationJobStatus("status").notNull().default("pending"),
+    action: jobAction("action").notNull(),
+    status: jobStatus("status").notNull().default("pending"),
     reason: text("reason"),
     serverId: uuid("server_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -418,7 +418,7 @@ export const automationJobs = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("automation_jobs_run_action_idx").on(table.runId, table.action),
-    index("automation_jobs_status_created_at_idx").on(table.status, table.createdAt),
+    uniqueIndex("jobs_run_action_idx").on(table.runId, table.action),
+    index("jobs_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );
