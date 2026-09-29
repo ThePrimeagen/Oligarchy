@@ -1,26 +1,69 @@
 import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
-import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, notInArray, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
+import * as jarl from "jarl";
 import type { Answer } from "./answer.ts";
+
+// A transition asked of a row that is not in a state it moves from, or a create whose parent
+// is not ready for it. The message names the row, the state it is in, and what was needed.
+export const InvalidState = jarl.error.define("InvalidState");
+export type InvalidState = InstanceType<typeof InvalidState>;
+
+export const NotFound = jarl.error.define("NotFound");
+export type NotFound = InstanceType<typeof NotFound>;
+
+// A suite already holds a test run for that definition.
+export const Duplicate = jarl.error.define("Duplicate");
+export type Duplicate = InstanceType<typeof Duplicate>;
 
 export type DefinitionRow = typeof DbSchema.testDefinitions.$inferSelect;
 
 export type BasePromptRow = typeof DbSchema.testBasePrompts.$inferSelect;
 
+export type SuiteRow = typeof DbSchema.testSuites.$inferSelect;
+
 export type RunRow = typeof DbSchema.testRuns.$inferSelect;
 
-export type ResultRow = typeof DbSchema.testResults.$inferSelect;
+export type JobRow = typeof DbSchema.jobs.$inferSelect;
 
-export type RunInput = {
-  readonly iso: string;
-  readonly serverUrl: string;
-  readonly definitions: ReadonlyArray<{ readonly id: number }>;
+export type JobAction = JobRow["action"];
+
+export type JobStatus = JobRow["status"];
+
+export type RunStatus = RunRow["status"];
+
+// runs counts the suite's test runs in each status. In a summary, test is the definition's
+// name and suite the suite's.
+export type TestSuiteSummary = SuiteRow & { readonly runs: Readonly<Record<RunStatus, number>> };
+
+export type TestRunSummary = RunRow & { readonly test: string; readonly suite: string };
+
+export type JobSummary = JobRow & { readonly test: string };
+
+// Test runs and jobs in the details are oldest first.
+export type TestSuiteDetails = {
+  readonly suite: SuiteRow;
+  readonly runs: ReadonlyArray<{
+    readonly run: RunRow;
+    readonly test: string;
+    readonly jobs: ReadonlyArray<JobRow>;
+  }>;
 };
 
-export type CreatedRun = {
-  readonly runId: string;
-  readonly results: ReadonlyArray<{ readonly id: string; readonly definitionId: number }>;
+export type TestRunDetails = {
+  readonly run: RunRow;
+  readonly suite: SuiteRow;
+  readonly definition: DefinitionRow;
+  readonly jobs: ReadonlyArray<JobRow>;
+};
+
+export type JobDetails = {
+  readonly job: JobRow;
+  readonly run: RunRow;
+  readonly suite: SuiteRow;
+  readonly definition: DefinitionRow;
 };
 
 export type DefinitionInput = {
@@ -36,20 +79,21 @@ export type DefinedDefinition = {
   readonly version: number;
 };
 
-export type SessionResult = {
-  readonly result: ResultRow;
-  readonly definition: DefinitionRow;
-  readonly run: RunRow;
-};
-
-export type DriveFacts = {
+export type SuiteInput = {
   readonly name: string;
-  readonly description: string;
-  readonly instruction: string;
-  readonly proof: string;
   readonly iso: string;
   readonly serverUrl: string;
 };
+
+export type SuiteVerdict = "passed" | "failed";
+
+export type RunVerdict = "passed" | "failed";
+
+export type JobVerdict = "succeeded" | "failed";
+
+export type Moved<T> = Promise<jarl.Result<T, Db.DatabaseError | InvalidState | NotFound>>;
+
+export type Found<T> = Promise<jarl.Result<T, Db.DatabaseError | NotFound>>;
 
 export type Tests = {
   readonly service: "tests";
@@ -58,27 +102,47 @@ export type Tests = {
   readonly listTestDefinitionHistory: (name?: string) => Answer<ReadonlyArray<DefinitionRow>>;
   readonly defineTestDefinition: (input: DefinitionInput) => Answer<DefinedDefinition>;
   readonly listTestBasePrompts: () => Answer<ReadonlyArray<BasePromptRow>>;
-  readonly createRun: (input: RunInput) => Answer<CreatedRun>;
-  readonly failRun: (
-    runId: string,
-    reason: string,
-    resultIds: ReadonlyArray<string>,
-  ) => Answer<void>;
-  readonly startResult: (resultId: string, sessionId: string, model: string) => Answer<boolean>;
-  readonly closeResult: (
-    resultId: string,
-    status: "passed" | "failed",
-    reason: string | null,
-    sessionId: string | null,
-  ) => Answer<boolean>;
-  readonly errorResult: (resultId: string, reason: string) => Answer<boolean>;
-  readonly findResult: (resultId: string) => Answer<ResultRow | undefined>;
-  readonly setLinearId: (resultId: string, linearId: string) => Answer<void>;
-  readonly findResultByLinearId: (linearId: string) => Answer<ResultRow | undefined>;
-  readonly resultForSession: (sessionId: string) => Answer<ReadonlyArray<SessionResult>>;
   readonly definitionName: (id: number) => Answer<string | undefined>;
-  readonly resumeIso: (resultId: string) => Answer<string | undefined>;
-  readonly driveFacts: (resultId: string) => Answer<DriveFacts | undefined>;
+
+  readonly createTestSuite: (input: SuiteInput) => Answer<SuiteRow>;
+  readonly getTestSuite: (suiteId: string) => Found<TestSuiteSummary>;
+  readonly getTestSuiteDetails: (suiteId: string) => Found<TestSuiteDetails>;
+  readonly listTestSuites: (limit: number) => Answer<ReadonlyArray<TestSuiteSummary>>;
+  readonly startSuite: (suiteId: string) => Moved<SuiteRow>;
+  readonly completeSuite: (
+    suiteId: string,
+    status: SuiteVerdict,
+    reason: string | null,
+  ) => Moved<SuiteRow>;
+  readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
+
+  readonly createTestRun: (
+    suiteId: string,
+    definitionId: number,
+  ) => Promise<jarl.Result<RunRow, Db.DatabaseError | InvalidState | NotFound | Duplicate>>;
+  readonly getTestRun: (runId: string) => Found<TestRunSummary>;
+  readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
+  readonly listTestRuns: (suiteId: string) => Answer<ReadonlyArray<TestRunSummary>>;
+  readonly startRun: (runId: string) => Moved<RunRow>;
+  readonly completeRun: (runId: string, status: RunVerdict, reason: string | null) => Moved<RunRow>;
+  readonly errorRun: (runId: string, reason: string) => Moved<RunRow>;
+  readonly abortRun: (runId: string, reason: string) => Moved<RunRow>;
+
+  readonly createJob: (runId: string, action: JobAction) => Moved<JobRow>;
+  readonly getJob: (jobId: string) => Found<JobSummary>;
+  readonly getJobDetails: (jobId: string) => Found<JobDetails>;
+  readonly listJobs: (
+    statuses: ReadonlyArray<JobStatus>,
+    limit: number,
+  ) => Answer<ReadonlyArray<JobSummary>>;
+  readonly latestJob: (runId: string, action: JobAction) => Answer<JobRow | undefined>;
+  readonly nextPendingJob: (except: ReadonlyArray<string>) => Answer<JobRow | undefined>;
+  readonly runJob: (jobId: string, serverId: string) => Moved<JobRow>;
+  readonly completeJob: (jobId: string) => Moved<JobRow>;
+  readonly finalizeJob: (jobId: string, status: JobVerdict, reason: string | null) => Moved<JobRow>;
+  readonly errorJob: (jobId: string, reason: string) => Moved<JobRow>;
+  readonly timeoutJob: (jobId: string, reason: string) => Moved<JobRow>;
+  readonly abortJob: (jobId: string, reason: string) => Moved<JobRow>;
 };
 
 declare module "@oligarchy/app" {
@@ -87,240 +151,696 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = (db: Db.Database): Tests => ({
-  service: "tests",
+type Tx = Parameters<Parameters<Db.Drizzle["transaction"]>[0]>[0];
 
-  listTestDefinitions: () =>
-    db.run((d) =>
-      d
-        .selectDistinctOn([DbSchema.testDefinitions.name])
-        .from(DbSchema.testDefinitions)
-        .orderBy(DbSchema.testDefinitions.name, desc(DbSchema.testDefinitions.id)),
-    ),
+type Refusal = InvalidState | NotFound;
 
-  findTestDefinition: (name) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select()
-        .from(DbSchema.testDefinitions)
-        .where(eq(DbSchema.testDefinitions.name, name))
-        .orderBy(desc(DbSchema.testDefinitions.id))
-        .limit(1);
-      return row;
-    }),
+// Which states a transition moves from, and how its refusal says so.
+type Rule<Row> = { readonly accepts: (row: Row) => boolean; readonly need: string };
 
-  listTestDefinitionHistory: (name) =>
-    db.run((d) =>
-      d
-        .select()
-        .from(DbSchema.testDefinitions)
-        .where(name === undefined ? undefined : eq(DbSchema.testDefinitions.name, name))
-        .orderBy(DbSchema.testDefinitions.name, DbSchema.testDefinitions.id),
-    ),
+// A test run or suite held by a pending or running row below it: the refusal, or undefined.
+type Guard = (tx: Tx, id: string) => Promise<string | undefined>;
 
-  defineTestDefinition: (input) =>
-    db.run((d) =>
-      d.transaction(async (tx) => {
-        const [row] = await tx
-          .insert(DbSchema.testDefinitions)
-          .values(input)
-          .returning({ id: DbSchema.testDefinitions.id });
-        if (row === undefined) {
-          throw new Error("defineTestDefinition: the insert returned no row");
-        }
-        const version = await tx.$count(
-          DbSchema.testDefinitions,
-          eq(DbSchema.testDefinitions.name, input.name),
-        );
-        return { id: row.id, version };
-      }),
-    ),
+const OPEN = ["pending", "running"] as const;
 
-  listTestBasePrompts: () =>
-    db.run((d) => d.select().from(DbSchema.testBasePrompts).orderBy(DbSchema.testBasePrompts.name)),
+const settle = <T, E>(
+  answer: jarl.Result<jarl.Result<T, E>, Db.DatabaseError>,
+): jarl.Result<T, E | Db.DatabaseError> => (answer.ok ? answer.value : answer);
 
-  createRun: (input) =>
-    db.run((d) =>
-      d.transaction(async (tx) => {
-        const [run] = await tx
-          .insert(DbSchema.testRuns)
-          .values({
-            name: "Omarchy experiment",
-            iso: input.iso,
-            serverUrl: input.serverUrl,
-            status: "pending",
-          })
-          .returning({ id: DbSchema.testRuns.id });
-        if (run === undefined) {
-          throw new Error("createRun: the insert returned no row");
-        }
-        const results = await tx
-          .insert(DbSchema.testResults)
-          .values(
-            input.definitions.map((definition) => ({
-              runId: run.id,
-              definitionId: definition.id,
-              status: "pending" as const,
-            })),
-          )
-          .returning({
-            id: DbSchema.testResults.id,
-            definitionId: DbSchema.testResults.definitionId,
-          });
-        return { runId: run.id, results };
-      }),
-    ),
+const only = <T>(rows: ReadonlyArray<T>, what: string): T => {
+  const [row] = rows;
+  if (row === undefined) {
+    throw new Error(`${what}: the write returned no row`);
+  }
+  return row;
+};
 
-  failRun: (runId, reason, resultIds) =>
-    db.run((d) =>
-      d.transaction(async (tx) => {
-        const finishedAt = sql`now()`;
-        await tx
-          .update(DbSchema.testRuns)
-          .set({ status: "failed", reason, endedAt: finishedAt })
-          .where(eq(DbSchema.testRuns.id, runId));
-        await tx
-          .update(DbSchema.testResults)
-          .set({ status: "failed", reason, finishedAt })
-          .where(
-            and(eq(DbSchema.testResults.runId, runId), inArray(DbSchema.testResults.id, resultIds)),
-          );
-      }),
-    ),
+const now = sql`now()`;
 
-  startResult: (resultId, sessionId, model) =>
-    db.run(async (d) => {
-      const rows = await d
-        .update(DbSchema.testResults)
-        .set({ sessionId, status: "running", model })
-        .where(
-          and(eq(DbSchema.testResults.id, resultId), eq(DbSchema.testResults.status, "pending")),
-        )
-        .returning({ id: DbSchema.testResults.id });
-      return rows.length > 0;
-    }),
-
-  closeResult: (resultId, status, reason, sessionId) =>
-    db.run(async (d) => {
-      const rows = await d
-        .update(DbSchema.testResults)
-        .set(
-          Object.assign(
-            { status, finishedAt: sql`now()` },
-            reason === null ? undefined : { reason },
-            sessionId === null ? undefined : { sessionId },
-          ),
-        )
-        .where(
-          and(
-            eq(DbSchema.testResults.id, resultId),
-            notInArray(DbSchema.testResults.status, ["aborted", "errored"]),
-          ),
-        )
-        .returning({ id: DbSchema.testResults.id });
-      return rows.length > 0;
-    }),
-
-  errorResult: (resultId, reason) =>
-    db.run(async (d) => {
-      const rows = await d
-        .update(DbSchema.testResults)
-        .set({ status: "errored", reason, finishedAt: sql`now()` })
-        .where(
-          and(eq(DbSchema.testResults.id, resultId), ne(DbSchema.testResults.status, "aborted")),
-        )
-        .returning({ id: DbSchema.testResults.id });
-      return rows.length > 0;
-    }),
-
-  findResult: (resultId) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select()
-        .from(DbSchema.testResults)
-        .where(eq(DbSchema.testResults.id, resultId));
-      return row;
-    }),
-
-  setLinearId: (resultId, linearId) =>
-    db.run(async (d) => {
-      const rows = await d
-        .update(DbSchema.testResults)
-        .set({ linearId })
-        .where(eq(DbSchema.testResults.id, resultId))
-        .returning({ id: DbSchema.testResults.id });
-      if (rows.length === 0) {
-        throw new Error(`setLinearId: no result ${resultId}`);
-      }
-    }),
-
-  findResultByLinearId: (linearId) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select()
-        .from(DbSchema.testResults)
-        .where(eq(DbSchema.testResults.linearId, linearId));
-      return row;
-    }),
-
-  resultForSession: (sessionId) =>
-    db.run((d) =>
-      d
-        .select({
-          result: DbSchema.testResults,
-          definition: DbSchema.testDefinitions,
-          run: DbSchema.testRuns,
-        })
-        .from(DbSchema.testResults)
-        .innerJoin(
-          DbSchema.testDefinitions,
-          eq(DbSchema.testResults.definitionId, DbSchema.testDefinitions.id),
-        )
-        .innerJoin(DbSchema.testRuns, eq(DbSchema.testResults.runId, DbSchema.testRuns.id))
-        .where(eq(DbSchema.testResults.sessionId, sessionId)),
-    ),
-
-  definitionName: (id) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select({ name: DbSchema.testDefinitions.name })
-        .from(DbSchema.testDefinitions)
-        .where(eq(DbSchema.testDefinitions.id, id));
-      return row?.name;
-    }),
-
-  resumeIso: (resultId) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select({ iso: DbSchema.testRuns.iso, name: DbSchema.testDefinitions.name })
-        .from(DbSchema.testResults)
-        .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.testResults.runId))
-        .innerJoin(
-          DbSchema.testDefinitions,
-          eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
-        )
-        .where(eq(DbSchema.testResults.id, resultId));
-      return row === undefined || row.name === "mint" ? undefined : row.iso;
-    }),
-
-  driveFacts: (resultId) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select({
-          name: DbSchema.testDefinitions.name,
-          description: DbSchema.testDefinitions.description,
-          instruction: DbSchema.testDefinitions.instruction,
-          proof: DbSchema.testDefinitions.proof,
-          iso: DbSchema.testRuns.iso,
-          serverUrl: DbSchema.testRuns.serverUrl,
-        })
-        .from(DbSchema.testResults)
-        .innerJoin(
-          DbSchema.testDefinitions,
-          eq(DbSchema.testDefinitions.id, DbSchema.testResults.definitionId),
-        )
-        .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.testResults.runId))
-        .where(eq(DbSchema.testResults.id, resultId));
-      return row;
-    }),
+const noRuns = (): Record<RunStatus, number> => ({
+  pending: 0,
+  running: 0,
+  passed: 0,
+  failed: 0,
+  aborted: 0,
+  timed_out: 0,
+  completed: 0,
+  errored: 0,
 });
+
+// Each suite's test runs counted by status, in one grouped read; a suite with none counts zeros.
+const countRuns = async (d: Db.Drizzle, suiteIds: ReadonlyArray<string>) => {
+  const counts = new Map(suiteIds.map((id) => [id, noRuns()]));
+  if (suiteIds.length === 0) {
+    return counts;
+  }
+  const rows = await d
+    .select({
+      suiteId: DbSchema.testRuns.suiteId,
+      status: DbSchema.testRuns.status,
+      count: sql<number>`count(*)`.mapWith(Number),
+    })
+    .from(DbSchema.testRuns)
+    .where(inArray(DbSchema.testRuns.suiteId, [...suiteIds]))
+    .groupBy(DbSchema.testRuns.suiteId, DbSchema.testRuns.status);
+  for (const row of rows) {
+    const counted = counts.get(row.suiteId);
+    if (counted !== undefined) {
+      counted[row.status] = row.count;
+    }
+  }
+  return counts;
+};
+
+// Queue order: every pending mint, then every pending diagnose, then every pending drive,
+// each oldest first; id breaks a tie. A mint is the install a resume waits on, so it never
+// waits behind that resume, and a diagnose closes a drive already done.
+const queueRank = sql`case ${DbSchema.jobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
+
+const runSummary = {
+  ...getTableColumns(DbSchema.testRuns),
+  test: DbSchema.testDefinitions.name,
+  suite: DbSchema.testSuites.name,
+};
+
+const jobSummary = { ...getTableColumns(DbSchema.jobs), test: DbSchema.testDefinitions.name };
+
+const job = {
+  pending: { accepts: (row) => row.status === "pending", need: "pending" },
+  running: { accepts: (row) => row.status === "running", need: "running" },
+  completedJudged: {
+    accepts: (row) => row.status === "completed" && row.action !== "diagnose",
+    need: "a completed drive or mint",
+  },
+  errorable: {
+    accepts: (row) =>
+      row.status === "running" || (row.status === "completed" && row.action !== "diagnose"),
+    need: "running, or a completed drive or mint",
+  },
+  open: {
+    accepts: (row) => row.status === "pending" || row.status === "running",
+    need: "pending or running",
+  },
+} satisfies Record<string, Rule<JobRow>>;
+
+const run = {
+  pending: { accepts: (row) => row.status === "pending", need: "pending" },
+  running: { accepts: (row) => row.status === "running", need: "running" },
+  open: {
+    accepts: (row) => row.status === "pending" || row.status === "running",
+    need: "pending or running",
+  },
+} satisfies Record<string, Rule<RunRow>>;
+
+const suite = {
+  pending: { accepts: (row) => row.status === "pending", need: "pending" },
+  running: { accepts: (row) => row.status === "running", need: "running" },
+  open: {
+    accepts: (row) => row.status === "pending" || row.status === "running",
+    need: "pending or running",
+  },
+} satisfies Record<string, Rule<SuiteRow>>;
+
+const openJobOf =
+  (fn: string): Guard =>
+  async (tx, runId) => {
+    const [open] = await tx
+      .select({ id: DbSchema.jobs.id, status: DbSchema.jobs.status })
+      .from(DbSchema.jobs)
+      .where(and(eq(DbSchema.jobs.runId, runId), inArray(DbSchema.jobs.status, [...OPEN])))
+      .limit(1);
+    return open === undefined
+      ? undefined
+      : `${fn}: test run ${runId} has job ${open.id} ${open.status}; needs no pending or running job`;
+  };
+
+const openRunOf =
+  (fn: string): Guard =>
+  async (tx, suiteId) => {
+    const [open] = await tx
+      .select({ id: DbSchema.testRuns.id, status: DbSchema.testRuns.status })
+      .from(DbSchema.testRuns)
+      .where(
+        and(eq(DbSchema.testRuns.suiteId, suiteId), inArray(DbSchema.testRuns.status, [...OPEN])),
+      )
+      .limit(1);
+    return open === undefined
+      ? undefined
+      : `${fn}: test suite ${suiteId} has test run ${open.id} ${open.status}; needs no pending or running test run`;
+  };
+
+// Each transition locks its row, checks the state it is in and whatever holds it, and only
+// then writes: a refused call changes nothing, and two calls cannot both pass one check.
+export const create = (db: Db.Database): Tests => {
+  const moveJob = (
+    fn: string,
+    id: string,
+    rule: Rule<JobRow>,
+    set: PgUpdateSetSource<typeof DbSchema.jobs>,
+  ) =>
+    db
+      .run((d) =>
+        d.transaction(async (tx): Promise<jarl.Result<JobRow, Refusal>> => {
+          const [row] = await tx
+            .select()
+            .from(DbSchema.jobs)
+            .where(eq(DbSchema.jobs.id, id))
+            .for("update");
+          if (row === undefined) {
+            return jarl.err(new NotFound(`${fn}: no job ${id}`));
+          }
+          if (!rule.accepts(row)) {
+            return jarl.err(
+              new InvalidState(
+                `${fn}: job ${id} is ${row.status} ${row.action}; needs ${rule.need}`,
+              ),
+            );
+          }
+          return jarl.ok(
+            only(
+              await tx.update(DbSchema.jobs).set(set).where(eq(DbSchema.jobs.id, id)).returning(),
+              fn,
+            ),
+          );
+        }),
+      )
+      .then(settle);
+
+  const moveRun = (
+    fn: string,
+    id: string,
+    rule: Rule<RunRow>,
+    set: PgUpdateSetSource<typeof DbSchema.testRuns>,
+    guard?: Guard,
+  ) =>
+    db
+      .run((d) =>
+        d.transaction(async (tx): Promise<jarl.Result<RunRow, Refusal>> => {
+          const [row] = await tx
+            .select()
+            .from(DbSchema.testRuns)
+            .where(eq(DbSchema.testRuns.id, id))
+            .for("update");
+          if (row === undefined) {
+            return jarl.err(new NotFound(`${fn}: no test run ${id}`));
+          }
+          if (!rule.accepts(row)) {
+            return jarl.err(
+              new InvalidState(`${fn}: test run ${id} is ${row.status}; needs ${rule.need}`),
+            );
+          }
+          const held = guard === undefined ? undefined : await guard(tx, id);
+          if (held !== undefined) {
+            return jarl.err(new InvalidState(held));
+          }
+          return jarl.ok(
+            only(
+              await tx
+                .update(DbSchema.testRuns)
+                .set(set)
+                .where(eq(DbSchema.testRuns.id, id))
+                .returning(),
+              fn,
+            ),
+          );
+        }),
+      )
+      .then(settle);
+
+  const moveSuite = (
+    fn: string,
+    id: string,
+    rule: Rule<SuiteRow>,
+    set: PgUpdateSetSource<typeof DbSchema.testSuites>,
+    guard?: Guard,
+  ) =>
+    db
+      .run((d) =>
+        d.transaction(async (tx): Promise<jarl.Result<SuiteRow, Refusal>> => {
+          const [row] = await tx
+            .select()
+            .from(DbSchema.testSuites)
+            .where(eq(DbSchema.testSuites.id, id))
+            .for("update");
+          if (row === undefined) {
+            return jarl.err(new NotFound(`${fn}: no test suite ${id}`));
+          }
+          if (!rule.accepts(row)) {
+            return jarl.err(
+              new InvalidState(`${fn}: test suite ${id} is ${row.status}; needs ${rule.need}`),
+            );
+          }
+          const held = guard === undefined ? undefined : await guard(tx, id);
+          if (held !== undefined) {
+            return jarl.err(new InvalidState(held));
+          }
+          return jarl.ok(
+            only(
+              await tx
+                .update(DbSchema.testSuites)
+                .set(set)
+                .where(eq(DbSchema.testSuites.id, id))
+                .returning(),
+              fn,
+            ),
+          );
+        }),
+      )
+      .then(settle);
+
+  return {
+    service: "tests",
+
+    listTestDefinitions: () =>
+      db.run((d) =>
+        d
+          .selectDistinctOn([DbSchema.testDefinitions.name])
+          .from(DbSchema.testDefinitions)
+          .orderBy(DbSchema.testDefinitions.name, desc(DbSchema.testDefinitions.id)),
+      ),
+
+    findTestDefinition: (name) =>
+      db.run(async (d) => {
+        const [row] = await d
+          .select()
+          .from(DbSchema.testDefinitions)
+          .where(eq(DbSchema.testDefinitions.name, name))
+          .orderBy(desc(DbSchema.testDefinitions.id))
+          .limit(1);
+        return row;
+      }),
+
+    listTestDefinitionHistory: (name) =>
+      db.run((d) =>
+        d
+          .select()
+          .from(DbSchema.testDefinitions)
+          .where(name === undefined ? undefined : eq(DbSchema.testDefinitions.name, name))
+          .orderBy(DbSchema.testDefinitions.name, DbSchema.testDefinitions.id),
+      ),
+
+    defineTestDefinition: (input) =>
+      db.run((d) =>
+        d.transaction(async (tx) => {
+          const row = only(
+            await tx
+              .insert(DbSchema.testDefinitions)
+              .values(input)
+              .returning({ id: DbSchema.testDefinitions.id }),
+            "defineTestDefinition",
+          );
+          const version = await tx.$count(
+            DbSchema.testDefinitions,
+            eq(DbSchema.testDefinitions.name, input.name),
+          );
+          return { id: row.id, version };
+        }),
+      ),
+
+    listTestBasePrompts: () =>
+      db.run((d) =>
+        d.select().from(DbSchema.testBasePrompts).orderBy(DbSchema.testBasePrompts.name),
+      ),
+
+    definitionName: (id) =>
+      db.run(async (d) => {
+        const [row] = await d
+          .select({ name: DbSchema.testDefinitions.name })
+          .from(DbSchema.testDefinitions)
+          .where(eq(DbSchema.testDefinitions.id, id));
+        return row?.name;
+      }),
+
+    createTestSuite: (input) =>
+      db.run(async (d) =>
+        only(await d.insert(DbSchema.testSuites).values(input).returning(), "createTestSuite"),
+      ),
+
+    getTestSuite: (suiteId) =>
+      db
+        .run(async (d): Promise<jarl.Result<TestSuiteSummary, NotFound>> => {
+          const [row] = await d
+            .select()
+            .from(DbSchema.testSuites)
+            .where(eq(DbSchema.testSuites.id, suiteId));
+          if (row === undefined) {
+            return jarl.err(new NotFound(`getTestSuite: no test suite ${suiteId}`));
+          }
+          const counts = await countRuns(d, [suiteId]);
+          return jarl.ok({ ...row, runs: counts.get(suiteId) ?? noRuns() });
+        })
+        .then(settle),
+
+    getTestSuiteDetails: (suiteId) =>
+      db
+        .run(async (d): Promise<jarl.Result<TestSuiteDetails, NotFound>> => {
+          const [found] = await d
+            .select()
+            .from(DbSchema.testSuites)
+            .where(eq(DbSchema.testSuites.id, suiteId));
+          if (found === undefined) {
+            return jarl.err(new NotFound(`getTestSuiteDetails: no test suite ${suiteId}`));
+          }
+          const runs = await d
+            .select({ run: DbSchema.testRuns, test: DbSchema.testDefinitions.name })
+            .from(DbSchema.testRuns)
+            .innerJoin(
+              DbSchema.testDefinitions,
+              eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+            )
+            .where(eq(DbSchema.testRuns.suiteId, suiteId))
+            .orderBy(asc(DbSchema.testRuns.createdAt), asc(DbSchema.testRuns.id));
+          const history =
+            runs.length === 0
+              ? []
+              : await d
+                  .select()
+                  .from(DbSchema.jobs)
+                  .where(
+                    inArray(
+                      DbSchema.jobs.runId,
+                      runs.map((listed) => listed.run.id),
+                    ),
+                  )
+                  .orderBy(asc(DbSchema.jobs.createdAt), asc(DbSchema.jobs.id));
+          return jarl.ok({
+            suite: found,
+            runs: runs.map((listed) => ({
+              ...listed,
+              jobs: history.filter((taken) => taken.runId === listed.run.id),
+            })),
+          });
+        })
+        .then(settle),
+
+    listTestSuites: (limit) =>
+      db.run(async (d) => {
+        const rows = await d
+          .select()
+          .from(DbSchema.testSuites)
+          .orderBy(desc(DbSchema.testSuites.startedAt), desc(DbSchema.testSuites.id))
+          .limit(limit);
+        const counts = await countRuns(
+          d,
+          rows.map((row) => row.id),
+        );
+        return rows.map((row) => ({ ...row, runs: counts.get(row.id) ?? noRuns() }));
+      }),
+
+    startSuite: (suiteId) => moveSuite("startSuite", suiteId, suite.pending, { status: "running" }),
+
+    completeSuite: (suiteId, status, reason) =>
+      moveSuite(
+        "completeSuite",
+        suiteId,
+        suite.running,
+        { status, reason, endedAt: now },
+        openRunOf("completeSuite"),
+      ),
+
+    abortSuite: (suiteId, reason) =>
+      moveSuite(
+        "abortSuite",
+        suiteId,
+        suite.open,
+        { status: "aborted", reason, endedAt: now },
+        openRunOf("abortSuite"),
+      ),
+
+    createTestRun: (suiteId, definitionId) =>
+      db
+        .run((d) =>
+          d.transaction(
+            async (tx): Promise<jarl.Result<RunRow, InvalidState | NotFound | Duplicate>> => {
+              const [held] = await tx
+                .select({ status: DbSchema.testSuites.status })
+                .from(DbSchema.testSuites)
+                .where(eq(DbSchema.testSuites.id, suiteId))
+                .for("update");
+              if (held === undefined) {
+                return jarl.err(new NotFound(`createTestRun: no test suite ${suiteId}`));
+              }
+              if (held.status !== "pending") {
+                return jarl.err(
+                  new InvalidState(
+                    `createTestRun: test suite ${suiteId} is ${held.status}; needs pending`,
+                  ),
+                );
+              }
+              const [known] = await tx
+                .select({ id: DbSchema.testDefinitions.id })
+                .from(DbSchema.testDefinitions)
+                .where(eq(DbSchema.testDefinitions.id, definitionId));
+              if (known === undefined) {
+                return jarl.err(
+                  new NotFound(`createTestRun: no test definition ${String(definitionId)}`),
+                );
+              }
+              const [twin] = await tx
+                .select({ id: DbSchema.testRuns.id })
+                .from(DbSchema.testRuns)
+                .where(
+                  and(
+                    eq(DbSchema.testRuns.suiteId, suiteId),
+                    eq(DbSchema.testRuns.definitionId, definitionId),
+                  ),
+                );
+              if (twin !== undefined) {
+                return jarl.err(
+                  new Duplicate(
+                    `createTestRun: test suite ${suiteId} already has test definition ${String(definitionId)}`,
+                  ),
+                );
+              }
+              return jarl.ok(
+                only(
+                  await tx.insert(DbSchema.testRuns).values({ suiteId, definitionId }).returning(),
+                  "createTestRun",
+                ),
+              );
+            },
+          ),
+        )
+        .then(settle),
+
+    getTestRun: (runId) =>
+      db
+        .run(async (d): Promise<jarl.Result<TestRunSummary, NotFound>> => {
+          const [row] = await d
+            .select(runSummary)
+            .from(DbSchema.testRuns)
+            .innerJoin(
+              DbSchema.testDefinitions,
+              eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+            )
+            .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+            .where(eq(DbSchema.testRuns.id, runId));
+          return row === undefined
+            ? jarl.err(new NotFound(`getTestRun: no test run ${runId}`))
+            : jarl.ok(row);
+        })
+        .then(settle),
+
+    getTestRunDetails: (runId) =>
+      db
+        .run(async (d): Promise<jarl.Result<TestRunDetails, NotFound>> => {
+          const [row] = await d
+            .select({
+              run: DbSchema.testRuns,
+              suite: DbSchema.testSuites,
+              definition: DbSchema.testDefinitions,
+            })
+            .from(DbSchema.testRuns)
+            .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+            .innerJoin(
+              DbSchema.testDefinitions,
+              eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+            )
+            .where(eq(DbSchema.testRuns.id, runId));
+          if (row === undefined) {
+            return jarl.err(new NotFound(`getTestRunDetails: no test run ${runId}`));
+          }
+          const history = await d
+            .select()
+            .from(DbSchema.jobs)
+            .where(eq(DbSchema.jobs.runId, runId))
+            .orderBy(asc(DbSchema.jobs.createdAt), asc(DbSchema.jobs.id));
+          return jarl.ok({ ...row, jobs: history });
+        })
+        .then(settle),
+
+    listTestRuns: (suiteId) =>
+      db.run((d) =>
+        d
+          .select(runSummary)
+          .from(DbSchema.testRuns)
+          .innerJoin(
+            DbSchema.testDefinitions,
+            eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+          )
+          .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+          .where(eq(DbSchema.testRuns.suiteId, suiteId))
+          .orderBy(asc(DbSchema.testRuns.createdAt), asc(DbSchema.testRuns.id)),
+      ),
+
+    startRun: (runId) => moveRun("startRun", runId, run.pending, { status: "running" }),
+
+    completeRun: (runId, status, reason) =>
+      moveRun("completeRun", runId, run.running, { status, reason, finishedAt: now }),
+
+    errorRun: (runId, reason) =>
+      moveRun(
+        "errorRun",
+        runId,
+        run.running,
+        { status: "errored", reason, finishedAt: now },
+        openJobOf("errorRun"),
+      ),
+
+    abortRun: (runId, reason) =>
+      moveRun(
+        "abortRun",
+        runId,
+        run.open,
+        { status: "aborted", reason, finishedAt: now },
+        openJobOf("abortRun"),
+      ),
+
+    createJob: (runId, action) =>
+      db
+        .run((d) =>
+          d.transaction(async (tx): Promise<jarl.Result<JobRow, Refusal>> => {
+            const [held] = await tx
+              .select()
+              .from(DbSchema.testRuns)
+              .where(eq(DbSchema.testRuns.id, runId))
+              .for("update");
+            if (held === undefined) {
+              return jarl.err(new NotFound(`createJob: no test run ${runId}`));
+            }
+            if (!run.open.accepts(held)) {
+              return jarl.err(
+                new InvalidState(
+                  `createJob: test run ${runId} is ${held.status}; needs ${run.open.need}`,
+                ),
+              );
+            }
+            const open = await openJobOf("createJob")(tx, runId);
+            if (open !== undefined) {
+              return jarl.err(new InvalidState(open));
+            }
+            return jarl.ok(
+              only(
+                await tx.insert(DbSchema.jobs).values({ runId, action }).returning(),
+                "createJob",
+              ),
+            );
+          }),
+        )
+        .then(settle),
+
+    getJob: (jobId) =>
+      db
+        .run(async (d): Promise<jarl.Result<JobSummary, NotFound>> => {
+          const [row] = await d
+            .select(jobSummary)
+            .from(DbSchema.jobs)
+            .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
+            .innerJoin(
+              DbSchema.testDefinitions,
+              eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+            )
+            .where(eq(DbSchema.jobs.id, jobId));
+          return row === undefined
+            ? jarl.err(new NotFound(`getJob: no job ${jobId}`))
+            : jarl.ok(row);
+        })
+        .then(settle),
+
+    getJobDetails: (jobId) =>
+      db
+        .run(async (d): Promise<jarl.Result<JobDetails, NotFound>> => {
+          const [row] = await d
+            .select({
+              job: DbSchema.jobs,
+              run: DbSchema.testRuns,
+              suite: DbSchema.testSuites,
+              definition: DbSchema.testDefinitions,
+            })
+            .from(DbSchema.jobs)
+            .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
+            .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+            .innerJoin(
+              DbSchema.testDefinitions,
+              eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+            )
+            .where(eq(DbSchema.jobs.id, jobId));
+          return row === undefined
+            ? jarl.err(new NotFound(`getJobDetails: no job ${jobId}`))
+            : jarl.ok(row);
+        })
+        .then(settle),
+
+    listJobs: (statuses, limit) =>
+      db.run((d) =>
+        d
+          .select(jobSummary)
+          .from(DbSchema.jobs)
+          .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
+          .innerJoin(
+            DbSchema.testDefinitions,
+            eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+          )
+          .where(inArray(DbSchema.jobs.status, [...statuses]))
+          .orderBy(desc(DbSchema.jobs.createdAt), desc(DbSchema.jobs.id))
+          .limit(limit),
+      ),
+
+    latestJob: (runId, action) =>
+      db.run(async (d) => {
+        const [row] = await d
+          .select()
+          .from(DbSchema.jobs)
+          .where(and(eq(DbSchema.jobs.runId, runId), eq(DbSchema.jobs.action, action)))
+          .orderBy(desc(DbSchema.jobs.createdAt), desc(DbSchema.jobs.id))
+          .limit(1);
+        return row;
+      }),
+
+    nextPendingJob: (except) =>
+      db.run(async (d) => {
+        const pending = eq(DbSchema.jobs.status, "pending");
+        const [row] = await d
+          .select()
+          .from(DbSchema.jobs)
+          .where(
+            except.length === 0 ? pending : and(pending, notInArray(DbSchema.jobs.id, [...except])),
+          )
+          .orderBy(queueRank, asc(DbSchema.jobs.createdAt), asc(DbSchema.jobs.id))
+          .limit(1);
+        return row;
+      }),
+
+    runJob: (jobId, serverId) =>
+      moveJob("runJob", jobId, job.pending, { status: "running", serverId, startedAt: now }),
+
+    completeJob: (jobId) =>
+      moveJob("completeJob", jobId, job.running, { status: "completed", finishedAt: now }),
+
+    finalizeJob: (jobId, status, reason) =>
+      moveJob("finalizeJob", jobId, job.completedJudged, { status, reason }),
+
+    errorJob: (jobId, reason) =>
+      moveJob("errorJob", jobId, job.errorable, {
+        status: "errored",
+        reason,
+        finishedAt: sql`coalesce(${DbSchema.jobs.finishedAt}, now())`,
+      }),
+
+    timeoutJob: (jobId, reason) =>
+      moveJob("timeoutJob", jobId, job.running, { status: "timed_out", reason, finishedAt: now }),
+
+    abortJob: (jobId, reason) =>
+      moveJob("abortJob", jobId, job.open, { status: "aborted", reason, finishedAt: now }),
+  };
+};
