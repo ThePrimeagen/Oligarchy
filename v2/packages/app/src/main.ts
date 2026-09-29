@@ -1,4 +1,4 @@
-export { App, MainCalledTwice } from "./app.ts";
+export { App } from "./app.ts";
 export type { Services } from "./services.ts";
 export type {
   AnyService,
@@ -6,7 +6,9 @@ export type {
   Has,
   Io,
   Needs,
+  OnClose,
   OnExit,
+  Outcome,
   Provided,
   Register,
   Signal,

@@ -42,13 +42,14 @@ if (!wired.ok) {
   process.exit(1);
 }
 
-const app = new App.App(created.value, wired.value);
+const app = new App.App(created.value).main(main);
 app.onExit(async () => {
   // Every line waits on its insert, so the pool stays open until the last one lands.
   await app.services.logger.flush();
-  const closed = await app.services.db.close();
-  if (!closed.ok) {
-    process.stderr.write(`${closed.error.message}\n`);
+  return app.services.db.close();
+});
+await app.run(wired.value, (errors) => {
+  for (const error of errors) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   }
 });
-await app.main(main);

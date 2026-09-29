@@ -1,3 +1,4 @@
+import type * as jarl from "jarl";
 import type { Services } from "./services.ts";
 
 // Every type that makes the app check itself lives here; app.ts only names them.
@@ -11,7 +12,7 @@ export type Needs<T extends AnyService> = { readonly [S in T as S["service"]]: S
 // An entry in Services, whose key must be the service's own name.
 export type Register<Name extends string, T extends { readonly service: Name }> = T;
 
-// What an app is built from: each key a service's name, its value that service.
+// What a top app runs on: each key a service's name, its value that service.
 export type Provided = { readonly [K in keyof Services]?: Services[K] };
 
 // A bare service where the object of services goes has a `service` field; this refuses it.
@@ -21,30 +22,33 @@ export type NotAService = { readonly service?: never };
 export type OnlyServices<S> = { readonly [K in Exclude<keyof S, keyof Services>]: never };
 
 // The keys a services object certainly has: an optional key, or one that may be undefined, is not
-// a service the app can hand to main.
-type Present<S> = {
+// a service main can be handed.
+export type NamesOf<S> = {
   [K in keyof S]-?: {} extends Pick<S, K> ? never : undefined extends S[K] ? never : K;
 }[keyof S];
 
-// An app is written with the services main wants (a union) or built from an object. Both read as
-// the same object of services, and both name the services they certainly have.
-export type ServicesOf<S> = [S] extends [AnyService] ? Needs<S> : S;
-export type NamesOf<S> = [S] extends [AnyService] ? S["service"] : Present<S>;
-
 type Missing<Wants extends AnyService, Names> = Exclude<Wants["service"], Names>;
 
-// Nothing to add when the app has every service main wants; otherwise the error names the rest.
+// Nothing to add when every service wanted is there; otherwise the error names the rest.
 export type Provides<Wants extends AnyService, Names> = [Missing<Wants, Names>] extends [never]
   ? unknown
   : { readonly missing: Missing<Wants, Names> };
 
 export type Signal = "SIGINT" | "SIGTERM" | "SIGHUP";
 
+// A sub-app never sees a signal: its parent stopping, for whatever reason, is what stops it.
 export type ExitReason =
   | { readonly kind: "returned" }
-  | { readonly kind: "signal"; readonly signal: Signal };
+  | { readonly kind: "signal"; readonly signal: Signal }
+  | { readonly kind: "parent" };
 
-export type OnExit = (reason: ExitReason) => void | Promise<void>;
+// What main and the exit handlers hand back: an error they return is one the top app closes with.
+export type Outcome = jarl.Result<void, unknown>;
+
+export type OnExit = (reason: ExitReason) => void | Outcome | Promise<void | Outcome>;
+
+// The top app's last word: every error its tree returned or threw, in the order they happened.
+export type OnClose = (errors: ReadonlyArray<unknown>) => void | Outcome | Promise<void | Outcome>;
 
 // The process as the app sees it; a test passes its own.
 export type Io = {
