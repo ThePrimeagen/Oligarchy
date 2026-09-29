@@ -2,7 +2,7 @@ import * as Async from "@oligarchy/async";
 import * as Fake from "@oligarchy/http/testing";
 import * as Sentry from "../src/main.ts";
 
-export const DSN = "https://public@o1.ingest.example/42";
+const DSN = "https://public@o1.ingest.example/42";
 export const JOB_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 export const TRACE_ID = "1baaad43674b4bdb88d73f18fce50aba";
 
