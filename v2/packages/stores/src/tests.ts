@@ -4,7 +4,7 @@ import * as DbSchema from "@oligarchy/db/schema";
 import { and, asc, desc, eq, getTableColumns, inArray, notInArray, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import * as jarl from "jarl";
-import type { Answer } from "./answer.ts";
+import { type Answer, settle } from "./answer.ts";
 
 // A transition asked of a row that is not in a state it moves from, or a create whose parent
 // is not ready for it. The message names the row, the state it is in, and what was needed.
@@ -162,10 +162,6 @@ type Rule<Row> = { readonly accepts: (row: Row) => boolean; readonly need: strin
 type Guard = (tx: Tx, id: string) => Promise<string | undefined>;
 
 const OPEN = ["pending", "running"] as const;
-
-const settle = <T, E>(
-  answer: jarl.Result<jarl.Result<T, E>, Db.DatabaseError>,
-): jarl.Result<T, E | Db.DatabaseError> => (jarl.is_ok(answer) ? jarl.value(answer) : answer);
 
 const only = <T>(rows: ReadonlyArray<T>, what: string): T => {
   const [row] = rows;
