@@ -11,3 +11,6 @@
 6. When we do not yet know how a service behaves (Linear's tickets, for one), its fake must still
    be able to produce every error the service can, so each error is tested now. How its happy
    path is tested gets settled once we know.
+7. Always use `jarl.value(...)` to get values out of a result, and enforce error handling. It
+   accepts a result only once every error has been handled, so the compiler proves none was
+   skipped.
