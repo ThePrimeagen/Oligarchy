@@ -34,17 +34,15 @@ export type JobStatus = JobRow["status"];
 
 export type RunStatus = RunRow["status"];
 
-// A suite for display: its row, and its test runs counted by status.
+// runs counts the suite's test runs in each status. In a summary, test is the definition's
+// name and suite the suite's.
 export type TestSuiteSummary = SuiteRow & { readonly runs: Readonly<Record<RunStatus, number>> };
 
-// A test run for display: its row, its definition's name and its suite's name.
 export type TestRunSummary = RunRow & { readonly test: string; readonly suite: string };
 
-// A job for display: its row and its test run's definition name.
 export type JobSummary = JobRow & { readonly test: string };
 
-// A suite and everything under it: each test run with its definition's name and its jobs,
-// test runs and jobs both oldest first.
+// Test runs and jobs in the details are oldest first.
 export type TestSuiteDetails = {
   readonly suite: SuiteRow;
   readonly runs: ReadonlyArray<{
@@ -54,7 +52,6 @@ export type TestSuiteDetails = {
   }>;
 };
 
-// A test run and what it belongs to, with every job it took, oldest first.
 export type TestRunDetails = {
   readonly run: RunRow;
   readonly suite: SuiteRow;
@@ -62,8 +59,6 @@ export type TestRunDetails = {
   readonly jobs: ReadonlyArray<JobRow>;
 };
 
-// A job and everything needed to run it: its test run, the suite's iso and server, and the
-// definition's instruction and proof.
 export type JobDetails = {
   readonly job: JobRow;
   readonly run: RunRow;
@@ -96,10 +91,8 @@ export type RunVerdict = "passed" | "failed";
 
 export type JobVerdict = "succeeded" | "failed";
 
-// The row as the transition left it, or why it did not move.
 export type Moved<T> = Promise<jarl.Result<T, Db.DatabaseError | InvalidState | NotFound>>;
 
-// A read of one row by its id, which may not exist.
 export type Found<T> = Promise<jarl.Result<T, Db.DatabaseError | NotFound>>;
 
 export type Tests = {
