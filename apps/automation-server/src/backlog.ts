@@ -43,12 +43,12 @@ const tracking = (watch: string, seen: ReadonlyArray<Seen>): string =>
 
 const isLinearError = Schema.is(LinearErrors.LinearError);
 
-// A ticket's step the next poll repeats. A Linear call Linear says is worth asking again is that
-// poll's to send, so it is a warning; anything else is the watch failing.
-const missed = (watch: string, ticket: string, error: unknown) =>
+// A column read or a ticket's step the next poll repeats. A Linear call Linear says is worth
+// asking again is that poll's to send, so it is a warning; anything else is the watch failing.
+const missed = (watch: string, agentId: string, error: unknown) =>
   Effect.gen(function* () {
     const log = yield* Log.Log;
-    const where = { location: Log.Locations.automation, agentId: ticket };
+    const where = { location: Log.Locations.automation, agentId };
     if (isLinearError(error) && error.retryable === true) {
       return yield* log.warning(
         `${watch} watch will try again: ${JobsErrors.detail(error)}`,
@@ -256,13 +256,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
       Effect.gen(function* () {
         const tickets = yield* Retry.linearRead(linear.listBacklog).pipe(
           Effect.catch((error) =>
-            log
-              .error(`backlog watch failed: ${JobsErrors.detail(error)}`, {
-                location: Log.Locations.automation,
-                agentId: Log.AutomationAgentId,
-                cause: error,
-              })
-              .pipe(Effect.as(undefined)),
+            missed("backlog", Log.AutomationAgentId, error).pipe(Effect.as(undefined)),
           ),
         );
         if (tickets === undefined) {
@@ -314,13 +308,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
       Effect.gen(function* () {
         const tickets = yield* Retry.linearRead(linear.listAutomationNeeded).pipe(
           Effect.catch((error) =>
-            log
-              .error(`automation needed watch failed: ${JobsErrors.detail(error)}`, {
-                location: Log.Locations.automation,
-                agentId: Log.AutomationAgentId,
-                cause: error,
-              })
-              .pipe(Effect.as(undefined)),
+            missed("automation needed", Log.AutomationAgentId, error).pipe(Effect.as(undefined)),
           ),
         );
         if (tickets === undefined) {
@@ -378,13 +366,7 @@ export const watch = Effect.fn("watchBoard")(function* () {
       Effect.gen(function* () {
         const tickets = yield* Retry.linearRead(linear.listNeedsReview).pipe(
           Effect.catch((error) =>
-            log
-              .error(`needs review watch failed: ${JobsErrors.detail(error)}`, {
-                location: Log.Locations.automation,
-                agentId: Log.AutomationAgentId,
-                cause: error,
-              })
-              .pipe(Effect.as(undefined)),
+            missed("needs review", Log.AutomationAgentId, error).pipe(Effect.as(undefined)),
           ),
         );
         if (tickets === undefined) {

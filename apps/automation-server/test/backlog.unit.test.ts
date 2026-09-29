@@ -587,6 +587,67 @@ describe("backlog watch unhappy path", () => {
       }),
   );
 
+  it.effect(
+    "a column Linear does not answer, even when asked again, is a warning per column; the next poll moves the ticket",
+    () =>
+      Effect.gen(function* () {
+        const unanswered = (operation: string) =>
+          LinearErrors.LinearError.make({
+            operation,
+            message: "linear: request failed: no answer within 10 seconds",
+            retryable: true,
+          });
+        let fail = false;
+        const stores = TestingStores.fakeStores();
+        const log = TestingLog.fakeLog();
+        const moved: Array<Move> = [];
+        const linear = TestingLinear.fakeLinear({
+          overrides: {
+            listBacklog: Effect.suspend(() =>
+              fail
+                ? Effect.fail(unanswered("listBacklog"))
+                : Effect.succeed([ticket(TICKET, SEEN)]),
+            ),
+            listAutomationNeeded: Effect.suspend(() =>
+              fail ? Effect.fail(unanswered("listAutomationNeeded")) : Effect.succeed([]),
+            ),
+            listNeedsReview: Effect.suspend(() =>
+              fail ? Effect.fail(unanswered("listNeedsReview")) : Effect.succeed([]),
+            ),
+            moveIssue: (issue, stateId) =>
+              Effect.sync(() => {
+                moved.push({ issueId: issue.id, identifier: issue.identifier, stateId });
+              }),
+          },
+        });
+        seedResult(stores.tests, TICKET);
+        announceClient(stores.servers);
+        const scope = yield* Scope.make();
+        yield* Backlog.watch().pipe(
+          Effect.provide(Layer.mergeAll(stores.layer, linear.layer, log.layer)),
+          Scope.provide(scope),
+        );
+        yield* TestClock.adjust("30 seconds");
+        fail = true;
+        yield* TestClock.adjust("30 seconds");
+        yield* TestClock.adjust("6 seconds");
+        expect(errors(log)).toEqual([]);
+        expect(log.lines.filter((line) => line.level === "warning")).toEqual(
+          ["backlog", "automation needed", "needs review"].map((column) =>
+            expect.objectContaining({
+              text: `${column} watch will try again: linear: request failed: no answer within 10 seconds`,
+              location: "automation",
+              agentId: "automation",
+            }),
+          ),
+        );
+        fail = false;
+        yield* TestClock.adjust("60 seconds");
+        expect(moved).toEqual([automationNeeded(TICKET)]);
+        expect(stores.automation.jobs).toHaveLength(1);
+      }),
+  );
+
   it.effect("a column Linear answers busy once is read again and the poll logs no failure", () =>
     Effect.gen(function* () {
       const busy = LinearErrors.LinearError.make({
