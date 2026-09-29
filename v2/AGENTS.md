@@ -11,3 +11,7 @@
 6. When we do not yet know how a service behaves (Linear's tickets, for one), its fake must still
    be able to produce every error the service can, so each error is tested now. How its happy
    path is tested gets settled once we know.
+7. Every error is handled, and a jarl value is only ever read with `jarl.value(result)`. It takes
+   a `Result<T, never>`, so it compiles only once each error has been dealt with (returned,
+   narrowed off with `jarl.error.is`, or ruled out by an `ok` check). Never read `.value`
+   directly, and never `jarl.unwrap`: both reach the value past an error nobody handled.
