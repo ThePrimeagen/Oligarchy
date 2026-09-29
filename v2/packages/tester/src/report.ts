@@ -14,11 +14,11 @@ export const report = (
   logger: Logger.Logger,
   counted: jarl.Result<Counts, Db.DatabaseError>,
 ): jarl.Result<void, Db.DatabaseError> => {
-  if (!counted.ok) {
+  if (jarl.is_err(counted)) {
     logger.error(`could not count tests: ${counted.error.message}`, AS);
     return counted;
   }
-  const { running, passing, failing } = counted.value;
+  const { running, passing, failing } = jarl.value(counted);
   logger.info(`running test suites: ${String(running)}`, AS);
   logger.info(`passing tests: ${String(passing)}`, AS);
   (failing > 0 ? logger.warning : logger.info)(`failing tests: ${String(failing)}`, AS);

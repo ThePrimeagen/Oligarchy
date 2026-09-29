@@ -49,7 +49,7 @@ export const create = (
     if (!read.ok) {
       return read;
     }
-    const reading = read.value;
+    const reading = jarl.value(read);
     const at = now();
     const before = last;
     last = { reading, at };
@@ -208,7 +208,7 @@ export const psSource =
     if (!listing.ok) {
       return listing;
     }
-    const memoryBytes = treeRssBytes(listing.value, pid);
+    const memoryBytes = treeRssBytes(jarl.value(listing), pid);
     if (memoryBytes === undefined) {
       return jarl.err(new UsageUnreadable(`ps did not list this process (pid ${String(pid)})`));
     }

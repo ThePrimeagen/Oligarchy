@@ -1,6 +1,6 @@
 // A fake transport for tests: Http as create makes it, answering from replies instead of the
 // network, and recording each request it was asked.
-import type * as jarl from "jarl";
+import * as jarl from "jarl";
 import * as Http from "./main.ts";
 
 // "unreachable" throws as fetch does on no connection; "hang" answers only when the request's
@@ -92,9 +92,11 @@ export const failure = <C>(
   result: jarl.Result<unknown, unknown>,
   error: abstract new (...args: never[]) => C,
 ): C => {
-  if (!result.ok && result.error instanceof error) {
+  if (jarl.is_err(result) && result.error instanceof error) {
     return result.error;
   }
-  const came = result.ok ? `ok ${JSON.stringify(result.value)}` : String(result.error);
+  const came = jarl.is_ok(result)
+    ? `ok ${JSON.stringify(jarl.value(result))}`
+    : String(result.error);
   throw new Error(`expected a ${error.name} failure, got ${came}`);
 };

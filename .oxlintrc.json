@@ -66,9 +66,15 @@
       "jsPlugins": ["./v2/lint/plugin.js"],
       "rules": {
         "oligarchy/augment-through-entry": "error",
+        "oligarchy/result-through-jarl": "error",
+        "oligarchy/unwrap-inside-jarl-fn": "error",
         "typescript/no-redundant-type-constituents": "off",
         "import/namespace": "off"
       }
+    },
+    {
+      "files": ["v2/**/test/**"],
+      "rules": { "oligarchy/unwrap-inside-jarl-fn": "off" }
     }
   ],
   "env": { "builtin": true, "node": true, "es2022": true },

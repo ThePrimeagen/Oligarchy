@@ -165,7 +165,7 @@ const OPEN = ["pending", "running"] as const;
 
 const settle = <T, E>(
   answer: jarl.Result<jarl.Result<T, E>, Db.DatabaseError>,
-): jarl.Result<T, E | Db.DatabaseError> => (answer.ok ? answer.value : answer);
+): jarl.Result<T, E | Db.DatabaseError> => (jarl.is_ok(answer) ? jarl.value(answer) : answer);
 
 const only = <T>(rows: ReadonlyArray<T>, what: string): T => {
   const [row] = rows;

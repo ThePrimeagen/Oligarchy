@@ -33,20 +33,21 @@ export const createServices = (
   env: { readonly vars: { readonly databaseUrl: Env.Secret } },
   terminal: Terminal = stdout,
 ): jarl.Result<Services, Db.DatabaseError> => {
-  const db = Db.open({
+  const opened = Db.open({
     url: env.vars.databaseUrl,
     onPoolError: (error) => {
       logger.error(`db: pool error: ${error.message}`);
     },
   });
-  if (!db.ok) {
-    return db;
+  if (!opened.ok) {
+    return opened;
   }
-  const logs = Stores.Logs.create(db.value);
+  const db = jarl.value(opened);
+  const logs = Stores.Logs.create(db);
   const logger = Logger.create({
     write: terminal.write,
     colors: terminal.colors,
     store: logs.insertLog,
   });
-  return jarl.ok({ db: db.value, logs, logger });
+  return jarl.ok({ db, logs, logger });
 };

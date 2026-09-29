@@ -49,10 +49,7 @@ describe("create", () => {
       ctrl,
       io({ argv: [...RUN_ONE, "--session-id", "s-1"], env: { DATABASE_URL: SENTINEL } }),
     );
-    if (!jarl.is_ok(result)) {
-      throw result.error;
-    }
-    const env = result.value;
+    const env = jarl.unwrap(result);
     expectTypeOf(env.command).toEqualTypeOf<"mint" | "test run one">();
     if (env.command !== "test run one") {
       throw new Error(`expected test run one, got ${env.command}`);
@@ -111,10 +108,7 @@ describe("create", () => {
         },
       }),
     );
-    if (!jarl.is_ok(result)) {
-      throw result.error;
-    }
-    const env = result.value;
+    const env = jarl.unwrap(result);
     if (env.command !== "mint") {
       throw new Error(`expected mint, got ${env.command}`);
     }
@@ -139,11 +133,9 @@ describe("create", () => {
         files: { [Env.CONFIG_PATH]: JSON.stringify(file) },
       }),
     );
-    if (!jarl.is_ok(result)) {
-      throw result.error;
-    }
-    expect(result.value.config.models).toEqual(file.models);
-    expect(result.value.config.stepLimit).toBe(7);
-    expect(result.value.config.timeouts).toEqual({ header: 2_000, chunk: 5_000 });
+    const { config } = jarl.unwrap(result);
+    expect(config.models).toEqual(file.models);
+    expect(config.stepLimit).toBe(7);
+    expect(config.timeouts).toEqual({ header: 2_000, chunk: 5_000 });
   });
 });

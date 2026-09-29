@@ -1,40 +1,76 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = join(import.meta.dirname, "../..");
 
-// Lints the files with only oligarchy/augment-through-entry on: oxlint's exit status, and each
-// diagnostic's message, sorted. A plugin that fails to load exits 1 with no diagnostics.
-const lint = (
-  files: Readonly<Record<string, string>>,
-): { readonly status: number | null; readonly messages: Array<string> } => {
-  const dir = mkdtempSync(join(tmpdir(), "augment-through-entry-"));
+const writeFiles = (dir: string, files: Readonly<Record<string, string>>): void => {
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, name)), { recursive: true });
     writeFileSync(join(dir, name), text);
   }
+};
+
+// Lints dir with config: oxlint's exit status, and each diagnostic of the one oligarchy rule as
+// the file it is in, relative to dir, and its message.
+const diagnose = (
+  rule: string,
+  config: string,
+  dir: string,
+): {
+  readonly status: number | null;
+  readonly found: Array<{ readonly file: string; readonly message: string }>;
+} => {
+  const run = spawnSync(
+    join(root, "node_modules/.bin/oxlint"),
+    ["-c", config, "--format", "unix", dir],
+    { encoding: "utf8", cwd: root },
+  );
+  const found = run.stdout
+    .split("\n")
+    .map((line) => /^(.+?):\d+:\d+: (.*)$/.exec(line))
+    .filter((match) => match?.[2]?.includes(`oligarchy(${rule})`) === true)
+    .map((match) => ({
+      file: relative(dir, resolve(root, match?.[1] ?? "")),
+      message: match?.[2] ?? "",
+    }));
+  return { status: run.status, found };
+};
+
+// Lints the files with only the one oligarchy rule on. A plugin that fails to load exits 1 with
+// no diagnostics.
+const lintAlone = (rule: string, files: Readonly<Record<string, string>>) => {
+  const dir = mkdtempSync(join(tmpdir(), `${rule}-`));
+  writeFiles(dir, files);
   const config = join(dir, "oxlintrc.json");
   writeFileSync(
     config,
     JSON.stringify({
       jsPlugins: [join(root, "v2/lint/plugin.js")],
-      rules: { "oligarchy/augment-through-entry": "error" },
+      rules: { [`oligarchy/${rule}`]: "error" },
     }),
   );
-  const run = spawnSync(
-    join(root, "node_modules/.bin/oxlint"),
-    ["-c", config, "--format", "unix", dir],
-    { encoding: "utf8" },
-  );
-  const messages = run.stdout
-    .split("\n")
-    .map((line) => /^.+?:\d+:\d+: (.*augment-through-entry.*)$/.exec(line)?.[1])
-    .filter((message) => message !== undefined)
-    .sort();
-  return { status: run.status, messages };
+  return diagnose(rule, config, dir);
+};
+
+// oxlint's exit status, and each diagnostic's message, sorted.
+const lint = (
+  rule: string,
+  files: Readonly<Record<string, string>>,
+): { readonly status: number | null; readonly messages: Array<string> } => {
+  const { status, found } = lintAlone(rule, files);
+  return { status, messages: found.map(({ message }) => message).sort() };
+};
+
+// oxlint's exit status, and the file each diagnostic is in, sorted.
+const refusedIn = (
+  rule: string,
+  files: Readonly<Record<string, string>>,
+): { readonly status: number | null; readonly files: Array<string> } => {
+  const { status, found } = lintAlone(rule, files);
+  return { status, files: found.map(({ file }) => file).sort() };
 };
 
 const augment = (specifier: string) =>
@@ -100,7 +136,7 @@ describe("no-redundant-type-constituents", () => {
 describe("oligarchy/augment-through-entry", () => {
   it("accepts a package name, the package's own src/main.ts from any depth, and declare global (happy)", () => {
     expect(
-      lint({
+      lint("augment-through-entry", {
         "app/package.json": "{}",
         "app/test/name.ts": augment("@oligarchy/app"),
         "app/test/entry.ts": augment("../src/main.ts"),
@@ -112,7 +148,7 @@ describe("oligarchy/augment-through-entry", () => {
   });
 
   it("refuses a package's other files, a path that misses its entry, and another package's entry (unhappy)", () => {
-    const result = lint({
+    const result = lint("augment-through-entry", {
       "app/package.json": "{}",
       "other/package.json": "{}",
       "app/test/relative.ts": augment("../src/services.ts"),
@@ -127,5 +163,281 @@ describe("oligarchy/augment-through-entry", () => {
       refused("../src/services.ts"),
       refused("@oligarchy/app/src/services.ts"),
     ]);
+  });
+});
+
+const RESULTS = `import * as jarl from "jarl";
+
+class Boom extends jarl.error.define("Boom") {}
+declare const make: () => jarl.Result<number, Boom>;
+`;
+
+const valueRefused = (name: string) =>
+  `read ${name}.value with jarl.value(${name}) once every error is handled, or jarl.unwrap(${name}) inside a jarl.fn to throw the rest [Error/oligarchy(result-through-jarl)]`;
+
+const errorRefused = (name: string) =>
+  `name ${name}'s error with jarl.error.is(${name}, ...) or jarl.is_err(${name}) before reading ${name}.error [Error/oligarchy(result-through-jarl)]`;
+
+describe("oligarchy/result-through-jarl", () => {
+  it("accepts jarl reading a result, .error once jarl has named it, and .value/.error on what is not a result (happy)", () => {
+    expect(
+      lint("result-through-jarl", {
+        "handled.ts": `${RESULTS}
+export const handled = () => {
+  const a = make();
+  if (jarl.error.is(a, Boom)) {
+    return a.error.message;
+  }
+  return jarl.value(a);
+};
+
+export const earlyExit = () => {
+  const b = make();
+  if (!jarl.error.is(b, Boom)) {
+    return jarl.unwrap(b);
+  }
+  return b.error.message;
+};
+
+export const either = () => {
+  const c = make();
+  if (jarl.is_ok(c)) {
+    return jarl.value(c);
+  } else {
+    return c.error.message;
+  }
+};
+
+export const inline = (d: jarl.Result<number, Boom>) => jarl.is_err(d) && d.error.message;
+
+export const ternary = (e: jarl.Result<number, Boom>) =>
+  jarl.is_ok(e) ? jarl.value(e) : e.error.message;
+
+export const loop = (f: jarl.Result<number, Boom>) => {
+  while (jarl.is_err(f)) {
+    console.log(f.error.message);
+    f = make();
+  }
+  return jarl.value(f);
+};
+
+export const passed = () => {
+  const g = make();
+  if (!g.ok) {
+    return g;
+  }
+  return jarl.ok(jarl.value(g) + 1);
+};
+
+export const exits = () => {
+  const h = make();
+  if (!jarl.is_err(h)) {
+    process.exit(0);
+  }
+  const { error } = h;
+  return error.message;
+};
+`,
+        "not-results.ts": `import * as jarl from "jarl";
+import * as z from "zod";
+
+export const zod = (text: string) => {
+  const parsed = z.string().safeParse(text);
+  return parsed.success ? parsed.data : parsed.error.message;
+};
+
+export const fallback = (v: { readonly fallback: { readonly value: number } }) => v.fallback.value;
+
+export const box = (promise: Promise<unknown>) => {
+  const state = { settled: false, value: undefined as unknown };
+  void promise.then((value) => {
+    state.value = value;
+  });
+  return jarl.error.is(state.value, Error);
+};
+`,
+      }),
+    ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("refuses .value on a result anywhere, and .error before jarl has named it (unhappy)", () => {
+    const result = lint("result-through-jarl", {
+      "refused.ts": `${RESULTS}
+export const afterOk = () => {
+  const a = make();
+  if (!a.ok) {
+    return 0;
+  }
+  return a.value;
+};
+
+export const afterIsOk = () => {
+  const b = make();
+  if (jarl.is_ok(b)) {
+    return b.value;
+  }
+  return 0;
+};
+
+export const ternary = () => {
+  const c = make();
+  return c.ok ? c.value : c.error.message;
+};
+
+export const notOk = () => {
+  const d = make();
+  if (!d.ok) {
+    return d.error.message;
+  }
+  return 0;
+};
+
+export const named = () => {
+  const e = make();
+  return jarl.error.is(e.error, Boom);
+};
+
+export const param = (f: jarl.Result<number, Boom>) => String(f.error);
+
+export const destructured = () => {
+  const g: jarl.Result<number, Boom> = make();
+  const { value, error } = g;
+  return [value, error];
+};
+
+export const another = () => {
+  const h = make();
+  const i: jarl.Result<number, Boom> = make();
+  if (jarl.is_err(h)) {
+    return i.error;
+  }
+  return 0;
+};
+
+export const wrongWay = () => {
+  const j = make();
+  if (jarl.is_err(j)) {
+    return 0;
+  }
+  return j.error;
+};
+`,
+    });
+    expect(result.status).toBe(1);
+    expect(result.messages).toEqual(
+      [
+        valueRefused("a"),
+        valueRefused("b"),
+        valueRefused("c"),
+        errorRefused("c"),
+        errorRefused("d"),
+        errorRefused("e"),
+        errorRefused("f"),
+        valueRefused("g"),
+        errorRefused("g"),
+        errorRefused("i"),
+        errorRefused("j"),
+      ].sort(),
+    );
+  });
+});
+
+const READS = `import * as jarl from "jarl";
+
+declare const read: () => Promise<jarl.Result<string, Error>>;
+`;
+
+const UNWRAP_REFUSED =
+  "call jarl.unwrap only in the function handed to jarl.fn, whose mapError catches what it throws; handle the error here instead [Error/oligarchy(unwrap-inside-jarl-fn)]";
+
+describe("oligarchy/unwrap-inside-jarl-fn", () => {
+  it("accepts jarl.unwrap in a function handed to jarl.fn, inline, by name or through a const (happy)", () => {
+    expect(
+      lint("unwrap-inside-jarl-fn", {
+        "inline.ts": `${READS}
+export const inline = jarl.fn(async () => jarl.unwrap(await read()), (caught) => caught);
+`,
+        "declared.ts": `${READS}
+async function build(): Promise<number>;
+async function build(): Promise<unknown> {
+  const text = await jarl.unwrap(read());
+  return text.length;
+}
+export const create = jarl.fn(build);
+`,
+        "const.ts": `${READS}
+const load = async () => jarl.unwrap(read());
+export const loaded = jarl.fn(load);
+`,
+      }),
+    ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("refuses jarl.unwrap anywhere else, a callback inside a jarl.fn body included (unhappy)", () => {
+    const result = refusedIn("unwrap-inside-jarl-fn", {
+      "bare.ts": `${READS}
+export const bare = async () => jarl.unwrap(await read());
+`,
+      "top-level.ts": `${READS}
+export const top = await jarl.unwrap(read());
+`,
+      "callback.ts": `${READS}
+export const later = jarl.fn(async () => {
+  const all = await Promise.all([read()]);
+  return all.map((one) => jarl.unwrap(one));
+});
+`,
+      "not-handed.ts": `${READS}
+async function helper() {
+  return jarl.unwrap(read());
+}
+export const wrapped = jarl.fn(async () => helper());
+`,
+      "other-fn.ts": `${READS}
+const fn = (inner: () => Promise<string>) => inner;
+export const other = fn(async () => jarl.unwrap(read()));
+`,
+    });
+    expect(result).toEqual({
+      status: 1,
+      files: ["bare.ts", "callback.ts", "not-handed.ts", "other-fn.ts", "top-level.ts"],
+    });
+    expect(
+      lint("unwrap-inside-jarl-fn", { "bare.ts": `${READS}\njarl.unwrap(read());\n` }),
+    ).toEqual({
+      status: 1,
+      messages: [UNWRAP_REFUSED],
+    });
+  });
+});
+
+// Lints the files, laid out under a directory made in v2, with the repo's own config: oxlint's
+// exit status, and the file each unwrap-inside-jarl-fn diagnostic is in.
+const unwrapsUnderV2 = (files: Readonly<Record<string, string>>) => {
+  const dir = mkdtempSync(join(root, "v2", ".lint-"));
+  try {
+    writeFiles(dir, files);
+    const { status, found } = diagnose("unwrap-inside-jarl-fn", join(root, ".oxlintrc.json"), dir);
+    return { status, files: found.map(({ file }) => file).sort() };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+describe("unwrap-inside-jarl-fn under v2", () => {
+  const bare = `${READS}\nexport const bare = async () => jarl.unwrap(await read());\n`;
+
+  it("is off in a test, where a throw fails the test (happy)", () => {
+    expect(unwrapsUnderV2({ "pkg/test/a.test.ts": bare, "pkg/test/support.ts": bare })).toEqual({
+      status: 0,
+      files: [],
+    });
+  });
+
+  it("is on everywhere else in v2 (unhappy)", () => {
+    expect(unwrapsUnderV2({ "pkg/src/main.ts": bare })).toEqual({
+      status: 1,
+      files: ["pkg/src/main.ts"],
+    });
   });
 });

@@ -30,7 +30,7 @@ export const attempt = async <T>(
   } catch (thrown) {
     result = jarl.err(thrown);
   }
-  if (!result.ok) {
+  if (jarl.is_err(result)) {
     log.logger.error(`${what}: ${detail(result.error)}`, log.attribution);
   }
   return result;

@@ -1,7 +1,7 @@
 import * as Async from "@oligarchy/async";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
-import type * as jarl from "jarl";
+import * as jarl from "jarl";
 import { attempt } from "./failure.ts";
 import type * as Host from "./host.ts";
 import type * as Usage from "./usage.ts";
@@ -56,7 +56,7 @@ export const announce = async (
     if (!counts.ok) {
       return;
     }
-    const { qemus, jobs } = counts.value;
+    const { qemus, jobs } = jarl.value(counts);
     await attempt(log, "heartbeat failed", () => {
       const stats = host.collect();
       return servers.heartbeat(member.url, member.type, member.name, {
@@ -70,7 +70,7 @@ export const announce = async (
       if (!sample.ok) {
         return sample;
       }
-      return processStats.report(member.name, member.type, { jobs, ...sample.value });
+      return processStats.report(member.name, member.type, { jobs, ...jarl.value(sample) });
     });
   };
 

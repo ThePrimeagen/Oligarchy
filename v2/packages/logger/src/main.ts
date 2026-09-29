@@ -1,5 +1,5 @@
 import type * as App from "@oligarchy/app";
-import type * as jarl from "jarl";
+import * as jarl from "jarl";
 import * as Palette from "./palette.ts";
 import * as Render from "./render.ts";
 
@@ -59,7 +59,7 @@ export const create = (options: {
     let failure: string | undefined;
     try {
       const stored = await into(row);
-      failure = stored.ok ? undefined : stored.error.message;
+      failure = jarl.is_err(stored) ? stored.error.message : undefined;
     } catch (thrown) {
       failure = messageOf(thrown);
     }

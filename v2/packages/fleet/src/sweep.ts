@@ -1,6 +1,7 @@
 import * as Async from "@oligarchy/async";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
+import * as jarl from "jarl";
 import { attempt } from "./failure.ts";
 import { HEARTBEAT_MS } from "./member.ts";
 
@@ -21,10 +22,11 @@ export const forget = async (
 ): Promise<void> => {
   const { servers, logger, attribution } = needs;
   const sweep = async () => {
-    const forgotten = await attempt(needs, "stale server cleanup failed", () =>
-      servers.removeStaleServers(type),
+    const forgotten = await jarl.or_else(
+      attempt(needs, "stale server cleanup failed", () => servers.removeStaleServers(type)),
+      [],
     );
-    for (const url of forgotten.ok ? forgotten.value : []) {
+    for (const url of forgotten) {
       logger.info(`server forgotten; ${url} silent for 10 minutes`, attribution);
     }
   };
