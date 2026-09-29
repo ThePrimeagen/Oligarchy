@@ -36,6 +36,13 @@
       "when": 1790685258454,
       "tag": "0005_no_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790686737610,
+      "tag": "0006_jobs_many_per_run",
+      "breakpoints": true
     }
   ]
 }
