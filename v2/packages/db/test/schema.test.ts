@@ -104,6 +104,22 @@ describe("a test suite and its tests", () => {
     });
   });
 
+  it("a suite whose id is taken is refused, and the refusal names test_suites (unhappy)", async () => {
+    const url = await started();
+    const opened = await suite(url);
+
+    expect(
+      await refusal(
+        url,
+        "insert into test_suites (id, name, iso, server_url) values ($1, 'again', 'omarchy.iso', 'http://s1')",
+        [opened["id"]],
+      ),
+    ).toMatchObject({
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "test_suites_pkey"',
+    });
+  });
+
   it("a suite closed with a status only a test has is refused (unhappy)", async () => {
     const url = await started();
     const opened = await suite(url);
