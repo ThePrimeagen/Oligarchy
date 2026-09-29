@@ -37,7 +37,7 @@ export const testSuiteStatus = pgEnum("test_suite_status", [
   "aborted",
   "timed_out",
 ]);
-export const testResultStatus = pgEnum("test_result_status", [
+export const testRunStatus = pgEnum("test_run_status", [
   "pending",
   "running",
   "passed",
@@ -175,7 +175,7 @@ export const postRunErrorTypes = pgTable("post_run_error_types", {
 
 // One diagnosis per ended session, keyed by the session: a row absent is a session nobody has
 // reviewed. verdict is the reviewer's, written after reading the evidence, and may disagree with
-// the driver's stop status and test result. error_type names the cause of a failed verdict and is
+// the driver's stop status and the test run's status. error_type names the cause of a failed verdict and is
 // null exactly when the verdict is passed: a pass has no cause to name, and the check keeps the two
 // columns honest. model wrote it.
 export const postRunDiagnosis = pgTable(
@@ -276,25 +276,25 @@ export const sessionServers = pgTable("session_servers", {
 });
 
 // One setup in flight, or finished and left in place, per iso and server. The primary key is
-// the lock: a second insert fails, so one ticket per pair. result_id is null until that
-// ticket's result exists, then whoever watches the row reads the result by it. Not a foreign
+// the lock: a second insert fails, so one ticket per pair. run_id is null until that
+// ticket's test run exists, then whoever watches the row reads the test run by it. Not a foreign
 // key, and server_url is not one either: forgetting a server does not cascade the row away, and
-// a success stays when retention sweeps the result. A server deletes its own rows once, when it
-// comes online, so a restarted host cannot keep a stale lock. Many null result ids are allowed;
-// one result is one setup. server_url is indexed
+// a success stays when retention sweeps the test run. A server deletes its own rows once, when it
+// comes online, so a restarted host cannot keep a stale lock. Many null run ids are allowed;
+// one test run is one setup. server_url is indexed
 // on its own — the primary key leads with iso — for that delete. Not unique: one server, many isos.
 export const setupRequests = pgTable(
   "setup_requests",
   {
     iso: text("iso").notNull(),
     serverUrl: text("server_url").notNull(),
-    resultId: uuid("result_id"),
+    runId: uuid("run_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ columns: [table.iso, table.serverUrl] }),
     index("setup_requests_server_url_idx").on(table.serverUrl),
-    uniqueIndex("setup_requests_result_id_idx").on(table.resultId),
+    uniqueIndex("setup_requests_run_id_idx").on(table.runId),
   ],
 );
 
@@ -308,7 +308,7 @@ export const agentServers = pgTable("agent_servers", {
 
 // A definition is the stored mission an agent is handed — what it is about, what to
 // do, and the proof that closes it. A row is never updated: an edit is a new row with
-// the same name and a higher id, so a result's definition_id names the exact wording
+// the same name and a higher id, so a test run's definition_id names the exact wording
 // it ran against. A name's newest wording is its highest id, and its version is the
 // row's place among the name's rows by id; name is indexed for those lookups, not
 // unique.
@@ -341,9 +341,9 @@ export const testBasePrompts = pgTable(
 
 // One execution of a set of definitions against one ISO and one control-plane
 // server. The orchestrator owns the row: it opens the suite and declares the
-// verdict once the results are in — or timed_out when reports stop coming.
+// verdict once the test runs are in — or timed_out when reports stop coming.
 // Counts are not stored — planned and reported are both readable off the
-// test_results rows. The Cursor model lives on each result: one suite can mix
+// test_runs rows. The Cursor model lives on each test run: one suite can mix
 // models.
 export const testSuites = pgTable("test_suites", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -360,11 +360,11 @@ export const testSuites = pgTable("test_suites", {
 // runs, and the orchestrator marks it running when it spawns the driver. The agent's
 // report closes it passed or failed; the orchestrator closes the rest when it closes
 // the suite — timed_out when the report never came, aborted when the suite was stopped
-// on purpose. model is the Cursor model id that result's agent used.
-export const testResults = pgTable(
-  "test_results",
+// on purpose. model is the Cursor model id that test run's agent used.
+export const testRuns = pgTable(
+  "test_runs",
   {
-    id: uuid("result_id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().defaultRandom(),
     suiteId: uuid("suite_id")
       .notNull()
       .references(() => testSuites.id),
@@ -374,30 +374,30 @@ export const testResults = pgTable(
     // Null until test start writes the session, or until the close if start
     // was never called. Attribution is recorded fact, not an upfront guess.
     sessionId: uuid("session_id").references(() => sessions.id),
-    // Null until test start writes the Cursor model id that is running this result.
+    // Null until test start writes the Cursor model id that is running this test run.
     model: text("model"),
-    // Null until ctrl writes the Linear issue identifier created for this result.
+    // Null until ctrl writes the Linear issue identifier created for this test run.
     // The human-readable id is what webhooks carry; it is the reverse lookup key.
     linearId: text("linear_id"),
-    status: testResultStatus("status").notNull().default("pending"),
+    status: testRunStatus("status").notNull().default("pending"),
     reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One result per definition per suite, and one result per session once attributed:
+  // One test run per definition per suite, and one test run per session once attributed:
   // a second write of either is a database error by design. Postgres unique
-  // indexes still allow many NULL session_ids (pending results).
+  // indexes still allow many NULL session_ids (pending test runs).
   (table) => [
-    uniqueIndex("test_results_suite_definition_idx").on(table.suiteId, table.definitionId),
-    uniqueIndex("test_results_session_id_idx").on(table.sessionId),
-    // One result per Linear ticket once assigned; many NULL linear_ids remain allowed.
-    uniqueIndex("test_results_linear_id_idx").on(table.linearId),
+    uniqueIndex("test_runs_suite_definition_idx").on(table.suiteId, table.definitionId),
+    uniqueIndex("test_runs_session_id_idx").on(table.sessionId),
+    // One test run per Linear ticket once assigned; many NULL linear_ids remain allowed.
+    uniqueIndex("test_runs_linear_id_idx").on(table.linearId),
   ],
 );
 
-// One automation step for a test result: drive the guest, or diagnose after. Inserted
+// One automation step for a test run: drive the guest, or diagnose after. Inserted
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
-// status. (result_id, action) is unique — one mint, one drive and one diagnose per result.
+// status. (run_id, action) is unique — one mint, one drive and one diagnose per test run.
 // Queue order is created_at among pending rows; capacity limits stay out of this table.
 // server_id is the servers.id that claimed the job, so /abort can find that client after
 // a restart; null while the row is pending. Attribution, not a relation: forgetting a
@@ -406,9 +406,9 @@ export const automationJobs = pgTable(
   "automation_jobs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    resultId: uuid("result_id")
+    runId: uuid("run_id")
       .notNull()
-      .references(() => testResults.id),
+      .references(() => testRuns.id),
     action: automationAction("action").notNull(),
     status: automationJobStatus("status").notNull().default("pending"),
     reason: text("reason"),
@@ -418,7 +418,7 @@ export const automationJobs = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("automation_jobs_result_action_idx").on(table.resultId, table.action),
+    uniqueIndex("automation_jobs_run_action_idx").on(table.runId, table.action),
     index("automation_jobs_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );
