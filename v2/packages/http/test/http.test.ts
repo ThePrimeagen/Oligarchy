@@ -24,12 +24,18 @@ const decodeTeam = (body: unknown) => {
 };
 
 describe("fetch", () => {
-  it("returns what decode makes of a 2xx body, from the one request asked (happy)", async () => {
-    const fake = Fake.http(Fake.json({ team: { id: "team-1" } }));
+  it("returns what decode makes of a 2xx body and its headers, from the one request asked (happy)", async () => {
+    const fake = Fake.http(Fake.json({ team: { id: "team-1" } }, 200, { "X-Request-Id": "req-1" }));
+    const decodeWithRequest = (body: unknown, headers: Headers) => {
+      const team = decodeTeam(body);
+      return jarl.is_ok(team)
+        ? jarl.ok({ ...jarl.value(team), request: headers.get("x-request-id") })
+        : team;
+    };
 
-    const team = await fake.http.fetch(URL, init, { decode: decodeTeam });
+    const team = await fake.http.fetch(URL, init, { decode: decodeWithRequest });
 
-    expect(team).toEqual(jarl.ok({ id: "team-1" }));
+    expect(team).toEqual(jarl.ok({ id: "team-1", request: "req-1" }));
     expect(fake.asked).toEqual([
       { url: URL, method: "POST", headers: { authorization: "key" }, body: { name: "Fixture" } },
     ]);
@@ -60,6 +66,40 @@ describe("fetch", () => {
     })();
     expect(retried).toEqual(jarl.ok({ id: "team-1" }));
     expect(fake.asked).toHaveLength(3);
+  });
+
+  it("a status's error carries the response's headers, and a named status's handler is handed them (sad)", async () => {
+    const headers = { "Retry-After": "7" };
+    const fake = Fake.http([
+      Fake.status(400, "bad query", headers),
+      Fake.status(404, "", headers),
+      Fake.status(503, "busy", headers),
+      Fake.status(418, "teapot", headers),
+      Fake.status(429, "slow down", headers),
+    ]);
+    const ask = () => fake.http.fetch(URL, init, { decode: decodeTeam });
+
+    const failures = [
+      Fake.failure(await ask(), Http.HttpBadRequest),
+      Fake.failure(await ask(), Http.HttpNotFound),
+      Fake.failure(await ask(), Http.HttpServerError),
+      Fake.failure(await ask(), Http.HttpUnhandled),
+    ];
+    const named = await fake.http.fetch(URL, init, {
+      decode: decodeTeam,
+      status: {
+        429: (body, sent) =>
+          new RateLimited(`${body}; again in ${sent.get("retry-after") ?? "?"}s`),
+      },
+    });
+
+    expect(failures.map((failure) => failure.headers.get("retry-after"))).toEqual([
+      "7",
+      "7",
+      "7",
+      "7",
+    ]);
+    expect(Fake.failure(named, RateLimited).message).toBe("slow down; again in 7s");
   });
 
   type Case = {
