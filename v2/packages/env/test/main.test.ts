@@ -96,7 +96,8 @@ describe("create", () => {
         files: {
           ".prod-env":
             "AUTOMATION_SERVER_URL=from-file\nOLIGARCHY_TOKEN=from-file\nSESSION_ID=from-file\n",
-          ".env": "AUTOMATION_SERVER_URL=from-dot\nOLIGARCHY_TOKEN=from-dot\nDATABASE_URL=from-dot\n",
+          ".env":
+            "AUTOMATION_SERVER_URL=from-dot\nOLIGARCHY_TOKEN=from-dot\nDATABASE_URL=from-dot\n",
         },
       }),
     );
