@@ -335,8 +335,8 @@ export const testRuns = pgTable(
 
 // One automation step for a test run: drive the guest, or diagnose after. Inserted
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
-// status. (run_id, action) is unique — one mint, one drive and one diagnose per test run.
-// Queue order is created_at among pending rows; capacity limits stay out of this table.
+// status. A job runs once and is never run again: a failed job stays failed, and trying
+// again is a new job, so a test run holds every mint, drive and diagnose it took. Queue order is created_at among pending rows; capacity limits stay out of this table.
 // server_id is the servers.id that claimed the job, so /abort can find that client after
 // a restart; null while the row is pending. Attribution, not a relation: forgetting a
 // server must keep the job row.
@@ -356,7 +356,7 @@ export const jobs = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("jobs_run_action_idx").on(table.runId, table.action),
+    index("jobs_run_action_idx").on(table.runId, table.action),
     index("jobs_status_created_at_idx").on(table.status, table.createdAt),
   ],
 );
