@@ -29,6 +29,13 @@
       "when": 1790655809183,
       "tag": "0004_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790683516895,
+      "tag": "0005_drop_test_runs_session_id",
+      "breakpoints": true
     }
   ]
 }
