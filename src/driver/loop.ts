@@ -570,6 +570,13 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             yield* log(input, turn, "failure", gone);
             return yield* Effect.fail(commandError(gone));
           }
+          // The client already read it again through the gateway. The guest may be running; only
+          // the proxy's own answer says it is off, so this is the run's failure, not a Done.
+          if (imaging && ran.unanswered) {
+            const unanswered = `get-image: the proxy did not answer: ${firstLine(printed)}`;
+            yield* log(input, turn, "failure", unanswered);
+            return yield* Effect.fail(commandError(unanswered));
+          }
           // Without this a failed get-image reads as nothing, and the model asks for it forever.
           // A mint's last act is powering the guest off, so its failed image is the end of the
           // drive, and Done is what lets the harness save the disk.
