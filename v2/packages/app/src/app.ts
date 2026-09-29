@@ -6,32 +6,38 @@ import type {
   ExitReason,
   Io,
   NamesOf,
+  Needs,
   NotAService,
+  OnClose,
   OnExit,
   OnlyServices,
+  Outcome,
   Provided,
   Provides,
-  ServicesOf,
   Signal,
 } from "./types.ts";
 
-export const MainCalledTwice = jarl.error.define("MainCalledTwice");
-export type MainCalledTwice = InstanceType<typeof MainCalledTwice>;
-
 type Main<Environment, Wants extends AnyService> = (
   app: App<Environment, Wants>,
-) => Promise<jarl.Result<unknown, unknown>>;
+) => Promise<jarl.Result<void, unknown>>;
 
 // What an app has done so far. Each registration is its own entry, so a remover takes off only
-// its own. `drained` settles once every handler queued so far has run. `exiting` is set once main
-// has settled, when the handlers start.
+// its own. `drained` settles once every handler queued so far has run. `reason` is why main
+// ended; `exiting` is set once the app's turn to exit has come, when its handlers start.
+// `errors` is only ever filled on the top app of a tree.
 export type State = {
   started: boolean;
+  main: () => Promise<Outcome>;
+  running: Promise<void>;
+  reason: ExitReason;
   exiting: ExitReason | undefined;
-  failed: boolean;
   readonly handlers: Array<{ readonly handler: OnExit }>;
   drained: Promise<void>;
   readonly aborter: AbortController;
+  readonly services: Record<string, unknown>;
+  parent: State | undefined;
+  readonly children: Array<State>;
+  readonly errors: Array<unknown>;
 };
 
 // SIGHUP is the terminal closing; left alone it kills the process before any handler runs.
@@ -61,12 +67,28 @@ const processIo: Io = {
 // A C-c in the terminal is a person waiting on the exit handlers; the second one kills at once.
 const PRESS_AGAIN = "press again to kill the application right away\n";
 
+const PARENT: ExitReason = { kind: "parent" };
+
+const topOf = (state: State): State => (state.parent === undefined ? state : topOf(state.parent));
+
+const report = (state: State, error: unknown): void => {
+  topOf(state).errors.push(error);
+};
+
+// A handler may hand back nothing; only a returned Err is a failure.
+const failure = (
+  returned: void | Outcome,
+): returned is { readonly ok: false; readonly error: unknown } =>
+  typeof returned === "object" && !returned.ok;
+
 const call = async (state: State, handler: OnExit, reason: ExitReason): Promise<void> => {
   try {
-    await handler(reason);
+    const returned = await handler(reason);
+    if (failure(returned)) {
+      report(state, returned.error);
+    }
   } catch (caught) {
-    state.failed = true;
-    console.error(caught);
+    report(state, caught);
   }
 };
 
@@ -90,46 +112,144 @@ const settled = async (state: State): Promise<void> => {
   } while (current !== state.drained);
 };
 
-// While main runs the signal aborts only on a signal, so Aborted then is a stop, not a failure.
+// The signal aborts before main returns only on a stop, so Aborted then is a stop, not a failure.
 const stopped = (signal: AbortSignal, error: unknown): boolean =>
   signal.aborted && jarl.error.is(error, Aborted);
 
-const run = async <Environment, S extends Provided | AnyService>(
-  app: App<Environment, S>,
-  main: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
-): Promise<boolean> => {
+// Once main has returned the app's signal aborts, and every sub-app under it stops with it.
+const runMain = async (state: State): Promise<void> => {
+  const { signal } = state.aborter;
   try {
-    const result = await main(app);
-    return result.ok || stopped(app.signal, result.error);
-  } catch (caught) {
-    if (stopped(app.signal, caught)) {
-      return true;
+    const result = await state.main();
+    if (!result.ok && !stopped(signal, result.error)) {
+      report(state, result.error);
     }
-    console.error(caught);
-    return false;
+  } catch (caught) {
+    if (!stopped(signal, caught)) {
+      report(state, caught);
+    }
+  }
+  state.aborter.abort(new Aborted("main returned"));
+};
+
+// A sub-app runs on its parent's services and stops when its parent does; one added after its
+// parent stopped never runs its main, though its handlers still run.
+const start = (state: State): void => {
+  if (state.started) {
+    return;
+  }
+  state.started = true;
+  const { parent } = state;
+  if (parent !== undefined) {
+    Object.assign(state.services, parent.services);
+    const stop = () => {
+      if (!state.aborter.signal.aborted) {
+        state.reason = PARENT;
+        state.aborter.abort(new Aborted("parent stopped"));
+      }
+    };
+    if (parent.aborter.signal.aborted) {
+      stop();
+    } else {
+      parent.aborter.signal.addEventListener("abort", stop, { once: true });
+    }
+  }
+  if (!state.aborter.signal.aborted) {
+    state.running = runMain(state);
+  }
+  for (const child of state.children) {
+    start(child);
   }
 };
 
-export class App<const Environment, const S extends Provided | AnyService> {
+// Every main in the tree, including those of sub-apps added while it waits.
+const mains = async (state: State): Promise<void> => {
+  await state.running;
+  for (const child of state.children) {
+    await mains(child);
+  }
+};
+
+// Post-order, left to right: every sub-app, in the order it was added, exits before its parent.
+const exits = async (state: State): Promise<void> => {
+  for (const child of state.children) {
+    await exits(child);
+  }
+  if (state.exiting === undefined) {
+    state.exiting = state.reason;
+    schedule(state, state.reason);
+  }
+  await settled(state);
+};
+
+// A sub-app an exit handler added after its parent's turn still has its turn to come.
+const pending = (state: State): boolean =>
+  state.exiting === undefined || state.handlers.length > 0 || state.children.some(pending);
+
+const describe = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+// Nothing is left to hand onClose's own failure to, so it goes to stderr.
+const close = async (
+  onClose: OnClose,
+  errors: ReadonlyArray<unknown>,
+): Promise<string | undefined> => {
+  try {
+    const returned = await onClose(errors);
+    return failure(returned) ? describe(returned.error) : undefined;
+  } catch (caught) {
+    return describe(caught);
+  }
+};
+
+export class App<const Environment, const Wants extends AnyService = never> {
   readonly environment: Environment;
-  readonly services: ServicesOf<S>;
   readonly state: State = {
     started: false,
+    main: async () => jarl.ok(undefined),
+    running: Promise.resolve(),
+    reason: { kind: "returned" },
     exiting: undefined,
-    failed: false,
     handlers: [],
     drained: Promise.resolve(),
     aborter: new AbortController(),
+    services: {},
+    parent: undefined,
+    children: [],
+    errors: [],
   };
-  // Aborts on the first signal, or once main returns. The exit handlers run after it aborts, so
-  // what they send takes a deadline of its own, not this.
+  // Filled when the tree runs: the top app's from run, a sub-app's from its parent. Run and sub
+  // are what check that the object holds every service main wants.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  readonly services: Needs<Wants> = this.state.services as Needs<Wants>;
+  // Aborts on the first signal, when the parent stops, or once main returns. The exit handlers
+  // run after it aborts, so what they send takes a deadline of its own, not this.
   readonly signal: AbortSignal = this.state.aborter.signal;
 
-  // The overloads are the typed face; the bodies below take what they already checked.
-  constructor(environment: Environment, services: S & NotAService & OnlyServices<S>);
-  constructor(environment: Environment, services: ServicesOf<S>) {
+  constructor(environment: Environment) {
     this.environment = environment;
-    this.services = services;
+  }
+
+  // A new app on the same environment, typed by what `main` wants; this one is left as it was.
+  main<W extends AnyService = never>(main: Main<Environment, W>): App<Environment, W> {
+    const app = new App<Environment, W>(this.environment);
+    app.state.main = () => main(app);
+    return app;
+  }
+
+  // A sub-app may want only services this app's main wants. It runs with this app, or at once if
+  // this app is already running; one already under a parent stays there.
+  sub<E, W extends AnyService>(child: App<E, W> & Provides<W, Wants["service"]>): this {
+    const { state } = child;
+    if (state.parent !== undefined || state.started || topOf(this.state) === state) {
+      return this;
+    }
+    state.parent = this.state;
+    this.state.children.push(state);
+    if (this.state.started) {
+      start(state);
+    }
+    return this;
   }
 
   onExit(handler: OnExit): () => void {
@@ -146,20 +266,20 @@ export class App<const Environment, const S extends Provided | AnyService> {
     };
   }
 
-  main<Wants extends AnyService = never>(
-    main: Main<Environment, Wants> & Provides<Wants, NamesOf<S>>,
+  // Runs the tree: every main, then every exit handler, then onClose with the errors, then exits
+  // 1 if there were any. Only a top app runs, and only once.
+  run<P extends Provided>(
+    services: P & NotAService & OnlyServices<P> & Provides<Wants, NamesOf<P>>,
+    onClose: OnClose,
     io?: Io,
-  ): Promise<jarl.Result<void, MainCalledTwice>>;
-  async main(
-    main: (app: App<Environment, S>) => Promise<jarl.Result<unknown, unknown>>,
-    io: Io = processIo,
-  ): Promise<jarl.Result<void, MainCalledTwice>> {
-    if (this.state.started) {
-      return jarl.err(new MainCalledTwice("main was already called"));
+  ): Promise<void>;
+  async run(services: Provided, onClose: OnClose, io: Io = processIo): Promise<void> {
+    const { state } = this;
+    if (state.started || state.parent !== undefined) {
+      return;
     }
-    this.state.started = true;
+    Object.assign(state.services, services);
     let signals = 0;
-    let signalled: ExitReason | undefined;
     const stopListening = io.onSignal((signal) => {
       signals += 1;
       if (signals === 1 && signal === "SIGINT") {
@@ -169,20 +289,23 @@ export class App<const Environment, const S extends Provided | AnyService> {
         io.exit(1);
       }
       // Main settles before any handler runs, so nothing is closed under a request in flight.
-      if (signalled === undefined && this.state.exiting === undefined) {
-        signalled = { kind: "signal", signal };
-        this.state.aborter.abort(new Aborted(`${signal} received`));
+      if (!state.aborter.signal.aborted) {
+        state.reason = { kind: "signal", signal };
+        state.aborter.abort(new Aborted(`${signal} received`));
       }
     });
-    const ok = await run(this, main);
-    this.state.aborter.abort(new Aborted("main returned"));
-    this.state.exiting = signalled ?? { kind: "returned" };
-    schedule(this.state, this.state.exiting);
-    await settled(this.state);
+    start(state);
+    await mains(state);
+    do {
+      await exits(state);
+    } while (pending(state));
+    const failed = await close(onClose, state.errors);
+    if (failed !== undefined) {
+      io.stderr(`onClose failed: ${failed}\n`);
+    }
     stopListening();
     if (signals < 2) {
-      io.exit(ok && !this.state.failed ? 0 : 1);
+      io.exit(failed === undefined && state.errors.length === 0 ? 0 : 1);
     }
-    return jarl.ok(undefined);
   }
 }

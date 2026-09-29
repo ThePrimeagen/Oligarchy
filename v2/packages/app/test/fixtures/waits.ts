@@ -8,17 +8,17 @@ const hang = process.argv.includes("--hang");
 // Nothing else keeps the process up while it waits: a signal listener does not.
 setInterval(() => undefined, 60_000);
 
-const app = new App.App({}, {});
-app.onExit(async (reason) => {
-  process.stdout.write(`handler ${reason.kind === "signal" ? reason.signal : reason.kind}\n`);
-  if (hang) {
-    await new Promise<never>(() => undefined);
-  }
-});
-await app.main(async (started) => {
+const app = new App.App({}).main(async (started) => {
   process.stdout.write("ready\n");
   await new Promise<void>((resolve) => {
     started.signal.addEventListener("abort", () => resolve(), { once: true });
   });
   return jarl.ok(undefined);
 });
+app.onExit(async (reason) => {
+  process.stdout.write(`handler ${reason.kind === "signal" ? reason.signal : reason.kind}\n`);
+  if (hang) {
+    await new Promise<never>(() => undefined);
+  }
+});
+await app.run({}, () => undefined);

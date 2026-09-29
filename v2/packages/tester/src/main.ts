@@ -6,7 +6,7 @@ import type * as Logger from "@oligarchy/logger";
 import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
 import { report } from "./report.ts";
-import { environment, wire } from "./wire.ts";
+import { createServices, environment } from "./services.ts";
 
 const main = async (app: App.App<unknown, Db.Database | Logger.Logger>) => {
   const counted = await app.services.db.run(async (db) => ({
@@ -32,23 +32,20 @@ if (jarl.is_err(created)) {
   process.exit(1);
 }
 
-const wired = wire({
-  url: created.value.vars.databaseUrl,
-  write: (line) => process.stdout.write(`${line}\n`),
-  colors: process.stdout.isTTY,
-});
-if (!wired.ok) {
-  process.stderr.write(`${wired.error.message}\n`);
+const services = createServices(created.value);
+if (!services.ok) {
+  process.stderr.write(`${services.error.message}\n`);
   process.exit(1);
 }
 
-const app = new App.App(created.value, wired.value);
+const app = new App.App(created.value).main(main);
 app.onExit(async () => {
   // Every line waits on its insert, so the pool stays open until the last one lands.
   await app.services.logger.flush();
-  const closed = await app.services.db.close();
-  if (!closed.ok) {
-    process.stderr.write(`${closed.error.message}\n`);
+  return app.services.db.close();
+});
+await app.run(services.value, (errors) => {
+  for (const error of errors) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   }
 });
-await app.main(main);
