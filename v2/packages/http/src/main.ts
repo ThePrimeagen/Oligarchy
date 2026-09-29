@@ -59,6 +59,19 @@ export type HttpServerError = InstanceType<typeof HttpServerError>;
 export const HttpUnhandled = statusError("HttpUnhandled");
 export type HttpUnhandled = InstanceType<typeof HttpUnhandled>;
 
+// A named status whose handler threw instead of returning its error; `cause` is what it threw.
+export class HttpTranslationFailed extends jarl.error.define("HttpTranslationFailed") {
+  readonly asked: Asked;
+  readonly status: number;
+  override readonly cause: unknown;
+  constructor(asked: Asked, status: number, cause: unknown) {
+    super(`${where(asked)}: ${String(status)}: translating the status failed: ${messageOf(cause)}`);
+    this.asked = asked;
+    this.status = status;
+    this.cause = cause;
+  }
+}
+
 // A 2xx body that is not JSON, or that decode refused. A decode builds one with its reason
 // alone; fetch hands it back naming what was asked.
 export class HttpInvalid extends jarl.error.define("HttpInvalid") {
@@ -80,6 +93,7 @@ export type HttpFailure =
   | HttpNotFound
   | HttpServerError
   | HttpUnhandled
+  | HttpTranslationFailed
   | HttpInvalid
   | Async.Aborted;
 
@@ -213,7 +227,14 @@ export const create = (
       return jarl.err(new HttpServerError(asked, status, text));
     }
     const named = answers.status?.[status];
-    return jarl.err(named === undefined ? new HttpUnhandled(asked, status, text) : named(text));
+    if (named === undefined) {
+      return jarl.err(new HttpUnhandled(asked, status, text));
+    }
+    try {
+      return jarl.err(named(text));
+    } catch (caught) {
+      return jarl.err(new HttpTranslationFailed(asked, status, caught));
+    }
   }
 
   return { service: "http", fetch: request };
