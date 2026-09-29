@@ -63,10 +63,23 @@ const definition = async (url: string, name = "lock-screen") =>
     ),
   );
 
-const TEST = "insert into test_results (suite_id, definition_id) values ($1, $2)";
+const TEST = "insert into test_runs (suite_id, definition_id) values ($1, $2)";
 
-describe("a test suite and its tests", () => {
-  it("a test is stored under its suite and read back by the suite's id; the suite opens pending (happy)", async () => {
+// One test run under a suite of its own, returned with its suite and the status it opens with.
+const testRun = async (url: string) => {
+  const opened = await suite(url);
+  const lockScreen = await definition(url);
+  return first(
+    await query(
+      url,
+      "insert into test_runs (suite_id, definition_id) values ($1, $2) returning id, suite_id, status",
+      [opened["id"], lockScreen["id"]],
+    ),
+  );
+};
+
+describe("a test suite and its test runs", () => {
+  it("a test run is stored under its suite and read back by the suite's id; the suite opens pending (happy)", async () => {
     const url = await started();
     const opened = await suite(url);
     const lockScreen = await definition(url);
@@ -75,13 +88,11 @@ describe("a test suite and its tests", () => {
 
     expect(opened["status"]).toBe("pending");
     expect(
-      await query(url, "select definition_id from test_results where suite_id = $1", [
-        opened["id"],
-      ]),
+      await query(url, "select definition_id from test_runs where suite_id = $1", [opened["id"]]),
     ).toEqual([{ definition_id: lockScreen["id"] }]);
   });
 
-  it("a test naming a suite that does not exist is refused (unhappy)", async () => {
+  it("a test run naming a suite that does not exist is refused (unhappy)", async () => {
     const url = await started();
     const lockScreen = await definition(url);
     const missing = crypto.randomUUID();
@@ -120,7 +131,7 @@ describe("a test suite and its tests", () => {
     });
   });
 
-  it("a suite closed with a status only a test has is refused (unhappy)", async () => {
+  it("a suite closed with a status only a test run has is refused (unhappy)", async () => {
     const url = await started();
     const opened = await suite(url);
 
@@ -131,6 +142,99 @@ describe("a test suite and its tests", () => {
     ).toMatchObject({
       code: "22P02",
       message: 'invalid input value for enum test_suite_status: "completed"',
+    });
+  });
+});
+
+describe("a test run, and the jobs and setup lock that name it", () => {
+  it("a job and a setup lock name a test run by run_id; the test run opens pending (happy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+
+    await query(url, "insert into automation_jobs (run_id, action) values ($1, 'mint')", [
+      run["id"],
+    ]);
+    await query(
+      url,
+      "insert into setup_requests (iso, server_url, run_id) values ('omarchy.iso', 'http://s1', $1)",
+      [run["id"]],
+    );
+
+    expect(run["status"]).toBe("pending");
+    expect(await query(url, "select run_id, action from automation_jobs")).toEqual([
+      { run_id: run["id"], action: "mint" },
+    ]);
+    expect(await query(url, "select run_id from setup_requests")).toEqual([{ run_id: run["id"] }]);
+  });
+
+  it("a job naming a test run that does not exist is refused (unhappy)", async () => {
+    const url = await started();
+    const missing = crypto.randomUUID();
+
+    expect(
+      await refusal(url, "insert into automation_jobs (run_id, action) values ($1, 'drive')", [
+        missing,
+      ]),
+    ).toMatchObject({
+      code: "23503",
+      detail: `Key (run_id)=(${missing}) is not present in table "test_runs".`,
+    });
+  });
+
+  it("two setup locks naming the same test run are refused (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+    const lock =
+      "insert into setup_requests (iso, server_url, run_id) values ('omarchy.iso', $1, $2)";
+    await query(url, lock, ["http://s1", run["id"]]);
+
+    expect(await refusal(url, lock, ["http://s2", run["id"]])).toMatchObject({
+      code: "23505",
+      detail: `Key (run_id)=(${String(run["id"])}) already exists.`,
+    });
+  });
+
+  it("one Linear ticket on two test runs is refused (unhappy)", async () => {
+    const url = await started();
+    const opened = await suite(url);
+    const ticketed =
+      "insert into test_runs (suite_id, definition_id, linear_id) values ($1, $2, 'OLI-1')";
+    await query(url, ticketed, [opened["id"], (await definition(url, "lock-screen"))["id"]]);
+
+    expect(
+      await refusal(url, ticketed, [opened["id"], (await definition(url, "wifi"))["id"]]),
+    ).toMatchObject({
+      code: "23505",
+      detail: "Key (linear_id)=(OLI-1) already exists.",
+    });
+  });
+
+  it("a test run whose id is taken is refused, and the refusal names test_runs (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+    const wifi = await definition(url, "wifi");
+
+    expect(
+      await refusal(
+        url,
+        "insert into test_runs (id, suite_id, definition_id) values ($1, $2, $3)",
+        [run["id"], run["suite_id"], wifi["id"]],
+      ),
+    ).toMatchObject({
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "test_runs_pkey"',
+    });
+  });
+
+  it("a test run closed with a status only a job has is refused (unhappy)", async () => {
+    const url = await started();
+    const run = await testRun(url);
+
+    expect(
+      await refusal(url, "update test_runs set status = 'succeeded' where id = $1", [run["id"]]),
+    ).toMatchObject({
+      code: "22P02",
+      message: 'invalid input value for enum test_run_status: "succeeded"',
     });
   });
 });
