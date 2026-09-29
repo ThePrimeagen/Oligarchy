@@ -429,7 +429,13 @@ describe("ProxyClient transport", () => {
         ),
       );
       const proxy = yield* connect.pipe(Effect.provide(layer));
-      const error = yield* Effect.flip(proxy.image(SESSION, AGENT));
+      // An image is read again while nothing answers; the last refusal still names the url.
+      const fiber = yield* Effect.forkScoped(Effect.flip(proxy.image(SESSION, AGENT)));
+      for (let i = 0; i < 120; i++) {
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("250 millis");
+      }
+      const error = yield* Fiber.join(fiber);
       expect(error.message).toBe(
         `GET http://127.0.0.1:42069/image?id=${SESSION}&agent=${AGENT} failed`,
       );
@@ -437,7 +443,7 @@ describe("ProxyClient transport", () => {
   );
 });
 
-describe("ProxyClient stop through a gateway", () => {
+describe("ProxyClient calls safe to send twice, through a gateway", () => {
   const STOP = Contract.StopBody.make({ id: SESSION, agent: AGENT, status: "succeeded" });
   const gateway = () => new Response("error code: 502", { status: 502 });
   const dropped = (request: Parameters<TestingHttp.Respond>[0]) =>
@@ -455,13 +461,23 @@ describe("ProxyClient stop through a gateway", () => {
       return reply(request, url);
     });
   };
+  // A resend sleeps once the refused answer has been read, which is a few turns after the send,
+  // so the clock is walked in small steps rather than jumped past the sleep before it starts.
+  const walk = (total: Duration.Input) =>
+    Effect.gen(function* () {
+      const steps = Math.ceil(Duration.toMillis(Duration.fromInputUnsafe(total)) / 250);
+      for (let i = 0; i < steps; i++) {
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("250 millis");
+      }
+    });
   const failureOf = (exit: Exit.Exit<void, ProxyClient.Failure>) =>
     Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
   const stopped = (recorder: TestingHttp.Recorder, waited: Duration.Input) =>
     Effect.gen(function* () {
       const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
       const fiber = yield* Effect.forkScoped(Effect.exit(proxy.stop(STOP)));
-      yield* TestClock.adjust(waited);
+      yield* walk(waited);
       return yield* Fiber.join(fiber);
     });
 
@@ -529,6 +545,63 @@ describe("ProxyClient stop through a gateway", () => {
   );
 
   it.effect(
+    "a stop our own server answers 502 for is not sent again: it is not the tunnel (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = answers(() => TestingHttp.json({ error: "qemu: closed" }, 502), ok);
+        const exit = yield* stopped(recorder, "30 seconds");
+        expect(recorder.requests).toHaveLength(1);
+        expect(failureOf(exit)).toMatchObject({ status: 502, message: "qemu: closed" });
+      }),
+  );
+
+  it.effect("an image or a serial log a gateway answers 502 for is read again", () =>
+    Effect.gen(function* () {
+      const png = new Uint8Array([137, 80, 78, 71]);
+      const image = answers(
+        gateway,
+        () =>
+          new Response(png, {
+            status: 200,
+            headers: {
+              "content-type": "image/png",
+              "x-image-url": "https://oligarchy.trm.sh/images/9c4f0000-0000-4000-8000-00000000b2d3",
+            },
+          }),
+      );
+      const proxy = yield* connect.pipe(Effect.provide(image.layer));
+      const shot = yield* Effect.forkScoped(proxy.image(SESSION, AGENT));
+      yield* walk("2 seconds");
+      expect(Array.from(yield* Fiber.join(shot))).toEqual(Array.from(png));
+      expect(image.requests).toHaveLength(2);
+
+      const serial = answers(
+        dropped,
+        () => new Response("boot ok", { status: 200, headers: { "content-type": "text/plain" } }),
+      );
+      const log = yield* connect.pipe(Effect.provide(serial.layer));
+      const read = yield* Effect.forkScoped(log.serial(SESSION, AGENT));
+      yield* walk("2 seconds");
+      expect(decoder.decode(yield* Fiber.join(read))).toBe("boot ok");
+      expect(serial.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect(
+    "an image of a guest our server says is closed fails at once, not read again (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = answers(() => TestingHttp.json({ error: "qemu: closed" }, 502), ok);
+        const proxy = yield* connect.pipe(Effect.provide(recorder.layer));
+        const fiber = yield* Effect.forkScoped(Effect.exit(proxy.image(SESSION, AGENT)));
+        yield* walk("30 seconds");
+        const exit = yield* Fiber.join(fiber);
+        expect(recorder.requests).toHaveLength(1);
+        expect(Exit.isFailure(exit)).toBe(true);
+      }),
+  );
+
+  it.effect(
     "send-keys a gateway answers 502 for is not sent again: it may have typed (unhappy)",
     () =>
       Effect.gen(function* () {
@@ -539,7 +612,7 @@ describe("ProxyClient stop through a gateway", () => {
             proxy.sendKeys(Contract.SendKeysBody.make({ id: SESSION, keys: "x", agent: AGENT })),
           ),
         );
-        yield* TestClock.adjust("30 seconds");
+        yield* walk("30 seconds");
         const exit = yield* Fiber.join(fiber);
         expect(exit._tag).toBe("Failure");
         expect(recorder.requests).toHaveLength(1);

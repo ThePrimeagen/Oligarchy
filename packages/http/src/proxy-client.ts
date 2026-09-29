@@ -95,14 +95,27 @@ const classify = (error: HttpClientError.HttpClientError): Effect.Effect<never, 
     : refusal(response);
 };
 
-// Cloudflare's tunnel answering for the proxy: the request may never have reached it.
+// Cloudflare's tunnel answering for the proxy, or no answer: the request may never have reached
+// it. Cloudflare's body is `error code: <status>`; our servers' own 502 ("qemu: closed") is JSON
+// and is their answer.
 const GATEWAY = new Set([502, 503, 504, 520, 521, 522, 523, 524, 530]);
 
-const throughGateway = (error: Failure): boolean =>
-  error._tag === "ProxyUnreachable" || GATEWAY.has(error.status);
+export const throughGateway = (error: Failure): boolean =>
+  error._tag === "ProxyUnreachable" ||
+  (GATEWAY.has(error.status) && error.message === `error code: ${String(error.status)}`);
 
 // A blip in the tunnel lasts seconds; four more sends, 2s apart and doubling, span thirty.
-const STOP_RESENDS = 4;
+const RESENDS = 4;
+
+// A call safe to send twice, sent again while the gateway answers for the proxy.
+const resent = <A>(call: Effect.Effect<A, Failure>) =>
+  call.pipe(
+    Effect.retry({
+      times: RESENDS,
+      schedule: Schedule.exponential("2 seconds"),
+      while: throughGateway,
+    }),
+  );
 
 const unknownSession = (error: Failure): boolean =>
   error._tag === "ProxyRefusal" &&
@@ -191,12 +204,12 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
     );
 
   const image = (id: string, agent: string) =>
-    run(label("GET", "/image"), client.Sessions.image({ query: { id, agent } })).pipe(
+    resent(run(label("GET", "/image"), client.Sessions.image({ query: { id, agent } }))).pipe(
       Effect.map((response) => response.body),
     );
 
   const serial = (id: string, agent: string) =>
-    run(label("GET", "/serial"), client.Sessions.serial({ query: { id, agent } }));
+    resent(run(label("GET", "/serial"), client.Sessions.serial({ query: { id, agent } })));
 
   const sendKeys = (body: Contract.SendKeysBody) =>
     run(label("POST", "/send-keys"), client.Sessions.sendKeys({ payload: body })).pipe(
@@ -250,8 +263,8 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
     );
 
   // Stopping twice is stopping once, so a stop the gateway answered for is sent again; the
-  // session a lost first send already ended answers unknown to the next. No other call is sent
-  // again: a send-keys that reached the guest would type twice.
+  // session a lost first send already ended answers unknown to the next. Besides the image and
+  // serial reads, no other call is sent again: a send-keys that reached the guest would type twice.
   const stop = (body: Contract.StopBody) =>
     Effect.gen(function* () {
       let sends = 0;
@@ -259,12 +272,7 @@ export const connect = Effect.fn("ProxyClient.connect")(function* (options: Conn
         sends += 1;
         return run(label("POST", "/stop"), client.Sessions.stop({ payload: body }));
       });
-      return yield* send.pipe(
-        Effect.retry({
-          times: STOP_RESENDS,
-          schedule: Schedule.exponential("2 seconds"),
-          while: throughGateway,
-        }),
+      return yield* resent(send).pipe(
         Effect.catchIf(
           (error) => sends > 1 && unknownSession(error),
           () => Effect.void,
