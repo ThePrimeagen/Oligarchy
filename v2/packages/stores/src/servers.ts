@@ -37,11 +37,8 @@ export type Servers = {
   readonly listLiveServers: (type: ServerType) => Answer<ReadonlyArray<LiveServer>>;
   readonly removeStaleServers: (type: ServerType) => Answer<ReadonlyArray<string>>;
   readonly findServer: (id: string) => Answer<LiveServer | undefined>;
-  readonly routeSession: (sessionId: string, url: string) => Answer<void>;
-  readonly serverForSession: (sessionId: string) => Answer<string | undefined>;
-  readonly routeAgent: (agentId: string, url: string) => Answer<void>;
-  readonly serverForAgent: (agentId: string) => Answer<string | undefined>;
-  readonly clearAgent: (agentId: string) => Answer<void>;
+  readonly routeJob: (jobId: string, url: string) => Answer<void>;
+  readonly serverForJob: (jobId: string) => Answer<string | undefined>;
 };
 
 declare module "@oligarchy/app" {
@@ -148,39 +145,17 @@ export const create = (db: Db.Database): Servers => ({
       return row;
     }),
 
-  routeSession: (sessionId, url) =>
+  routeJob: (jobId, url) =>
     db.run(async (d) => {
-      await d.insert(DbSchema.sessionServers).values({ sessionId, serverUrl: url });
+      await d.insert(DbSchema.jobServers).values({ jobId, serverUrl: url });
     }),
 
-  serverForSession: (sessionId) =>
+  serverForJob: (jobId) =>
     db.run(async (d) => {
       const [row] = await d
-        .select({ serverUrl: DbSchema.sessionServers.serverUrl })
-        .from(DbSchema.sessionServers)
-        .where(eq(DbSchema.sessionServers.sessionId, sessionId));
+        .select({ serverUrl: DbSchema.jobServers.serverUrl })
+        .from(DbSchema.jobServers)
+        .where(eq(DbSchema.jobServers.jobId, jobId));
       return row?.serverUrl;
-    }),
-
-  routeAgent: (agentId, url) =>
-    db.run(async (d) => {
-      await d
-        .insert(DbSchema.agentServers)
-        .values({ agentId, serverUrl: url })
-        .onConflictDoNothing();
-    }),
-
-  serverForAgent: (agentId) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select({ serverUrl: DbSchema.agentServers.serverUrl })
-        .from(DbSchema.agentServers)
-        .where(eq(DbSchema.agentServers.agentId, agentId));
-      return row?.serverUrl;
-    }),
-
-  clearAgent: (agentId) =>
-    db.run(async (d) => {
-      await d.delete(DbSchema.agentServers).where(eq(DbSchema.agentServers.agentId, agentId));
     }),
 });

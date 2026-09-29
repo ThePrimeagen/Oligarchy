@@ -3,6 +3,5 @@ export * as Diagnosis from "./diagnosis.ts";
 export * as Logs from "./logs.ts";
 export * as ProcessStats from "./process-stats.ts";
 export * as Servers from "./servers.ts";
-export * as Sessions from "./sessions.ts";
 export * as SetupRequests from "./setup-requests.ts";
 export * as Tests from "./tests.ts";

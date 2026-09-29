@@ -4,19 +4,16 @@ import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import type { Answer } from "./answer.ts";
 
-export type ResultStatus = (typeof DbSchema.testResults.$inferSelect)["status"];
+export type JobStatus = (typeof DbSchema.jobs.$inferSelect)["status"];
 
-export type DriveStatus = (typeof DbSchema.automationJobs.$inferSelect)["status"];
-
-// One setup row as the watcher reads it, after looking it up again. resultId null means the
-// ticket was never attached. A missing result or drive is null, not an error: the row can
-// outlive both.
+// One setup row as the watcher reads it, after looking it up again. jobId null means no mint job
+// holds the lock yet. jobStatus is null then, and for a job retention swept: the row can outlive
+// its job.
 export type Situation = {
   readonly iso: string;
   readonly serverUrl: string;
-  readonly resultId: string | null;
-  readonly resultStatus: ResultStatus | null;
-  readonly driveStatus: DriveStatus | null;
+  readonly jobId: string | null;
+  readonly jobStatus: JobStatus | null;
 };
 
 export type SetupRequest = { readonly iso: string; readonly serverUrl: string };
@@ -24,11 +21,11 @@ export type SetupRequest = { readonly iso: string; readonly serverUrl: string };
 export type SetupRequests = {
   readonly service: "setupRequests";
   readonly insert: (iso: string, serverUrl: string) => Answer<boolean>;
-  readonly setResult: (iso: string, serverUrl: string, resultId: string) => Answer<boolean>;
-  readonly claim: (iso: string, serverUrl: string, resultId: string) => Answer<boolean>;
+  readonly setJob: (iso: string, serverUrl: string, jobId: string) => Answer<boolean>;
+  readonly claim: (iso: string, serverUrl: string, jobId: string) => Answer<boolean>;
   readonly remove: (iso: string, serverUrl: string) => Answer<boolean>;
   readonly removeServer: (serverUrl: string) => Answer<number>;
-  readonly serverForResult: (resultId: string) => Answer<string | undefined>;
+  readonly serverForJob: (jobId: string) => Answer<string | undefined>;
   readonly list: () => Answer<ReadonlyArray<SetupRequest>>;
   readonly inspect: (iso: string, serverUrl: string) => Answer<Situation | undefined>;
 };
@@ -39,14 +36,12 @@ declare module "@oligarchy/app" {
   }
 }
 
-// A setup row whose result is pending or running and whose mint job has not ended: a mint in
-// flight holds the server. Mirrors decide's "keep" in the proxy's setup watcher.
-const heldByLiveMint = sql`exists (select 1 from ${DbSchema.testResults} where ${DbSchema.testResults.id} = ${DbSchema.setupRequests.resultId} and ${DbSchema.testResults.status} in ('pending', 'running') and not exists (select 1 from ${DbSchema.automationJobs} where ${DbSchema.automationJobs.resultId} = ${DbSchema.setupRequests.resultId} and ${DbSchema.automationJobs.action} = 'mint' and ${DbSchema.automationJobs.status} not in ('pending', 'running')))`;
+// A mint pending, running, or completed and waiting on its verdict holds the server.
+const heldByLiveMint = sql`exists (select 1 from ${DbSchema.jobs} where ${DbSchema.jobs.id} = ${DbSchema.setupRequests.jobId} and ${DbSchema.jobs.status} in ('pending', 'running', 'completed'))`;
 
-// A setup row the proxy's watcher would release, read at the moment of the delete: no result
-// yet, a result that ended without passing, or an open result whose mint job ended. Mirrors
-// decide's "release". A passed result, or one retention swept, keeps its row ("done").
-const releasable = sql`(${DbSchema.setupRequests.resultId} is null or exists (select 1 from ${DbSchema.testResults} where ${DbSchema.testResults.id} = ${DbSchema.setupRequests.resultId} and (${DbSchema.testResults.status} in ('failed', 'errored', 'aborted', 'timed_out', 'completed') or (${DbSchema.testResults.status} in ('pending', 'running') and exists (select 1 from ${DbSchema.automationJobs} where ${DbSchema.automationJobs.resultId} = ${DbSchema.setupRequests.resultId} and ${DbSchema.automationJobs.action} = 'mint' and ${DbSchema.automationJobs.status} not in ('pending', 'running'))))))`;
+// Read at the moment of the delete: no job yet, or a mint that ended without success. A mint
+// that succeeded, or one retention swept, keeps its row.
+const releasable = sql`(${DbSchema.setupRequests.jobId} is null or exists (select 1 from ${DbSchema.jobs} where ${DbSchema.jobs.id} = ${DbSchema.setupRequests.jobId} and ${DbSchema.jobs.status} in ('failed', 'errored', 'aborted', 'timed_out')))`;
 
 const pair = (iso: string, serverUrl: string) =>
   and(eq(DbSchema.setupRequests.iso, iso), eq(DbSchema.setupRequests.serverUrl, serverUrl));
@@ -64,25 +59,25 @@ export const create = (db: Db.Database): SetupRequests => ({
       return rows.length > 0;
     }),
 
-  setResult: (iso, serverUrl, resultId) =>
+  setJob: (iso, serverUrl, jobId) =>
     db.run(async (d) => {
       const rows = await d
         .update(DbSchema.setupRequests)
-        .set({ resultId })
+        .set({ jobId })
         .where(pair(iso, serverUrl))
         .returning({ iso: DbSchema.setupRequests.iso });
       return rows.length > 0;
     }),
 
-  claim: (iso, serverUrl, resultId) =>
+  claim: (iso, serverUrl, jobId) =>
     db.run(async (d) => {
       const rows = await d
         .insert(DbSchema.setupRequests)
-        .values({ iso, serverUrl, resultId })
+        .values({ iso, serverUrl, jobId })
         .onConflictDoUpdate({
           target: [DbSchema.setupRequests.iso, DbSchema.setupRequests.serverUrl],
-          set: { resultId },
-          setWhere: sql`${DbSchema.setupRequests.resultId} is not null and not ${heldByLiveMint}`,
+          set: { jobId },
+          setWhere: sql`${DbSchema.setupRequests.jobId} is not null and not ${heldByLiveMint}`,
         })
         .returning({ iso: DbSchema.setupRequests.iso });
       return rows.length > 0;
@@ -106,13 +101,12 @@ export const create = (db: Db.Database): SetupRequests => ({
       return rows.length;
     }),
 
-  serverForResult: (resultId) =>
+  serverForJob: (jobId) =>
     db.run(async (d) => {
       const [row] = await d
         .select({ serverUrl: DbSchema.setupRequests.serverUrl })
         .from(DbSchema.setupRequests)
-        .where(eq(DbSchema.setupRequests.resultId, resultId))
-        .limit(1);
+        .where(eq(DbSchema.setupRequests.jobId, jobId));
       return row?.serverUrl;
     }),
 
@@ -129,22 +123,11 @@ export const create = (db: Db.Database): SetupRequests => ({
         .select({
           iso: DbSchema.setupRequests.iso,
           serverUrl: DbSchema.setupRequests.serverUrl,
-          resultId: DbSchema.setupRequests.resultId,
-          resultStatus: DbSchema.testResults.status,
-          driveStatus: DbSchema.automationJobs.status,
+          jobId: DbSchema.setupRequests.jobId,
+          jobStatus: DbSchema.jobs.status,
         })
         .from(DbSchema.setupRequests)
-        .leftJoin(
-          DbSchema.testResults,
-          eq(DbSchema.testResults.id, DbSchema.setupRequests.resultId),
-        )
-        .leftJoin(
-          DbSchema.automationJobs,
-          and(
-            eq(DbSchema.automationJobs.resultId, DbSchema.setupRequests.resultId),
-            eq(DbSchema.automationJobs.action, "mint"),
-          ),
-        )
+        .leftJoin(DbSchema.jobs, eq(DbSchema.jobs.id, DbSchema.setupRequests.jobId))
         .where(pair(iso, serverUrl));
       return row;
     }),

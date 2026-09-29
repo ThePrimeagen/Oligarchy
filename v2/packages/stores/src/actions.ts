@@ -9,8 +9,7 @@ export type ActionState = (typeof DbSchema.actionState.enumValues)[number];
 export type ActionRow = typeof DbSchema.actions.$inferSelect;
 
 export type ActionInput = {
-  readonly sessionId: string;
-  readonly agentId: string;
+  readonly jobId: string;
   readonly request: unknown;
 };
 
@@ -33,12 +32,9 @@ export type Actions = {
   readonly startAction: (input: ActionInput) => Answer<number>;
   readonly finishAction: (id: number, outcome: Outcome, image?: ImageInput) => Answer<void>;
   readonly getImage: (id: string) => Answer<Uint8Array | undefined>;
-  readonly listActions: (sessionId: string) => Answer<ReadonlyArray<ActionRow>>;
-  readonly listImages: (sessionId: string) => Answer<ReadonlyArray<Image>>;
-  readonly listRecentActions: (
-    sessionId: string,
-    limit: number,
-  ) => Answer<ReadonlyArray<RecentAction>>;
+  readonly listActions: (jobId: string) => Answer<ReadonlyArray<ActionRow>>;
+  readonly listImages: (jobId: string) => Answer<ReadonlyArray<Image>>;
+  readonly listRecentActions: (jobId: string, limit: number) => Answer<ReadonlyArray<RecentAction>>;
 };
 
 declare module "@oligarchy/app" {
@@ -54,7 +50,7 @@ export const create = (db: Db.Database): Actions => ({
     db.run(async (d) => {
       const [row] = await d
         .insert(DbSchema.actions)
-        .values({ sessionId: input.sessionId, agentId: input.agentId, request: input.request })
+        .values({ jobId: input.jobId, request: input.request })
         .returning({ id: DbSchema.actions.id });
       if (row === undefined) {
         throw new Error("startAction: the insert returned no row");
@@ -86,16 +82,16 @@ export const create = (db: Db.Database): Actions => ({
       return row?.data;
     }),
 
-  listActions: (sessionId) =>
+  listActions: (jobId) =>
     db.run((d) =>
       d
         .select()
         .from(DbSchema.actions)
-        .where(eq(DbSchema.actions.sessionId, sessionId))
+        .where(eq(DbSchema.actions.jobId, jobId))
         .orderBy(DbSchema.actions.createdAt, DbSchema.actions.id),
     ),
 
-  listImages: (sessionId) =>
+  listImages: (jobId) =>
     db.run((d) =>
       d
         .select({
@@ -105,11 +101,11 @@ export const create = (db: Db.Database): Actions => ({
         })
         .from(DbSchema.images)
         .innerJoin(DbSchema.actions, eq(DbSchema.images.actionId, DbSchema.actions.id))
-        .where(eq(DbSchema.actions.sessionId, sessionId))
+        .where(eq(DbSchema.actions.jobId, jobId))
         .orderBy(DbSchema.actions.createdAt, DbSchema.actions.id),
     ),
 
-  listRecentActions: (sessionId, limit) =>
+  listRecentActions: (jobId, limit) =>
     db.run(async (d) => {
       const rows = await d
         .select({
@@ -120,7 +116,7 @@ export const create = (db: Db.Database): Actions => ({
           finishedAt: DbSchema.actions.finishedAt,
         })
         .from(DbSchema.actions)
-        .where(eq(DbSchema.actions.sessionId, sessionId))
+        .where(eq(DbSchema.actions.jobId, jobId))
         .orderBy(desc(DbSchema.actions.id))
         .limit(limit);
       return rows.reverse();
