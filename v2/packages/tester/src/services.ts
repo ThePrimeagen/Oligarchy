@@ -11,21 +11,30 @@ export const environment = Env.cli({
   .needs("databaseUrl")
   .done();
 
-export type Wired = {
+export type Services = {
   readonly db: Db.Database;
   readonly logs: Stores.Logs.Logs;
   readonly logger: Logger.Logger;
 };
 
-// Every line is printed and stored in the logs table; a connection the database drops is a line
-// too, printed even when it cannot be stored.
-export const wire = (options: {
-  readonly url: Env.Secret;
+export type Terminal = {
   readonly write: (line: string) => void;
   readonly colors: boolean;
-}): jarl.Result<Wired, Db.DatabaseError> => {
+};
+
+const stdout: Terminal = {
+  write: (line) => process.stdout.write(`${line}\n`),
+  colors: process.stdout.isTTY,
+};
+
+// Every line is printed and stored in the logs table; a connection the database drops is a line
+// too, printed even when it cannot be stored.
+export const createServices = (
+  env: { readonly vars: { readonly databaseUrl: Env.Secret } },
+  terminal: Terminal = stdout,
+): jarl.Result<Services, Db.DatabaseError> => {
   const db = Db.open({
-    url: options.url,
+    url: env.vars.databaseUrl,
     onPoolError: (error) => {
       logger.error(`db: pool error: ${error.message}`);
     },
@@ -35,8 +44,8 @@ export const wire = (options: {
   }
   const logs = Stores.Logs.create(db.value);
   const logger = Logger.create({
-    write: options.write,
-    colors: options.colors,
+    write: terminal.write,
+    colors: terminal.colors,
     store: logs.insertLog,
   });
   return jarl.ok({ db: db.value, logs, logger });
