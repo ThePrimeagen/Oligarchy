@@ -29,7 +29,7 @@ export const sessionStatus = pgEnum("session_status", [
   "completed",
   "errored",
 ]);
-export const testRunStatus = pgEnum("test_run_status", [
+export const testSuiteStatus = pgEnum("test_suite_status", [
   "pending",
   "running",
   "passed",
@@ -340,34 +340,34 @@ export const testBasePrompts = pgTable(
 );
 
 // One execution of a set of definitions against one ISO and one control-plane
-// server. The orchestrator owns the row: it opens the run and declares the
+// server. The orchestrator owns the row: it opens the suite and declares the
 // verdict once the results are in — or timed_out when reports stop coming.
 // Counts are not stored — planned and reported are both readable off the
-// test_results rows. The Cursor model lives on each result: one run can mix
+// test_results rows. The Cursor model lives on each result: one suite can mix
 // models.
-export const testRuns = pgTable("test_runs", {
+export const testSuites = pgTable("test_suites", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   iso: text("iso").notNull(),
   serverUrl: text("server_url").notNull(),
-  status: testRunStatus("status").notNull().default("pending"),
+  status: testSuiteStatus("status").notNull().default("pending"),
   reason: text("reason"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
 });
 
-// One row per definition in the run, inserted pending: capacity decides when it
+// One row per definition in the suite, inserted pending: capacity decides when it
 // runs, and the orchestrator marks it running when it spawns the driver. The agent's
 // report closes it passed or failed; the orchestrator closes the rest when it closes
-// the run — timed_out when the report never came, aborted when the run was stopped
+// the suite — timed_out when the report never came, aborted when the suite was stopped
 // on purpose. model is the Cursor model id that result's agent used.
 export const testResults = pgTable(
   "test_results",
   {
     id: uuid("result_id").primaryKey().defaultRandom(),
-    runId: uuid("run_id")
+    suiteId: uuid("suite_id")
       .notNull()
-      .references(() => testRuns.id),
+      .references(() => testSuites.id),
     definitionId: bigint("definition_id", { mode: "number" })
       .notNull()
       .references(() => testDefinitions.id),
@@ -384,11 +384,11 @@ export const testResults = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One result per definition per run, and one result per session once attributed:
+  // One result per definition per suite, and one result per session once attributed:
   // a second write of either is a database error by design. Postgres unique
   // indexes still allow many NULL session_ids (pending results).
   (table) => [
-    uniqueIndex("test_results_run_definition_idx").on(table.runId, table.definitionId),
+    uniqueIndex("test_results_suite_definition_idx").on(table.suiteId, table.definitionId),
     uniqueIndex("test_results_session_id_idx").on(table.sessionId),
     // One result per Linear ticket once assigned; many NULL linear_ids remain allowed.
     uniqueIndex("test_results_linear_id_idx").on(table.linearId),
