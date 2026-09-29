@@ -26,15 +26,16 @@ meet plus one happy path, and every service is faked except the database.
       row; `getDebugLog(jobId)` reads it. Logs are keyed by test run, so a job takes its run's
       lines from when it was queued until the run's next job was queued, or until now for the
       newest.
-- [ ] **OpenRouter client.** V1: `src/harness/openrouter.ts`. The driver's model call, on
-      `@oligarchy/http`, with `OPENROUTER_API_KEY` and the models, reasoning efforts and timeouts
-      that V2's env already reads from `oligarchy.json`. Its fake produces every error: a refusal,
-      no answer, a header or chunk timeout, and a reply that is not a completion.
+- [x] **OpenRouter client** (`v2/packages/openrouter`). V1: `src/harness/openrouter.ts`. The
+      driver's model call: `complete(request)` streams one completion through `Http.open`, and
+      asks again after a 429, a 5xx or a header or chunk timeout. It fails with
+      `OpenRouterRefused`, `OpenRouterUnreachable`, `OpenRouterOutOfTime` (a wait to ask again
+      that would reach the request's deadline) or `Aborted`.
 - [ ] **Proxy client.** V1: `packages/http/src/proxy-client.ts`. The calls the driver, `./client`
       and the automation client make to the qemu reverse proxy: reserve, relinquish, start, image,
       serial, send-keys, the mouse calls, intent start and end, stop, save and follow. On
-      `@oligarchy/http`. `start` needs a long timeout of its own (45 minutes in V1) because a first
-      ISO download blocks it.
+      `@oligarchy/http`; `follow` streams, through `Http.open`. `start` needs a long timeout of its
+      own (45 minutes in V1) because a first ISO download blocks it.
 - [ ] **Automation client client.** V1: `apps/automation-server/src/client.ts`. The automation
       server's reserve, run and abort calls to an automation client, with `OLIGARCHY_TOKEN` as the
       bearer.
@@ -134,7 +135,9 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
-      Needs the OpenRouter client and the proxy client.
+      Needs the proxy client. It hands `complete` the run's ceiling as the deadline, and
+      `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
+      client, which `@oligarchy/openrouter` does not have yet.
 - [ ] **client** (`src/client`). `./client`, the agent's commands against the proxy. Needs the proxy
       client.
 - [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
