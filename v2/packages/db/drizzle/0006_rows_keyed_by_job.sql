@@ -17,6 +17,7 @@ ALTER TABLE "debug_logs" DROP CONSTRAINT "debug_logs_session_id_sessions_id_fk";
 ALTER TABLE "post_run_diagnosis" DROP CONSTRAINT "post_run_diagnosis_session_id_sessions_id_fk";
 --> statement-breakpoint
 DROP INDEX "actions_session_id_idx";--> statement-breakpoint
+DROP INDEX "test_runs_linear_id_idx";--> statement-breakpoint
 ALTER TABLE "debug_logs" DROP COLUMN "session_id";--> statement-breakpoint
 ALTER TABLE "post_run_diagnosis" DROP COLUMN "session_id";--> statement-breakpoint
 ALTER TABLE "actions" ADD COLUMN "job_id" uuid NOT NULL;--> statement-breakpoint
@@ -28,4 +29,5 @@ ALTER TABLE "debug_logs" ADD CONSTRAINT "debug_logs_job_id_jobs_id_fk" FOREIGN K
 ALTER TABLE "post_run_diagnosis" ADD CONSTRAINT "post_run_diagnosis_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "actions_job_id_idx" ON "actions" USING btree ("job_id");--> statement-breakpoint
 ALTER TABLE "actions" DROP COLUMN "session_id";--> statement-breakpoint
-ALTER TABLE "actions" DROP COLUMN "agent_id";
+ALTER TABLE "actions" DROP COLUMN "agent_id";--> statement-breakpoint
+ALTER TABLE "test_runs" DROP COLUMN "linear_id";
