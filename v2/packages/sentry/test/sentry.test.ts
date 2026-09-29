@@ -86,7 +86,8 @@ describe("sending", () => {
     sentry.send(new Error("second"), { level: "error" });
     const second = sentry.wait();
     gates[0]?.release();
-    expect(await within(50, Promise.race([first, second]))).toBe(false);
+    // Longer than one drain of the SDK and one look at the count: wait goes on until zero.
+    expect(await within(1_500, Promise.race([first, second]))).toBe(false);
     gates[1]?.release();
     expect(await within(2_000, Promise.all([first, second]))).toBe(true);
   });
