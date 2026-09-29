@@ -119,7 +119,8 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       saves minted disks), `QmpListen` (the QMP socket) and `Sessions` (slots against `--max-jobs`,
       each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`, `/stop`, `/save`,
       `/image`, `/serial`, `/follow`, `/stats`, `/minted`, `/send-keys`, `/mouse/*`,
-      `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`.
+      `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`. Saves a failed
+      guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but nothing calls it.
 - [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
