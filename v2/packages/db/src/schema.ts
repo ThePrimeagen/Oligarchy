@@ -276,8 +276,8 @@ export const jobServers = pgTable("job_servers", {
 });
 
 // One setup in flight, or finished and left in place, per iso and server. The primary key is
-// the lock: a second insert fails, so one ticket per pair. run_id is null until that
-// ticket's test run exists, then whoever watches the row reads the test run by it. Not a foreign
+// the lock: a second insert fails, so one mint per pair. run_id is null until that
+// mint's test run exists, then whoever watches the row reads the test run by it. Not a foreign
 // key, and server_url is not one either: forgetting a server does not cascade the row away, and
 // a success stays when retention sweeps the test run. A server deletes its own rows once, when it
 // comes online, so a restarted host cannot keep a stale lock. Many null run ids are allowed;
@@ -365,9 +365,6 @@ export const testRuns = pgTable(
       .references(() => testDefinitions.id),
     // Null until test start writes the Cursor model id that is running this test run.
     model: text("model"),
-    // Null until ctrl writes the Linear issue identifier created for this test run.
-    // The human-readable id is what webhooks carry; it is the reverse lookup key.
-    linearId: text("linear_id"),
     status: testRunStatus("status").notNull().default("pending"),
     reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -376,8 +373,6 @@ export const testRuns = pgTable(
   // One test run per definition per suite: a second write is a database error by design.
   (table) => [
     uniqueIndex("test_runs_suite_definition_idx").on(table.suiteId, table.definitionId),
-    // One test run per Linear ticket once assigned; many NULL linear_ids remain allowed.
-    uniqueIndex("test_runs_linear_id_idx").on(table.linearId),
   ],
 );
 
