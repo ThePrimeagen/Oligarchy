@@ -241,9 +241,67 @@ const namedAnError = (context, jarl, node, variable) => {
   return false;
 };
 
+const FUNCTIONS = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
+
+const handedToJarlFn = (node, jarl) =>
+  node.parent?.type === "CallExpression" &&
+  node.parent.arguments[0] === node &&
+  isMember(node.parent.callee, jarl, "fn");
+
+// Whether fn is what a jarl.fn wraps: written as its first argument, or named there.
+const wrappedByJarlFn = (context, jarl, fn) => {
+  if (handedToJarlFn(fn, jarl)) {
+    return true;
+  }
+  let name;
+  if (fn.type === "FunctionDeclaration") {
+    name = fn.id;
+  } else if (fn.parent?.type === "VariableDeclarator" && fn.parent.init === fn) {
+    name = fn.parent.id;
+  }
+  if (name?.type !== "Identifier") {
+    return false;
+  }
+  const variable = variableOf(context, name);
+  return variable?.references.some(({ identifier }) => handedToJarlFn(identifier, jarl)) === true;
+};
+
 export default {
   meta: { name: "oligarchy" },
   rules: {
+    "unwrap-inside-jarl-fn": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "jarl.unwrap throws, so it is called only in the function a jarl.fn wraps, whose mapError catches it",
+        },
+        messages: {
+          outside:
+            "call jarl.unwrap only in the function handed to jarl.fn, whose mapError catches what it throws; handle the error here instead",
+        },
+      },
+      create(context) {
+        let jarl;
+        return {
+          Program(node) {
+            jarl = jarlName(node);
+          },
+          MemberExpression(node) {
+            if (jarl === undefined || !isMember(node, jarl, "unwrap")) {
+              return;
+            }
+            let fn = node.parent;
+            while (fn && !FUNCTIONS.has(fn.type)) {
+              fn = fn.parent;
+            }
+            if (fn === null || fn === undefined || !wrappedByJarlFn(context, jarl, fn)) {
+              context.report({ node, messageId: "outside" });
+            }
+          },
+        };
+      },
+    },
     "result-through-jarl": {
       meta: {
         type: "problem",
@@ -253,7 +311,7 @@ export default {
         },
         messages: {
           value:
-            "read {{ name }}.value with jarl.value({{ name }}) once every error is handled, or jarl.unwrap({{ name }}) to throw the rest",
+            "read {{ name }}.value with jarl.value({{ name }}) once every error is handled, or jarl.unwrap({{ name }}) inside a jarl.fn to throw the rest",
           error:
             "name {{ name }}'s error with jarl.error.is({{ name }}, ...) or jarl.is_err({{ name }}) before reading {{ name }}.error",
         },
