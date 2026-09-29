@@ -371,9 +371,6 @@ export const testRuns = pgTable(
     definitionId: bigint("definition_id", { mode: "number" })
       .notNull()
       .references(() => testDefinitions.id),
-    // Null until test start writes the session, or until the close if start
-    // was never called. Attribution is recorded fact, not an upfront guess.
-    sessionId: uuid("session_id").references(() => sessions.id),
     // Null until test start writes the Cursor model id that is running this test run.
     model: text("model"),
     // Null until ctrl writes the Linear issue identifier created for this test run.
@@ -384,12 +381,9 @@ export const testRuns = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One test run per definition per suite, and one test run per session once attributed:
-  // a second write of either is a database error by design. Postgres unique
-  // indexes still allow many NULL session_ids (pending test runs).
+  // One test run per definition per suite: a second write is a database error by design.
   (table) => [
     uniqueIndex("test_runs_suite_definition_idx").on(table.suiteId, table.definitionId),
-    uniqueIndex("test_runs_session_id_idx").on(table.sessionId),
     // One test run per Linear ticket once assigned; many NULL linear_ids remain allowed.
     uniqueIndex("test_runs_linear_id_idx").on(table.linearId),
   ],
