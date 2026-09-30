@@ -38,7 +38,7 @@ describe("the tester's report", () => {
       "[ERROR] [global] tester: could not count tests: Failed query: select count(*): connect ECONNREFUSED",
     ]);
     expect(jarl.is_err(reported) && reported.error).toBe(refused);
-    expect(said.map(({ level, report }) => ({ level, report }))).toEqual([
+    expect(said.map((one) => ({ level: one.level, report: one.report }))).toEqual([
       { level: "error", report: { location: "tester", cause: refused } },
     ]);
   });

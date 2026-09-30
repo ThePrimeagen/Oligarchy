@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
@@ -43,7 +43,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = (db: Db.Database): Actions => ({
+export const create = App.createService<Db.Database, void, Actions>(({ db }) => ({
   service: "actions",
 
   startAction: (input) =>
@@ -121,4 +121,4 @@ export const create = (db: Db.Database): Actions => ({
         .limit(limit);
       return rows.reverse();
     }),
-});
+}));

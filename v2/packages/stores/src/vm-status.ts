@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { asc, desc, eq } from "drizzle-orm";
@@ -33,7 +33,7 @@ const CRASHED_WHILE_RUNNING = "the qemu server crashed and came back to find thi
 
 const LIVE: ReadonlyArray<VmStatusRow["status"]> = ["downloading", "running"];
 
-export const create = (db: Db.Database): VmStatus => ({
+export const create = App.createService<Db.Database, void, VmStatus>(({ db }) => ({
   service: "vmStatus",
 
   record: (jobId, status) =>
@@ -96,4 +96,4 @@ export const create = (db: Db.Database): VmStatus => ({
         return past;
       }),
     ),
-});
+}));

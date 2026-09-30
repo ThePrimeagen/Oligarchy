@@ -34,12 +34,7 @@ if (jarl.is_err(created)) {
 
 const env = jarl.value(created);
 
-const built = createServices(env);
-if (jarl.is_err(built)) {
-  process.stderr.write(`${built.error.message}\n`);
-  process.exit(1);
-}
-const services = jarl.value(built);
+const services = createServices(env);
 
 const app = new App.App(env).main(main);
 app.onExit(() => closeServices(services));

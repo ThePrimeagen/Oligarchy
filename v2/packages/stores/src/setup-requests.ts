@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
@@ -46,7 +46,7 @@ const releasable = sql`(${DbSchema.setupRequests.jobId} is null or exists (selec
 const pair = (iso: string, serverUrl: string) =>
   and(eq(DbSchema.setupRequests.iso, iso), eq(DbSchema.setupRequests.serverUrl, serverUrl));
 
-export const create = (db: Db.Database): SetupRequests => ({
+export const create = App.createService<Db.Database, void, SetupRequests>(({ db }) => ({
   service: "setupRequests",
 
   insert: (iso, serverUrl) =>
@@ -131,4 +131,4 @@ export const create = (db: Db.Database): SetupRequests => ({
         .where(pair(iso, serverUrl));
       return row;
     }),
-});
+}));

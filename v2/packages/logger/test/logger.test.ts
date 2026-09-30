@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import * as Render from "../src/render.ts";
 import { logging, track, UNREACHABLE } from "./support.ts";
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 describe("the logger", () => {
   it("prints each line once its row is stored, rows in call order with level and location, and flush settles after the last (happy)", async () => {
     const { lines, logger, rows } = await logging();
@@ -152,7 +154,7 @@ describe("the logger's Sentry", () => {
     expect(sent[0]?.error).toEqual(new Error("qemu exited"));
     expect(sent[1]?.error).toBeInstanceOf(Db.DatabaseError);
     expect(sent[2]?.error).toBeInstanceOf(Db.DatabaseError);
-    expect(said[0]).toBe(`db: log insert failed: ${(sent[1]?.error as Error).message}`);
+    expect(said[0]).toBe(`db: log insert failed: ${messageOf(sent[1]?.error)}`);
   });
 
   it("a connection the database drops is one error line, sent with the pool's error as its cause (unhappy)", async () => {
@@ -166,13 +168,13 @@ describe("the logger's Sentry", () => {
     });
     await logger.flush();
 
-    const pooled = lines.filter((line) => line.includes("db: pool error: "));
+    const pooled = lines.filter((line) => line.startsWith("[ERROR] [global] db: pool error: "));
     expect(pooled).toHaveLength(1);
     const text = pooled[0]?.replace("[ERROR] [global] ", "");
     const reported = sent.find(({ report }) => report.extra?.["log"] === text);
     expect(reported?.report).toEqual({ level: "error", tags: {}, extra: { log: text } });
     expect(reported?.error).toBeInstanceOf(Error);
     expect(reported?.error).not.toBeInstanceOf(Db.DatabaseError);
-    expect(text).toBe(`db: pool error: ${(reported?.error as Error).message}`);
+    expect(text).toBe(`db: pool error: ${messageOf(reported?.error)}`);
   });
 });

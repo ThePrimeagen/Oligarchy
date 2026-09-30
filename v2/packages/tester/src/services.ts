@@ -1,10 +1,11 @@
+import type * as App from "@oligarchy/app";
 import * as Db from "@oligarchy/db";
 import * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
 import * as Logger from "@oligarchy/logger";
 import * as Sentry from "@oligarchy/sentry";
 import * as Stores from "@oligarchy/stores";
-import * as jarl from "jarl";
+import type * as jarl from "jarl";
 
 export const environment = Env.cli({
   name: "tester",
@@ -14,11 +15,11 @@ export const environment = Env.cli({
   .done();
 
 export type Services = {
-  readonly http: Http.Http;
-  readonly sentry: Sentry.Sentry;
-  readonly db: Db.Database;
-  readonly logs: Stores.Logs.Logs;
-  readonly logger: Logger.Logger;
+  readonly http: App.Made<Http.Http>;
+  readonly sentry: App.Made<Sentry.Sentry>;
+  readonly db: App.Made<Db.Database>;
+  readonly logs: App.Made<Stores.Logs.Logs>;
+  readonly logger: App.Made<Logger.Logger>;
 };
 
 export type Terminal = {
@@ -29,7 +30,7 @@ export type Terminal = {
 // Everything the services reach outside the process but the database, which env names.
 export type World = {
   readonly terminal: Terminal;
-  readonly http: Http.Http;
+  readonly http: App.Made<Http.Http>;
 };
 
 const live = (): World => ({
@@ -37,7 +38,7 @@ const live = (): World => ({
     write: (line) => process.stdout.write(`${line}\n`),
     colors: process.stdout.isTTY,
   },
-  http: Http.create(),
+  http: Http.create({}),
 });
 
 // The environment in, the services out. Every line is printed and stored in the logs table; a
@@ -46,28 +47,13 @@ const live = (): World => ({
 export const createServices = (
   env: { readonly vars: { readonly databaseUrl: Env.Secret } },
   world: World = live(),
-): jarl.Result<Services, Db.DatabaseError> => {
+): Services => {
   const { terminal, http } = world;
-  const sentry = Sentry.create({ dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT, http });
-  const opened = Db.open({
-    url: env.vars.databaseUrl,
-    onPoolError: (error) => {
-      logger.error(`db: pool error: ${error.message}`, { cause: error });
-    },
-  });
-  if (!opened.ok) {
-    return opened;
-  }
-  const db = jarl.value(opened);
-  const logs = Stores.Logs.create(db);
-  const logger = Logger.create({
-    write: terminal.write,
-    colors: terminal.colors,
-    sentry,
-    store: (row) =>
-      logs.insertLog({ text: row.text, level: row.level, location: row.location, runId: null }),
-  });
-  return jarl.ok({ http, sentry, db, logs, logger });
+  const sentry = Sentry.create({ http }, { dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT });
+  const db = Db.create({}, { url: env.vars.databaseUrl });
+  const logs = Stores.Logs.create({ db });
+  const logger = Logger.create({ sentry, db }, { write: terminal.write, colors: terminal.colors });
+  return { http, sentry, db, logs, logger };
 };
 
 // Every line waits on its insert, so the pool stays open until the last one lands; a line the

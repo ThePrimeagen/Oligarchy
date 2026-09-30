@@ -1,5 +1,6 @@
 // A fake service for tests: the same span tree as create makes, recording what it would send
 // instead of sending it. Every send settles at once, so wait resolves at once.
+import * as App from "@oligarchy/app";
 import * as Tree from "./tree.ts";
 import type * as Types from "./types.ts";
 
@@ -42,7 +43,7 @@ const node = (name: string, options: Types.TraceOptions, jobId: string): Node =>
 });
 
 export const sentry = (): {
-  readonly sentry: Types.Sentry;
+  readonly sentry: App.Made<Types.Sentry>;
   // Every root span, in the order they were opened.
   readonly roots: ReadonlyArray<Recorded>;
   // Everything sent, through a span or not, in the order it was sent.
@@ -83,8 +84,13 @@ export const sentry = (): {
     },
   };
 
+  const create = App.createService<never, void, Types.Sentry>(() => ({
+    service: "sentry",
+    ...Tree.reporter(sink),
+    wait: () => Promise.resolve(),
+  }));
   return {
-    sentry: { service: "sentry", ...Tree.reporter(sink), wait: () => Promise.resolve() },
+    sentry: create({}),
     roots,
     sent,
     ended,

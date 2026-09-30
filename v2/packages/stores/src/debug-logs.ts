@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
@@ -58,7 +58,7 @@ const formatActions = (rows: ReadonlyArray<Action>): string =>
     })
     .join("\n");
 
-export const create = (db: Db.Database): DebugLogs => ({
+export const create = App.createService<Db.Database, void, DebugLogs>(({ db }) => ({
   service: "debugLogs",
 
   // A test run holds one open job at a time, so its lines fall into turns: a job's turn runs from
@@ -129,4 +129,4 @@ export const create = (db: Db.Database): DebugLogs => ({
         .where(eq(DbSchema.debugLogs.jobId, jobId));
       return row;
     }),
-});
+}));

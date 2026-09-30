@@ -1,4 +1,6 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
+import type * as Db from "@oligarchy/db";
+import * as DbSchema from "@oligarchy/db/schema";
 import type * as Sentry from "@oligarchy/sentry";
 import * as jarl from "jarl";
 import * as Palette from "./palette.ts";
@@ -12,15 +14,6 @@ export type Attribution = { readonly location?: string; readonly agentId?: strin
 // What an error or fatal line hands Sentry besides its text: the cause Sentry is sent in the
 // text's place, or skipSentry to send nothing.
 export type Report = Attribution & { readonly cause?: unknown; readonly skipSentry?: true };
-
-export type Row = {
-  readonly text: string;
-  readonly level: Level;
-  readonly location: string | null;
-  readonly agentId: string | null;
-};
-
-export type Store = (row: Row) => Promise<jarl.Result<void, { readonly message: string }>>;
 
 type Write = (text: string, attribution?: Attribution) => void;
 type Reported = (text: string, report?: Report) => void;
@@ -40,9 +33,6 @@ declare module "@oligarchy/app" {
   }
 }
 
-const messageOf = (thrown: unknown): string =>
-  thrown instanceof Error ? thrown.message : String(thrown);
-
 const sentryReport = (
   level: "error" | "fatal",
   text: string,
@@ -55,78 +45,74 @@ const sentryReport = (
   return { level, tags, extra: { log: text, ...tags } };
 };
 
-// Without a store a line is written at once. With one, rows are stored one at a time in call
-// order and each line is written once its row has landed; a refused row is still written,
-// followed by a line saying why, which is not stored. An error or fatal line goes to Sentry when
-// it is logged, as its cause or else as its text; a refused row's failure goes too.
-export const create = (options: {
+export type Options = {
   readonly write: (line: string) => void;
   readonly colors: boolean;
-  readonly store?: Store;
-  readonly sentry?: Pick<Sentry.Sentry, "send">;
   readonly now?: () => number;
-}): Logger => {
-  const { write, colors, store, sentry } = options;
-  const now = options.now ?? Date.now;
-  let palette = Palette.empty;
-  let landed: Promise<void> = Promise.resolve();
+};
 
-  const print = (line: Render.Line) => {
-    write(Render.renderLine(line, colors));
-  };
+// Rows go into the logs table one at a time in call order, and each line is written once its row
+// has landed; a refused row is still written, followed by a line saying why, which is not stored.
+// An error or fatal line goes to Sentry when it is logged, as its cause or else as its text; a
+// refused row's failure goes too. A connection the database drops is an error line of its own.
+export const create = App.createService<Sentry.Sentry | Db.Database, Options, Logger>(
+  ({ sentry, db }, options) => {
+    const { write, colors } = options;
+    const now = options.now ?? Date.now;
+    let palette = Palette.empty;
+    let landed: Promise<void> = Promise.resolve();
 
-  const keep = async (line: Render.Line, row: Row, into: Store) => {
-    let failure: { readonly error: unknown; readonly message: string } | undefined;
-    try {
-      const stored = await into(row);
-      if (jarl.is_err(stored)) {
-        failure = { error: stored.error, message: stored.error.message };
-      }
-    } catch (thrown) {
-      failure = { error: thrown, message: messageOf(thrown) };
-    }
-    print(line);
-    if (failure !== undefined) {
-      const text = `db: log insert failed: ${failure.message}`;
-      print({ text, level: "error" });
-      sentry?.send(failure.error, sentryReport("error", text, {}));
-    }
-  };
-
-  const emit =
-    (level: Level): Reported =>
-    (text, report = {}) => {
-      const { agentId, location } = report;
-      let color: string | undefined;
-      if (colors && agentId !== undefined) {
-        const touched = Palette.touch(palette, agentId, now());
-        palette = touched.palette;
-        color = touched.color;
-      }
-      if ((level === "error" || level === "fatal") && report.skipSentry !== true) {
-        sentry?.send(report.cause ?? new Error(text), sentryReport(level, text, report));
-      }
-      const line: Render.Line = {
-        text,
-        level,
-        ...(agentId === undefined ? {} : { agentId }),
-        ...(location === undefined ? {} : { location }),
-        ...(color === undefined ? {} : { color }),
-      };
-      if (store === undefined) {
-        print(line);
-        return;
-      }
-      const row: Row = { text, level, location: location ?? null, agentId: agentId ?? null };
-      landed = landed.then(() => keep(line, row, store));
+    const print = (line: Render.Line) => {
+      write(Render.renderLine(line, colors));
     };
 
-  return {
-    service: "logger",
-    info: emit("info"),
-    warning: emit("warning"),
-    error: emit("error"),
-    fatal: emit("fatal"),
-    flush: () => landed,
-  };
-};
+    const keep = async (line: Render.Line, location: string | null) => {
+      const stored = await db.run(async (d) => {
+        await d.insert(DbSchema.logs).values({ text: line.text, level: line.level, location });
+      });
+      print(line);
+      if (jarl.is_err(stored)) {
+        const text = `db: log insert failed: ${stored.error.message}`;
+        print({ text, level: "error" });
+        sentry.send(stored.error, sentryReport("error", text, {}));
+      }
+    };
+
+    const emit =
+      (level: Level): Reported =>
+      (text, report = {}) => {
+        const { agentId, location } = report;
+        let color: string | undefined;
+        if (colors && agentId !== undefined) {
+          const touched = Palette.touch(palette, agentId, now());
+          palette = touched.palette;
+          color = touched.color;
+        }
+        if ((level === "error" || level === "fatal") && report.skipSentry !== true) {
+          sentry.send(report.cause ?? new Error(text), sentryReport(level, text, report));
+        }
+        const line: Render.Line = {
+          text,
+          level,
+          ...(agentId === undefined ? {} : { agentId }),
+          ...(location === undefined ? {} : { location }),
+          ...(color === undefined ? {} : { color }),
+        };
+        landed = landed.then(() => keep(line, location ?? null));
+      };
+
+    const error = emit("error");
+    db.onPoolError((cause) => {
+      error(`db: pool error: ${cause.message}`, { cause });
+    });
+
+    return {
+      service: "logger",
+      info: emit("info"),
+      warning: emit("warning"),
+      error,
+      fatal: emit("fatal"),
+      flush: () => landed,
+    };
+  },
+);

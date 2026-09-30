@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import type * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
@@ -123,18 +123,19 @@ const failure = (error: Asked): Failure => {
   return Errors.unreachable(`openrouter: ${error.message}`, error);
 };
 
-// One chat completion, asked once and read whole. timeoutMs bounds each ask; attempts is the
-// most asks in all, the first included, however long each wait. A wait to ask again that would
-// reach the request's deadline is not waited.
-export const create = (options: {
+export type Options = {
   readonly token: Env.Secret;
   readonly baseUrl: string;
   readonly timeoutMs: number;
   readonly defaultRetry: number;
   readonly attempts: number;
-  readonly http: Http.Http;
-}): OpenRouter => {
-  const { token, timeoutMs, defaultRetry, attempts, http } = options;
+};
+
+// One chat completion, asked once and read whole. timeoutMs bounds each ask; attempts is the
+// most asks in all, the first included, however long each wait. A wait to ask again that would
+// reach the request's deadline is not waited.
+export const create = App.createService<Http.Http, Options, OpenRouter>(({ http }, options) => {
+  const { token, timeoutMs, defaultRetry, attempts } = options;
   const url = chatCompletions(options.baseUrl);
 
   // Seconds, or an HTTP-date on the clock. Zero, or a date already past, waits a millisecond; a
@@ -233,4 +234,4 @@ export const create = (options: {
       );
     },
   };
-};
+});
