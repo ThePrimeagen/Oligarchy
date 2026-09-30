@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Env from "@oligarchy/env";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as jarl from "jarl";
@@ -16,7 +16,13 @@ export type Database = {
   readonly run: <T>(query: (db: Drizzle) => Promise<T>) => Promise<jarl.Result<T, DatabaseError>>;
   // Ends the pool once the queries in flight have finished. Nothing uses the database after.
   readonly close: () => Promise<jarl.Result<void, DatabaseError>>;
+  // An idle connection the server drops is an error on the pool, not on any query; each listener
+  // hears it, in the order they listened, and the pool replaces the connection on its next query.
+  // With none it is dropped. Hands back the listener's unsubscribe.
+  readonly onPoolError: (listener: (error: Error) => void) => () => void;
 };
+
+export type Options = { readonly url: Env.Secret };
 
 declare module "@oligarchy/app" {
   interface Services {
@@ -39,15 +45,16 @@ const failed = (thrown: unknown): DatabaseError => {
 
 const attempt = <T>(query: () => Promise<T>) => jarl.fn(query, failed)();
 
-// canParse, not new URL's throw: that TypeError carries the url, password and all, into the logs.
-// PlanetScale urls carry sslrootcert=system, libpq 16's "verify against the system trust store".
-// node-postgres reads sslrootcert as a file path, so the first query dies with ENOENT
-// (node-postgres#3101). Node's default TLS verification already is the system trust store, so
-// dropping the parameter keeps the url's meaning; sslmode=verify-full stays.
-const connectionString = (url: Env.Secret): string | undefined => {
+// env has already refused a url that does not parse; one that still does not reaches the pool as
+// it is, and fails at the first query. PlanetScale urls carry sslrootcert=system, libpq 16's
+// "verify against the system trust store". node-postgres reads sslrootcert as a file path, so the
+// first query dies with ENOENT (node-postgres#3101). Node's default TLS verification already is
+// the system trust store, so dropping the parameter keeps the url's meaning; sslmode=verify-full
+// stays.
+const connectionString = (url: Env.Secret): string => {
   const raw = url.reveal();
   if (!URL.canParse(raw)) {
-    return undefined;
+    return raw;
   }
   const parsed = new URL(raw);
   if (parsed.searchParams.get("sslrootcert") !== "system") {
@@ -57,23 +64,28 @@ const connectionString = (url: Env.Secret): string | undefined => {
   return parsed.toString();
 };
 
-export const open = (options: {
-  readonly url: Env.Secret;
-  // An idle connection the server drops is an error on the pool, not on any query; with no
-  // listener it would end the process. The pool replaces the connection on its next query.
-  readonly onPoolError: (error: Error) => void;
-}): jarl.Result<Database, DatabaseError> => {
-  const url = connectionString(options.url);
-  if (url === undefined) {
-    return jarl.err(new DatabaseError("db: database url is not a valid url"));
-  }
-  // Nothing connects until the first query.
-  const pool = new Pool({ connectionString: url });
-  pool.on("error", options.onPoolError);
+// Nothing connects until the first query.
+export const create = App.createService<never, Options, Database>((_, { url }) => {
+  const pool = new Pool({ connectionString: connectionString(url) });
+  const listeners = new Set<(error: Error) => void>();
+  pool.on("error", (error) => {
+    for (const listener of listeners) {
+      listener(error);
+    }
+  });
   const db = drizzle({ client: pool, schema: Schema });
-  return jarl.ok({
+  return {
     service: "db",
     run: (query) => attempt(() => query(db)),
     close: () => attempt(() => pool.end()),
-  });
-};
+    onPoolError: (listener) => {
+      // A subscription of its own, so a listener subscribed twice is heard twice and each
+      // unsubscribe takes back only its own.
+      const own = (error: Error) => listener(error);
+      listeners.add(own);
+      return () => {
+        listeners.delete(own);
+      };
+    },
+  };
+});

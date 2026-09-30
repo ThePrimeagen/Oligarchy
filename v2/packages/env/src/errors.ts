@@ -71,6 +71,15 @@ export class MissingVariable extends jarl.error.define("MissingVariable") {
   }
 }
 
+// Set, but not what the variable holds. The message never carries the value either.
+export class InvalidVariable extends jarl.error.define("InvalidVariable") {
+  readonly variable: string;
+  constructor(variable: string, expected: string) {
+    super(`${variable} is not ${expected}`);
+    this.variable = variable;
+  }
+}
+
 export class ConfigInvalid extends jarl.error.define("ConfigInvalid") {
   readonly path: string;
   constructor(path: string, issue: string) {

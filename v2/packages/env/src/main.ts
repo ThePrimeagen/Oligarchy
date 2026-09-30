@@ -17,6 +17,7 @@ export {
   FileMissing,
   FileUnreadable,
   HelpRequested,
+  InvalidVariable,
   MissingVariable,
   Unexpected,
   UsageError,
@@ -99,5 +100,6 @@ export const create = jarl.fn(
     Errors.FileUnreadable,
     Errors.ConfigInvalid,
     Errors.MissingVariable,
+    Errors.InvalidVariable,
   ),
 );
