@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
+    "@oligarchy/sentry": "workspace:*",
     "jarl": "catalog:"
   },
   "devDependencies": {

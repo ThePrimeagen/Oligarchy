@@ -1,3 +1,4 @@
+import * as SentryTesting from "@oligarchy/sentry/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as Logger from "../src/main.ts";
@@ -162,6 +163,142 @@ describe("the logger", () => {
       painted("A", Render.AGENT_COLORS[0]),
       painted("B", Render.AGENT_COLORS[1]),
       painted("A", Render.AGENT_COLORS[0]),
+    ]);
+  });
+});
+
+const reporting = (store?: Logger.Store) => {
+  const lines: Array<string> = [];
+  const rows: Array<Logger.Row> = [];
+  const fake = SentryTesting.sentry();
+  const logger = Logger.create({
+    write: (line) => lines.push(line),
+    colors: false,
+    sentry: fake.sentry,
+    store:
+      store ??
+      (async (row) => {
+        rows.push(row);
+        return jarl.ok(undefined);
+      }),
+  });
+  return { lines, rows, sent: fake.sent, logger };
+};
+
+describe("the logger's Sentry", () => {
+  it("sends an error line's cause, and a fatal line without one as its text, each once with its level, tags and text (happy)", async () => {
+    const { lines, sent, logger } = reporting();
+    const cause = new Error("connect ECONNREFUSED");
+
+    logger.error("stop cleanup failed: connect ECONNREFUSED", {
+      location: "s-1",
+      agentId: "OLI-1",
+      cause,
+    });
+    logger.fatal("config unreadable");
+    await logger.flush();
+
+    expect(lines).toEqual([
+      "[ERROR] [OLI-1] s-1: stop cleanup failed: connect ECONNREFUSED",
+      "[FATAL] [global] config unreadable",
+    ]);
+    expect(sent).toEqual([
+      {
+        error: cause,
+        jobId: undefined,
+        report: {
+          level: "error",
+          tags: { location: "s-1", agent_id: "OLI-1" },
+          extra: {
+            log: "stop cleanup failed: connect ECONNREFUSED",
+            location: "s-1",
+            agent_id: "OLI-1",
+          },
+        },
+      },
+      {
+        error: new Error("config unreadable"),
+        jobId: undefined,
+        report: { level: "fatal", tags: {}, extra: { log: "config unreadable" } },
+      },
+    ]);
+  });
+
+  it("never sends an info or a warning line (unhappy)", async () => {
+    const { lines, sent, logger } = reporting();
+
+    logger.info("booted");
+    logger.warning("slow");
+    await logger.flush();
+
+    expect(lines).toEqual(["[INFO] [global] booted", "[WARN] [global] slow"]);
+    expect(sent).toEqual([]);
+  });
+
+  it("writes and stores an error or fatal line marked skipSentry, and sends neither (unhappy)", async () => {
+    const { lines, rows, sent, logger } = reporting();
+
+    logger.error("POST /stop failed: unauthorized", { skipSentry: true });
+    logger.fatal("shutting down", { skipSentry: true, cause: new Error("SIGTERM") });
+    await logger.flush();
+
+    expect(lines).toEqual([
+      "[ERROR] [global] POST /stop failed: unauthorized",
+      "[FATAL] [global] shutting down",
+    ]);
+    expect(rows.map((row) => row.text)).toEqual([
+      "POST /stop failed: unauthorized",
+      "shutting down",
+    ]);
+    expect(sent).toEqual([]);
+  });
+
+  it("sends the refusal a row's insert failed with, as the line saying so, and still sends the line itself (unhappy)", async () => {
+    const refusal = new Error("connection refused");
+    const { lines, sent, logger } = reporting(async () => jarl.err(refusal));
+
+    logger.error("qemu exited");
+    await logger.flush();
+
+    expect(lines).toEqual([
+      "[ERROR] [global] qemu exited",
+      "[ERROR] [global] db: log insert failed: connection refused",
+    ]);
+    expect(sent).toEqual([
+      {
+        error: new Error("qemu exited"),
+        jobId: undefined,
+        report: { level: "error", tags: {}, extra: { log: "qemu exited" } },
+      },
+      {
+        error: refusal,
+        jobId: undefined,
+        report: {
+          level: "error",
+          tags: {},
+          extra: { log: "db: log insert failed: connection refused" },
+        },
+      },
+    ]);
+  });
+
+  it("sends what a store threw as the insert's failure, for an info line it never sends (unhappy)", async () => {
+    const thrown = new Error("pool ended");
+    const { lines, sent, logger } = reporting(() => Promise.reject(thrown));
+
+    logger.info("booted");
+    await logger.flush();
+
+    expect(lines).toEqual([
+      "[INFO] [global] booted",
+      "[ERROR] [global] db: log insert failed: pool ended",
+    ]);
+    expect(sent).toEqual([
+      {
+        error: thrown,
+        jobId: undefined,
+        report: { level: "error", tags: {}, extra: { log: "db: log insert failed: pool ended" } },
+      },
     ]);
   });
 });
