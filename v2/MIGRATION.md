@@ -20,6 +20,9 @@ meet plus one happy path, and every service is faked except the database.
 - **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
   nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
   guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
+- **No live events, for now.** `/follow`, the stream of a guest's screens and actions that viz
+  watched through the proxy, is not ported, on the qemu server or the proxy. Live events get a
+  design of their own later; nothing is built toward V1's.
 
 ## 1. Services to write
 
@@ -55,7 +58,7 @@ meet plus one happy path, and every service is faked except the database.
       (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
       waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
       other calls go with the apps that make them: the automation client's reserve and
-      relinquish, `ctrl mint`'s minted and viz's follow.
+      relinquish, and `ctrl mint`'s minted.
 
 ## 2. Finish the services V2 has
 
@@ -157,7 +160,7 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `Minted` (finds and
       saves minted disks), `QmpListen` (the QMP socket) and `Sessions` (slots against `--max-jobs`,
       each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`, `/stop`, `/save`,
-      `/image`, `/serial`, `/follow`, `/stats`, `/minted`, `/send-keys`, `/mouse/*`,
+      `/image`, `/serial`, `/stats`, `/minted`, `/send-keys`, `/mouse/*`,
       `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`. Saves a failed
       guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but nothing calls it.
       Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
@@ -205,9 +208,9 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
       V2's `Db.create` makes a pool, so the database service needs a way to run there. It carries
       `packages/shared/src/steps.ts`, which places intents against a definition's steps.
-- [ ] **viz** (`apps/viz`) and the **session REPL** (`src/session`). Terminal views of a running
-      guest. viz reads the guest's output through the proxy's `/follow`, which streams in V1, and
-      `@oligarchy/http` reads whole bodies: decide whether `follow` needs streaming added to it.
+- [ ] **viz** (`apps/viz`). Its machines and its queue (`tests.listJobs`). Its live view of a
+      guest, which read the proxy's `/follow`, is not ported (Decided).
+- [ ] **session REPL** (`src/session`). A terminal view of a running guest.
 
 ## 5. Cutover
 
