@@ -8,7 +8,7 @@ import * as Render from "./render.ts";
 export type Said = {
   readonly level: Logger.Level;
   readonly text: string;
-  readonly attribution: Logger.Attribution;
+  readonly report: Logger.Report;
 };
 
 export const logger = (
@@ -27,9 +27,9 @@ export const logger = (
 
   const emit =
     (level: Logger.Level) =>
-    (text: string, attribution: Logger.Attribution = {}) => {
-      said.push({ level, text, attribution });
-      const { agentId, location } = attribution;
+    (text: string, report: Logger.Report = {}) => {
+      said.push({ level, text, report });
+      const { agentId, location } = report;
       let color: string | undefined;
       if (colors && agentId !== undefined) {
         const touched = Palette.touch(palette, agentId, now());

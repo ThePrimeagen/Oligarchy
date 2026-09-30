@@ -29,12 +29,19 @@ const query = async (url: string, sql: string, params: ReadonlyArray<unknown> = 
   }
 };
 
-// The tester as its own process, the way `bun run tester` starts it.
+// The tester as its own process, the way `bun run tester` starts it. A proxy nobody listens on
+// refuses its requests to Sentry, so an error line it sends never reaches the real project.
 const tester = (url: string) =>
   new Promise<{ readonly code: number | null; readonly lines: ReadonlyArray<string> }>(
     (resolve, reject) => {
       const child = spawn(process.execPath, ["--no-env-file", MAIN], {
-        env: { ...process.env, DATABASE_URL: url },
+        env: {
+          ...process.env,
+          DATABASE_URL: url,
+          https_proxy: "http://127.0.0.1:1",
+          http_proxy: "http://127.0.0.1:1",
+          no_proxy: "",
+        },
       });
       let stdout = "";
       child.stdout.setEncoding("utf8");

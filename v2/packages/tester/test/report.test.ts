@@ -28,8 +28,8 @@ describe("the tester's report", () => {
     expect(lines.at(-1)).toBe("[WARN] [global] tester: failing tests: 3");
   });
 
-  it("a database that cannot count is an error line, and the error comes back (unhappy)", () => {
-    const { lines, logger } = logging();
+  it("a database that cannot count is an error line whose cause is the database's error, and the error comes back (unhappy)", () => {
+    const { lines, logger, said } = logging();
     const refused = new Db.DatabaseError("Failed query: select count(*): connect ECONNREFUSED");
 
     const reported = report(logger, jarl.err(refused));
@@ -38,5 +38,8 @@ describe("the tester's report", () => {
       "[ERROR] [global] tester: could not count tests: Failed query: select count(*): connect ECONNREFUSED",
     ]);
     expect(jarl.is_err(reported) && reported.error).toBe(refused);
+    expect(said.map((one) => ({ level: one.level, report: one.report }))).toEqual([
+      { level: "error", report: { location: "tester", cause: refused } },
+    ]);
   });
 });

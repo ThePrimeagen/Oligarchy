@@ -16,16 +16,17 @@ describe("the fake logger", () => {
 
     expect(lines).toEqual(["[INFO] [OLI-1] s-1: booted", "[WARN] [global] slow"]);
     expect(said).toEqual([
-      { level: "info", text: "booted", attribution: { agentId: "OLI-1", location: "s-1" } },
-      { level: "warning", text: "slow", attribution: {} },
+      { level: "info", text: "booted", report: { agentId: "OLI-1", location: "s-1" } },
+      { level: "warning", text: "slow", report: {} },
     ]);
   });
 
-  it("keeps an error and a fatal line as given, and paints an agent when asked (unhappy)", () => {
+  it("keeps an error's cause and skipSentry as given, and paints an agent when asked (unhappy)", () => {
     const { lines, said, logger } = LoggerTesting.logger({ colors: true, now: () => 0 });
+    const cause = new Error("connect ECONNREFUSED");
 
-    logger.error("stop failed", { agentId: "A" });
-    logger.fatal("shutting down");
+    logger.error("stop failed", { agentId: "A", cause });
+    logger.fatal("shutting down", { skipSentry: true });
 
     const color = Render.AGENT_COLORS[0];
     expect(lines).toEqual([
@@ -41,8 +42,8 @@ describe("the fake logger", () => {
       Render.renderLine({ text: "shutting down", level: "fatal" }, true),
     ]);
     expect(said).toEqual([
-      { level: "error", text: "stop failed", attribution: { agentId: "A" } },
-      { level: "fatal", text: "shutting down", attribution: {} },
+      { level: "error", text: "stop failed", report: { agentId: "A", cause } },
+      { level: "fatal", text: "shutting down", report: { skipSentry: true } },
     ]);
   });
 });
