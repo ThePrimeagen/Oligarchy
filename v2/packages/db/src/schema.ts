@@ -338,9 +338,10 @@ export const testBasePrompts = pgTable(
 );
 
 // One batch of test runs against one ISO and one control-plane server, named by the
-// ISO's version. Each of its test runs carries that ISO and server too. The
-// orchestrator owns the row: it opens the suite and declares the verdict once the test
-// runs are in — or timed_out when reports stop coming. Counts are not stored — planned
+// ISO's version. Each of its test runs carries that ISO and server too. The suite is
+// written whole and running, with its test runs and their drives, in one transaction;
+// the orchestrator declares the verdict once the test runs are in — or timed_out when
+// reports stop coming. Counts are not stored — planned
 // and reported are both readable off the test_runs rows. The Cursor model lives on each
 // test run: one suite can mix models.
 export const testSuites = pgTable("test_suites", {
