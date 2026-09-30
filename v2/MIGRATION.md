@@ -70,11 +70,14 @@ meet plus one happy path, and every service is faked except the database.
       and the database's clock. V2 lists only the live queue; the instruction is
       `tests.getJobDetails`, intents are `logs.listIntents` (keyed by test run, so a job keeps only
       the lines since it was queued) and actions are `actions.listActions`.
-- [ ] **Where a job's guest state lives.** V1's sessions said whether a guest was downloading its
-      ISO or running, and when it started and ended; the dashboard and `ctrl` show it. V2 dropped
-      sessions without a replacement. Decide where it goes, then add it to the schema and the
-      `tests` store. [#298](https://github.com/ThePrimeagen/Oligarchy/pull/298) proposed a
-      `vm_status` on each job.
+- [x] **Where a job's guest state lives.** In `vm_status`, one row per change to a job's VM, never
+      updated: its status is its newest row, and when it started or ended is when that row was
+      written. `downloading` and `running` are live; `shutdown` (the guest powered itself off),
+      `stopped` (the host ended it), `panicked` (its pvpanic device fired) and `crashed` (QEMU gone
+      with no `SHUTDOWN`) are how it ended, as the host can see it, and only `crashed` has a reason.
+      The `vmStatus` store records a live status, `stop`s with an end one, reads the `current` and
+      the `history`, and `stopLost` ends as crashed every live VM routed to a qemu server that
+      restarted.
 - [ ] **Wire Sentry.** `@oligarchy/sentry` exists, but no app creates it and env declares no DSN
       (V1 hard-codes one in `packages/observability/src/dsn.ts`). Each app's `createServices`
       builds it and `wait`s for it on exit, and the logger sends error and fatal lines to it, as
@@ -149,7 +152,14 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       holds no guest for is a 404, job not found: a restarted server holds none, so its lost
       guests' drivers fail, their automation clients answer `/run` with the failure, and the
       automation server errors the jobs. Nothing errors them at startup, as V1's
-      `failRoutedSessions` did.
+      `failRoutedSessions` did; `vmStatus.stopLost` ends their VMs' statuses there instead. Starts
+      QEMU with a pvpanic device and without `-no-reboot`, since a mint's installer reboots. Writes
+      each VM's `vmStatus` as it changes, and reads how one ended from QEMU's `SHUTDOWN` reason
+      over QMP, which V1 ignored: `guest-shutdown` is `shutdown`, `host-signal` and
+      `host-qmp-quit` are `stopped`, `guest-panic` is `panicked`, and QEMU exiting with no
+      `SHUTDOWN` is `crashed`, with its exit code or signal and the end of its stderr. pvpanic
+      carries no detail: a panic's trace reaches the serial only once the installed system's
+      kernel writes its console to `ttyS0`, which the mint does not set yet.
 - [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
