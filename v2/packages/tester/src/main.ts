@@ -6,7 +6,7 @@ import type * as Logger from "@oligarchy/logger";
 import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
 import { report } from "./report.ts";
-import { createServices, environment } from "./services.ts";
+import { closeServices, createServices, environment } from "./services.ts";
 
 const main = async (app: App.App<unknown, Db.Database | Logger.Logger>) => {
   const counted = await app.services.db.run(async (db) => ({
@@ -34,19 +34,16 @@ if (jarl.is_err(created)) {
 
 const env = jarl.value(created);
 
-const services = createServices(env);
-if (jarl.is_err(services)) {
-  process.stderr.write(`${services.error.message}\n`);
+const built = createServices(env);
+if (jarl.is_err(built)) {
+  process.stderr.write(`${built.error.message}\n`);
   process.exit(1);
 }
+const services = jarl.value(built);
 
 const app = new App.App(env).main(main);
-app.onExit(async () => {
-  // Every line waits on its insert, so the pool stays open until the last one lands.
-  await app.services.logger.flush();
-  return app.services.db.close();
-});
-await app.run(jarl.value(services), (errors) => {
+app.onExit(() => closeServices(services));
+await app.run(services, (errors) => {
   for (const error of errors) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   }

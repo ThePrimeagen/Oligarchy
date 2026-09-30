@@ -85,9 +85,7 @@ describe("the tester's services", () => {
     await services.logger.flush();
 
     expect(lines).toEqual(["[ERROR] [global] tester: could not count tests: timeout"]);
-    expect(await stored(services)).toEqual([
-      ["error", "tester", "could not count tests: timeout"],
-    ]);
+    expect(await stored(services)).toEqual([["error", "tester", "could not count tests: timeout"]]);
     expect(jarl.is_ok(await closeServices(services))).toBe(true);
     expect(envelopes(asked).map(({ at }) => at)).toEqual([ENVELOPES]);
   });
