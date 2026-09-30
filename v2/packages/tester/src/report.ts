@@ -15,7 +15,10 @@ export const report = (
   counted: jarl.Result<Counts, Db.DatabaseError>,
 ): jarl.Result<void, Db.DatabaseError> => {
   if (jarl.is_err(counted)) {
-    logger.error(`could not count tests: ${counted.error.message}`, AS);
+    logger.error(`could not count tests: ${counted.error.message}`, {
+      ...AS,
+      cause: counted.error,
+    });
     return counted;
   }
   const { running, passing, failing } = jarl.value(counted);
