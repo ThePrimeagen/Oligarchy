@@ -17,6 +17,9 @@ meet plus one happy path, and every service is faked except the database.
   package. Calls out go through `@oligarchy/http`.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
+- **Modern terminals only.** Output is coloured when stdout is a TTY, and the terminal is assumed
+  to render 24-bit colour, as Ghostty does. There is no `FORCE_COLOR` and no colour-depth probe;
+  V1's `packages/env/src/colors.ts` is not ported.
 - **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
   nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
   guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
@@ -102,10 +105,6 @@ meet plus one happy path, and every service is faked except the database.
       nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
       variable and never its value. Tests that only read what was logged use
       `@oligarchy/logger/testing`.
-- [ ] **Colour on stdout.** V1's `packages/env/src/colors.ts` honours `FORCE_COLOR` and asks the
-      stream for its colour depth; V2's tester reads `isTTY` alone. Move V1's rule into
-      `@oligarchy/env`.
-
 ## 3. The flow that replaces the Linear board
 
 In V1 the board drove everything: `ctrl` filed tickets, a webhook and a thirty-second board watch
