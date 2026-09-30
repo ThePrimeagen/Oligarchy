@@ -43,8 +43,6 @@ const failed = (thrown: unknown): DatabaseError => {
   return error;
 };
 
-const attempt = <T>(query: () => Promise<T>) => jarl.fn(query, failed)();
-
 // env has already refused a url that does not parse; one that still does not reaches the pool as
 // it is, and fails at the first query. PlanetScale urls carry sslrootcert=system, libpq 16's
 // "verify against the system trust store". node-postgres reads sslrootcert as a file path, so the
@@ -76,8 +74,8 @@ export const create = App.createService<never, Options, Database>((_, { url }) =
   const db = drizzle({ client: pool, schema: Schema });
   return {
     service: "db",
-    run: (query) => attempt(() => query(db)),
-    close: () => attempt(() => pool.end()),
+    run: (query) => jarl.exec(() => query(db), failed),
+    close: () => jarl.exec(() => pool.end(), failed),
     onPoolError: (listener) => {
       // A subscription of its own, so a listener subscribed twice is heard twice and each
       // unsubscribe takes back only its own.

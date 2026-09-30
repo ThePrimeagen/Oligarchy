@@ -194,18 +194,18 @@ export const create = App.createService<never, Options, Http>((_, options) => {
         { status: number; bytes: Uint8Array; headers: Headers },
         HttpUnreachable | Async.Aborted
       >
-    > => {
-      try {
-        const response = await send(url, { ...rest, signal: inner });
-        return jarl.ok({
-          status: response.status,
-          bytes: new Uint8Array(await response.arrayBuffer()),
-          headers: response.headers,
-        });
-      } catch (caught) {
-        return jarl.err(outer.aborted ? abortedBy(outer) : new HttpUnreachable(asked, caught));
-      }
-    };
+    > =>
+      jarl.exec(
+        async () => {
+          const response = await send(url, { ...rest, signal: inner });
+          return {
+            status: response.status,
+            bytes: new Uint8Array(await response.arrayBuffer()),
+            headers: response.headers,
+          };
+        },
+        (caught) => (outer.aborted ? abortedBy(outer) : new HttpUnreachable(asked, caught)),
+      );
 
     const answered = await Async.timeout(exchange, { ms: timeoutMs, signal: outer });
     if (jarl.error.is(answered, Async.TimedOut)) {
