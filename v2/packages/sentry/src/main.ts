@@ -17,6 +17,7 @@ export type {
   SpanStatus,
   TraceOptions,
 } from "./types.ts";
+export { DSN, ENVIRONMENT } from "./project.ts";
 
 declare module "@oligarchy/app" {
   interface Services {
