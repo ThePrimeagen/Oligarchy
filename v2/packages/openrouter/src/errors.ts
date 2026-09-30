@@ -18,6 +18,16 @@ export type OpenRouterUnreachable = InstanceType<typeof OpenRouterUnreachable>;
 export const OpenRouterOutOfTime = jarl.error.define("OpenRouterOutOfTime");
 export type OpenRouterOutOfTime = InstanceType<typeof OpenRouterOutOfTime>;
 
+// A 429, as the client's handler for that status builds it: the body's message, and the
+// Retry-After the response named, if it named one.
+export class RateLimited extends jarl.error.define("RateLimited") {
+  readonly retryAfter: string | null;
+  constructor(message: string, retryAfter: string | null) {
+    super(message);
+    this.retryAfter = retryAfter;
+  }
+}
+
 export const unreachable = (message: string, cause?: unknown): OpenRouterUnreachable => {
   const error = new OpenRouterUnreachable(message);
   if (cause !== undefined) {
