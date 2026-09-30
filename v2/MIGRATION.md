@@ -209,12 +209,6 @@ bearer, and runs under `@oligarchy/app`.
 
 ## 5. Cutover
 
-- [ ] **The production database.** V2's migrations rename V1's tables in place (`test_runs` to
-      `test_suites`, `test_results` to `test_runs`, `automation_jobs` to `jobs`) and drop sessions
-      and Linear ids, so V1 stops working the moment V2's `prod:db:migrate` runs. The cutover is:
-      stop V1, migrate, start V2, with no way back but a restore.
-      [#298](https://github.com/ThePrimeagen/Oligarchy/pull/298) proposed V2 tables in a Postgres
-      schema of their own instead; decide before cutover.
 - [ ] **CI for V2.** CI lints and formats `v2/` but never runs its type checks or unit tests, and
       the migration checks guard only `packages/db/drizzle`. Add V2's `check:types`, `test:unit`
       and `db:check`, and the append-only and in-sync checks for `v2/packages/db/drizzle`.
