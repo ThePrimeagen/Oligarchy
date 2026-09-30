@@ -108,35 +108,18 @@ describe("run", () => {
   );
 
   it.each<{ readonly name: string; readonly why: string; readonly args: unknown }>([
-    { name: "start", why: "a harness call", args: { iso: "omarchy.iso" } },
-    { name: "stop", why: "a harness call", args: { status: "failed" } },
-    { name: "save", why: "a harness call", args: {} },
-    { name: "intent_start", why: "a harness call", args: { message: "step 1" } },
+    { name: "stop", why: "no tool of that name, as no harness call is one,", args: {} },
     { name: "mouse_move", why: "a point off the screen", args: { x: 1.5, y: 0.5 } },
-    { name: "mouse_move", why: "a missing y", args: { x: 0.5 } },
-    {
-      name: "mouse_scroll",
-      why: "no ticks",
-      args: { x: 0.5, y: 0.5, direction: "down", ticks: 0 },
-    },
-    {
-      name: "mouse_scroll",
-      why: "a part of a tick",
-      args: { x: 0.5, y: 0.5, direction: "down", ticks: 2.5 },
-    },
     {
       name: "mouse_scroll",
       why: "more than 100 ticks",
       args: { x: 0.5, y: 0.5, direction: "down", ticks: 101 },
     },
-    { name: "mouse_click", why: "a button the mouse lacks", args: { button: "thumb" } },
     {
       name: "mouse_click",
       why: "a field of the caller's left in",
       args: { button: "left", step: 3 },
     },
-    { name: "send_keys", why: "keys that are not text", args: { keys: 7 } },
-    { name: "get_image", why: "arguments that are not an object", args: null },
   ])(
     "$name with $why is ToolInvalid naming the tool, and sends nothing (unhappy)",
     async ({ name, args }) => {

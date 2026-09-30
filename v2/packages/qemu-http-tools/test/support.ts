@@ -7,7 +7,7 @@ import * as QemuHttpTools from "../src/main.ts";
 export const JOB = "job-7f3a";
 export const TOKEN = "oligarchy-s3cret";
 export const BASE_URL = "https://proxy.example";
-export const DEFAULT_TIMEOUT_MS = 5;
+const DEFAULT_TIMEOUT_MS = 5;
 
 export const BEARER = { authorization: `Bearer ${TOKEN}` };
 export const POSTED = { ...BEARER, "content-type": "application/json" };

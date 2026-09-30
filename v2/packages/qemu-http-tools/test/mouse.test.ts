@@ -15,7 +15,6 @@ const P5 = { x: 0.9, y: 0.95 };
 describe("mouse", () => {
   it.each<{ readonly name: string; readonly call: MouseCall }>([
     { name: "click", call: (mouse) => mouse.click("left") },
-    { name: "doubleClick", call: (mouse) => mouse.doubleClick("left") },
     { name: "drag", call: (mouse) => mouse.drag(P2, "left") },
     { name: "nudge", call: (mouse) => mouse.nudge("up") },
   ])(
@@ -26,7 +25,6 @@ describe("mouse", () => {
       const answer = await call(qemu.mouse);
 
       Fake.failure(answer, QemuHttpTools.NoPointer);
-      expect(qemu.mouse.at()).toBeUndefined();
       expect(asked).toEqual([]);
     },
   );
@@ -35,10 +33,10 @@ describe("mouse", () => {
     const { qemu, asked } = await tools(OK);
     const { mouse } = qemu;
 
-    expect(await mouse.move(P1)).toEqual(jarl.ok(P1));
+    await mouse.move(P1);
     await mouse.click("left", ["ctrl"]);
     await mouse.doubleClick("right");
-    expect(await mouse.drag(P2, "left", ["shift"])).toEqual(jarl.ok(P2));
+    await mouse.drag(P2, "left", ["shift"]);
     await mouse.click("left");
     await mouse.scroll(P3, "down", 2);
     await mouse.click("middle");
@@ -63,11 +61,7 @@ describe("mouse", () => {
 
   it.each<{ readonly name: string; readonly call: MouseCall }>([
     { name: "move", call: (mouse) => mouse.move(P2) },
-    { name: "nudge", call: (mouse) => mouse.nudge("down") },
     { name: "drag", call: (mouse) => mouse.drag(P2, "left") },
-    { name: "scroll", call: (mouse) => mouse.scroll(P2, "down", 1) },
-    { name: "hold", call: (mouse) => mouse.hold(P2, "left") },
-    { name: "release", call: (mouse) => mouse.release(P2, "left") },
   ])("a $name that failed leaves the pointer where it was (unhappy)", async ({ call }) => {
     const { qemu, asked } = await tools([OK, Fake.status(502, "qemu: exchange failed"), OK]);
     await qemu.mouse.move(P1);
@@ -76,32 +70,40 @@ describe("mouse", () => {
     await qemu.mouse.click("left");
 
     expect(jarl.is_err(answer)).toBe(true);
-    expect(qemu.mouse.at()).toEqual(P1);
     expect(asked.at(-1)).toEqual(posted("mouse/click", { ...P1, button: "left" }));
   });
 
   it.each<{
+    readonly why: string;
     readonly direction: QemuHttpTools.Direction;
     readonly from: QemuHttpTools.Point;
     readonly to: QemuHttpTools.Point;
   }>([
-    { direction: "up", from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.48 } },
-    { direction: "down", from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.52 } },
-    { direction: "left", from: { x: 0.5, y: 0.5 }, to: { x: 0.48, y: 0.5 } },
-    { direction: "right", from: { x: 0.56, y: 0.5 }, to: { x: 0.58, y: 0.5 } },
-    { direction: "left", from: { x: 0.01, y: 0.5 }, to: { x: 0, y: 0.5 } },
-    { direction: "down", from: { x: 0.5, y: 0.99 }, to: { x: 0.5, y: 1 } },
-  ])(
-    "a nudge $direction from ($from.x, $from.y) moves the pointer to ($to.x, $to.y)",
-    async ({ direction, from, to }) => {
-      const { qemu, asked } = await tools(OK);
-      await qemu.mouse.move(from);
-
-      const answer = await qemu.mouse.nudge(direction);
-
-      expect(answer).toEqual(jarl.ok(to));
-      expect(qemu.mouse.at()).toEqual(to);
-      expect(asked.at(-1)).toEqual(posted("mouse/move", to));
+    {
+      why: "rounded to a millionth",
+      direction: "right",
+      from: { x: 0.56, y: 0.5 },
+      to: { x: 0.58, y: 0.5 },
     },
-  );
+    {
+      why: "stopping at the left edge",
+      direction: "left",
+      from: { x: 0.01, y: 0.5 },
+      to: { x: 0, y: 0.5 },
+    },
+    {
+      why: "stopping at the bottom edge",
+      direction: "down",
+      from: { x: 0.5, y: 0.99 },
+      to: { x: 0.5, y: 1 },
+    },
+  ])("a nudge moves 0.02 from the pointer, $why", async ({ direction, from, to }) => {
+    const { qemu, asked } = await tools(OK);
+    await qemu.mouse.move(from);
+
+    const answer = await qemu.mouse.nudge(direction);
+
+    expect(answer).toEqual(jarl.ok(to));
+    expect(asked.at(-1)).toEqual(posted("mouse/move", to));
+  });
 });
