@@ -56,14 +56,12 @@ meet plus one happy path, and every service is faked except the database.
       waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
       other calls go with the apps that make them: the automation client's reserve and
       relinquish, `ctrl mint`'s minted and viz's follow.
-- [ ] **Automation client client.** V1: `apps/automation-server/src/client.ts`. The automation
-      server's reserve, run and abort calls to an automation client, with `OLIGARCHY_TOKEN` as the
-      bearer.
 
 ## 2. Finish the services V2 has
 
-- [ ] **`tests`: write the model at start.** `test_runs.model` exists, but `startRun` writes only
-      the status. V1's `startResult` wrote the Cursor model id.
+- [x] **`tests`: write the model at start.** `startRun(runId, model)` writes the model id to
+      `test_runs.model` beside the running status, as V1's `startResult` did. A refused or missing
+      start writes neither.
 - [ ] **`tests`: a claim or close retried after a lost reply.** V1's `markRunning` counted the same
       server already running the job as success, and its `finish` counted a row already closed the
       same way as success. V2's `runJob` and close transitions refuse both with `InvalidState`.
@@ -154,8 +152,9 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       `/servers`, `/minted` (asking every qemu server) and the qemu-server calls except `/stats`.
       Forgets silent servers with `fleet.forget`.
 - [ ] **automation-server** (`apps/automation-server`). Section 3's dispatch, close, abort, restart
-      and shutdown, and `/abort`. `/linear`, the board watch (`backlog.ts`) and the webhook
-      signature (`signature.ts`) go.
+      and shutdown, and `/abort`. Its reserve, run and abort calls to an automation client are its
+      own, on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). `/linear`,
+      the board watch (`backlog.ts`) and the webhook signature (`signature.ts`) go.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or mint and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
