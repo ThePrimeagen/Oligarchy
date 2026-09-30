@@ -62,9 +62,14 @@ meet plus one happy path, and every service is faked except the database.
 - [x] **`tests`: write the model at start.** `startRun(runId, model)` writes the model id to
       `test_runs.model` beside the running status, as V1's `startResult` did. A refused or missing
       start writes neither.
-- [ ] **`tests`: the dashboard's queue.** V1's `listJobs` returned the running, pending and newest
-      completed jobs, each with its automation client url, qemu server url, instruction, open
-      intent and the database's clock. V2's `listJobs` returns the job and its test's name.
+- [x] **`tests`: the live queue for viz and `ctrl automation`.** `listJobs(limit = 25)` returns the
+      running and the pending jobs, each list in queue order and cut at `limit`, read on one
+      snapshot. Each job carries its test's name, the url of the automation client that claimed it
+      and that of the qemu server holding its guest. V1's also listed the newest finished jobs, which
+      viz's tickets tab and `ctrl automation --list` showed, and each job's instruction, open intent
+      and the database's clock. V2 lists only the live queue; the instruction is
+      `tests.getJobDetails`, intents are `logs.listIntents` (keyed by test run, so a job keeps only
+      the lines since it was queued) and actions are `actions.listActions`.
 - [ ] **Error the jobs a restarted qemu server left.** V1's `SessionStore.failRoutedSessions`
       errored every session still downloading or running on a qemu server that came back. V2 needs
       the same over jobs, found through `job_servers`.

@@ -2,7 +2,7 @@ import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, asc, desc, eq, getTableColumns, inArray, notInArray, sql } from "drizzle-orm";
-import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
+import { alias, type PgUpdateSetSource } from "drizzle-orm/pg-core";
 import * as jarl from "jarl";
 import { type Answer, settle } from "./answer.ts";
 
@@ -41,6 +41,19 @@ export type TestSuiteSummary = SuiteRow & { readonly runs: Readonly<Record<RunSt
 export type TestRunSummary = RunRow & { readonly test: string; readonly suite: string };
 
 export type JobSummary = JobRow & { readonly test: string };
+
+// clientUrl is the automation client that claimed the job, serverUrl the qemu server holding
+// its guest; each is null until there is one, and clientUrl once that client is forgotten.
+export type QueuedJob = JobSummary & {
+  readonly clientUrl: string | null;
+  readonly serverUrl: string | null;
+};
+
+// The live queue, each list in queue order.
+export type Queue = {
+  readonly running: ReadonlyArray<QueuedJob>;
+  readonly pending: ReadonlyArray<QueuedJob>;
+};
 
 // Test runs and jobs in the details are oldest first.
 export type TestSuiteDetails = {
@@ -131,10 +144,7 @@ export type Tests = {
   readonly createJob: (runId: string, action: JobAction) => Moved<JobRow>;
   readonly getJob: (jobId: string) => Found<JobSummary>;
   readonly getJobDetails: (jobId: string) => Found<JobDetails>;
-  readonly listJobs: (
-    statuses: ReadonlyArray<JobStatus>,
-    limit: number,
-  ) => Answer<ReadonlyArray<JobSummary>>;
+  readonly listJobs: (limit?: number) => Answer<Queue>;
   readonly latestJob: (runId: string, action: JobAction) => Answer<JobRow | undefined>;
   readonly nextPendingJob: (except: ReadonlyArray<string>) => Answer<JobRow | undefined>;
   readonly runJob: (jobId: string, serverId: string) => Moved<JobRow>;
@@ -220,6 +230,16 @@ const runSummary = {
 };
 
 const jobSummary = { ...getTableColumns(DbSchema.jobs), test: DbSchema.testDefinitions.name };
+
+const QUEUE_LIMIT = 25;
+
+const client = alias(DbSchema.servers, "client");
+
+const queuedJob = {
+  ...jobSummary,
+  clientUrl: client.url,
+  serverUrl: DbSchema.jobServers.serverUrl,
+};
 
 const job = {
   pending: { accepts: (row) => row.status === "pending", need: "pending" },
@@ -778,19 +798,29 @@ export const create = (db: Db.Database): Tests => {
         })
         .then(settle),
 
-    listJobs: (statuses, limit) =>
+    // One repeatable-read snapshot, so a job claimed between the two reads is in exactly one list.
+    listJobs: (limit = QUEUE_LIMIT) =>
       db.run((d) =>
-        d
-          .select(jobSummary)
-          .from(DbSchema.jobs)
-          .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
-          .innerJoin(
-            DbSchema.testDefinitions,
-            eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
-          )
-          .where(inArray(DbSchema.jobs.status, [...statuses]))
-          .orderBy(desc(DbSchema.jobs.createdAt), desc(DbSchema.jobs.id))
-          .limit(limit),
+        d.transaction(
+          async (tx): Promise<Queue> => {
+            const listed = (status: JobStatus) =>
+              tx
+                .select(queuedJob)
+                .from(DbSchema.jobs)
+                .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
+                .innerJoin(
+                  DbSchema.testDefinitions,
+                  eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
+                )
+                .leftJoin(client, eq(client.id, DbSchema.jobs.serverId))
+                .leftJoin(DbSchema.jobServers, eq(DbSchema.jobServers.jobId, DbSchema.jobs.id))
+                .where(eq(DbSchema.jobs.status, status))
+                .orderBy(queueRank, asc(DbSchema.jobs.createdAt), asc(DbSchema.jobs.id))
+                .limit(limit);
+            return { running: await listed("running"), pending: await listed("pending") };
+          },
+          { isolationLevel: "repeatable read", accessMode: "read only" },
+        ),
       ),
 
     latestJob: (runId, action) =>
