@@ -1,6 +1,6 @@
 // Oligarchy's own lint rules. The root .oxlintrc.json loads this file for v2/**. Plain JavaScript:
 // oxlint runs plugins under Node, and Node before 22.18 cannot strip TypeScript.
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const packageRoot = (file) => {
@@ -266,9 +266,307 @@ const wrappedByJarlFn = (context, jarl, fn) => {
   return variable?.references.some(({ identifier }) => handedToJarlFn(identifier, jarl)) === true;
 };
 
+const nameOf = (key) => (key.type === "Identifier" ? key.name : String(key.value));
+
+// Every service a file adds to interface Services: its name, its type's text, and the member.
+const registrations = (context, program) => {
+  const found = [];
+  for (const statement of program.body) {
+    if (statement.type !== "TSModuleDeclaration" || statement.id.type !== "Literal") {
+      continue;
+    }
+    for (const inner of statement.body?.body ?? []) {
+      if (inner.type !== "TSInterfaceDeclaration" || inner.id.name !== "Services") {
+        continue;
+      }
+      for (const member of inner.body.body) {
+        if (member.type !== "TSPropertySignature" || member.typeAnnotation === undefined) {
+          continue;
+        }
+        const annotation = member.typeAnnotation.typeAnnotation;
+        const registered =
+          annotation.type === "TSTypeReference" &&
+          /(^|\.)Register$/.test(context.sourceCode.getText(annotation.typeName))
+            ? annotation.typeArguments?.params[1]
+            : undefined;
+        found.push({
+          node: member,
+          name: nameOf(member.key),
+          type: context.sourceCode.getText(registered ?? annotation),
+        });
+      }
+    }
+  }
+  return found;
+};
+
+const isCreateService = (call) =>
+  call?.type === "CallExpression" &&
+  ((call.callee.type === "Identifier" && call.callee.name === "createService") ||
+    (call.callee.type === "MemberExpression" &&
+      !call.callee.computed &&
+      call.callee.property.name === "createService"));
+
+// The file's exported create: { node, call } with call the createService call it is, if it is one.
+const exportedCreate = (program) => {
+  for (const statement of program.body) {
+    if (statement.type !== "ExportNamedDeclaration" || statement.declaration === null) {
+      continue;
+    }
+    const { declaration } = statement;
+    if (declaration.type === "FunctionDeclaration" && declaration.id?.name === "create") {
+      return { node: declaration, call: undefined };
+    }
+    if (declaration.type !== "VariableDeclaration") {
+      continue;
+    }
+    for (const declarator of declaration.declarations) {
+      if (declarator.id.type === "Identifier" && declarator.id.name === "create") {
+        return {
+          node: declarator,
+          call: isCreateService(declarator.init) ? declarator.init : undefined,
+        };
+      }
+    }
+  }
+  return undefined;
+};
+
+const squash = (text) => text.replace(/\s+/g, "");
+
+// The text of a type-argument list split at its top-level separator: "," between the arguments,
+// "|" between a union's members. The ">" of an arrow is not a closing bracket.
+const splitTop = (text, separator) => {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if ("<([{".includes(char)) {
+      depth += 1;
+    } else if (")]}".includes(char) || (char === ">" && text[i - 1] !== "=")) {
+      depth -= 1;
+    } else if (char === separator && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim()).filter((part) => part !== "");
+};
+
+// The text between createService's "<" and its matching ">", or undefined.
+const typeArgumentsText = (text) => {
+  const open = text.search(/createService\s*</);
+  if (open < 0) {
+    return undefined;
+  }
+  const start = text.indexOf("<", open) + 1;
+  let depth = 1;
+  for (let i = start; i < text.length; i += 1) {
+    if ("<([{".includes(text[i])) {
+      depth += 1;
+    } else if (")]}".includes(text[i]) || (text[i] === ">" && text[i - 1] !== "=")) {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i);
+      }
+    }
+  }
+  return undefined;
+};
+
+// A type named by its last identifier: Types.Sentry and Sentry.Sentry are both Sentry.
+const typeKey = (type) => /([\w$]+)\s*$/.exec(type.replace(/<[\s\S]*$/, ""))?.[1];
+
+const wantedKeys = (wants) =>
+  wants === undefined
+    ? []
+    : splitTop(wants, "|")
+        .filter((one) => one !== "never")
+        .map(typeKey)
+        .filter((key) => key !== undefined);
+
+const REGISTERS = /([\w$]+)\s*:\s*(?:[\w$]+\.)?Register<\s*"([\w$]+)"\s*,\s*([^>]+?)\s*>/g;
+
+// A file's services and what each wants, read from its text: no types reach a JS plugin, and
+// the other files are not being linted.
+const servicesIn = (text) => {
+  const wants = wantedKeys(splitTop(typeArgumentsText(text) ?? "", ",")[0]);
+  return [...text.matchAll(REGISTERS)].map(([, , name, type]) => ({
+    name,
+    key: typeKey(type),
+    wants,
+  }));
+};
+
+// The directory holding packages/, from file up.
+const workspaceRoot = (file) => {
+  for (let dir = dirname(file); dir !== dirname(dir); dir = dirname(dir)) {
+    const packages = join(dir, "packages");
+    if (existsSync(packages) && statSync(packages).isDirectory()) {
+      return dir;
+    }
+  }
+  return undefined;
+};
+
+const sourcesUnder = (dir) => {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== "node_modules") {
+      files.push(...sourcesUnder(path));
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      files.push(path);
+    }
+  }
+  return files;
+};
+
+// Every service under root's packages/*/src, and the file being linted as it is now.
+const serviceGraph = (root, file, text) => {
+  const services = [...servicesIn(text)];
+  if (root !== undefined) {
+    const packages = join(root, "packages");
+    for (const name of readdirSync(packages)) {
+      const src = join(packages, name, "src");
+      if (!existsSync(src) || !statSync(src).isDirectory()) {
+        continue;
+      }
+      for (const path of sourcesUnder(src)) {
+        if (resolve(path) !== resolve(file)) {
+          services.push(...servicesIn(readFileSync(path, "utf8")));
+        }
+      }
+    }
+  }
+  const byKey = new Map(services.map((service) => [service.key, service.name]));
+  const edges = new Map();
+  for (const service of services) {
+    const wanted = service.wants.map((key) => byKey.get(key)).filter((name) => name !== undefined);
+    edges.set(service.name, [...(edges.get(service.name) ?? []), ...wanted]);
+  }
+  return edges;
+};
+
+// The shortest way from name back to itself through what each service wants, or undefined.
+const cycleFrom = (edges, name) => {
+  const cameFrom = new Map();
+  const queue = [name];
+  while (queue.length > 0) {
+    const at = queue.shift();
+    for (const next of edges.get(at) ?? []) {
+      if (next === name) {
+        const path = [name];
+        for (let step = at; step !== name; step = cameFrom.get(step)) {
+          path.splice(1, 0, step);
+        }
+        return [...path, name];
+      }
+      if (!cameFrom.has(next)) {
+        cameFrom.set(next, at);
+        queue.push(next);
+      }
+    }
+  }
+  return undefined;
+};
+
 export default {
   meta: { name: "oligarchy" },
   rules: {
+    "service-create": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "A file that registers a service exports its create, built by createService for that service",
+        },
+        messages: {
+          missing:
+            "export create from the file that registers {{ name }}: export const create = App.createService<Wants, Options, {{ type }}>(...)",
+          notBuilt:
+            "build create with App.createService<Wants, Options, {{ type }}>(...), which types the services {{ name }} wants and brands what it builds",
+          wrongType: "create builds {{ built }}, but this file registers {{ name }} as {{ type }}",
+          many: "register one service per file, each with its own create: this file registers {{ names }}",
+        },
+      },
+      create(context) {
+        return {
+          Program(program) {
+            const registered = registrations(context, program);
+            if (registered.length === 0) {
+              return;
+            }
+            if (registered.length > 1) {
+              context.report({
+                node: registered[1].node,
+                messageId: "many",
+                data: { names: registered.map(({ name }) => name).join(", ") },
+              });
+              return;
+            }
+            const [{ node, name, type }] = registered;
+            const create = exportedCreate(program);
+            if (create === undefined) {
+              context.report({ node, messageId: "missing", data: { name, type } });
+              return;
+            }
+            const built = create.call?.typeArguments?.params;
+            if (built?.length !== 3) {
+              context.report({ node: create.node, messageId: "notBuilt", data: { name, type } });
+              return;
+            }
+            const builtType = context.sourceCode.getText(built[2]);
+            if (squash(builtType) !== squash(type)) {
+              context.report({
+                node: built[2],
+                messageId: "wrongType",
+                data: { name, type, built: builtType },
+              });
+            }
+          },
+        };
+      },
+    },
+    "service-cycle": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "No service wants itself, directly or through the services it wants, across every package",
+        },
+        messages: {
+          cycle:
+            "break the service cycle {{ path }}: a service cannot want itself, directly or through the services it wants",
+        },
+      },
+      create(context) {
+        return {
+          Program(program) {
+            const create = exportedCreate(program);
+            const [own] = registrations(context, program);
+            if (create?.call === undefined || own === undefined) {
+              return;
+            }
+            const edges = serviceGraph(
+              workspaceRoot(context.filename),
+              context.filename,
+              context.sourceCode.text,
+            );
+            const path = cycleFrom(edges, own.name);
+            if (path !== undefined) {
+              context.report({
+                node: create.call,
+                messageId: "cycle",
+                data: { path: path.join(" -> ") },
+              });
+            }
+          },
+        };
+      },
+    },
     "unwrap-inside-jarl-fn": {
       meta: {
         type: "problem",
