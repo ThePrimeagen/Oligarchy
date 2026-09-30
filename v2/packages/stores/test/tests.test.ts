@@ -22,6 +22,7 @@ const ENDED_SUITE_STATES = DbSchema.testSuiteStatus.enumValues.filter(
 );
 
 const SERVER = "11111111-1111-4111-8111-111111111111";
+const MODEL = "meta/muse-spark-1.3-contributor";
 const MISSING = "00000000-0000-4000-8000-000000000000";
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
@@ -140,7 +141,7 @@ const RUN_MOVES_WITH_A_JOB: Readonly<Record<string, Move>> = {
 };
 
 const RUN_MOVES: Readonly<Record<string, Move>> = {
-  startRun: (tests, id) => tests.startRun(id),
+  startRun: (tests, id) => tests.startRun(id, MODEL),
   completeRun: (tests, id) => tests.completeRun(id, "passed", null),
   errorRun: (tests, id) => tests.errorRun(id, "given up"),
   abortRun: (tests, id) => tests.abortRun(id, "operator"),
@@ -248,7 +249,7 @@ const createdAt = (db: Db.Database, id: string, second: number) =>
   );
 
 describe("a test, start to finish", () => {
-  it("its drive runs and completes, its diagnose passes it, and the suite passes (happy)", async () => {
+  it("it starts on its model, its drive runs and completes, its diagnose passes it, and the suite passes (happy)", async () => {
     const { tests } = await database();
     const trail: Array<string> = [];
     const step = async <T extends { readonly status: string }>(
@@ -263,7 +264,7 @@ describe("a test, start to finish", () => {
     const suite = await step("createTestSuite", tests.createTestSuite(SUITE));
     const run = await step("createTestRun", tests.createTestRun(suite.id, await definition(tests)));
     await step("startSuite", tests.startSuite(suite.id));
-    await step("startRun", tests.startRun(run.id));
+    await step("startRun", tests.startRun(run.id, MODEL));
     const drive = await step("createJob drive", tests.createJob(run.id, "drive"));
     const queued = jarl.unwrap(await tests.nextPendingJob([]));
     await step("runJob drive", tests.runJob(drive.id, SERVER));
@@ -296,6 +297,7 @@ describe("a test, start to finish", () => {
         .unwrap(await tests.getTestRunDetails(run.id))
         .jobs.map((job) => `${job.action} ${job.status}`),
     ).toEqual(["drive succeeded", "diagnose completed"]);
+    expect(jarl.unwrap(await tests.getTestRun(run.id)).model).toBe(MODEL);
   });
 });
 
@@ -556,7 +558,7 @@ describe("a row that does not exist", () => {
       errorJob: () => tests.errorJob(MISSING, "x"),
       timeoutJob: () => tests.timeoutJob(MISSING, "x"),
       abortJob: () => tests.abortJob(MISSING, "x"),
-      startRun: () => tests.startRun(MISSING),
+      startRun: () => tests.startRun(MISSING, MODEL),
       completeRun: () => tests.completeRun(MISSING, "passed", null),
       errorRun: () => tests.errorRun(MISSING, "x"),
       abortRun: () => tests.abortRun(MISSING, "x"),
