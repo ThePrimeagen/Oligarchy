@@ -479,7 +479,8 @@ describe("App sub-apps", () => {
       "b exits on parent",
       "top exits on returned",
     ]);
-    expect(services.counter.read()).toBe(3);
+    // Three workers counted, and the greeter counted its one greeting on the same counter.
+    expect(services.counter.read()).toBe(4);
     expect(closes).toEqual([[]]);
     expect(codes).toEqual([0]);
   });

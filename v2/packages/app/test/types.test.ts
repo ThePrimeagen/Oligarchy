@@ -185,17 +185,17 @@ describe("App types", () => {
 
 describe("createService types", () => {
   it("hands a service exactly what it wants and the options it names, and what it builds is a service (happy)", () => {
-    void App.createService<Counter, Greeters.Options, Greeter>(({ counter }, options) => {
-      expectTypeOf(counter).toEqualTypeOf<Counter>();
+    void App.createService<Counter, Greeters.Options, Greeter>((services, options) => {
+      expectTypeOf(services).toEqualTypeOf<{ readonly counter: Counter }>();
       expectTypeOf(options).toEqualTypeOf<Greeters.Options>();
       return { service: "greeter", greet: (name) => `${options.greeting} ${name}` };
     });
     const counted = counter();
-    const greets = Greeters.create({ counter: counted }, { greeting: "hi" });
-    expectTypeOf(greets).toEqualTypeOf<App.Made<Greeter>>();
-    expectTypeOf(greets.greet).toEqualTypeOf<Greeter["greet"]>();
+    const greeting = Greeters.create({ counter: counted }, { greeting: "hi" });
+    expectTypeOf(greeting).toEqualTypeOf<App.Made<Greeter>>();
+    expectTypeOf(greeting.greet).toEqualTypeOf<Greeter["greet"]>();
     const app = new App.App(environment).main(both);
-    void (() => app.run({ counter: counted, greeter: greets }, closes));
+    void (() => app.run({ counter: counted, greeter: greeting }, closes));
   });
 
   it("refuses a call missing a service it wants (unhappy)", () => {
@@ -234,10 +234,10 @@ describe("createService types", () => {
 
   it("refuses a service that builds something other than the service it names (unhappy)", () => {
     const unread = () => ({ service: "counter" as const, increment: () => undefined });
-    const greets = () => ({ service: "greeter" as const, greet: (name: string) => name });
+    const echoes = () => ({ service: "greeter" as const, greet: (name: string) => name });
     // @ts-expect-error a counter reads its count
     void App.createService<never, void, Counter>(unread);
     // @ts-expect-error a greeter is not a counter
-    void App.createService<never, void, Counter>(greets);
+    void App.createService<never, void, Counter>(echoes);
   });
 });
