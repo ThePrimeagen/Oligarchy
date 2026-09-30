@@ -10,7 +10,7 @@ const answered = () => Fake.json({ id: "stored" });
 
 describe("the sentry service", () => {
   it("is built by createService over the http it wants, the fake too (happy)", () => {
-    expectTypeOf(ingest(answered()).sentry).toEqualTypeOf<App.Made<Sentry.Sentry>>();
+    expectTypeOf(ingest({ replies: answered() }).sentry).toEqualTypeOf<App.Made<Sentry.Sentry>>();
     expectTypeOf(SentryTesting.sentry().sentry).toEqualTypeOf<App.Made<Sentry.Sentry>>();
     expectTypeOf<Parameters<typeof Sentry.create>[0]>().toEqualTypeOf<{
       readonly http: App.Made<Http.Http>;
@@ -21,9 +21,11 @@ describe("the sentry service", () => {
 describe("sentry", () => {
   it("puts a job's spans, their children and the errors sent through them on the job's trace, and wait resolves once Sentry has them (happy)", async () => {
     const gate = held<void>();
-    const { sentry, asked } = ingest(async () => {
-      await gate.promise;
-      return answered();
+    const { sentry, asked } = ingest({
+      replies: async () => {
+        await gate.promise;
+        return answered();
+      },
     });
 
     const job = sentry.trace("drive: lock screen", { op: "qemu.job", jobId: JOB_ID });
@@ -69,7 +71,7 @@ describe("sentry", () => {
       ["hang", 50],
     ];
     for (const [reply, timeoutMs] of failing) {
-      const { sentry, asked } = ingest(reply, { timeoutMs });
+      const { sentry, asked } = ingest({ replies: reply, timeoutMs });
 
       sentry.trace("drive", { op: "qemu.job", jobId: JOB_ID }).fail(new Error("qemu crashed"));
 

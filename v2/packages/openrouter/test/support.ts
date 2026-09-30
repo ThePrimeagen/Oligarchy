@@ -86,13 +86,15 @@ export const client = async (
   options: { readonly attempts?: number } = {},
 ) => {
   const at: Array<number> = [];
-  const fake = Fake.http(() => {
-    at.push(Date.now());
-    const reply = replies[at.length - 1];
-    if (reply === undefined) {
-      throw new Error(`fake http: no reply for request ${String(at.length)}`);
-    }
-    return reply;
+  const fake = Fake.http({
+    replies: () => {
+      at.push(Date.now());
+      const reply = replies[at.length - 1];
+      if (reply === undefined) {
+        throw new Error(`fake http: no reply for request ${String(at.length)}`);
+      }
+      return reply;
+    },
   });
   const openRouter = OpenRouter.create(
     { http: fake.http },

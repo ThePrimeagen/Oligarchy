@@ -43,7 +43,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = App.createService<Db.Database, void, Actions>(({ db }) => ({
+export const create = App.createService<Db.Database, App.NoOptions, Actions>(({ db }) => ({
   service: "actions",
 
   startAction: (input) =>

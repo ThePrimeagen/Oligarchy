@@ -13,7 +13,7 @@ declare module "../src/main.ts" {
   }
 }
 
-export const create = App.createService<never, void, Counter>(() => {
+export const create = App.createService<never, App.NoOptions, Counter>(() => {
   let count = 0;
   return {
     service: "counter",

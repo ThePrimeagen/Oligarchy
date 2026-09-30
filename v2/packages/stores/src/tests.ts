@@ -307,7 +307,7 @@ const openRunOf =
 
 // Each transition locks its row, checks the state it is in and whatever holds it, and only
 // then writes: a refused call changes nothing, and two calls cannot both pass one check.
-export const create = App.createService<Db.Database, void, Tests>(({ db }) => {
+export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db }) => {
   const moveJob = (
     fn: string,
     id: string,

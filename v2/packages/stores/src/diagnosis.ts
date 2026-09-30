@@ -34,7 +34,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = App.createService<Db.Database, void, Diagnosis>(({ db }) => ({
+export const create = App.createService<Db.Database, App.NoOptions, Diagnosis>(({ db }) => ({
   service: "diagnosis",
 
   createErrorType: (key, description) =>
