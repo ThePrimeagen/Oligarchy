@@ -53,11 +53,9 @@ export const database = async () => {
   };
 };
 
-// A job on a test run of its own, in a suite of its own.
+// A job on a test run of its own: the drive it was filed with, or a job of another action after
+// that drive was aborted.
 export const newJob = async (tests: Tests.Tests, action: Tests.JobAction = "drive") => {
-  const suite = jarl.unwrap(
-    await tests.createTestSuite({ iso: "omarchy.iso", serverUrl: "http://qemu-1" }),
-  );
   const definition = jarl.unwrap(
     await tests.defineTestDefinition({
       name: "lock-screen",
@@ -67,9 +65,17 @@ export const newJob = async (tests: Tests.Tests, action: Tests.JobAction = "driv
       resume: true,
     }),
   );
-  const run = jarl.unwrap(
-    await tests.createTestRun({ suiteId: suite.id, definitionId: definition.id }),
+  const { run, job } = jarl.unwrap(
+    await tests.createTestRun({
+      definitionId: definition.id,
+      iso: "omarchy.iso",
+      serverUrl: "http://qemu-1",
+    }),
   );
+  if (action === "drive") {
+    return job;
+  }
+  jarl.unwrap(await tests.abortJob(job.id, "making way"));
   return jarl.unwrap(await tests.createJob(run.id, action));
 };
 

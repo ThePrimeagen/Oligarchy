@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
-import type * as Db from "@oligarchy/db";
+import * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as Tests from "../src/tests.ts";
@@ -32,10 +32,7 @@ const said = (result: jarl.Result<unknown, Error>) =>
     ? "ok"
     : `${result.error.name}: ${result.error.message.replaceAll(UUID, "<id>")}`;
 
-const SUITE: Tests.SuiteInput = {
-  iso: "https://iso.omarchy.org/omarchy-4.0.4.iso",
-  serverUrl: "http://qemu-1",
-};
+const SUITE = { iso: "https://iso.omarchy.org/omarchy-4.0.4.iso", serverUrl: "http://qemu-1" };
 
 const SINGLE = { iso: "https://iso.omarchy.org/omarchy-4.1.0.iso", serverUrl: "http://qemu-2" };
 
@@ -44,18 +41,30 @@ const definition = async (tests: Store, name = "lock-screen", resume = true) =>
     await tests.defineTestDefinition({ name, description: "", instruction: "", proof: "", resume }),
   ).id;
 
-const newSuite = async (tests: Store) => jarl.unwrap(await tests.createTestSuite(SUITE));
-
-const newRun = async (tests: Store, suiteId?: string, name?: string) => {
-  const suite = suiteId ?? (await newSuite(tests)).id;
-  return jarl.unwrap(
-    await tests.createTestRun({ suiteId: suite, definitionId: await definition(tests, name) }),
-  );
+// A suite of the named definitions, written whole.
+const newSuite = async (tests: Store, names: ReadonlyArray<string> = ["lock-screen"]) => {
+  const definitionIds: Array<number> = [];
+  for (const name of names) {
+    definitionIds.push(await definition(tests, name));
+  }
+  return jarl.unwrap(await tests.createTestSuite({ ...SUITE, definitionIds }));
 };
 
-const newJob = async (tests: Store, runId?: string, action: Tests.JobAction = "drive") => {
-  const run = runId ?? (await newRun(tests)).id;
-  return jarl.unwrap(await tests.createJob(run, action));
+// A test run on its own, with the drive it was filed with.
+const newRun = async (tests: Store, name?: string) =>
+  jarl.unwrap(
+    await tests.createTestRun({ definitionId: await definition(tests, name), ...SINGLE }),
+  );
+
+// A job on a test run of its own: that run's drive, or a job of another action after the drive
+// was aborted.
+const newJob = async (tests: Store, action: Tests.JobAction = "drive") => {
+  const { run, job } = await newRun(tests);
+  if (action === "drive") {
+    return job;
+  }
+  jarl.unwrap(await tests.abortJob(job.id, "making way"));
+  return jarl.unwrap(await tests.createJob(run.id, action));
 };
 
 // Puts a row straight into a state, so a test starts from any state without walking there.
@@ -68,18 +77,55 @@ const setSuite = (db: Db.Database, id: string, status: SuiteStatus) =>
     d.update(DbSchema.testSuites).set({ status }).where(eq(DbSchema.testSuites.id, id)),
   );
 
+// Every insert into jobs fails from here on, so a write that reaches it must roll back.
+const refuseJobs = async (db: Db.Database) => {
+  jarl.unwrap(
+    await db.run((d) =>
+      d.execute(
+        sql.raw(
+          "create function refuse_jobs() returns trigger language plpgsql as $$ begin raise exception 'jobs refused by the test'; end $$",
+        ),
+      ),
+    ),
+  );
+  jarl.unwrap(
+    await db.run((d) =>
+      d.execute(
+        sql.raw(
+          "create trigger refuse_jobs before insert on jobs for each row execute function refuse_jobs()",
+        ),
+      ),
+    ),
+  );
+};
+
+const counted = async (db: Db.Database) =>
+  jarl.unwrap(
+    await db.run(async (d) => ({
+      suites: await d.$count(DbSchema.testSuites),
+      runs: await d.$count(DbSchema.testRuns),
+      jobs: await d.$count(DbSchema.jobs),
+    })),
+  );
+
 const jobIn = async (setup: Setup, status: Tests.JobStatus, action: Tests.JobAction = "drive") => {
-  const job = await newJob(setup.tests, undefined, action);
+  const job = await newJob(setup.tests, action);
   await setJob(setup.db, job.id, status);
   return job;
 };
+// A test run in a state, its drive aborted so no job holds it.
 const runIn = async (setup: Setup, status: Tests.RunStatus) => {
-  const run = await newRun(setup.tests);
+  const { run, job } = await newRun(setup.tests);
+  await setJob(setup.db, job.id, "aborted");
   await setRun(setup.db, run.id, status);
   return run;
 };
+// A suite in a state, its one test run passed so no test run holds it.
 const suiteIn = async (setup: Setup, status: SuiteStatus) => {
-  const suite = await newSuite(setup.tests);
+  const { suite, runs } = await newSuite(setup.tests);
+  for (const listed of runs) {
+    await setRun(setup.db, listed.run.id, "passed");
+  }
   await setSuite(setup.db, suite.id, status);
   return suite;
 };
@@ -164,18 +210,10 @@ const SUITE_MOVES_WITH_A_RUN: Readonly<Record<string, Move>> = {
   abortSuite: (tests, id) => tests.abortSuite(id, "operator"),
 };
 
-const SUITE_MOVES: Readonly<Record<string, Move>> = {
-  startSuite: (tests, id) => tests.startSuite(id),
-  completeSuite: (tests, id) => tests.completeSuite(id, "passed", null),
-  abortSuite: (tests, id) => tests.abortSuite(id, "operator"),
-  createTestRun: async (tests, id) =>
-    tests.createTestRun({ suiteId: id, definitionId: await definition(tests, "wifi") }),
-};
+const SUITE_MOVES: Readonly<Record<string, Move>> = SUITE_MOVES_WITH_A_RUN;
 const SUITE_NEEDS = {
-  startSuite: "pending",
   completeSuite: "running",
   abortSuite: "pending or running",
-  createTestRun: "pending",
 };
 
 const jobMoves = (setup: Setup, status: Tests.JobStatus, action: Tests.JobAction = "drive") =>
@@ -191,8 +229,9 @@ const runMovesWithAJob = (setup: Setup, status: Tests.JobStatus) =>
     setup,
     RUN_MOVES_WITH_A_JOB,
     async () => {
-      const run = await runIn(setup, "running");
-      await setJob(setup.db, (await newJob(setup.tests, run.id)).id, status);
+      const { run, job } = await newRun(setup.tests);
+      await setRun(setup.db, run.id, "running");
+      await setJob(setup.db, job.id, status);
       return run.id;
     },
     (id) => setup.tests.getTestRunDetails(id),
@@ -211,9 +250,10 @@ const suiteMovesWithARun = (setup: Setup, status: Tests.RunStatus) =>
     setup,
     SUITE_MOVES_WITH_A_RUN,
     async () => {
-      const suite = await newSuite(setup.tests);
-      await setRun(setup.db, (await newRun(setup.tests, suite.id)).id, status);
-      await setSuite(setup.db, suite.id, "running");
+      const { suite, runs } = await newSuite(setup.tests);
+      for (const listed of runs) {
+        await setRun(setup.db, listed.run.id, status);
+      }
       return suite.id;
     },
     (id) => setup.tests.getTestSuiteDetails(id),
@@ -264,7 +304,7 @@ describe("a suite's name", () => {
 });
 
 describe("a test, start to finish", () => {
-  it("it starts on its model, its drive runs and completes, its diagnose passes it, and the suite passes (happy)", async () => {
+  it("its suite is written running with its drive queued; it starts on its model, its drive completes, its diagnose passes it, and the suite passes (happy)", async () => {
     const { tests } = await database();
     const trail: Array<string> = [];
     const step = async <T extends { readonly status: string }>(
@@ -276,15 +316,20 @@ describe("a test, start to finish", () => {
       return row;
     };
 
-    const suite = await step("createTestSuite", tests.createTestSuite(SUITE));
-    const run = await step(
-      "createTestRun",
-      tests.createTestRun({ suiteId: suite.id, definitionId: await definition(tests) }),
+    const filed = jarl.unwrap(
+      await tests.createTestSuite({ ...SUITE, definitionIds: [await definition(tests)] }),
     );
-    await step("startSuite", tests.startSuite(suite.id));
-    await step("startRun", tests.startRun(run.id, MODEL));
-    const drive = await step("createJob drive", tests.createJob(run.id, "drive"));
+    const [listed] = filed.runs;
+    const run = listed?.run;
+    const drive = listed?.jobs[0];
+    if (run === undefined || drive === undefined) {
+      throw new Error("the suite was written without its test run and drive");
+    }
+    trail.push(
+      `createTestSuite ${filed.suite.status}, its run ${run.status}, its drive ${drive.status}`,
+    );
     const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    await step("startRun", tests.startRun(run.id, MODEL));
     await step("runJob drive", tests.runJob(drive.id, SERVER));
     await step("completeJob drive", tests.completeJob(drive.id));
     const diagnose = await step("createJob diagnose", tests.createJob(run.id, "diagnose"));
@@ -292,15 +337,12 @@ describe("a test, start to finish", () => {
     await step("finalizeJob drive", tests.finalizeJob(drive.id, "succeeded", null));
     await step("completeRun", tests.completeRun(run.id, "passed", null));
     await step("completeJob diagnose", tests.completeJob(diagnose.id));
-    await step("completeSuite", tests.completeSuite(suite.id, "passed", null));
+    await step("completeSuite", tests.completeSuite(filed.suite.id, "passed", null));
 
     expect(queued?.id).toBe(drive.id);
     expect(trail).toEqual([
-      "createTestSuite pending",
-      "createTestRun pending",
-      "startSuite running",
+      "createTestSuite running, its run pending, its drive pending",
       "startRun running",
-      "createJob drive pending",
       "runJob drive running",
       "completeJob drive completed",
       "createJob diagnose pending",
@@ -316,32 +358,94 @@ describe("a test, start to finish", () => {
         .jobs.map((job) => `${job.action} ${job.status}`),
     ).toEqual(["drive succeeded", "diagnose completed"]);
     expect(jarl.unwrap(await tests.getTestRun(run.id)).model).toBe(MODEL);
-    expect(suite.name).toBe("4.0.4");
+    expect(filed.suite.name).toBe("4.0.4");
     const details = jarl.unwrap(await tests.getJobDetails(drive.id));
     expect({
       suite: details.suite?.id,
       iso: details.run.iso,
       serverUrl: details.run.serverUrl,
       resume: details.definition.resume,
-    }).toEqual({ suite: suite.id, ...SUITE, resume: true });
+    }).toEqual({ suite: filed.suite.id, ...SUITE, resume: true });
+  });
+});
+
+describe("a suite, written whole", () => {
+  it("holds a test run for each definition named, a definition as often as named, each with one pending drive, and reads back the same (happy)", async () => {
+    const { tests } = await database();
+    const lockScreen = await definition(tests, "lock-screen");
+    const wifi = await definition(tests, "wifi");
+
+    const filed = jarl.unwrap(
+      await tests.createTestSuite({ ...SUITE, definitionIds: [lockScreen, wifi, lockScreen] }),
+    );
+
+    expect(
+      filed.runs.map(({ run, test, jobs }) => ({
+        test,
+        status: run.status,
+        iso: run.iso,
+        serverUrl: run.serverUrl,
+        jobs: jobs.map((job) => `${job.action} ${job.status}`),
+      })),
+    ).toEqual(
+      ["lock-screen", "wifi", "lock-screen"].map((test) => ({
+        test,
+        status: "pending",
+        ...SUITE,
+        jobs: ["drive pending"],
+      })),
+    );
+    expect(jarl.unwrap(await tests.getTestSuiteDetails(filed.suite.id))).toEqual(filed);
+  });
+
+  it("naming a definition that does not exist is refused, and nothing is written or queued (unhappy)", async () => {
+    const { db, tests } = await database();
+    const lockScreen = await definition(tests);
+
+    const refused = await tests.createTestSuite({ ...SUITE, definitionIds: [lockScreen, 999] });
+
+    expect(said(refused)).toBe("NotFound: createTestSuite: no test definition 999");
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+    expect(jarl.unwrap(await tests.nextPendingJob([]))).toBeUndefined();
+  });
+
+  it("naming no definitions is refused, and nothing is written (unhappy)", async () => {
+    const { db, tests } = await database();
+
+    const refused = await tests.createTestSuite({ ...SUITE, definitionIds: [] });
+
+    expect(said(refused)).toBe("InvalidState: createTestSuite: needs at least one test definition");
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+
+  it("when its drives cannot be written, it is the database's error and none of it is left: no suite, no test run (unhappy)", async () => {
+    const { db, tests } = await database();
+    const lockScreen = await definition(tests);
+    await refuseJobs(db);
+
+    const failed = await tests.createTestSuite({ ...SUITE, definitionIds: [lockScreen] });
+
+    expect(jarl.error.is(failed, Db.DatabaseError)).toBe(true);
+    expect(said(failed)).toMatch(/jobs refused by the test/);
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
   });
 });
 
 describe("a single test run, with no suite", () => {
-  it("carries its own iso and server, queues its drive and takes its verdict; nothing names a suite (happy)", async () => {
+  it("is written with its pending drive, carries its own iso and server, is queued and takes its verdict; nothing names a suite (happy)", async () => {
     const { tests } = await database();
 
-    const run = jarl.unwrap(
+    const { run, job: drive } = jarl.unwrap(
       await tests.createTestRun({ definitionId: await definition(tests), ...SINGLE }),
     );
-    jarl.unwrap(await tests.startRun(run.id, MODEL));
-    const drive = jarl.unwrap(await tests.createJob(run.id, "drive"));
     const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    jarl.unwrap(await tests.startRun(run.id, MODEL));
     jarl.unwrap(await tests.runJob(drive.id, SERVER));
     jarl.unwrap(await tests.completeJob(drive.id));
     jarl.unwrap(await tests.finalizeJob(drive.id, "succeeded", null));
     const closed = jarl.unwrap(await tests.completeRun(run.id, "passed", null));
 
+    expect(`${drive.action} ${drive.status}`).toBe("drive pending");
     expect(queued?.id).toBe(drive.id);
     expect(closed.status).toBe("passed");
     expect({ suiteId: run.suiteId, iso: run.iso, serverUrl: run.serverUrl }).toEqual({
@@ -351,6 +455,17 @@ describe("a single test run, with no suite", () => {
     expect(jarl.unwrap(await tests.getTestRun(run.id)).suite).toBeNull();
     expect(jarl.unwrap(await tests.getTestRunDetails(run.id)).suite).toBeNull();
     expect(jarl.unwrap(await tests.getJobDetails(drive.id)).suite).toBeNull();
+  });
+
+  it("when its drive cannot be written, it is the database's error and no test run is left (unhappy)", async () => {
+    const { db, tests } = await database();
+    const lockScreen = await definition(tests);
+    await refuseJobs(db);
+
+    const failed = await tests.createTestRun({ definitionId: lockScreen, ...SINGLE });
+
+    expect(jarl.error.is(failed, Db.DatabaseError)).toBe(true);
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
   });
 });
 
@@ -389,7 +504,7 @@ describe("a job, state by state", () => {
     await setup.db.run((d) =>
       d.update(DbSchema.jobs).set({ finishedAt: ended }).where(eq(DbSchema.jobs.id, drive.id)),
     );
-    const diagnose = await newJob(setup.tests, drive.runId, "diagnose");
+    const diagnose = jarl.unwrap(await setup.tests.createJob(drive.runId, "diagnose"));
     await setJob(setup.db, diagnose.id, "running");
 
     expect(await jobMoves(setup, "completed")).toEqual(
@@ -478,29 +593,7 @@ describe("a test run, state by state", () => {
 });
 
 describe("a suite, state by state", () => {
-  it("pending: it starts, is aborted or takes test runs, a definition as often as asked, and refuses completing (unhappy)", async () => {
-    const setup = await database();
-    const suite = await newSuite(setup.tests);
-    const lockScreen = await definition(setup.tests);
-    jarl.unwrap(await setup.tests.createTestRun({ suiteId: suite.id, definitionId: lockScreen }));
-
-    expect(await suiteMoves(setup, "pending")).toEqual(
-      expected(SUITE_NEEDS, "test suite <id> is pending", {
-        startSuite: "running",
-        abortSuite: "aborted",
-        createTestRun: "pending",
-      }),
-    );
-    jarl.unwrap(await setup.tests.createTestRun({ suiteId: suite.id, definitionId: lockScreen }));
-    expect(
-      jarl.unwrap(await setup.tests.listTestRuns(suite.id)).map((listed) => listed.definitionId),
-    ).toEqual([lockScreen, lockScreen]);
-    expect(said(await setup.tests.createTestRun({ suiteId: suite.id, definitionId: 999 }))).toBe(
-      "NotFound: createTestRun: no test definition 999",
-    );
-  });
-
-  it("running: it takes its verdict or is aborted, and refuses starting again and new test runs (unhappy)", async () => {
+  it("running, as it is written: it takes its verdict or is aborted", async () => {
     const setup = await database();
 
     expect(await suiteMoves(setup, "running")).toEqual(
@@ -535,7 +628,7 @@ describe("the reads with rules of their own", () => {
     ];
     const names = new Map<string, string>();
     for (const [action, second] of queued) {
-      const job = await newJob(setup.tests, undefined, action);
+      const job = await newJob(setup.tests, action);
       await createdAt(setup.db, job.id, second);
       names.set(job.id, `${action} ${String(second)}`);
     }
@@ -569,10 +662,9 @@ describe("the reads with rules of their own", () => {
 
   it("latestJob is a test run's newest job of an action, or nothing", async () => {
     const { db, tests } = await database();
-    const run = await newRun(tests);
-    const first = await newJob(tests, run.id);
+    const { run, job: first } = await newRun(tests);
     await setJob(db, first.id, "failed");
-    const again = await newJob(tests, run.id);
+    const again = jarl.unwrap(await tests.createJob(run.id, "drive"));
     await createdAt(db, first.id, 0);
     await createdAt(db, again.id, 1);
 
@@ -582,7 +674,6 @@ describe("the reads with rules of their own", () => {
 
   it("a suite's test runs are counted by status, the same in getTestSuite and listTestSuites", async () => {
     const { db, tests } = await database();
-    const suite = await newSuite(tests);
     const statuses: ReadonlyArray<Tests.RunStatus> = [
       "pending",
       "running",
@@ -590,10 +681,14 @@ describe("the reads with rules of their own", () => {
       "passed",
       "failed",
     ];
-    for (const [index, status] of statuses.entries()) {
-      await setRun(db, (await newRun(tests, suite.id, `test-${String(index)}`)).id, status);
+    const { suite, runs } = await newSuite(
+      tests,
+      statuses.map((_, index) => `test-${String(index)}`),
+    );
+    for (const [index, listed] of runs.entries()) {
+      await setRun(db, listed.run.id, statuses[index] ?? "pending");
     }
-    const counted = {
+    const tally = {
       pending: 1,
       running: 1,
       passed: 2,
@@ -604,10 +699,10 @@ describe("the reads with rules of their own", () => {
       timed_out: 0,
     };
 
-    expect(jarl.unwrap(await tests.getTestSuite(suite.id)).runs).toEqual(counted);
+    expect(jarl.unwrap(await tests.getTestSuite(suite.id)).runs).toEqual(tally);
     expect(
       jarl.unwrap(await tests.listTestSuites(10)).find((listed) => listed.id === suite.id)?.runs,
-    ).toEqual(counted);
+    ).toEqual(tally);
   });
 });
 
@@ -615,7 +710,6 @@ describe("a row that does not exist", () => {
   it("every call that names one by id refuses it with NotFound (unhappy)", async () => {
     const { tests } = await database();
     const calls: Readonly<Record<string, () => Promise<jarl.Result<unknown, Error>>>> = {
-      createTestRun: () => tests.createTestRun({ suiteId: MISSING, definitionId: 1 }),
       createJob: () => tests.createJob(MISSING, "drive"),
       runJob: () => tests.runJob(MISSING, SERVER),
       completeJob: () => tests.completeJob(MISSING),
@@ -627,7 +721,6 @@ describe("a row that does not exist", () => {
       completeRun: () => tests.completeRun(MISSING, "passed", null),
       errorRun: () => tests.errorRun(MISSING, "x"),
       abortRun: () => tests.abortRun(MISSING, "x"),
-      startSuite: () => tests.startSuite(MISSING),
       completeSuite: () => tests.completeSuite(MISSING, "passed", null),
       abortSuite: () => tests.abortSuite(MISSING, "x"),
       getTestSuite: () => tests.getTestSuite(MISSING),
@@ -638,7 +731,6 @@ describe("a row that does not exist", () => {
       getJobDetails: () => tests.getJobDetails(MISSING),
     };
     const nouns: Readonly<Record<string, string>> = {
-      createTestRun: "test suite",
       createJob: "test run",
       startRun: "test run",
       completeRun: "test run",
@@ -646,7 +738,6 @@ describe("a row that does not exist", () => {
       abortRun: "test run",
       getTestRun: "test run",
       getTestRunDetails: "test run",
-      startSuite: "test suite",
       completeSuite: "test suite",
       abortSuite: "test suite",
       getTestSuite: "test suite",
