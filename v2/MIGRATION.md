@@ -81,8 +81,10 @@ meet plus one happy path, and every service is faked except the database.
       left downloading or running, saying so.
 - [x] **Services take their services first.** A file that registers a service exports
       `create = App.createService<Wants, Options, Service>((services, options) => service)`:
-      `Wants` is the union of the services it uses, and `make` sees only those. Creation is
-      synchronous and cannot fail; a service that reaches something connects on first use.
+      `Wants` is the union of the services it uses, and `make` sees only those. `Options` is
+      always one object of named fields, `App.NoOptions` for a service told nothing, and never a
+      bare value, a list or a function. Creation is synchronous and cannot fail; a service that
+      reaches something connects on first use.
       What `createService` builds is `App.Made<Service>`, the only thing `app.run` and another
       create's services accept, so a fake goes through `createService` too.
       `oligarchy/service-create` lints that every registering file exports that `create` for its
