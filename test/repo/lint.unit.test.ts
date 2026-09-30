@@ -173,7 +173,7 @@ declare const make: () => jarl.Result<number, Boom>;
 `;
 
 const valueRefused = (name: string) =>
-  `read ${name}.value with jarl.value(${name}) once every error is handled, or jarl.unwrap(${name}) inside a jarl.fn to throw the rest [Error/oligarchy(result-through-jarl)]`;
+  `read ${name}.value with jarl.value(${name}) once every error is handled, or jarl.unwrap(${name}) inside a jarl.fn or jarl.exec to throw the rest [Error/oligarchy(result-through-jarl)]`;
 
 const errorRefused = (name: string) =>
   `name ${name}'s error with jarl.error.is(${name}, ...) or jarl.is_err(${name}) before reading ${name}.error [Error/oligarchy(result-through-jarl)]`;
@@ -348,7 +348,7 @@ declare const read: () => Promise<jarl.Result<string, Error>>;
 `;
 
 const UNWRAP_REFUSED =
-  "call jarl.unwrap only in the function handed to jarl.fn, whose mapError catches what it throws; handle the error here instead [Error/oligarchy(unwrap-inside-jarl-fn)]";
+  "call jarl.unwrap only in the function handed to jarl.fn or jarl.exec, whose mapError catches what it throws; handle the error here instead [Error/oligarchy(unwrap-inside-jarl-fn)]";
 
 describe("oligarchy/unwrap-inside-jarl-fn", () => {
   it("accepts jarl.unwrap in a function handed to jarl.fn, inline, by name or through a const (happy)", () => {
@@ -371,6 +371,40 @@ export const loaded = jarl.fn(load);
 `,
       }),
     ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("accepts jarl.unwrap in the function jarl.exec runs, inline or by name (happy)", () => {
+    expect(
+      lint("unwrap-inside-jarl-fn", {
+        "inline.ts": `${READS}
+export const inline = () => jarl.exec(async () => jarl.unwrap(await read()), (caught) => caught);
+`,
+        "const.ts": `${READS}
+const load = async () => jarl.unwrap(read());
+export const loaded = () => jarl.exec(load);
+`,
+      }),
+    ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("refuses jarl.unwrap in a callback inside what jarl.exec runs, and in its mapError (unhappy)", () => {
+    const result = refusedIn("unwrap-inside-jarl-fn", {
+      "callback.ts": `${READS}
+export const later = () =>
+  jarl.exec(async () => {
+    const all = await Promise.all([read()]);
+    return all.map((one) => jarl.unwrap(one));
+  });
+`,
+      "map-error.ts": `${READS}
+export const mapped = () =>
+  jarl.exec(
+    async () => "read",
+    async () => jarl.unwrap(read()),
+  );
+`,
+    });
+    expect(result).toEqual({ status: 1, files: ["callback.ts", "map-error.ts"] });
   });
 
   it("refuses jarl.unwrap anywhere else, a callback inside a jarl.fn body included (unhappy)", () => {
