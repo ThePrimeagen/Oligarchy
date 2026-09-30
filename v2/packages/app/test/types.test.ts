@@ -214,21 +214,21 @@ describe("createService types", () => {
   });
 
   it("refuses options that are not an object bag (unhappy)", () => {
-    const counts = () => ({
+    const builds = () => ({
       service: "counter" as const,
       increment: () => undefined,
       read: () => 0,
     });
     // @ts-expect-error options are a bag, not void
-    void App.createService<never, void, Counter>(counts);
+    void App.createService<never, void, Counter>(builds);
     // @ts-expect-error options are a bag, not a string
-    void App.createService<never, string, Counter>(counts);
+    void App.createService<never, string, Counter>(builds);
     // @ts-expect-error options are a bag, not a number
-    void App.createService<never, number, Counter>(counts);
+    void App.createService<never, number, Counter>(builds);
     // @ts-expect-error options are a bag, not a list
-    void App.createService<never, ReadonlyArray<string>, Counter>(counts);
+    void App.createService<never, ReadonlyArray<string>, Counter>(builds);
     // @ts-expect-error options are a bag, not a function
-    void App.createService<never, () => string, Counter>(counts);
+    void App.createService<never, () => string, Counter>(builds);
   });
 
   it("refuses a call whose options are not the bag its service names (unhappy)", () => {
