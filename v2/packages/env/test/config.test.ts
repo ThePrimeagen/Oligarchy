@@ -9,9 +9,9 @@ const valid = {
   models: {
     drive: "meta/muse-spark-1.3-contributor",
     diagnose: "meta/muse-spark-1.3-contributor",
-    mint: "meta/muse-spark-1.3-contributor",
+    setup: "meta/muse-spark-1.3-contributor",
   },
-  reasoning: { drive: "minimal", diagnose: "xhigh", mint: "minimal" },
+  reasoning: { drive: "minimal", diagnose: "xhigh", setup: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",
@@ -40,6 +40,19 @@ describe("load", () => {
     expect(config.runCeiling).toBe(5_400_000);
     expect(config.harness.defaultRetry).toBe(1_000);
     expect(config.reasoning.diagnose).toBe("xhigh");
+    expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
+    expect(config.reasoning.setup).toBe("minimal");
+  });
+
+  it("refuses mint, setup's old name, for a model or a reasoning effort (unhappy)", async () => {
+    const { setup: model, ...models } = valid.models;
+    const { setup: effort, ...reasoning } = valid.reasoning;
+    expect(await refusal({ ...valid, models: { ...models, mint: model } })).toMatch(
+      new RegExp(`^${Config.PATH}: models`),
+    );
+    expect(await refusal({ ...valid, reasoning: { ...reasoning, mint: effort } })).toMatch(
+      new RegExp(`^${Config.PATH}: reasoning`),
+    );
   });
 
   it("refuses a missing file rather than guessing a default (unhappy)", async () => {

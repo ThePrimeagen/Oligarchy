@@ -176,8 +176,8 @@ const JOB_MOVES: Readonly<Record<string, Move>> = {
 const JOB_NEEDS = {
   runJob: "pending",
   completeJob: "running",
-  finalizeJob: "a completed drive or mint",
-  errorJob: "running, or a completed drive or mint",
+  finalizeJob: "a completed drive or setup",
+  errorJob: "running, or a completed drive or setup",
   timeoutJob: "running",
   abortJob: "pending or running",
 };
@@ -616,14 +616,14 @@ describe("a suite, state by state", () => {
 });
 
 describe("the reads with rules of their own", () => {
-  it("the queue hands out mints, then diagnoses, then drives, oldest first, skips what it is told to, and ends empty", async () => {
+  it("the queue hands out setups, then diagnoses, then drives, oldest first, skips what it is told to, and ends empty", async () => {
     const setup = await database();
     const queued: Array<[Tests.JobAction, number]> = [
       ["drive", 1],
       ["diagnose", 2],
-      ["mint", 3],
+      ["setup", 3],
       ["drive", 0],
-      ["mint", 4],
+      ["setup", 4],
       ["diagnose", 5],
     ];
     const names = new Map<string, string>();
@@ -644,8 +644,15 @@ describe("the reads with rules of their own", () => {
       next = jarl.unwrap(await setup.tests.nextPendingJob([]));
     }
 
-    expect(handed).toEqual(["mint 3", "mint 4", "diagnose 2", "diagnose 5", "drive 0", "drive 1"]);
-    expect(names.get(skipped?.id ?? "")).toBe("mint 4");
+    expect(handed).toEqual([
+      "setup 3",
+      "setup 4",
+      "diagnose 2",
+      "diagnose 5",
+      "drive 0",
+      "drive 1",
+    ]);
+    expect(names.get(skipped?.id ?? "")).toBe("setup 4");
     expect(jarl.unwrap(await setup.tests.nextPendingJob([]))).toBeUndefined();
   });
 
@@ -669,7 +676,7 @@ describe("the reads with rules of their own", () => {
     await createdAt(db, again.id, 1);
 
     expect(jarl.unwrap(await tests.latestJob(run.id, "drive"))?.id).toBe(again.id);
-    expect(jarl.unwrap(await tests.latestJob(run.id, "mint"))).toBeUndefined();
+    expect(jarl.unwrap(await tests.latestJob(run.id, "setup"))).toBeUndefined();
   });
 
   it("a suite's test runs are counted by status, the same in getTestSuite and listTestSuites", async () => {
