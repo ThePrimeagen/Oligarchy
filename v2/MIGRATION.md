@@ -9,8 +9,9 @@ meet plus one happy path, and every service is faked except the database.
 
 ## Decided
 
-- **Jobs live in the `tests` store.** A test suite holds test runs, one per definition, and a test
-  run holds its jobs: mint, drive and diagnose. A job runs once; trying again is a new job.
+- **Jobs live in the `tests` store.** A test suite holds test runs, any number of each definition,
+  and a test run holds its jobs: mint, drive and diagnose. A job runs once; trying again is a new
+  job.
 - **No Linear.** V2 files no tickets and reads no board. The pending jobs in Postgres are the queue,
   and an agent is known by its job id.
 - **HTTP servers are Hono.** Each app's `main` builds its own Hono app; there is no shared API
@@ -105,6 +106,14 @@ meet plus one happy path, and every service is faked except the database.
       nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
       variable and never its value. Tests that only read what was logged use
       `@oligarchy/logger/testing`.
+- [ ] **`tests`: a suite may repeat a definition.** V1's unique index on a run's definitions, carried
+      over as `test_runs_suite_definition_idx`, goes in a new migration, and `createTestRun` no
+      longer reads for a twin before it inserts, so `Duplicate` goes. A suite can hold a mint run
+      per server, or the same test several times, and tally them as one batch.
+- [ ] **`tests`: a suite is named by its ISO.** `createTestSuite` takes the ISO's url and the
+      server's, not a name. The name is the version in the url's file name
+      (`https://iso.omarchy.org/omarchy-4.0.4.iso` is `4.0.4`), and the whole url when it names
+      none.
 
 ## 3. The flow that replaces the Linear board
 
