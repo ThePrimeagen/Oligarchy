@@ -70,9 +70,6 @@ meet plus one happy path, and every service is faked except the database.
       and the database's clock. V2 lists only the live queue; the instruction is
       `tests.getJobDetails`, intents are `logs.listIntents` (keyed by test run, so a job keeps only
       the lines since it was queued) and actions are `actions.listActions`.
-- [ ] **Error the jobs a restarted qemu server left.** V1's `SessionStore.failRoutedSessions`
-      errored every session still downloading or running on a qemu server that came back. V2 needs
-      the same over jobs, found through `job_servers`.
 - [ ] **Where a job's guest state lives.** V1's sessions said whether a guest was downloading its
       ISO or running, and when it started and ended; the dashboard and `ctrl` show it. V2 dropped
       sessions without a replacement. Decide where it goes, then add it to the schema and the
@@ -148,7 +145,11 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
       and a session; `/image` and `/serial` answer bytes; and a 409 is a guest that is off on
       `/image`, `/send-keys` and `/mouse/*`, an intent already open on `/intent/start` (V1
-      answered that one 400) and a guest that did not power off on `/save`.
+      answered that one 400) and a guest that did not power off on `/save`. A call naming a job it
+      holds no guest for is a 404, job not found: a restarted server holds none, so its lost
+      guests' drivers fail, their automation clients answer `/run` with the failure, and the
+      automation server errors the jobs. Nothing errors them at startup, as V1's
+      `failRoutedSessions` did.
 - [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
