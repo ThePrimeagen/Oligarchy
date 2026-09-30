@@ -123,7 +123,7 @@ export type Tests = {
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
   readonly listTestRuns: (suiteId: string) => Answer<ReadonlyArray<TestRunSummary>>;
-  readonly startRun: (runId: string) => Moved<RunRow>;
+  readonly startRun: (runId: string, model: string) => Moved<RunRow>;
   readonly completeRun: (runId: string, status: RunVerdict, reason: string | null) => Moved<RunRow>;
   readonly errorRun: (runId: string, reason: string) => Moved<RunRow>;
   readonly abortRun: (runId: string, reason: string) => Moved<RunRow>;
@@ -679,7 +679,8 @@ export const create = (db: Db.Database): Tests => {
           .orderBy(asc(DbSchema.testRuns.createdAt), asc(DbSchema.testRuns.id)),
       ),
 
-    startRun: (runId) => moveRun("startRun", runId, run.pending, { status: "running" }),
+    startRun: (runId, model) =>
+      moveRun("startRun", runId, run.pending, { status: "running", model }),
 
     completeRun: (runId, status, reason) =>
       moveRun("completeRun", runId, run.running, { status, reason, finishedAt: now }),
