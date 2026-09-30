@@ -105,10 +105,6 @@ meet plus one happy path, and every service is faked except the database.
 - [ ] **Colour on stdout.** V1's `packages/env/src/colors.ts` honours `FORCE_COLOR` and asks the
       stream for its colour depth; V2's tester reads `isTTY` alone. Move V1's rule into
       `@oligarchy/env`.
-- [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
-      `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
-      `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
-      `--debug-logs`, `--diagnosis` and `--all`. Rename or drop them as `ctrl` is ported.
 
 ## 3. The flow that replaces the Linear board
 
@@ -202,10 +198,6 @@ bearer, and runs under `@oligarchy/app`.
       deadline;
       `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
       client, which `@oligarchy/openrouter` does not have yet.
-- [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
-      `test-results`, `mint`, `session` (becomes a job's view: status, logs, definition, run,
-      actions, images, debug log, diagnosis), `error-type` (new, list), `diagnose` and
-      `automation`.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
       stores, the pages keyed by ticket (`/tickets/:ticket`) key by job id, and `@oligarchy/linear`
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
@@ -233,6 +225,19 @@ bearer, and runs under `@oligarchy/app`.
       go.
 - [ ] **Retire V1.** Delete `apps/`, `packages/` and `src/`, V1's scripts and workspaces in the
       root `package.json`, and `LINEAR_*` from every env file, then move `v2/` to the root.
+
+## 6. ctrl, last
+
+`ctrl` is really the diagnosing agent's tool, so it is dealt with after everything else.
+
+- [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
+      `test-results`, `mint`, `session` (becomes a job's view: status, logs, definition, run,
+      actions, images, debug log, diagnosis), `error-type` (new, list), `diagnose` and
+      `automation`.
+- [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
+      `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
+      `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
+      `--debug-logs`, `--diagnosis` and `--all`. Rename or drop them as `ctrl` is ported.
 
 ## Not coming over
 
