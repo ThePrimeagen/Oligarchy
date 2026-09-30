@@ -19,7 +19,7 @@ afterEach(async () => {
 
 // The tester's services against a database of its own, the way main builds them, with Sentry's
 // requests answered by sentry.
-const created = async (sentry: Parameters<typeof Fake.http>[0] = Fake.status(200)) => {
+const created = async (sentry: Fake.Options["replies"] = Fake.status(200)) => {
   const fake = jarl.unwrap(await FakePostgres.start());
   cleanups.push(() => fake.stop());
   const env = jarl.unwrap(
@@ -29,7 +29,7 @@ const created = async (sentry: Parameters<typeof Fake.http>[0] = Fake.status(200
     ),
   );
   const lines: Array<string> = [];
-  const http = Fake.http(sentry);
+  const http = Fake.http({ replies: sentry });
   const services: Services = createServices(env, {
     terminal: { write: (line) => lines.push(line), colors: false },
     http: http.http,
