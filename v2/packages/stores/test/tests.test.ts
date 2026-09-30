@@ -325,7 +325,9 @@ describe("a test, start to finish", () => {
     if (run === undefined || drive === undefined) {
       throw new Error("the suite was written without its test run and drive");
     }
-    trail.push(`createTestSuite ${filed.suite.status}, its run ${run.status}, its drive ${drive.status}`);
+    trail.push(
+      `createTestSuite ${filed.suite.status}, its run ${run.status}, its drive ${drive.status}`,
+    );
     const queued = jarl.unwrap(await tests.nextPendingJob([]));
     await step("startRun", tests.startRun(run.id, MODEL));
     await step("runJob drive", tests.runJob(drive.id, SERVER));

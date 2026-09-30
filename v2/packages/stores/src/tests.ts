@@ -6,8 +6,8 @@ import { alias, type PgUpdateSetSource } from "drizzle-orm/pg-core";
 import * as jarl from "jarl";
 import { type Answer, settle } from "./answer.ts";
 
-// A transition asked of a row that is not in a state it moves from, or a create whose parent
-// is not ready for it. The message names the row, the state it is in, and what was needed.
+// A transition asked of a row that is not in a state it moves from, or a create given nothing
+// to create. The message says what was asked and what was needed.
 export const InvalidState = jarl.error.define("InvalidState");
 export type InvalidState = InstanceType<typeof InvalidState>;
 
@@ -90,15 +90,21 @@ export type DefinedDefinition = {
   readonly version: number;
 };
 
+// definitionIds may name a definition more than once: each is a test run of its own.
 export type SuiteInput = {
+  readonly iso: string;
+  readonly serverUrl: string;
+  readonly definitionIds: ReadonlyArray<number>;
+};
+
+export type RunInput = {
+  readonly definitionId: number;
   readonly iso: string;
   readonly serverUrl: string;
 };
 
-// A test run in a suite takes the suite's ISO and server; one filed on its own names its own.
-export type RunInput =
-  | { readonly definitionId: number; readonly suiteId: string }
-  | { readonly definitionId: number; readonly iso: string; readonly serverUrl: string };
+// A test run filed on its own, and the drive it was filed with.
+export type NewTestRun = { readonly run: RunRow; readonly job: JobRow };
 
 // The version in the ISO's file name (`omarchy-4.0.4.iso` is `4.0.4`), or the whole url when
 // it names none. Only the file name is read, so a host such as 10.0.0.5 is never a version.
@@ -126,11 +132,10 @@ export type Tests = {
   readonly listTestBasePrompts: () => Answer<ReadonlyArray<BasePromptRow>>;
   readonly definitionName: (id: number) => Answer<string | undefined>;
 
-  readonly createTestSuite: (input: SuiteInput) => Answer<SuiteRow>;
+  readonly createTestSuite: (input: SuiteInput) => Moved<TestSuiteDetails>;
   readonly getTestSuite: (suiteId: string) => Found<TestSuiteSummary>;
   readonly getTestSuiteDetails: (suiteId: string) => Found<TestSuiteDetails>;
   readonly listTestSuites: (limit: number) => Answer<ReadonlyArray<TestSuiteSummary>>;
-  readonly startSuite: (suiteId: string) => Moved<SuiteRow>;
   readonly completeSuite: (
     suiteId: string,
     status: SuiteVerdict,
@@ -138,7 +143,7 @@ export type Tests = {
   ) => Moved<SuiteRow>;
   readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
 
-  readonly createTestRun: (input: RunInput) => Moved<RunRow>;
+  readonly createTestRun: (input: RunInput) => Found<NewTestRun>;
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
   readonly listTestRuns: (suiteId: string) => Answer<ReadonlyArray<TestRunSummary>>;
@@ -188,6 +193,43 @@ const only = <T>(rows: ReadonlyArray<T>, what: string): T => {
 };
 
 const now = sql`now()`;
+
+// The time of the write itself, not of its transaction's start, so rows written one after
+// another in a transaction keep that order.
+const clock = sql`clock_timestamp()`;
+
+type Placement = Pick<
+  typeof DbSchema.testRuns.$inferInsert,
+  "suiteId" | "definitionId" | "iso" | "serverUrl"
+>;
+
+// A test run and the pending drive it is filed with.
+const fileRun = async (tx: Tx, fn: string, placement: Placement): Promise<NewTestRun> => {
+  const filed = only(
+    await tx
+      .insert(DbSchema.testRuns)
+      .values({ ...placement, createdAt: clock })
+      .returning(),
+    fn,
+  );
+  const drive = only(
+    await tx
+      .insert(DbSchema.jobs)
+      .values({ runId: filed.id, action: "drive", createdAt: clock })
+      .returning(),
+    fn,
+  );
+  return { run: filed, job: drive };
+};
+
+// Each definition's name, for those of the ids that name one.
+const definitionNames = async (tx: Tx, ids: ReadonlyArray<number>) => {
+  const rows = await tx
+    .select({ id: DbSchema.testDefinitions.id, name: DbSchema.testDefinitions.name })
+    .from(DbSchema.testDefinitions)
+    .where(inArray(DbSchema.testDefinitions.id, [...new Set(ids)]));
+  return new Map(rows.map((row) => [row.id, row.name]));
+};
 
 const noRuns = (): Record<RunStatus, number> => ({
   pending: 0,
@@ -275,7 +317,6 @@ const run = {
 } satisfies Record<string, Rule<RunRow>>;
 
 const suite = {
-  pending: { accepts: (row) => row.status === "pending", need: "pending" },
   running: { accepts: (row) => row.status === "running", need: "running" },
   open: {
     accepts: (row) => row.status === "pending" || row.status === "running",
@@ -493,16 +534,49 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         return row?.name;
       }),
 
-    createTestSuite: (input) =>
-      db.run(async (d) =>
-        only(
-          await d
-            .insert(DbSchema.testSuites)
-            .values({ ...input, name: suiteName(input.iso) })
-            .returning(),
-          "createTestSuite",
-        ),
-      ),
+    // The whole suite in one transaction: the suite, running, and each test run with its pending
+    // drive, in the order named. The queue never sees part of a suite.
+    createTestSuite: ({ iso, serverUrl, definitionIds }) =>
+      db
+        .run((d) =>
+          d.transaction(async (tx): Promise<jarl.Result<TestSuiteDetails, Refusal>> => {
+            if (definitionIds.length === 0) {
+              return jarl.err(
+                new InvalidState("createTestSuite: needs at least one test definition"),
+              );
+            }
+            const names = await definitionNames(tx, definitionIds);
+            const named: Array<{ readonly definitionId: number; readonly test: string }> = [];
+            for (const definitionId of definitionIds) {
+              const test = names.get(definitionId);
+              if (test === undefined) {
+                return jarl.err(
+                  new NotFound(`createTestSuite: no test definition ${String(definitionId)}`),
+                );
+              }
+              named.push({ definitionId, test });
+            }
+            const filed = only(
+              await tx
+                .insert(DbSchema.testSuites)
+                .values({ iso, serverUrl, name: suiteName(iso), status: "running" })
+                .returning(),
+              "createTestSuite",
+            );
+            const runs: Array<TestSuiteDetails["runs"][number]> = [];
+            for (const { definitionId, test } of named) {
+              const { run: written, job: drive } = await fileRun(tx, "createTestSuite", {
+                suiteId: filed.id,
+                definitionId,
+                iso,
+                serverUrl,
+              });
+              runs.push({ run: written, test, jobs: [drive] });
+            }
+            return jarl.ok({ suite: filed, runs });
+          }),
+        )
+        .then(settle),
 
     getTestSuite: (suiteId) =>
       db
@@ -575,8 +649,6 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         return rows.map((row) => ({ ...row, runs: counts.get(row.id) ?? noRuns() }));
       }),
 
-    startSuite: (suiteId) => moveSuite("startSuite", suiteId, suite.pending, { status: "running" }),
-
     completeSuite: (suiteId, status, reason) =>
       moveSuite(
         "completeSuite",
@@ -595,62 +667,19 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         openRunOf("abortSuite"),
       ),
 
-    // A test run in a suite locks the suite, which must still be pending, and takes its ISO and
-    // server; one filed on its own names its own.
-    createTestRun: (input) =>
+    // A test run on its own and its pending drive, in one transaction.
+    createTestRun: ({ definitionId, iso, serverUrl }) =>
       db
         .run((d) =>
-          d.transaction(async (tx): Promise<jarl.Result<RunRow, Refusal>> => {
-            const placed = async (): Promise<
-              jarl.Result<{ suiteId: string | null; iso: string; serverUrl: string }, Refusal>
-            > => {
-              if (!("suiteId" in input)) {
-                return jarl.ok({ suiteId: null, iso: input.iso, serverUrl: input.serverUrl });
-              }
-              const { suiteId } = input;
-              const [held] = await tx
-                .select({
-                  status: DbSchema.testSuites.status,
-                  iso: DbSchema.testSuites.iso,
-                  serverUrl: DbSchema.testSuites.serverUrl,
-                })
-                .from(DbSchema.testSuites)
-                .where(eq(DbSchema.testSuites.id, suiteId))
-                .for("update");
-              if (held === undefined) {
-                return jarl.err(new NotFound(`createTestRun: no test suite ${suiteId}`));
-              }
-              if (held.status !== "pending") {
-                return jarl.err(
-                  new InvalidState(
-                    `createTestRun: test suite ${suiteId} is ${held.status}; needs pending`,
-                  ),
-                );
-              }
-              return jarl.ok({ suiteId, iso: held.iso, serverUrl: held.serverUrl });
-            };
-            const where = await placed();
-            if (jarl.is_err(where)) {
-              return where;
-            }
-            const { definitionId } = input;
-            const [known] = await tx
-              .select({ id: DbSchema.testDefinitions.id })
-              .from(DbSchema.testDefinitions)
-              .where(eq(DbSchema.testDefinitions.id, definitionId));
-            if (known === undefined) {
+          d.transaction(async (tx): Promise<jarl.Result<NewTestRun, NotFound>> => {
+            const names = await definitionNames(tx, [definitionId]);
+            if (!names.has(definitionId)) {
               return jarl.err(
                 new NotFound(`createTestRun: no test definition ${String(definitionId)}`),
               );
             }
             return jarl.ok(
-              only(
-                await tx
-                  .insert(DbSchema.testRuns)
-                  .values({ ...jarl.value(where), definitionId })
-                  .returning(),
-                "createTestRun",
-              ),
+              await fileRun(tx, "createTestRun", { suiteId: null, definitionId, iso, serverUrl }),
             );
           }),
         )
