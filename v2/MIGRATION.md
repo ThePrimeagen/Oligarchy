@@ -40,7 +40,7 @@ meet plus one happy path, and every service is faked except the database.
 - [x] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
       `src/harness/intent.ts`, `src/harness/pointer.ts` and `src/driver/client.ts`, over
       `packages/http/src/proxy-client.ts`. Controlling one job's qemu guest over HTTP for the AI's
-      tools. `create({ job, baseUrl, token, http, signal })` names the job once; every call
+      tools. `create({ http }, { job, baseUrl, token, signal })` names the job once; every call
       carries it, and `OLIGARCHY_TOKEN` as the bearer, on `@oligarchy/http` to the qemu reverse
       proxy. The harness's calls are `start`, `intentStart`, `intentEnd`, `stop` and `save`. The
       guest's are `image` (the PNG's bytes, through `@oligarchy/http`'s `read: "bytes"`),
@@ -80,13 +80,26 @@ meet plus one happy path, and every service is faked except the database.
       `clearPastRunningVms` marks as a `server-error` every VM a qemu server's crashed last process
       left downloading or running, saying so.
 - [x] **Wire Sentry.** `@oligarchy/sentry` hard-codes V1's DSN as `DSN`, and `ENVIRONMENT` is
-      `production`, which V1's events all were. The logger, handed a `sentry`, sends each error and
-      fatal line as it is logged, as its `cause` or else its text, with its level, its location
+      `production`, which V1's events all were. The logger, which wants `sentry`, sends each error
+      and fatal line as it is logged, as its `cause` or else its text, with its level, its location
       and agent as tags and its text as `extra.log`, unless told `skipSentry`, and a log insert's
       failure too, as V1's `Log` did. The tester's `createServices` builds it over the world's
       `http` and hands it to the logger, and `closeServices` waits for it after the logger's last
       line; each app does the same as it is ported. A test that runs an app as a process points
       `https_proxy` at a port nobody listens on, as V1's did, so the real project hears nothing.
+- [x] **Services take their services first.** A file that registers a service exports
+      `create = App.createService<Wants, Options, Service>((services, options) => service)`:
+      `Wants` is the union of the services it uses, and `make` sees only those. Creation is
+      synchronous and cannot fail; a service that reaches something connects on first use.
+      What `createService` builds is `App.Made<Service>`, the only thing `app.run` and another
+      create's services accept, so a fake goes through `createService` too.
+      `oligarchy/service-create` lints that every registering file exports that `create` for its
+      own service, and `oligarchy/service-cycle` that no service wants itself through the ones it
+      wants, across packages. The logger wants `sentry` and `db`: it stores each line in the logs
+      table itself and logs each pool error through `db.onPoolError`, so the database wants
+      nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
+      variable and never its value. Tests that only read what was logged use
+      `@oligarchy/logger/testing`.
 - [ ] **Colour on stdout.** V1's `packages/env/src/colors.ts` honours `FORCE_COLOR` and asks the
       stream for its colour depth; V2's tester reads `isTTY` alone. Move V1's rule into
       `@oligarchy/env`.
@@ -194,7 +207,7 @@ bearer, and runs under `@oligarchy/app`.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
       stores, the pages keyed by ticket (`/tickets/:ticket`) key by job id, and `@oligarchy/linear`
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
-      V2's `db.open` makes a pool, so the database service needs a way to run there. It carries
+      V2's `Db.create` makes a pool, so the database service needs a way to run there. It carries
       `packages/shared/src/steps.ts`, which places intents against a definition's steps.
 - [ ] **viz** (`apps/viz`) and the **session REPL** (`src/session`). Terminal views of a running
       guest. viz reads the guest's output through the proxy's `/follow`, which streams in V1, and
