@@ -8,10 +8,11 @@ export type VmStatusRow = typeof DbSchema.vmStatus.$inferSelect;
 
 export type Live = "downloading" | "running";
 
-// How a VM ended. Only a crash or an error says why: nothing else the host sees carries a cause.
+// How a VM ended. Only a crash or a server error says why: nothing else the host sees carries a
+// cause.
 export type End =
   | { readonly status: "shutdown" | "stopped" | "panicked" }
-  | { readonly status: "crashed" | "errored"; readonly reason: string };
+  | { readonly status: "crashed" | "server-error"; readonly reason: string };
 
 export type VmStatus = {
   readonly service: "vmStatus";
@@ -68,8 +69,8 @@ export const create = (db: Db.Database): VmStatus => ({
     ),
 
   // A qemu server that boots holds no VM yet, so every VM routed to it whose newest change is still
-  // downloading or running was left by a process that crashed. Errors them; killing a QEMU that
-  // outlived that process is the qemu server's.
+  // downloading or running was left by a process that crashed. Each is a server error; killing a
+  // QEMU that outlived that process is the qemu server's.
   clearPastRunningVms: (serverUrl) =>
     db.run((d) =>
       d.transaction(async (tx) => {
@@ -87,7 +88,7 @@ export const create = (db: Db.Database): VmStatus => ({
           await tx.insert(DbSchema.vmStatus).values(
             past.map((jobId) => ({
               jobId,
-              status: "errored" as const,
+              status: "server-error" as const,
               reason: CRASHED_WHILE_RUNNING,
             })),
           );

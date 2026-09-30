@@ -1,5 +1,5 @@
 {
-  "id": "be0b2edf-e443-4aef-8650-cd3e958e6b6f",
+  "id": "753e4fc7-a5f9-48e7-b96c-8542d49f1bd0",
   "prevId": "5346d32c-7228-489e-b06b-aa23beca5684",
   "version": "7",
   "dialect": "postgresql",
@@ -1280,7 +1280,7 @@
       "checkConstraints": {
         "vm_status_reason_check": {
           "name": "vm_status_reason_check",
-          "value": "(\"vm_status\".\"status\" IN ('crashed', 'errored')) = (\"vm_status\".\"reason\" IS NOT NULL)"
+          "value": "(\"vm_status\".\"status\" IN ('crashed', 'server-error')) = (\"vm_status\".\"reason\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false
@@ -1380,7 +1380,7 @@
         "stopped",
         "panicked",
         "crashed",
-        "errored"
+        "server-error"
       ]
     }
   },

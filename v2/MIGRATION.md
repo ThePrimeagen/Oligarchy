@@ -74,10 +74,11 @@ meet plus one happy path, and every service is faked except the database.
       updated: its status is its newest row, and when it started or ended is when that row was
       written. `downloading` and `running` are live; `shutdown` (the guest powered itself off),
       `stopped` (the host ended it), `panicked` (its pvpanic device fired), `crashed` (QEMU gone
-      with no `SHUTDOWN`) and `errored` (a VM the qemu server gave up on) are how it ended, and only
-      `crashed` and `errored` have a reason. The `vmStatus` store records a live status, `stop`s
-      with an end one, reads the `current` and the `history`, and `clearPastRunningVms` errors
-      every VM a qemu server's crashed last process left downloading or running.
+      with no `SHUTDOWN`) and `server-error` (a VM the qemu server itself failed) are how it ended,
+      and only `crashed` and `server-error` have a reason. The `vmStatus` store records a live
+      status, `stop`s with an end one, reads the `current` and the `history`, and
+      `clearPastRunningVms` marks as a `server-error` every VM a qemu server's crashed last process
+      left downloading or running, saying so.
 - [ ] **Wire Sentry.** `@oligarchy/sentry` exists, but no app creates it and env declares no DSN
       (V1 hard-codes one in `packages/observability/src/dsn.ts`). Each app's `createServices`
       builds it and `wait`s for it on exit, and the logger sends error and fatal lines to it, as
