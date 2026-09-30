@@ -11,6 +11,7 @@ import * as Logs from "../src/logs.ts";
 import * as Servers from "../src/servers.ts";
 import * as SetupRequests from "../src/setup-requests.ts";
 import * as Tests from "../src/tests.ts";
+import * as VmStatus from "../src/vm-status.ts";
 
 const cleanups: Array<() => Promise<unknown>> = [];
 
@@ -48,6 +49,7 @@ export const database = async () => {
     logs: Logs.create(db),
     servers: Servers.create(db),
     setupRequests: SetupRequests.create(db),
+    vmStatus: VmStatus.create(db),
   };
 };
 

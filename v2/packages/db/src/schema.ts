@@ -238,6 +238,45 @@ export const jobServers = pgTable("job_servers", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// What the host can see of a VM. Live: downloading its ISO, then running. Ended, by QEMU's SHUTDOWN
+// reason: shutdown (the guest powered itself off), stopped (the host ended it), panicked (the
+// guest's pvpanic device fired); crashed, QEMU gone with no SHUTDOWN at all; or server-error, a VM
+// the qemu server itself failed, such as one its crashed last process left running. A shutdown
+// says the guest asked to power off, never whether its run went well. Named apart from the
+// vm_status table, since a table's row type takes the table's name.
+export const vmState = pgEnum("vm_state", [
+  "downloading",
+  "running",
+  "shutdown",
+  "stopped",
+  "panicked",
+  "crashed",
+  "server-error",
+]);
+
+// Each change in a job's VM is a row of its own, never updated: its status is its newest row, and
+// when it started or ended is when that row was written. id orders the changes, which can share a
+// timestamp. reason is set exactly on a crash or a server error, and says what went wrong.
+export const vmStatus = pgTable(
+  "vm_status",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    status: vmState("status").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("vm_status_job_id_id_idx").on(table.jobId, table.id),
+    check(
+      "vm_status_reason_check",
+      sql`(${table.status} IN ('crashed', 'server-error')) = (${table.reason} IS NOT NULL)`,
+    ),
+  ],
+);
+
 // One setup in flight, or finished and left in place, per iso and server. The primary key is
 // the lock: a second insert fails, so one mint per pair. job_id is the one mint job holding
 // the lock, null until that job exists. A job that ends without success releases the lock and
