@@ -18,7 +18,7 @@ const scripted = (
     }
     return next instanceof Usage.UsageUnreadable ? jarl.err(next) : jarl.ok(next);
   };
-  return Usage.create(source, () => clock.shift() ?? 0n);
+  return Usage.create({}, { source, now: () => clock.shift() ?? 0n });
 };
 
 describe("collecting this process's usage", () => {

@@ -53,12 +53,9 @@ export const tools = async (
   options: { readonly signal?: AbortSignal } = {},
 ) => {
   const fake = Fake.http(replies, { timeoutMs: DEFAULT_TIMEOUT_MS });
-  const qemu = QemuHttpTools.create({
-    job: JOB,
-    baseUrl: BASE_URL,
-    token: await token(),
-    http: fake.http,
-    ...options,
-  });
+  const qemu = QemuHttpTools.create(
+    { http: fake.http },
+    { job: JOB, baseUrl: BASE_URL, token: await token(), ...options },
+  );
   return { qemu, asked: fake.asked };
 };

@@ -12,7 +12,7 @@ export const ingest = (
   options: { readonly timeoutMs?: number } = {},
 ) => {
   const fake = Fake.http(replies, options);
-  const sentry = Sentry.create({ dsn: DSN, environment: "test", http: fake.http });
+  const sentry = Sentry.create({ http: fake.http }, { dsn: DSN, environment: "test" });
   return { sentry, asked: fake.asked };
 };
 

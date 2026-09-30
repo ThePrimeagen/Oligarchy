@@ -38,10 +38,12 @@
         "pg": "catalog:",
       },
       "devDependencies": {
+        "@oligarchy/fake-postgres": "workspace:*",
         "@types/node": "catalog:",
         "@types/pg": "catalog:",
         "drizzle-kit": "^0.31.10",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/env": {
@@ -108,10 +110,13 @@
       "name": "@oligarchy/logger",
       "dependencies": {
         "@oligarchy/app": "workspace:*",
+        "@oligarchy/db": "workspace:*",
         "@oligarchy/sentry": "workspace:*",
         "jarl": "catalog:",
       },
       "devDependencies": {
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/fake-postgres": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -617,6 +622,10 @@
     "@oligarchy/openrouter/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/qemu-http-tools/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
+
+    "@oligarchy/stores/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
+
+    "@oligarchy/tester/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "import-in-the-middle/es-module-lexer": ["es-module-lexer@3.0.2", "", {}, "sha512-BuIB67FngDSyQ/dpQNOZybwdEBDUGJQvOqwWr4ha/ufYiqzuEwPkKO2zLhRAgay28tStRIHUeWmszZAJo3GCOg=="],
 

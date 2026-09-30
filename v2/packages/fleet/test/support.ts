@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import * as Db from "@oligarchy/db";
 import * as Env from "@oligarchy/env";
 import * as FakePostgres from "@oligarchy/fake-postgres";
-import * as Logger from "@oligarchy/logger";
+import * as LoggerTesting from "@oligarchy/logger/testing";
 import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { afterEach } from "vitest";
@@ -15,12 +15,8 @@ afterEach(async () => {
   }
 });
 
-// A logger that prints into `lines`, nothing stored.
-export const logging = () => {
-  const lines: Array<string> = [];
-  const logger = Logger.create({ write: (line) => lines.push(line), colors: false });
-  return { lines, logger };
-};
+// A logger that prints into `lines` at once, nothing stored.
+export const logging = () => LoggerTesting.logger();
 
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
 
@@ -34,13 +30,13 @@ export const database = async () => {
       Env.fakeIo({ env: { DATABASE_URL: fake.url }, files: { [Env.CONFIG_PATH]: CONFIG } }),
     ),
   );
-  const db = jarl.unwrap(Db.open({ url: env.vars.databaseUrl, onPoolError: () => undefined }));
+  const db = Db.create({}, { url: env.vars.databaseUrl });
   cleanups.push(() => db.close());
   return {
     fake,
     db,
-    servers: Stores.Servers.create(db),
-    processStats: Stores.ProcessStats.create(db),
+    servers: Stores.Servers.create({ db }),
+    processStats: Stores.ProcessStats.create({ db }),
   };
 };
 

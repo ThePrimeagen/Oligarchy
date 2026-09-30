@@ -411,13 +411,190 @@ export const other = fn(async () => jarl.unwrap(read()));
   });
 });
 
+// A service file: `registers` is the body of interface Services, `create` what follows it.
+const serviceFile = (registers: string, create: string) =>
+  `import * as App from "@oligarchy/app";
+import type * as Types from "./types.ts";
+
+declare module "@oligarchy/app" {
+  interface Services {
+${registers}
+  }
+}
+
+${create}
+`;
+
+const registers = (name: string, type: string) => `    ${name}: App.Register<"${name}", ${type}>;`;
+
+const created = (wants: string, options: string, type: string, name: string) =>
+  `export const create = App.createService<${wants}, ${options}, ${type}>(() => ({ service: "${name}" }));`;
+
+const createRefused = (name: string, type: string) =>
+  `export create from the file that registers ${name}: export const create = App.createService<Wants, Options, ${type}>(...) [Error/oligarchy(service-create)]`;
+
+const notBuiltRefused = (name: string, type: string) =>
+  `build create with App.createService<Wants, Options, ${type}>(...), which types the services ${name} wants and brands what it builds [Error/oligarchy(service-create)]`;
+
+const wrongTypeRefused = (name: string, type: string, built: string) =>
+  `create builds ${built}, but this file registers ${name} as ${type} [Error/oligarchy(service-create)]`;
+
+const manyRefused = (names: string) =>
+  `register one service per file, each with its own create: this file registers ${names} [Error/oligarchy(service-create)]`;
+
+describe("oligarchy/service-create", () => {
+  it("accepts a file that registers one service and exports create built by createService for it, and a file that registers none (happy)", () => {
+    expect(
+      lint("service-create", {
+        "packages/a/src/main.ts": serviceFile(
+          registers("alpha", "Alpha"),
+          `type Alpha = { readonly service: "alpha" };\n${created("never", "void", "Alpha", "alpha")}`,
+        ),
+        "packages/b/src/main.ts": serviceFile(
+          registers("beta", "Types.Beta"),
+          created(
+            "Alpha.Alpha | Http.Http",
+            "{ readonly url: string; readonly pick: Map<string, number> }",
+            "Types.Beta",
+            "beta",
+          ),
+        ),
+        "packages/c/src/main.ts": `import { createService, type Register } from "@oligarchy/app";
+
+declare module "@oligarchy/app" {
+  interface Services {
+    gamma: Register<"gamma", Gamma>;
+  }
+}
+
+type Gamma = { readonly service: "gamma" };
+export const create = createService<never, void, Gamma>(() => ({ service: "gamma" }));
+`,
+        "packages/c/src/helper.ts": "export const helper = (n: number) => n + 1;\n",
+        "packages/c/src/global.ts":
+          "declare global {\n  interface Window {\n    x: number;\n  }\n}\nexport {};\n",
+        "packages/c/src/other.ts":
+          'declare module "@oligarchy/app" {\n  interface Options {\n    x: number;\n  }\n}\nexport {};\n',
+      }),
+    ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("refuses a registering file with no create, an unexported create, a create not built by createService, a create for another type, and two services in one file (unhappy)", () => {
+    const files = {
+      "packages/a/src/none.ts": serviceFile(registers("alpha", "Alpha"), ""),
+      "packages/a/src/unexported.ts": serviceFile(
+        registers("beta", "Beta"),
+        created("never", "void", "Beta", "beta").replace("export ", ""),
+      ),
+      "packages/a/src/by-hand.ts": serviceFile(
+        registers("gamma", "Types.Gamma"),
+        'export const create = (): Types.Gamma => ({ service: "gamma" });',
+      ),
+      "packages/a/src/declared.ts": serviceFile(
+        registers("delta", "Delta"),
+        'export function create(): Delta {\n  return { service: "delta" };\n}',
+      ),
+      "packages/a/src/other-type.ts": serviceFile(
+        registers("epsilon", "Epsilon"),
+        created("never", "void", "Types.Epsilon", "epsilon"),
+      ),
+      "packages/a/src/two.ts": serviceFile(
+        `${registers("zeta", "Zeta")}\n${registers("eta", "Eta")}`,
+        created("never", "void", "Zeta", "zeta"),
+      ),
+    };
+    expect(refusedIn("service-create", files)).toEqual({
+      status: 1,
+      files: [
+        "packages/a/src/by-hand.ts",
+        "packages/a/src/declared.ts",
+        "packages/a/src/none.ts",
+        "packages/a/src/other-type.ts",
+        "packages/a/src/two.ts",
+        "packages/a/src/unexported.ts",
+      ],
+    });
+    expect(lint("service-create", files)).toEqual({
+      status: 1,
+      messages: [
+        createRefused("alpha", "Alpha"),
+        createRefused("beta", "Beta"),
+        notBuiltRefused("gamma", "Types.Gamma"),
+        notBuiltRefused("delta", "Delta"),
+        wrongTypeRefused("epsilon", "Epsilon", "Types.Epsilon"),
+        manyRefused("zeta, eta"),
+      ].sort(),
+    });
+  });
+});
+
+// A package's service file for the cycle rule: name registered as Name, wanting `wants`.
+const wanting = (name: string, wants: string, options = "void") => {
+  const type = `${name[0]?.toUpperCase()}${name.slice(1)}`;
+  return serviceFile(
+    registers(name, `Types.${type}`),
+    created(wants, options, `Types.${type}`, name),
+  );
+};
+
+const cycleRefused = (path: string) =>
+  `break the service cycle ${path}: a service cannot want itself, directly or through the services it wants [Error/oligarchy(service-cycle)]`;
+
+describe("oligarchy/service-cycle", () => {
+  it("accepts services across packages whose wants never lead back to themselves (happy)", () => {
+    expect(
+      lint("service-cycle", {
+        "packages/http/src/main.ts": wanting("http", "never"),
+        "packages/sentry/src/main.ts": wanting(
+          "sentry",
+          "Http.Http",
+          "{ readonly dsn: string; readonly tags: Map<string, number> }",
+        ),
+        "packages/db/src/main.ts": wanting("db", "never"),
+        "packages/logger/src/main.ts": wanting("logger", "Sentry.Sentry | Db.Db"),
+        "packages/stores/src/logs.ts": wanting("logs", "Db.Db"),
+        "packages/fleet/src/host.ts": wanting("host", "Logger.Logger | Logs.Logs"),
+      }),
+    ).toEqual({ status: 0, messages: [] });
+  });
+
+  it("refuses a cycle across packages in every file on it, and a service that wants itself, but not a service that only wants one on a cycle (unhappy)", () => {
+    const files = {
+      "packages/a/src/main.ts": wanting("alpha", "Beta.Beta"),
+      "packages/b/src/main.ts": wanting("beta", "Gamma.Gamma | Http.Http"),
+      "packages/c/src/gamma.ts": wanting("gamma", "Alpha.Alpha"),
+      "packages/d/src/main.ts": wanting("delta", "Alpha.Alpha"),
+      "packages/e/src/main.ts": wanting("epsilon", "Epsilon.Epsilon"),
+      "packages/http/src/main.ts": wanting("http", "never"),
+    };
+    expect(refusedIn("service-cycle", files)).toEqual({
+      status: 1,
+      files: [
+        "packages/a/src/main.ts",
+        "packages/b/src/main.ts",
+        "packages/c/src/gamma.ts",
+        "packages/e/src/main.ts",
+      ],
+    });
+    expect(lint("service-cycle", files)).toEqual({
+      status: 1,
+      messages: [
+        cycleRefused("alpha -> beta -> gamma -> alpha"),
+        cycleRefused("beta -> gamma -> alpha -> beta"),
+        cycleRefused("gamma -> alpha -> beta -> gamma"),
+        cycleRefused("epsilon -> epsilon"),
+      ].sort(),
+    });
+  });
+});
+
 // Lints the files, laid out under a directory made in v2, with the repo's own config: oxlint's
-// exit status, and the file each unwrap-inside-jarl-fn diagnostic is in.
-const unwrapsUnderV2 = (files: Readonly<Record<string, string>>) => {
+// exit status, and the file each diagnostic of the one rule is in.
+const underV2 = (rule: string, files: Readonly<Record<string, string>>) => {
   const dir = mkdtempSync(join(root, "v2", ".lint-"));
   try {
     writeFiles(dir, files);
-    const { status, found } = diagnose("unwrap-inside-jarl-fn", join(root, ".oxlintrc.json"), dir);
+    const { status, found } = diagnose(rule, join(root, ".oxlintrc.json"), dir);
     return { status, files: found.map(({ file }) => file).sort() };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -428,16 +605,38 @@ describe("unwrap-inside-jarl-fn under v2", () => {
   const bare = `${READS}\nexport const bare = async () => jarl.unwrap(await read());\n`;
 
   it("is off in a test, where a throw fails the test (happy)", () => {
-    expect(unwrapsUnderV2({ "pkg/test/a.test.ts": bare, "pkg/test/support.ts": bare })).toEqual({
+    expect(
+      underV2("unwrap-inside-jarl-fn", { "pkg/test/a.test.ts": bare, "pkg/test/support.ts": bare }),
+    ).toEqual({
       status: 0,
       files: [],
     });
   });
 
   it("is on everywhere else in v2 (unhappy)", () => {
-    expect(unwrapsUnderV2({ "pkg/src/main.ts": bare })).toEqual({
+    expect(underV2("unwrap-inside-jarl-fn", { "pkg/src/main.ts": bare })).toEqual({
       status: 1,
       files: ["pkg/src/main.ts"],
     });
+  });
+});
+
+describe("the service rules under v2", () => {
+  it("pass a service built by createService outside any cycle (happy)", () => {
+    const files = { "packages/a/src/main.ts": wanting("alpha", "never") };
+    expect(underV2("service-create", files)).toEqual({ status: 0, files: [] });
+    expect(underV2("service-cycle", files)).toEqual({ status: 0, files: [] });
+  });
+
+  it("are on in src and in test alike (unhappy)", () => {
+    expect(
+      underV2("service-create", {
+        "packages/a/src/main.ts": serviceFile(registers("alpha", "Alpha"), ""),
+        "packages/a/test/fake.ts": serviceFile(registers("beta", "Beta"), ""),
+      }),
+    ).toEqual({ status: 1, files: ["packages/a/src/main.ts", "packages/a/test/fake.ts"] });
+    expect(
+      underV2("service-cycle", { "packages/a/src/main.ts": wanting("alpha", "Alpha.Alpha") }),
+    ).toEqual({ status: 1, files: ["packages/a/src/main.ts"] });
   });
 });

@@ -1,20 +1,10 @@
 import * as Db from "@oligarchy/db";
-import * as Logger from "@oligarchy/logger";
-import * as SentryTesting from "@oligarchy/sentry/testing";
+import * as LoggerTesting from "@oligarchy/logger/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import { report } from "../src/report.ts";
 
-const logging = () => {
-  const lines: Array<string> = [];
-  const fake = SentryTesting.sentry();
-  const logger = Logger.create({
-    write: (line) => lines.push(line),
-    colors: false,
-    sentry: fake.sentry,
-  });
-  return { lines, logger, sent: fake.sent };
-};
+const logging = () => LoggerTesting.logger();
 
 describe("the tester's report", () => {
   it("says the running suites and the passing and failing tests as info when nothing fails (happy)", () => {
@@ -38,8 +28,8 @@ describe("the tester's report", () => {
     expect(lines.at(-1)).toBe("[WARN] [global] tester: failing tests: 3");
   });
 
-  it("a database that cannot count is an error line sent to Sentry as the database's error, and the error comes back (unhappy)", () => {
-    const { lines, logger, sent } = logging();
+  it("a database that cannot count is an error line whose cause is the database's error, and the error comes back (unhappy)", () => {
+    const { lines, logger, said } = logging();
     const refused = new Db.DatabaseError("Failed query: select count(*): connect ECONNREFUSED");
 
     const reported = report(logger, jarl.err(refused));
@@ -48,8 +38,8 @@ describe("the tester's report", () => {
       "[ERROR] [global] tester: could not count tests: Failed query: select count(*): connect ECONNREFUSED",
     ]);
     expect(jarl.is_err(reported) && reported.error).toBe(refused);
-    expect(sent.map(({ error, report: { level, tags } }) => ({ error, level, tags }))).toEqual([
-      { error: refused, level: "error", tags: { location: "tester" } },
+    expect(said.map(({ level, report }) => ({ level, report }))).toEqual([
+      { level: "error", report: { location: "tester", cause: refused } },
     ]);
   });
 });

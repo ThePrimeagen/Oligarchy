@@ -1,4 +1,5 @@
 // Type checks only: check:types fails when one breaks. Nothing here sends a request.
+import type * as App from "@oligarchy/app";
 import * as jarl from "jarl";
 import { describe, expectTypeOf, it } from "vitest";
 import type * as Http from "../src/main.ts";
@@ -14,6 +15,14 @@ const decodeTeam = (body: unknown): jarl.Result<Team, NoTeam> =>
   typeof body === "string" ? jarl.ok({ id: body }) : jarl.err(new NoTeam("no team"));
 
 const { http } = Fake.http(Fake.json({}));
+
+describe("the http service", () => {
+  it("is built by createService, the fake too, wanting no service and taking only its options (happy)", () => {
+    expectTypeOf(http).toEqualTypeOf<App.Made<Http.Http>>();
+    expectTypeOf<ReturnType<typeof Http.create>>().toEqualTypeOf<App.Made<Http.Http>>();
+    expectTypeOf<Parameters<typeof Http.create>[1]>().toEqualTypeOf<Http.Options | undefined>();
+  });
+});
 
 describe("fetch types", () => {
   it("infers the value from decode, and the errors from decode and the named statuses", () => {

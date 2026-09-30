@@ -2,7 +2,8 @@ import * as Async from "@oligarchy/async";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as App from "../src/main.ts";
-import { counter, greeter, type Counter, type Greeter } from "./support.ts";
+import * as Counter from "./counter.ts";
+import * as Greeter from "./greeter.ts";
 
 type Reads = { readonly flags: { readonly name: string } };
 const environment = { flags: { name: "ada" } };
@@ -69,9 +70,9 @@ const hangs = () => new App.App(environment).main(() => new Promise<never>(() =>
 
 describe("App", () => {
   it("runs main with its environment and services, closes with no errors, and exits 0 (happy)", async () => {
-    const services = { counter: counter() };
+    const services = { counter: Counter.create({}) };
     const seen: Array<string> = [];
-    const app = new App.App(environment).main(async (started: App.App<Reads, Counter>) => {
+    const app = new App.App(environment).main(async (started: App.App<Reads, Counter.Counter>) => {
       started.services.counter.increment();
       seen.push(started.environment.flags.name);
       return jarl.ok(undefined);
@@ -435,12 +436,14 @@ describe("App", () => {
 describe("App sub-apps", () => {
   // An app that counts, says so, and runs until its signal aborts; its exit handler says why.
   const worker = (name: string, order: Array<string>) => {
-    const app = new App.App({ flags: { name } }).main(async (started: App.App<Reads, Counter>) => {
-      started.services.counter.increment();
-      order.push(`${started.environment.flags.name} runs`);
-      await aborted(started.signal);
-      return jarl.ok(undefined);
-    });
+    const app = new App.App({ flags: { name } }).main(
+      async (started: App.App<Reads, Counter.Counter>) => {
+        started.services.counter.increment();
+        order.push(`${started.environment.flags.name} runs`);
+        await aborted(started.signal);
+        return jarl.ok(undefined);
+      },
+    );
     app.onExit((reason) => {
       order.push(`${name} exits on ${kindOf(reason)}`);
     });
@@ -449,11 +452,12 @@ describe("App sub-apps", () => {
 
   it("runs the tree on the top app's services, then exits children first, left to right (happy)", async () => {
     const order: Array<string> = [];
-    const services = { counter: counter(), greeter: greeter() };
+    const counter = Counter.create({});
+    const services = { counter, greeter: Greeter.create({ counter }, { greeting: "hi" }) };
     const a = worker("a", order).sub(worker("a1", order));
     const b = worker("b", order);
     const top = new App.App(environment)
-      .main(async (started: App.App<Reads, Counter | Greeter>) => {
+      .main(async (started: App.App<Reads, Counter.Counter | Greeter.Greeter>) => {
         order.push(`top runs and greets ${started.services.greeter.greet("a")}`);
         return jarl.ok(undefined);
       })
@@ -601,16 +605,18 @@ describe("App sub-apps", () => {
 
   it("starts a sub-app added while its parent runs at once, on the parent's services (happy)", async () => {
     const order: Array<string> = [];
-    const services = { counter: counter() };
-    const child = new App.App(environment).main(async (started: App.App<Reads, Counter>) => {
-      started.services.counter.increment();
-      order.push("child runs");
-      return jarl.ok(undefined);
-    });
+    const services = { counter: Counter.create({}) };
+    const child = new App.App(environment).main(
+      async (started: App.App<Reads, Counter.Counter>) => {
+        started.services.counter.increment();
+        order.push("child runs");
+        return jarl.ok(undefined);
+      },
+    );
     child.onExit((reason) => {
       order.push(`child exits on ${kindOf(reason)}`);
     });
-    const top = new App.App(environment).main(async (started: App.App<Reads, Counter>) => {
+    const top = new App.App(environment).main(async (started: App.App<Reads, Counter.Counter>) => {
       started.sub(child);
       order.push("child added");
       await later();

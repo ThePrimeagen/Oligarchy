@@ -30,12 +30,10 @@ const created = async (sentry: Parameters<typeof Fake.http>[0] = Fake.status(200
   );
   const lines: Array<string> = [];
   const http = Fake.http(sentry);
-  const services: Services = jarl.unwrap(
-    createServices(env, {
-      terminal: { write: (line) => lines.push(line), colors: false },
-      http: http.http,
-    }),
-  );
+  const services: Services = createServices(env, {
+    terminal: { write: (line) => lines.push(line), colors: false },
+    http: http.http,
+  });
   cleanups.push(() => services.db.close());
   return { fake, lines, services, asked: http.asked };
 };

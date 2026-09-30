@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/main.ts"
+    ".": "./src/main.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
@@ -11,10 +12,13 @@
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
+    "@oligarchy/db": "workspace:*",
     "@oligarchy/sentry": "workspace:*",
     "jarl": "catalog:"
   },
   "devDependencies": {
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/fake-postgres": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

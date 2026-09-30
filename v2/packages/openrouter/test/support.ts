@@ -94,14 +94,16 @@ export const client = async (
     }
     return reply;
   });
-  const openRouter = OpenRouter.create({
-    token: await token(),
-    baseUrl: BASE_URL,
-    timeoutMs: TIMEOUT_MS,
-    defaultRetry: DEFAULT_RETRY_MS,
-    attempts: options.attempts ?? ATTEMPTS,
-    http: fake.http,
-  });
+  const openRouter = OpenRouter.create(
+    { http: fake.http },
+    {
+      token: await token(),
+      baseUrl: BASE_URL,
+      timeoutMs: TIMEOUT_MS,
+      defaultRetry: DEFAULT_RETRY_MS,
+      attempts: options.attempts ?? ATTEMPTS,
+    },
+  );
   const complete = async (request: OpenRouter.Request) => {
     const answer = openRouter.complete(request);
     await vi.advanceTimersByTimeAsync(RUN_MS);
