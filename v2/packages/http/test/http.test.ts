@@ -25,7 +25,7 @@ const decodeTeam = (body: unknown) => {
 
 describe("fetch", () => {
   it("returns what decode makes of a 2xx body, from the one request asked (happy)", async () => {
-    const fake = Fake.http(Fake.json({ team: { id: "team-1" } }));
+    const fake = Fake.http({ replies: Fake.json({ team: { id: "team-1" } }) });
 
     const team = await fake.http.fetch(URL, init, { decode: decodeTeam });
 
@@ -36,7 +36,7 @@ describe("fetch", () => {
   });
 
   it("returns decode's own error when decode refuses the body (sad)", async () => {
-    const fake = Fake.http(Fake.json({ teams: [] }));
+    const fake = Fake.http({ replies: Fake.json({ teams: [] }) });
 
     const team = await fake.http.fetch(URL, init, { decode: decodeTeam });
 
@@ -45,7 +45,7 @@ describe("fetch", () => {
 
   it("returns the error a named status's handler made, so a caller retries on it (sad)", async () => {
     const slow = Fake.status(429, "slow down");
-    const fake = Fake.http([slow, slow, Fake.json({ team: { id: "team-1" } })]);
+    const fake = Fake.http({ replies: [slow, slow, Fake.json({ team: { id: "team-1" } })] });
     const ask = () =>
       fake.http.fetch(URL, init, {
         decode: decodeTeam,
@@ -65,13 +65,15 @@ describe("fetch", () => {
 
   it("a status's error carries the response's headers, and a named status's handler is handed them (sad)", async () => {
     const headers = { "Retry-After": "7" };
-    const fake = Fake.http([
-      Fake.status(400, "bad query", headers),
-      Fake.status(404, "", headers),
-      Fake.status(503, "busy", headers),
-      Fake.status(418, "teapot", headers),
-      Fake.status(429, "slow down", headers),
-    ]);
+    const fake = Fake.http({
+      replies: [
+        Fake.status(400, "bad query", headers),
+        Fake.status(404, "", headers),
+        Fake.status(503, "busy", headers),
+        Fake.status(418, "teapot", headers),
+        Fake.status(429, "slow down", headers),
+      ],
+    });
     const ask = () => fake.http.fetch(URL, init, { decode: decodeTeam });
 
     const failures = [
@@ -99,7 +101,9 @@ describe("fetch", () => {
 
   it('read "bytes" hands decode the 2xx body\'s bytes as they came, not parsed (happy)', async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
-    const fake = Fake.http(new Response(png, { headers: { "Content-Type": "image/png" } }));
+    const fake = Fake.http({
+      replies: new Response(png, { headers: { "Content-Type": "image/png" } }),
+    });
 
     const image = await fake.http.fetch(URL, init, {
       read: "bytes",
@@ -110,7 +114,7 @@ describe("fetch", () => {
   });
 
   it('read "bytes": a status\'s error still carries its body as text (sad)', async () => {
-    const fake = Fake.http(Fake.status(404, "no guest for job-1"));
+    const fake = Fake.http({ replies: Fake.status(404, "no guest for job-1") });
 
     const image = await fake.http.fetch(URL, init, {
       read: "bytes",
@@ -199,7 +203,7 @@ describe("fetch", () => {
   ];
 
   it.each(cases)("$name (sad)", async ({ reply, signal, error, said, retryable }) => {
-    const fake = Fake.http(reply, { timeoutMs: 5 });
+    const fake = Fake.http({ replies: reply, timeoutMs: 5 });
 
     const team = await fake.http.fetch(URL, signal === undefined ? init : { ...init, signal }, {
       decode: decodeTeam,

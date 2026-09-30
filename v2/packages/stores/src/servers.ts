@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, eq, sql } from "drizzle-orm";
@@ -47,7 +47,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = (db: Db.Database): Servers => ({
+export const create = App.createService<Db.Database, App.NoOptions, Servers>(({ db }) => ({
   service: "servers",
 
   addServer: (url, type) =>
@@ -158,4 +158,4 @@ export const create = (db: Db.Database): Servers => ({
         .where(eq(DbSchema.jobServers.jobId, jobId));
       return row?.serverUrl;
     }),
-});
+}));

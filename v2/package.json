@@ -10,7 +10,7 @@
       "@types/node": "^26.4.0",
       "@types/pg": "^8.23.1",
       "drizzle-orm": "^0.45.2",
-      "jarl": "github:ThePrimeagen/jarl#v1.1.0",
+      "jarl": "github:ThePrimeagen/jarl#v1.2.0",
       "pg": "^8.23.0",
       "typescript": "7.0.2",
       "vitest": "^4.1.11",

@@ -35,10 +35,6 @@ if (jarl.is_err(created)) {
 const env = jarl.value(created);
 
 const services = createServices(env);
-if (jarl.is_err(services)) {
-  process.stderr.write(`${services.error.message}\n`);
-  process.exit(1);
-}
 
 const app = new App.App(env).main(main);
 app.onExit(async () => {
@@ -46,7 +42,7 @@ app.onExit(async () => {
   await app.services.logger.flush();
   return app.services.db.close();
 });
-await app.run(jarl.value(services), (errors) => {
+await app.run(services, (errors) => {
   for (const error of errors) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   }

@@ -1,5 +1,6 @@
 // A fake transport for tests: Http as create makes it, answering from replies instead of the
 // network, and recording each request it was asked.
+import type * as App from "@oligarchy/app";
 import * as jarl from "jarl";
 import * as Http from "./main.ts";
 
@@ -18,6 +19,8 @@ export type Asked = {
 
 // One reply for every request, one per request in order, or one made from the request.
 type Replies = Reply | ReadonlyArray<Reply> | ((asked: Asked) => Reply | Promise<Reply>);
+
+export type Options = { readonly replies: Replies; readonly timeoutMs?: number };
 
 export const json = (
   body: unknown,
@@ -57,10 +60,10 @@ const bodyOf = (body: RequestInit["body"]): unknown => {
   }
 };
 
-export const http = (
-  replies: Replies,
-  options: { readonly timeoutMs?: number } = {},
-): { readonly http: Http.Http; readonly asked: ReadonlyArray<Asked> } => {
+export const http = ({
+  replies,
+  ...options
+}: Options): { readonly http: App.Made<Http.Http>; readonly asked: ReadonlyArray<Asked> } => {
   const asked: Array<Asked> = [];
 
   const replyTo = (one: Asked): Reply | Promise<Reply> => {
@@ -98,7 +101,7 @@ export const http = (
     return reply.clone();
   };
 
-  return { http: Http.create({ fetch, ...options }), asked };
+  return { http: Http.create({}, { fetch, ...options }), asked };
 };
 
 // The error result failed with, when it is one of error; throws otherwise, saying what came.

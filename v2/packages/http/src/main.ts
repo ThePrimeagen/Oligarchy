@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import * as jarl from "jarl";
 
@@ -160,9 +160,9 @@ const parsed = (text: string, asked: Asked): jarl.Result<unknown, HttpInvalid> =
   }
 };
 
-export const create = (
-  options: { readonly fetch?: Fetch; readonly timeoutMs?: number } = {},
-): Http => {
+export type Options = { readonly fetch?: Fetch; readonly timeoutMs?: number };
+
+export const create = App.createService<never, Options, Http>((_, options) => {
   const send = options.fetch ?? fetch;
   const defaultMs = options.timeoutMs ?? TIMEOUT_MS;
 
@@ -194,18 +194,18 @@ export const create = (
         { status: number; bytes: Uint8Array; headers: Headers },
         HttpUnreachable | Async.Aborted
       >
-    > => {
-      try {
-        const response = await send(url, { ...rest, signal: inner });
-        return jarl.ok({
-          status: response.status,
-          bytes: new Uint8Array(await response.arrayBuffer()),
-          headers: response.headers,
-        });
-      } catch (caught) {
-        return jarl.err(outer.aborted ? abortedBy(outer) : new HttpUnreachable(asked, caught));
-      }
-    };
+    > =>
+      jarl.exec(
+        async () => {
+          const response = await send(url, { ...rest, signal: inner });
+          return {
+            status: response.status,
+            bytes: new Uint8Array(await response.arrayBuffer()),
+            headers: response.headers,
+          };
+        },
+        (caught) => (outer.aborted ? abortedBy(outer) : new HttpUnreachable(asked, caught)),
+      );
 
     const answered = await Async.timeout(exchange, { ms: timeoutMs, signal: outer });
     if (jarl.error.is(answered, Async.TimedOut)) {
@@ -250,4 +250,4 @@ export const create = (
   }
 
   return { service: "http", fetch: request };
-};
+});

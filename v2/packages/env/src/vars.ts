@@ -18,16 +18,27 @@ const secret = (name: string): Var<Secret.Secret> => ({
   read: (text) => new Secret.Secret(text),
 });
 
+// canParse, not new URL's throw: that TypeError carries the url, password and all.
+const secretUrl = (name: string): Var<Secret.Secret> => ({
+  name,
+  read: (text) => {
+    if (!URL.canParse(text)) {
+      throw new Errors.InvalidVariable(name, "a url");
+    }
+    return new Secret.Secret(text);
+  },
+});
+
 // Every variable an oligarchy process reads, declared once. A command names the ones it needs,
 // and only those are required.
 export const all = {
   oligarchyToken: secret("OLIGARCHY_TOKEN"),
   // The harness talks to OpenRouter as itself. The token stays out of oligarchy.json.
   openRouterToken: secret("OPENROUTER_API_KEY"),
-  databaseUrl: secret("DATABASE_URL"),
+  databaseUrl: secretUrl("DATABASE_URL"),
   // `db:migrate` only. Kept off DATABASE_URL so the programs can use a pooler while migrations
   // stay on a direct connection.
-  databaseMigrationUrl: secret("DATABASE_MIGRATION_URL"),
+  databaseMigrationUrl: secretUrl("DATABASE_MIGRATION_URL"),
   automationServerUrl: required("AUTOMATION_SERVER_URL"),
 };
 
@@ -59,4 +70,7 @@ async function resolveValues(
   return values;
 }
 
-export const resolve = jarl.fn(resolveValues, Errors.keep(Errors.MissingVariable));
+export const resolve = jarl.fn(
+  resolveValues,
+  Errors.keep(Errors.MissingVariable, Errors.InvalidVariable),
+);

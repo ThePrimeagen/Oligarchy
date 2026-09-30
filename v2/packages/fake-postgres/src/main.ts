@@ -30,18 +30,20 @@ export const start = async (
   options: { readonly port?: number } = {},
 ): Promise<jarl.Result<FakePostgres, FakePostgresError>> => {
   const port = options.port ?? 0;
-  let data: Blob;
-  try {
-    data = await Template.migrated();
-  } catch (thrown) {
-    return jarl.err(refused("fake-postgres: could not prepare the migrated database", thrown));
+  const data = await jarl.exec(Template.migrated, (thrown) =>
+    refused("fake-postgres: could not prepare the migrated database", thrown),
+  );
+  if (jarl.is_err(data)) {
+    return data;
   }
-  const pg = new PGlite({ loadDataDir: data });
-  try {
-    await pg.waitReady;
-  } catch (thrown) {
+  const pg = new PGlite({ loadDataDir: jarl.value(data) });
+  const loaded = await jarl.exec(
+    () => pg.waitReady,
+    (thrown) => refused("fake-postgres: could not load the migrated database", thrown),
+  );
+  if (jarl.is_err(loaded)) {
     await pg.close();
-    return jarl.err(refused("fake-postgres: could not load the migrated database", thrown));
+    return loaded;
   }
   // node-postgres's pool opens up to ten connections; PGlite runs their queries one at a time.
   const server = new PGLiteSocketServer({
@@ -50,11 +52,13 @@ export const start = async (
     port,
     maxConnections: 10,
   });
-  try {
-    await server.start();
-  } catch (thrown) {
+  const listening = await jarl.exec(
+    () => server.start(),
+    (thrown) => refused(`fake-postgres: could not listen on ${HOST}:${String(port)}`, thrown),
+  );
+  if (jarl.is_err(listening)) {
     await pg.close();
-    return jarl.err(refused(`fake-postgres: could not listen on ${HOST}:${String(port)}`, thrown));
+    return listening;
   }
   let stopped: Promise<void> | undefined;
   return jarl.ok({

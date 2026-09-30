@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, desc, eq, like, or } from "drizzle-orm";
@@ -31,7 +31,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = (db: Db.Database): Logs => ({
+export const create = App.createService<Db.Database, App.NoOptions, Logs>(({ db }) => ({
   service: "logs",
 
   insertLog: (row) =>
@@ -71,4 +71,4 @@ export const create = (db: Db.Database): Logs => ({
         )
         .orderBy(DbSchema.logs.id),
     ),
-});
+}));

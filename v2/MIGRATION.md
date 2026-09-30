@@ -40,7 +40,7 @@ meet plus one happy path, and every service is faked except the database.
 - [x] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
       `src/harness/intent.ts`, `src/harness/pointer.ts` and `src/driver/client.ts`, over
       `packages/http/src/proxy-client.ts`. Controlling one job's qemu guest over HTTP for the AI's
-      tools. `create({ job, baseUrl, token, http, signal })` names the job once; every call
+      tools. `create({ http }, { job, baseUrl, token, signal })` names the job once; every call
       carries it, and `OLIGARCHY_TOKEN` as the bearer, on `@oligarchy/http` to the qemu reverse
       proxy. The harness's calls are `start`, `intentStart`, `intentEnd`, `stop` and `save`. The
       guest's are `image` (the PNG's bytes, through `@oligarchy/http`'s `read: "bytes"`),
@@ -79,6 +79,20 @@ meet plus one happy path, and every service is faked except the database.
       status, `stop`s with an end one, reads the `current` and the `history`, and
       `clearPastRunningVms` marks as a `server-error` every VM a qemu server's crashed last process
       left downloading or running, saying so.
+- [x] **Services take their services first.** A file that registers a service exports
+      `create = App.createService<Wants, Options, Service>((services, options) => service)`:
+      `Wants` is the union of the services it uses, and `make` sees only those. `Options` is
+      always one object of named fields, `App.NoOptions` for a service told nothing, and never a
+      bare value, a list or a function. Creation is synchronous and cannot fail; a service that
+      reaches something connects on first use.
+      What `createService` builds is `App.Made<Service>`, the only thing `app.run` and another
+      create's services accept, so a fake goes through `createService` too.
+      `oligarchy/service-create` lints that every registering file exports that `create` for its
+      own service, and `oligarchy/service-cycle` that no service wants itself through the ones it
+      wants, across packages. The logger wants `db`: it stores each line in the logs table itself
+      and logs each pool error through `db.onPoolError`, so the database wants nothing. env
+      refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the variable and
+      never its value. Tests that only read what was logged use `@oligarchy/logger/testing`.
 - [ ] **Wire Sentry.** `@oligarchy/sentry` exists, but no app creates it and env declares no DSN
       (V1 hard-codes one in `packages/observability/src/dsn.ts`). Each app's `createServices`
       builds it and `wait`s for it on exit, and the logger sends error and fatal lines to it, as
@@ -189,7 +203,7 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
       stores, the pages keyed by ticket (`/tickets/:ticket`) key by job id, and `@oligarchy/linear`
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
-      V2's `db.open` makes a pool, so the database service needs a way to run there. It carries
+      V2's `Db.create` makes a pool, so the database service needs a way to run there. It carries
       `packages/shared/src/steps.ts`, which places intents against a definition's steps.
 - [ ] **viz** (`apps/viz`) and the **session REPL** (`src/session`). Terminal views of a running
       guest. viz reads the guest's output through the proxy's `/follow`, which streams in V1, and

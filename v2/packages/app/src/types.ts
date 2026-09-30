@@ -9,11 +9,33 @@ export type AnyService = Services[keyof Services];
 // Services filed under their own names: Needs<Logger | Database> is { logger: Logger; db: Database }.
 export type Needs<T extends AnyService> = { readonly [S in T as S["service"]]: S };
 
+declare const made: unique symbol;
+
+// A service as createService built it. Nothing else makes one, so a service built by hand, a
+// fake included, is refused wherever services are handed over.
+export type Made<S extends AnyService> = S & { readonly [made]: S["service"] };
+
+// What a create is handed: each service it wants, under its name, as createService built it. One
+// that wants nothing is handed no service at all.
+export type Given<Deps extends AnyService> = [Deps] extends [never]
+  ? Readonly<Record<string, never>>
+  : { readonly [S in Deps as S["service"]]: Made<S> };
+
+// What a create is told: always one object of named fields, never a bare value, a list or a
+// function. NoOptions is the bag of a service told nothing.
+export type Bag = Readonly<Record<string, unknown>>;
+export type NoOptions = Readonly<Record<string, never>>;
+
+// A create's options after its services, which may be left out when nothing in them is required.
+export type OptionsArgs<Options extends Bag> = {} extends Options
+  ? [options?: Options]
+  : [options: Options];
+
 // An entry in Services, whose key must be the service's own name.
 export type Register<Name extends string, T extends { readonly service: Name }> = T;
 
-// What a top app runs on: each key a service's name, its value that service.
-export type Provided = { readonly [K in keyof Services]?: Services[K] };
+// What a top app runs on: each key a service's name, its value that service as createService built it.
+export type Provided = { readonly [K in keyof Services]?: Made<Services[K]> };
 
 // A bare service where the object of services goes has a `service` field; this refuses it.
 export type NotAService = { readonly service?: never };
