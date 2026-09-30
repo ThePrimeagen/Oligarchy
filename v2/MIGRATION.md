@@ -79,6 +79,14 @@ meet plus one happy path, and every service is faked except the database.
       status, `stop`s with an end one, reads the `current` and the `history`, and
       `clearPastRunningVms` marks as a `server-error` every VM a qemu server's crashed last process
       left downloading or running, saying so.
+- [x] **Wire Sentry.** `@oligarchy/sentry` hard-codes V1's DSN as `DSN`, and `ENVIRONMENT` is
+      `production`, which V1's events all were. The logger, which wants `sentry`, sends each error
+      and fatal line as it is logged, as its `cause` or else its text, with its level, its location
+      and agent as tags and its text as `extra.log`, unless told `skipSentry`, and a log insert's
+      failure too, as V1's `Log` did. The tester's `createServices` builds it over the world's
+      `http` and hands it to the logger, and `closeServices` waits for it after the logger's last
+      line; each app does the same as it is ported. A test that runs an app as a process points
+      `https_proxy` at a port nobody listens on, as V1's did, so the real project hears nothing.
 - [x] **Services take their services first.** A file that registers a service exports
       `create = App.createService<Wants, Options, Service>((services, options) => service)`:
       `Wants` is the union of the services it uses, and `make` sees only those. Creation is
@@ -87,14 +95,11 @@ meet plus one happy path, and every service is faked except the database.
       create's services accept, so a fake goes through `createService` too.
       `oligarchy/service-create` lints that every registering file exports that `create` for its
       own service, and `oligarchy/service-cycle` that no service wants itself through the ones it
-      wants, across packages. The logger wants `db`: it stores each line in the logs table itself
-      and logs each pool error through `db.onPoolError`, so the database wants nothing. env
-      refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the variable and
-      never its value. Tests that only read what was logged use `@oligarchy/logger/testing`.
-- [ ] **Wire Sentry.** `@oligarchy/sentry` exists, but no app creates it and env declares no DSN
-      (V1 hard-codes one in `packages/observability/src/dsn.ts`). Each app's `createServices`
-      builds it and `wait`s for it on exit, and the logger sends error and fatal lines to it, as
-      V1's `Log` did unless told `skipSentry`.
+      wants, across packages. The logger wants `sentry` and `db`: it stores each line in the logs
+      table itself and logs each pool error through `db.onPoolError`, so the database wants
+      nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
+      variable and never its value. Tests that only read what was logged use
+      `@oligarchy/logger/testing`.
 - [ ] **Colour on stdout.** V1's `packages/env/src/colors.ts` honours `FORCE_COLOR` and asks the
       stream for its colour depth; V2's tester reads `isTTY` alone. Move V1's rule into
       `@oligarchy/env`.
@@ -148,8 +153,9 @@ record, and the automation server acts on it directly.
 ## 4. Apps
 
 None of V1's apps are ported. Each becomes a V2 app: its `main` reads its environment with
-`@oligarchy/env`, builds its services with a `createServices`, serves Hono behind the
-`OLIGARCHY_TOKEN` bearer, and runs under `@oligarchy/app`.
+`@oligarchy/env`, builds its services with a `createServices` (Sentry among them, handed to its
+logger and waited for on exit, as the tester's are), serves Hono behind the `OLIGARCHY_TOKEN`
+bearer, and runs under `@oligarchy/app`.
 
 - [ ] **qemu-server** (`apps/qemu-server`). Services: `Qemu` (starts a guest; keys, mouse,
       screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `Minted` (finds and
