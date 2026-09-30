@@ -62,10 +62,6 @@ meet plus one happy path, and every service is faked except the database.
 - [x] **`tests`: write the model at start.** `startRun(runId, model)` writes the model id to
       `test_runs.model` beside the running status, as V1's `startResult` did. A refused or missing
       start writes neither.
-- [ ] **`tests`: a claim or close retried after a lost reply.** V1's `markRunning` counted the same
-      server already running the job as success, and its `finish` counted a row already closed the
-      same way as success. V2's `runJob` and close transitions refuse both with `InvalidState`.
-      Decide which retries count as success, and test each.
 - [ ] **`tests`: the dashboard's queue.** V1's `listJobs` returned the running, pending and newest
       completed jobs, each with its automation client url, qemu server url, instruction, open
       intent and the database's clock. V2's `listJobs` returns the job and its test's name.
@@ -101,10 +97,12 @@ record, and the automation server acts on it directly.
       drive job each, then `startSuite`. `ctrl mint`, and the proxy's first reserve of an ISO on a
       qemu server: a mint test run and job for each server, holding that server's setup lock with
       `setupRequests.claim`.
-- [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, a reserve on a live automation
-      client, round robin (a mint only on the server its setup lock names), `runJob` naming that
-      client, then `/run` with the prompt. One reserve is in flight at a time, and a full client
-      passes the job to the next. V1: `dispatch` in `worker.ts`.
+- [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
+      automation client, round robin (a mint only on the server its setup lock names). Only once
+      that client has reserved the job does `runJob` move it to running, naming the client, and
+      `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
+      loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. V1:
+      `dispatch` in `worker.ts`.
 - [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
