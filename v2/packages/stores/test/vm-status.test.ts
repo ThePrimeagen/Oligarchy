@@ -63,7 +63,8 @@ describe("a restarted qemu server's past running VMs", () => {
 
     const cleared = jarl.unwrap(await vmStatus.clearPastRunningVms(RESTARTED));
 
-    expect([...cleared].sort()).toEqual([running, downloading].sort());
+    expect(new Set(cleared)).toEqual(new Set([running, downloading]));
+    expect(cleared).toHaveLength(2);
     for (const jobId of [running, downloading]) {
       expect(jarl.unwrap(await vmStatus.current(jobId))).toMatchObject({
         status: "server-error",
