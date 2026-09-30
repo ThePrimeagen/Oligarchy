@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   customType,
   doublePrecision,
@@ -306,7 +307,8 @@ export const setupRequests = pgTable(
 // the same name and a higher id, so a test run's definition_id names the exact wording
 // it ran against. A name's newest wording is its highest id, and its version is the
 // row's place among the name's rows by id; name is indexed for those lookups, not
-// unique.
+// unique. resume: a drive of this wording boots its test run's ISO from that ISO's
+// minted disk; otherwise it boots fresh. A mint job always boots fresh.
 export const testDefinitions = pgTable(
   "test_definitions",
   {
@@ -315,6 +317,7 @@ export const testDefinitions = pgTable(
     description: text("description").notNull(),
     instruction: text("instruction").notNull(),
     proof: text("proof").notNull(),
+    resume: boolean("resume").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("test_definitions_name_idx").on(table.name)],
@@ -334,12 +337,12 @@ export const testBasePrompts = pgTable(
   (table) => [uniqueIndex("test_base_prompts_name_idx").on(table.name)],
 );
 
-// One execution of a set of definitions against one ISO and one control-plane
-// server. The orchestrator owns the row: it opens the suite and declares the
-// verdict once the test runs are in — or timed_out when reports stop coming.
-// Counts are not stored — planned and reported are both readable off the
-// test_runs rows. The Cursor model lives on each test run: one suite can mix
-// models.
+// One batch of test runs against one ISO and one control-plane server, named by the
+// ISO's version. Each of its test runs carries that ISO and server too. The
+// orchestrator owns the row: it opens the suite and declares the verdict once the test
+// runs are in — or timed_out when reports stop coming. Counts are not stored — planned
+// and reported are both readable off the test_runs rows. The Cursor model lives on each
+// test run: one suite can mix models.
 export const testSuites = pgTable("test_suites", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -351,21 +354,23 @@ export const testSuites = pgTable("test_suites", {
   endedAt: timestamp("ended_at", { withTimezone: true }),
 });
 
-// One row per definition in the suite, inserted pending: capacity decides when it
-// runs, and the orchestrator marks it running when it spawns the driver. The agent's
-// report closes it passed or failed; the orchestrator closes the rest when it closes
-// the suite — timed_out when the report never came, aborted when the suite was stopped
-// on purpose. model is the Cursor model id that test run's agent used.
+// One run of a definition against an ISO on a control-plane server, inserted pending:
+// capacity decides when it runs, and the orchestrator marks it running when it spawns
+// the driver. The agent's report closes it passed or failed; the orchestrator closes the
+// rest when it closes the suite — timed_out when the report never came, aborted when the
+// suite was stopped on purpose. model is the Cursor model id that test run's agent used.
+// suite_id is null for a test run filed on its own; a suite may hold a definition any
+// number of times.
 export const testRuns = pgTable(
   "test_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    suiteId: uuid("suite_id")
-      .notNull()
-      .references(() => testSuites.id),
+    suiteId: uuid("suite_id").references(() => testSuites.id),
     definitionId: bigint("definition_id", { mode: "number" })
       .notNull()
       .references(() => testDefinitions.id),
+    iso: text("iso").notNull(),
+    serverUrl: text("server_url").notNull(),
     // Null until test start writes the Cursor model id that is running this test run.
     model: text("model"),
     status: testRunStatus("status").notNull().default("pending"),
@@ -373,8 +378,7 @@ export const testRuns = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  // One test run per definition per suite: a second write is a database error by design.
-  (table) => [uniqueIndex("test_runs_suite_definition_idx").on(table.suiteId, table.definitionId)],
+  (table) => [index("test_runs_suite_id_idx").on(table.suiteId)],
 );
 
 // One automation step for a test run: drive the guest, or diagnose after. Inserted
