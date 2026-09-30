@@ -62,8 +62,9 @@ meet plus one happy path, and every service is faked except the database.
 
 ## 2. Finish the services V2 has
 
-- [ ] **`tests`: write the model at start.** `test_runs.model` exists, but `startRun` writes only
-      the status. V1's `startResult` wrote the Cursor model id.
+- [x] **`tests`: write the model at start.** `startRun(runId, model)` writes the model id to
+      `test_runs.model` beside the running status, as V1's `startResult` did. A refused or missing
+      start writes neither.
 - [ ] **`tests`: a claim or close retried after a lost reply.** V1's `markRunning` counted the same
       server already running the job as success, and its `finish` counted a row already closed the
       same way as success. V2's `runJob` and close transitions refuse both with `InvalidState`.
