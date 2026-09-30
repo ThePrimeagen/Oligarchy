@@ -246,9 +246,10 @@ const FUNCTIONS = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFu
 const handedToJarlFn = (node, jarl) =>
   node.parent?.type === "CallExpression" &&
   node.parent.arguments[0] === node &&
-  isMember(node.parent.callee, jarl, "fn");
+  (isMember(node.parent.callee, jarl, "fn") || isMember(node.parent.callee, jarl, "exec"));
 
-// Whether fn is what a jarl.fn wraps: written as its first argument, or named there.
+// Whether fn is what a jarl.fn wraps or a jarl.exec runs: written as its first argument, or named
+// there.
 const wrappedByJarlFn = (context, jarl, fn) => {
   if (handedToJarlFn(fn, jarl)) {
     return true;
@@ -572,11 +573,11 @@ export default {
         type: "problem",
         docs: {
           description:
-            "jarl.unwrap throws, so it is called only in the function a jarl.fn wraps, whose mapError catches it",
+            "jarl.unwrap throws, so it is called only in the function a jarl.fn wraps or a jarl.exec runs, whose mapError catches it",
         },
         messages: {
           outside:
-            "call jarl.unwrap only in the function handed to jarl.fn, whose mapError catches what it throws; handle the error here instead",
+            "call jarl.unwrap only in the function handed to jarl.fn or jarl.exec, whose mapError catches what it throws; handle the error here instead",
         },
       },
       create(context) {
@@ -609,7 +610,7 @@ export default {
         },
         messages: {
           value:
-            "read {{ name }}.value with jarl.value({{ name }}) once every error is handled, or jarl.unwrap({{ name }}) inside a jarl.fn to throw the rest",
+            "read {{ name }}.value with jarl.value({{ name }}) once every error is handled, or jarl.unwrap({{ name }}) inside a jarl.fn or jarl.exec to throw the rest",
           error:
             "name {{ name }}'s error with jarl.error.is({{ name }}, ...) or jarl.is_err({{ name }}) before reading {{ name }}.error",
         },

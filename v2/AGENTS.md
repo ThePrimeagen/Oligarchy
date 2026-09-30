@@ -17,6 +17,7 @@
    `jarl.error.is(result.error, C)`. Read `result.error` only where one of those has just named
    it an error, to handle that error. `oligarchy/result-through-jarl` lints both.
 8. `jarl.unwrap` throws whatever error is left, so it is only for a throw that is caught on
-   purpose: in the function a `jarl.fn` wraps, not a callback inside it, whose mapError keeps
-   that error so the caller still gets it typed; or in a test, where the throw fails the test.
+   purpose: in the function a `jarl.fn` wraps or a `jarl.exec` runs, not a callback inside it,
+   whose mapError keeps that error so the caller still gets it typed; or in a test, where the
+   throw fails the test.
    Anywhere else, handle the error. `oligarchy/unwrap-inside-jarl-fn` lints it outside `test/`.
