@@ -32,17 +32,19 @@ export const sleep = (delay: number, signal: AbortSignal): Promise<jarl.Result<v
     signal.addEventListener("abort", stop, { once: true });
   });
 
-// count is the most times fn is called. repeat returns whatever fn returns.
-// An error is tried again while a call remains and errorFilter is missing or
-// returns true. false returns that error and does not use the rest of the count.
-// delay is the wait before each call after the first; signal aborting ends the
-// wait, and the calls, with Aborted.
+// What an error calls for: call again after delay milliseconds, or stop and hand the error back.
+export type Decision = { readonly retry: true; readonly delay: number } | { readonly retry: false };
+
+const AGAIN: Decision = { retry: true, delay: 0 };
+
+// count is the most times fn is called, whatever retry decides. repeat returns whatever fn
+// returns. After an error, while a call remains, retry decides; with no retry every error is
+// called again at once. signal aborting ends a wait, and the calls, with Aborted.
 export const repeat = <A extends readonly unknown[], T, E>(
   fn: (...args: A) => Promise<jarl.Result<T, E>>,
   count: number,
   options: {
-    readonly errorFilter?: (error: E) => boolean;
-    readonly delay?: number;
+    readonly retry?: (error: E) => Decision;
     readonly signal?: AbortSignal;
   } = {},
 ): ((...args: A) => Promise<jarl.Result<T, E | Aborted>>) => {
@@ -50,22 +52,19 @@ export const repeat = <A extends readonly unknown[], T, E>(
     if (!Number.isInteger(count) || count < 1) {
       throw new Error("repeat count must be at least 1");
     }
-    const { delay, errorFilter, signal = NEVER } = options;
+    const { retry, signal = NEVER } = options;
     if (signal.aborted) {
       return jarl.err(abortedBy(signal));
     }
     let result = await fn(...args);
     for (let made = 1; made < count && jarl.is_err(result); made += 1) {
-      if (errorFilter !== undefined && !errorFilter(result.error)) {
+      const decision = retry === undefined ? AGAIN : retry(result.error);
+      if (!decision.retry) {
         return result;
       }
-      if (delay !== undefined) {
-        const slept = await sleep(delay, signal);
-        if (!slept.ok) {
-          return slept;
-        }
-      } else if (signal.aborted) {
-        return jarl.err(abortedBy(signal));
+      const slept = await sleep(decision.delay, signal);
+      if (!slept.ok) {
+        return slept;
       }
       result = await fn(...args);
     }
