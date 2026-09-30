@@ -9,9 +9,13 @@ meet plus one happy path, and every service is faked except the database.
 
 ## Decided
 
-- **Jobs live in the `tests` store.** A test suite holds test runs, any number of each definition,
-  and a test run holds its jobs: mint, drive and diagnose. A job runs once; trying again is a new
-  job.
+- **Jobs live in the `tests` store.** A test run is one definition against one ISO on one server,
+  and carries that ISO and server itself. It is filed on its own, to try something out, or in a
+  suite: a batch named by its ISO's version that holds any number of test runs of each definition
+  and tallies them. A test run holds its jobs: mint, drive and diagnose. A job runs once; trying
+  again is a new job.
+- **A definition says whether it resumes.** A drive of a resuming definition boots its test run's
+  ISO from that ISO's minted disk, and one that does not boots fresh. A mint always boots fresh.
 - **No Linear.** V2 files no tickets and reads no board. The pending jobs in Postgres are the queue,
   and an agent is known by its job id.
 - **HTTP servers are Hono.** Each app's `main` builds its own Hono app; there is no shared API
@@ -106,14 +110,19 @@ meet plus one happy path, and every service is faked except the database.
       nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
       variable and never its value. Tests that only read what was logged use
       `@oligarchy/logger/testing`.
-- [ ] **`tests`: a suite may repeat a definition.** V1's unique index on a run's definitions, carried
-      over as `test_runs_suite_definition_idx`, goes in a new migration, and `createTestRun` no
-      longer reads for a twin before it inserts, so `Duplicate` goes. A suite can hold a mint run
-      per server, or the same test several times, and tally them as one batch.
-- [ ] **`tests`: a suite is named by its ISO.** `createTestSuite` takes the ISO's url and the
-      server's, not a name. The name is the version in the url's file name
-      (`https://iso.omarchy.org/omarchy-4.0.4.iso` is `4.0.4`), and the whole url when it names
-      none.
+- [x] **`tests`: test runs carry their ISO, and suites are batches.** Migration 0009:
+      `test_runs` gains `iso` and `server_url`, filled for existing rows from their suites, and
+      its `suite_id` may be null. `createTestRun({ definitionId, suiteId })` takes the suite's ISO
+      and server and needs the suite pending; `createTestRun({ definitionId, iso, serverUrl })`
+      files a test run on its own. The reads that join a test run to its suite answer `suite:
+      null` for one filed on its own. V1's unique index on a run's definitions, carried over as
+      `test_runs_suite_definition_idx`, goes, and `createTestRun` no longer reads for a twin
+      before it inserts, so `Duplicate` goes: a suite can hold a mint run per server, or the same
+      test several times. `createTestSuite({ iso, serverUrl })` takes no name; `suiteName` gives
+      the version in the url's file name (`https://iso.omarchy.org/omarchy-4.0.4.iso` is `4.0.4`),
+      or the whole url when it names none, so a host such as `10.0.0.5` is never a version.
+      `test_definitions.resume`, true unless a definition is defined otherwise, is kept with each
+      wording.
 
 ## 3. The flow that replaces the Linear board
 
@@ -122,17 +131,29 @@ queued jobs from the tickets' columns, and each close moved a ticket on. That lo
 `packages/jobs` and `apps/automation-server/src/worker.ts`. In V2 the `tests` store is the whole
 record, and the automation server acts on it directly.
 
-- [ ] **File.** `ctrl test run`, `ctrl test run testsuite` and the dashboard's create-suite:
-      `createTestSuite`, then one `createTestRun` per definition (a suite leaves out `mint`) with a
-      drive job each, then `startSuite`. `ctrl mint`, and the proxy's first reserve of an ISO on a
-      qemu server: a mint test run and job for each server, holding that server's setup lock with
-      `setupRequests.claim`.
+- [ ] **File.** Three ways in:
+      - A single test run (`ctrl test run`): `createTestRun({ definitionId, iso, serverUrl })` and
+        a drive job, with no suite.
+      - A suite (`ctrl test suite` and the dashboard's create-suite): `createTestSuite({ iso,
+        serverUrl })`, then one `createTestRun({ definitionId, suiteId })` per definition but
+        `mint`, each with a drive job, then `startSuite`. `nextPendingJob` does not look at
+        suites, so none of a suite's jobs may be queued before the suite is whole.
+      - A mint. The proxy's first resume reserve of an ISO on a qemu server holding no minted disk
+        for it (section 4) inserts the setup lock, then files a single test run of `mint` with that
+        ISO and the proxy's url, and a mint job, and names the job on the lock with
+        `setupRequests.setJob`: `claim` refuses a lock that has no job yet. `ctrl mint` (section 6)
+        is one suite holding a mint run per server, each taking its server's lock with
+        `setupRequests.claim`, which refuses a lock a live mint holds.
 - [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
       automation client, round robin (a mint only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
       `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
-      loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. V1:
-      `dispatch` in `worker.ts`.
+      loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. A drive's
+      reserve resumes its test run's ISO when its definition resumes and asks for a fresh boot
+      otherwise; a mint's never resumes. A resume that no qemu server holds the minted disk for is
+      the proxy's to mint, and the drive stays pending until a reserve lands. A mint that fails
+      releases its lock, so the drive's next reserve mints again; decide when a drive whose ISO
+      keeps failing to mint is errored instead. V1: `dispatch` in `worker.ts`.
 - [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
@@ -145,7 +166,8 @@ record, and the automation server acts on it directly.
       job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
       `ctrl diagnose` (`diagnosis.saveDiagnosis`). Then the drive is `finalizeJob`ed, its run
-      `completeRun`s passed or failed, and the suite `completeSuite`s once its last run has closed.
+      `completeRun`s passed or failed, and its suite, when it has one, `completeSuite`s once its
+      last run has closed.
 - [ ] **Abort.** By job id or by suite id, from `ctrl`, the dashboard and the automation server's
       `/abort`. A pending job is `abortJob`ed; a running one is stopped at its automation client
       first.
@@ -191,7 +213,11 @@ bearer, and runs under `@oligarchy/app`.
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
       `/servers`, `/minted` (asking every qemu server) and the qemu-server calls except `/stats`.
-      Forgets silent servers with `fleet.forget`.
+      Forgets silent servers with `fleet.forget`. A resume reserve that no server can take, because
+      those with room hold no minted disk for its ISO, takes each such server's setup lock with
+      `setupRequests.insert`, files a mint for each (section 3's File), and answers setup needed.
+      One mint per ISO and server: a reserve while that mint is in flight files none, and one that
+      ended without passing releases the lock (V1: `setup.ts`).
 - [ ] **automation-server** (`apps/automation-server`). Section 3's dispatch, close, abort, restart
       and shutdown, and `/abort`. Its reserve, run and abort calls to an automation client are its
       own, on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). `/linear`,
@@ -231,12 +257,20 @@ bearer, and runs under `@oligarchy/app`.
 
 ## 6. ctrl, last
 
-`ctrl` is really the diagnosing agent's tool, so it is dealt with after everything else.
+`ctrl` is really the diagnosing agent's tool, so it is dealt with after everything else. It keeps
+V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
 
-- [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
-      `test-results`, `mint`, `session` (becomes a job's view: status, logs, definition, run,
-      actions, images, debug log, diagnosis), `error-type` (new, list), `diagnose` and
-      `automation`.
+- [ ] **ctrl** (`apps/ctrl`), cut down from V1's.
+      - `test run --name <definition> --iso <url>`: one test run on its own, with no suite, for
+        trying something out; prints its test run and job ids.
+      - `test suite --iso <url>`: a suite of every definition but `mint`; prints its id.
+      - `mint`: a mint on each server (section 3's File).
+      - `diagnose`: the diagnosing agent's verdict against a drive's job (section 3's Diagnose).
+
+      Open: whether the proxy's url is a flag, as V1's `--server-url` was, or read from the
+      environment; and which of V1's other commands come over at all (`test define`, `details`,
+      `list` and `start`, `test-results`, `session` as a job's view, `error-type` and
+      `automation`).
 - [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
       `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
       `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
