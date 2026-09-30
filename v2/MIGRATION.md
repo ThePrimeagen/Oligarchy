@@ -19,7 +19,7 @@ meet plus one happy path, and every service is faked except the database.
   diagnoses) is keyed by job or by test run.
 - **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
   nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
-  guest through its own tools interface, not through `./client`'s words.
+  guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
 
 ## 1. Services to write
 
@@ -37,11 +37,11 @@ meet plus one happy path, and every service is faked except the database.
       attempts in all. It fails with `OpenRouterRefused`, `OpenRouterUnreachable` (which also
       names attempts run out), `OpenRouterOutOfTime` (a wait to ask again that would reach the
       request's deadline) or `Aborted`.
-- [ ] **Tools interface.** V1: `src/harness/tools.ts`, `src/harness/intent.ts` and
-      `src/driver/client.ts`, over `packages/http/src/proxy-client.ts`. What the driver's model
-      calls to drive a guest, and the calls the harness makes around them, each on
-      `@oligarchy/http` to the qemu reverse proxy, which forwards it to the job's qemu server. The
-      model's tools: get-image, get-serial, send-keys, and the mouse's move, click, double-click,
+- [ ] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
+      `src/harness/intent.ts` and `src/driver/client.ts`, over `packages/http/src/proxy-client.ts`.
+      Controlling a qemu guest over HTTP for the AI's tools: what the driver's model calls to
+      drive a guest, and the calls the harness makes around them, each on `@oligarchy/http` to the
+      qemu reverse proxy, which forwards it to the job's qemu server. The model's tools: get-image, get-serial, send-keys, and the mouse's move, click, double-click,
       scroll, drag, hold and release, each a tool of its own with typed arguments and its own
       description. The harness's calls: start, intent start and end, stop and save. Each call
       names its job by id where V1's named an agent and a session. V1 gives the model one `client`
@@ -105,7 +105,7 @@ record, and the automation server acts on it directly.
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
       `prompts/driving-agent.html` and `prompts/diagnosing-agent.html` take the job id where they
-      take `{{LINEAR_TICKET}}`. `prompts/driving-agent.html` names the tools interface's tools
+      take `{{LINEAR_TICKET}}`. `prompts/driving-agent.html` names qemu-http-tools' tools
       where it names `./client` and its `client` tool. `prompts/linear-issue.html` and
       `prompts/mint-issue.html` were ticket bodies and go.
 - [ ] **Close a drive or mint.** `completeJob` when the driver ran to its end, then queue a diagnose
@@ -150,7 +150,7 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
-      Needs the tools interface. It creates the OpenRouter client with `timeouts.header` from
+      Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
       `oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
@@ -194,8 +194,8 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
   templates and `LINEAR_*`.
 - Sessions: `SessionStore`, `agent_runs`, and routing by session or agent, which `routeJob` and
   `serverForJob` replace.
-- `./client`: `src/client`, its wrapper, `client.md`, and the driver's one `client` tool. The tools
-  interface replaces them.
+- `./client`: `src/client`, its wrapper, `client.md`, and the driver's one `client` tool.
+  qemu-http-tools replaces them.
 - `Database.ping`.
 - The shared HTTP API package: V1's contract, middleware, `serve` and wire errors. Each app's Hono
   routes are its contract.
