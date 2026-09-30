@@ -17,6 +17,9 @@ meet plus one happy path, and every service is faked except the database.
   package. Calls out go through `@oligarchy/http`.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
+- **Modern terminals only.** Output is coloured when stdout is a TTY, and the terminal is assumed
+  to render 24-bit colour, as Ghostty does. There is no `FORCE_COLOR` and no colour-depth probe;
+  V1's `packages/env/src/colors.ts` is not ported.
 - **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
   nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
   guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
@@ -102,13 +105,6 @@ meet plus one happy path, and every service is faked except the database.
       nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
       variable and never its value. Tests that only read what was logged use
       `@oligarchy/logger/testing`.
-- [ ] **Colour on stdout.** V1's `packages/env/src/colors.ts` honours `FORCE_COLOR` and asks the
-      stream for its colour depth; V2's tester reads `isTTY` alone. Move V1's rule into
-      `@oligarchy/env`.
-- [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
-      `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
-      `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
-      `--debug-logs`, `--diagnosis` and `--all`. Rename or drop them as `ctrl` is ported.
 
 ## 3. The flow that replaces the Linear board
 
@@ -202,10 +198,6 @@ bearer, and runs under `@oligarchy/app`.
       deadline;
       `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
       client, which `@oligarchy/openrouter` does not have yet.
-- [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
-      `test-results`, `mint`, `session` (becomes a job's view: status, logs, definition, run,
-      actions, images, debug log, diagnosis), `error-type` (new, list), `diagnose` and
-      `automation`.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
       stores, the pages keyed by ticket (`/tickets/:ticket`) key by job id, and `@oligarchy/linear`
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
@@ -217,12 +209,6 @@ bearer, and runs under `@oligarchy/app`.
 
 ## 5. Cutover
 
-- [ ] **The production database.** V2's migrations rename V1's tables in place (`test_runs` to
-      `test_suites`, `test_results` to `test_runs`, `automation_jobs` to `jobs`) and drop sessions
-      and Linear ids, so V1 stops working the moment V2's `prod:db:migrate` runs. The cutover is:
-      stop V1, migrate, start V2, with no way back but a restore.
-      [#298](https://github.com/ThePrimeagen/Oligarchy/pull/298) proposed V2 tables in a Postgres
-      schema of their own instead; decide before cutover.
 - [ ] **CI for V2.** CI lints and formats `v2/` but never runs its type checks or unit tests, and
       the migration checks guard only `packages/db/drizzle`. Add V2's `check:types`, `test:unit`
       and `db:check`, and the append-only and in-sync checks for `v2/packages/db/drizzle`.
@@ -233,6 +219,19 @@ bearer, and runs under `@oligarchy/app`.
       go.
 - [ ] **Retire V1.** Delete `apps/`, `packages/` and `src/`, V1's scripts and workspaces in the
       root `package.json`, and `LINEAR_*` from every env file, then move `v2/` to the root.
+
+## 6. ctrl, last
+
+`ctrl` is really the diagnosing agent's tool, so it is dealt with after everything else.
+
+- [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
+      `test-results`, `mint`, `session` (becomes a job's view: status, logs, definition, run,
+      actions, images, debug log, diagnosis), `error-type` (new, list), `diagnose` and
+      `automation`.
+- [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
+      `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
+      `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
+      `--debug-logs`, `--diagnosis` and `--all`. Rename or drop them as `ctrl` is ported.
 
 ## Not coming over
 
