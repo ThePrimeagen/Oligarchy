@@ -67,6 +67,27 @@ describe("the database", () => {
     }
     expect(answered.error.message).toMatch(/ECONNREFUSED/);
   });
+
+  it("a query that throws is a DatabaseError carrying what it threw (unhappy)", async () => {
+    const db = await created(UNREACHABLE);
+    const thrown = new Error("not a row");
+
+    const answered = await db.run(() => Promise.reject(thrown));
+
+    if (!jarl.error.is(answered, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(answered.error.message).toBe("not a row");
+    expect(answered.error.cause).toBe(thrown);
+  });
+
+  it("once closed, a query and a second close are each a DatabaseError (unhappy)", async () => {
+    const { db } = await connected();
+    jarl.unwrap(await db.close());
+
+    expect(jarl.error.is(await selectOne(db), Db.DatabaseError)).toBe(true);
+    expect(jarl.error.is(await db.close(), Db.DatabaseError)).toBe(true);
+  });
 });
 
 describe("the database's pool errors", () => {
