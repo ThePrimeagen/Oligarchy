@@ -67,6 +67,8 @@
       "rules": {
         "oligarchy/augment-through-entry": "error",
         "oligarchy/result-through-jarl": "error",
+        "oligarchy/service-create": "error",
+        "oligarchy/service-cycle": "error",
         "oligarchy/unwrap-inside-jarl-fn": "error",
         "typescript/no-redundant-type-constituents": "off",
         "import/namespace": "off"
