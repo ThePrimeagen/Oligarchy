@@ -132,6 +132,23 @@
         "vitest": "catalog:",
       },
     },
+    "packages/qemu-http-tools": {
+      "name": "@oligarchy/qemu-http-tools",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/async": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/openrouter": "workspace:*",
+        "jarl": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/sentry": {
       "name": "@oligarchy/sentry",
       "dependencies": {
@@ -295,6 +312,8 @@
     "@oligarchy/logger": ["@oligarchy/logger@workspace:packages/logger"],
 
     "@oligarchy/openrouter": ["@oligarchy/openrouter@workspace:packages/openrouter"],
+
+    "@oligarchy/qemu-http-tools": ["@oligarchy/qemu-http-tools@workspace:packages/qemu-http-tools"],
 
     "@oligarchy/sentry": ["@oligarchy/sentry@workspace:packages/sentry"],
 
