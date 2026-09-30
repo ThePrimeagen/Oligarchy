@@ -57,17 +57,17 @@ describe("a job's VM", () => {
   });
 });
 
-describe("a restarted qemu server's lost VMs", () => {
-  it("each VM it left downloading or running ends crashed, as the server restarted, and its job is named (happy)", async () => {
+describe("a restarted qemu server's past running VMs", () => {
+  it("each VM its crashed process left downloading or running is errored, saying so, and its job is named (happy)", async () => {
     const { vmStatus, running, downloading } = await leftBehind();
 
-    const lost = jarl.unwrap(await vmStatus.stopLost(RESTARTED));
+    const cleared = jarl.unwrap(await vmStatus.clearPastRunningVms(RESTARTED));
 
-    expect([...lost].sort()).toEqual([running, downloading].sort());
+    expect([...cleared].sort()).toEqual([running, downloading].sort());
     for (const jobId of [running, downloading]) {
       expect(jarl.unwrap(await vmStatus.current(jobId))).toMatchObject({
-        status: "crashed",
-        reason: "qemu server restarted",
+        status: "errored",
+        reason: "the qemu server crashed and came back to find this VM still running",
       });
     }
   });
@@ -75,7 +75,7 @@ describe("a restarted qemu server's lost VMs", () => {
   it("a VM it had already ended, one it never started, and one on another server are left as they were (unhappy)", async () => {
     const { vmStatus, ended, unstarted, elsewhere } = await leftBehind();
 
-    jarl.unwrap(await vmStatus.stopLost(RESTARTED));
+    jarl.unwrap(await vmStatus.clearPastRunningVms(RESTARTED));
 
     expect(await statusOf(vmStatus, ended)).toBe("shutdown");
     expect(await statusOf(vmStatus, unstarted)).toBeUndefined();
