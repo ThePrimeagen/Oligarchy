@@ -58,7 +58,7 @@ const formatActions = (rows: ReadonlyArray<Action>): string =>
     })
     .join("\n");
 
-export const create = App.createService<Db.Database, void, DebugLogs>(({ db }) => ({
+export const create = App.createService<Db.Database, App.NoOptions, DebugLogs>(({ db }) => ({
   service: "debugLogs",
 
   // A test run holds one open job at a time, so its lines fall into turns: a job's turn runs from

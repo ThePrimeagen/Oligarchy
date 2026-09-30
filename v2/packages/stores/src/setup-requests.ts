@@ -46,7 +46,7 @@ const releasable = sql`(${DbSchema.setupRequests.jobId} is null or exists (selec
 const pair = (iso: string, serverUrl: string) =>
   and(eq(DbSchema.setupRequests.iso, iso), eq(DbSchema.setupRequests.serverUrl, serverUrl));
 
-export const create = App.createService<Db.Database, void, SetupRequests>(({ db }) => ({
+export const create = App.createService<Db.Database, App.NoOptions, SetupRequests>(({ db }) => ({
   service: "setupRequests",
 
   insert: (iso, serverUrl) =>

@@ -21,12 +21,15 @@ export type Given<Deps extends AnyService> = [Deps] extends [never]
   ? Readonly<Record<string, never>>
   : { readonly [S in Deps as S["service"]]: Made<S> };
 
-// A create's options after its services: void options are left out, and all-optional ones may be.
-export type OptionsArgs<Options> = [Options] extends [void]
-  ? []
-  : {} extends Options
-    ? [options?: Options]
-    : [options: Options];
+// What a create is told: always one object of named fields, never a bare value, a list or a
+// function. NoOptions is the bag of a service told nothing.
+export type Bag = Readonly<Record<string, unknown>>;
+export type NoOptions = Readonly<Record<string, never>>;
+
+// A create's options after its services, which may be left out when nothing in them is required.
+export type OptionsArgs<Options extends Bag> = {} extends Options
+  ? [options?: Options]
+  : [options: Options];
 
 // An entry in Services, whose key must be the service's own name.
 export type Register<Name extends string, T extends { readonly service: Name }> = T;

@@ -50,7 +50,7 @@ export const logger = (
       );
     };
 
-  const create = App.createService<never, void, Logger.Logger>(() => ({
+  const create = App.createService<never, App.NoOptions, Logger.Logger>(() => ({
     service: "logger",
     info: emit("info"),
     warning: emit("warning"),

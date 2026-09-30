@@ -84,7 +84,7 @@ export const sentry = (): {
     },
   };
 
-  const create = App.createService<never, void, Types.Sentry>(() => ({
+  const create = App.createService<never, App.NoOptions, Types.Sentry>(() => ({
     service: "sentry",
     ...Tree.reporter(sink),
     wait: () => Promise.resolve(),

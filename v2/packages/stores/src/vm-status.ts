@@ -33,7 +33,7 @@ const CRASHED_WHILE_RUNNING = "the qemu server crashed and came back to find thi
 
 const LIVE: ReadonlyArray<VmStatusRow["status"]> = ["downloading", "running"];
 
-export const create = App.createService<Db.Database, void, VmStatus>(({ db }) => ({
+export const create = App.createService<Db.Database, App.NoOptions, VmStatus>(({ db }) => ({
   service: "vmStatus",
 
   record: (jobId, status) =>
