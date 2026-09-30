@@ -12,10 +12,14 @@ meet plus one happy path, and every service is faked except the database.
 - **Jobs live in the `tests` store.** A test run is one definition against one ISO on one server,
   and carries that ISO and server itself. It is filed on its own, to try something out, or in a
   suite: a batch named by its ISO's version that holds any number of test runs of each definition
-  and tallies them. A test run holds its jobs: mint, drive and diagnose. A job runs once; trying
+  and tallies them. A test run holds its jobs: setup, drive and diagnose. A job runs once; trying
   again is a new job.
+- **Setup, not mint.** What V1 calls a mint, installing an ISO and saving the disk a resume boots
+  from, is a setup in V2, and that disk is its setup disk: the job action, the definition, the
+  config keys, the flags and `ctrl setup`. V2 reads its own `v2/oligarchy.json`, since V1 still
+  reads `mint` from the root's.
 - **A definition says whether it resumes.** A drive of a resuming definition boots its test run's
-  ISO from that ISO's minted disk, and one that does not boots fresh. A mint always boots fresh.
+  ISO from that ISO's setup disk, and one that does not boots fresh. A setup always boots fresh.
 - **No Linear.** V2 files no tickets and reads no board. The pending jobs in Postgres are the queue,
   and an agent is known by its job id.
 - **HTTP servers are Hono.** Each app's `main` builds its own Hono app; there is no shared API
@@ -63,7 +67,7 @@ meet plus one happy path, and every service is faked except the database.
       (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
       waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
       other calls go with the apps that make them: the automation client's reserve and
-      relinquish, `ctrl mint`'s minted and viz's follow.
+      relinquish, `ctrl setup`'s setup disks and viz's follow.
 
 ## 2. Finish the services V2 has
 
@@ -117,7 +121,7 @@ meet plus one happy path, and every service is faked except the database.
       files a test run on its own. The reads that join a test run to its suite answer `suite:
       null` for one filed on its own. V1's unique index on a run's definitions, carried over as
       `test_runs_suite_definition_idx`, goes, and `createTestRun` no longer reads for a twin
-      before it inserts, so `Duplicate` goes: a suite can hold a mint run per server, or the same
+      before it inserts, so `Duplicate` goes: a suite can hold a setup run per server, or the same
       test several times. `createTestSuite({ iso, serverUrl })` takes no name; `suiteName` gives
       the version in the url's file name (`https://iso.omarchy.org/omarchy-4.0.4.iso` is `4.0.4`),
       or the whole url when it names none, so a host such as `10.0.0.5` is never a version.
@@ -131,6 +135,11 @@ meet plus one happy path, and every service is faked except the database.
       a test run on its own and its pending drive in one transaction, and hands back both.
       `startSuite` and `createTestRun({ definitionId, suiteId })` go. Runs and drives are stamped
       with `clock_timestamp()`, so they keep the order they were named in.
+- [x] **Mint is setup.** Migration 0010 renames the `job_action` value `mint` to `setup`, and the
+      definition named `mint` to `setup`, rows already written included. The queue hands out
+      setups first. The config's `models.setup` and `reasoning.setup` replace `mint`, in V2's own
+      `v2/oligarchy.json`; the driver's `--action` is `drive` or `setup`; `ctrl setup`'s
+      `--not-set-up` replaces `--unminted`; and a minted disk is a setup disk.
 
 ## 3. The flow that replaces the Linear board
 
@@ -143,30 +152,30 @@ record, and the automation server acts on it directly.
       - A single test run (`ctrl test run`): `createTestRun({ definitionId, iso, serverUrl })`,
         which writes the test run and its drive together, with no suite.
       - A suite (`ctrl test suite` and the dashboard's create-suite): one
-        `createTestSuite({ iso, serverUrl, definitionIds })` of every definition but `mint`,
+        `createTestSuite({ iso, serverUrl, definitionIds })` of every definition but `setup`,
         which writes the suite, its test runs and their drives in one transaction.
         `nextPendingJob` does not look at suites, so the queue never sees part of a suite.
-      - A mint. The proxy's first resume reserve of an ISO on a qemu server holding no minted disk
-        for it (section 4) inserts the setup lock, then files a single test run of `mint` with that
-        ISO and the proxy's url, and a mint job, and names the job on the lock with
-        `setupRequests.setJob`: `claim` refuses a lock that has no job yet. The run, its mint job
+      - A setup. The proxy's first resume reserve of an ISO on a qemu server holding no setup disk
+        for it (section 4) inserts the setup lock, then files a single test run of `setup` with
+        that ISO and the proxy's url, and a setup job, and names the job on the lock with
+        `setupRequests.setJob`: `claim` refuses a lock that has no job yet. The run, its setup job
         and `setJob` must be one transaction too, or a crash leaves a lock with no job.
-        `ctrl mint` (section 6) is one suite holding a mint run per server, each taking its
-        server's lock with `setupRequests.claim`, which refuses a lock a live mint holds.
-        Open: the store files every test run with a drive, so a mint run needs a mint job
+        `ctrl setup` (section 6) is one suite holding a setup run per server, each taking its
+        server's lock with `setupRequests.claim`, which refuses a lock a live setup holds.
+        Open: the store files every test run with a drive, so a setup run needs a setup job
         instead (by the definition, or by an action `createTestRun` and `createTestSuite` are
         given), and the lock lives in `setupRequests`, another store, so the one transaction
         spans two stores.
 - [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
-      automation client, round robin (a mint only on the server its setup lock names). Only once
+      automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
       `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
       loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. A drive's
       reserve resumes its test run's ISO when its definition resumes and asks for a fresh boot
-      otherwise; a mint's never resumes. A resume that no qemu server holds the minted disk for is
-      the proxy's to mint, and the drive stays pending until a reserve lands. A mint that fails
-      releases its lock, so the drive's next reserve mints again; decide when a drive whose ISO
-      keeps failing to mint is errored instead. V1: `dispatch` in `worker.ts`.
+      otherwise; a setup's never resumes. A resume that no qemu server holds the setup disk for is
+      the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
+      releases its lock, so the drive's next reserve sets up again; decide when a drive whose ISO
+      keeps failing to set up is errored instead. V1: `dispatch` in `worker.ts`.
 - [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
@@ -175,8 +184,8 @@ record, and the automation server acts on it directly.
       prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
       tool, and `prompts/driving-agent.html` names them where it names `./client`.
       `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go.
-- [ ] **Close a drive or mint.** `completeJob` when the driver ran to its end, then queue a diagnose
-      job on the same test run; `errorJob` with the reason when the system failed it.
+- [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
+      diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
       `ctrl diagnose` (`diagnosis.saveDiagnosis`). Then the drive is `finalizeJob`ed, its run
       `completeRun`s passed or failed, and its suite, when it has one, `completeSuite`s once its
@@ -185,7 +194,7 @@ record, and the automation server acts on it directly.
       `/abort`. A pending job is `abortJob`ed; a running one is stopped at its automation client
       first.
 - [ ] **Restart and shutdown.** At startup, each job the last automation server left running is
-      stopped at its client and errored, except a drive or mint whose driver had already finished,
+      stopped at its client and errored, except a drive or setup whose driver had already finished,
       which is closed as it would have been. At shutdown, each running job is stopped at its client
       and aborted. V1: `packages/jobs/src/reclaim.ts`, and `stopInherited` and `stopAtShutdown` in
       `worker.ts`.
@@ -200,12 +209,13 @@ logger and waited for on exit, as the tester's are), serves Hono behind the `OLI
 bearer, and runs under `@oligarchy/app`.
 
 - [ ] **qemu-server** (`apps/qemu-server`). Services: `Qemu` (starts a guest; keys, mouse,
-      screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `Minted` (finds and
-      saves minted disks), `QmpListen` (the QMP socket) and `Sessions` (slots against `--max-jobs`,
-      each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`, `/stop`, `/save`,
-      `/image`, `/serial`, `/follow`, `/stats`, `/minted`, `/send-keys`, `/mouse/*`,
-      `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`. Saves a failed
-      guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but nothing calls it.
+      screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `SetupDisks`
+      (finds and saves setup disks), `QmpListen` (the QMP socket) and `Sessions` (slots against
+      `--max-jobs`, each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`,
+      `/stop`, `/save`, `/image`, `/serial`, `/follow`, `/stats`, `/setup-disks`, `/send-keys`,
+      `/mouse/*`, `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`.
+      Saves a failed guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but
+      nothing calls it.
       Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
       and a session; `/image` and `/serial` answer bytes; and a 409 is a guest that is off on
       `/image`, `/send-keys` and `/mouse/*`, an intent already open on `/intent/start` (V1
@@ -215,33 +225,33 @@ bearer, and runs under `@oligarchy/app`.
       automation server errors the jobs. Nothing errors them at startup, as V1's
       `failRoutedSessions` did. At boot it calls `vmStatus.clearPastRunningVms` on its url, and
       kills any QEMU its last process left running, which V1 never did. Starts
-      QEMU with a pvpanic device and without `-no-reboot`, since a mint's installer reboots. Writes
+      QEMU with a pvpanic device and without `-no-reboot`, since a setup's installer reboots. Writes
       each VM's `vmStatus` as it changes, and reads how one ended from QEMU's `SHUTDOWN` reason
       over QMP, which V1 ignored: `guest-shutdown` is `shutdown`, `host-signal` and
       `host-qmp-quit` are `stopped`, `guest-panic` is `panicked`, and QEMU exiting with no
       `SHUTDOWN` is `crashed`, with its exit code or signal and the end of its stderr. pvpanic
       carries no detail: a panic's trace reaches the serial only once the installed system's
-      kernel writes its console to `ttyS0`, which the mint does not set yet.
+      kernel writes its console to `ttyS0`, which the setup does not set yet.
 - [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
-      `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
-      `/servers`, `/minted` (asking every qemu server) and the qemu-server calls except `/stats`.
-      Forgets silent servers with `fleet.forget`. A resume reserve that no server can take, because
-      those with room hold no minted disk for its ISO, takes each such server's setup lock with
-      `setupRequests.insert`, files a mint for each (section 3's File), and answers setup needed.
-      One mint per ISO and server: a reserve while that mint is in flight files none, and one that
-      ended without passing releases the lock (V1: `setup.ts`).
+      `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
+      `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
+      `/stats`. Forgets silent servers with `fleet.forget`. A resume reserve that no server can
+      take, because those with room hold no setup disk for its ISO, takes each such server's setup
+      lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
+      setup needed. One setup per ISO and server: a reserve while that setup is in flight files
+      none, and one that ended without passing releases the lock (V1: `setup.ts`).
 - [ ] **automation-server** (`apps/automation-server`). Section 3's dispatch, close, abort, restart
       and shutdown, and `/abort`. Its reserve, run and abort calls to an automation client are its
       own, on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). `/linear`,
       the board watch (`backlog.ts`) and the webhook signature (`signature.ts`) go.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
-      against `--max-jobs`); spawns `./driver` for a drive or mint and opencode for a diagnose
+      against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
       Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
-      `oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
+      `v2/oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
       `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
@@ -266,7 +276,8 @@ bearer, and runs under `@oligarchy/app`.
       watched on the board. Rewrite them for V2 as its apps land; `client.md` and `ctrl-linear.md`
       go.
 - [ ] **Retire V1.** Delete `apps/`, `packages/` and `src/`, V1's scripts and workspaces in the
-      root `package.json`, and `LINEAR_*` from every env file, then move `v2/` to the root.
+      root `package.json`, V1's root `oligarchy.json`, and `LINEAR_*` from every env file, then
+      move `v2/` to the root, V2's `oligarchy.json` and its config path with it.
 
 ## 6. ctrl, last
 
@@ -276,8 +287,8 @@ V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
 - [ ] **ctrl** (`apps/ctrl`), cut down from V1's.
       - `test run --name <definition> --iso <url>`: one test run on its own, with no suite, for
         trying something out; prints its test run and job ids.
-      - `test suite --iso <url>`: a suite of every definition but `mint`; prints its id.
-      - `mint`: a mint on each server (section 3's File).
+      - `test suite --iso <url>`: a suite of every definition but `setup`; prints its id.
+      - `setup`: a setup on each server (section 3's File).
       - `diagnose`: the diagnosing agent's verdict against a drive's job (section 3's Diagnose).
 
       Open: whether the proxy's url is a flag, as V1's `--server-url` was, or read from the
