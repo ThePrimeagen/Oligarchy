@@ -1,5 +1,5 @@
 import { cpus, freemem, totalmem } from "node:os";
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import type * as Logger from "@oligarchy/logger";
 
@@ -101,15 +101,13 @@ const percentile = (sorted: ReadonlyArray<number>, p: number): number => {
 const messageOf = (thrown: unknown): string =>
   thrown instanceof Error ? thrown.message : String(thrown);
 
+export type Options = { readonly source: Source; readonly attribution?: Logger.Attribution };
+
 // Each sample is the cpu busy since the last reading. A reading that throws is one error line and
 // is not the next one's baseline; a reading after a core count change, or with no cpu time
 // passed, is not comparable to the last, so it only becomes the next one's baseline.
-export const create = (options: {
-  readonly source: Source;
-  readonly logger: Logger.Logger;
-  readonly attribution?: Logger.Attribution;
-}): Host => {
-  const { source, logger, attribution } = options;
+export const create = App.createService<Logger.Logger, Options, Host>(({ logger }, options) => {
+  const { source, attribution } = options;
   const samples: Array<number> = [];
   let previous: CpuTimes | undefined;
 
@@ -170,7 +168,7 @@ export const create = (options: {
   };
 
   return { service: "host", sample, collect };
-};
+});
 
 // Samples every SAMPLE_INTERVAL_MS until signal aborts.
 export const sampling = (host: Pick<Host, "sample">, signal: AbortSignal): Promise<void> =>

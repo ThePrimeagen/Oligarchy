@@ -1,8 +1,8 @@
+import type * as App from "@oligarchy/app";
 import * as Db from "@oligarchy/db";
 import * as Env from "@oligarchy/env";
 import * as Logger from "@oligarchy/logger";
 import * as Stores from "@oligarchy/stores";
-import * as jarl from "jarl";
 
 export const environment = Env.cli({
   name: "tester",
@@ -12,9 +12,9 @@ export const environment = Env.cli({
   .done();
 
 export type Services = {
-  readonly db: Db.Database;
-  readonly logs: Stores.Logs.Logs;
-  readonly logger: Logger.Logger;
+  readonly db: App.Made<Db.Database>;
+  readonly logs: App.Made<Stores.Logs.Logs>;
+  readonly logger: App.Made<Logger.Logger>;
 };
 
 export type Terminal = {
@@ -27,28 +27,14 @@ const stdout: Terminal = {
   colors: process.stdout.isTTY,
 };
 
-// Every line is printed and stored in the logs table; a connection the database drops is a line
-// too, printed even when it cannot be stored.
+// The environment in, the services out. Every line is printed and stored in the logs table; a
+// connection the database drops is a line too, printed even when it cannot be stored.
 export const createServices = (
   env: { readonly vars: { readonly databaseUrl: Env.Secret } },
   terminal: Terminal = stdout,
-): jarl.Result<Services, Db.DatabaseError> => {
-  const opened = Db.open({
-    url: env.vars.databaseUrl,
-    onPoolError: (error) => {
-      logger.error(`db: pool error: ${error.message}`);
-    },
-  });
-  if (!opened.ok) {
-    return opened;
-  }
-  const db = jarl.value(opened);
-  const logs = Stores.Logs.create(db);
-  const logger = Logger.create({
-    write: terminal.write,
-    colors: terminal.colors,
-    store: (row) =>
-      logs.insertLog({ text: row.text, level: row.level, location: row.location, runId: null }),
-  });
-  return jarl.ok({ db, logs, logger });
+): Services => {
+  const db = Db.create({}, { url: env.vars.databaseUrl });
+  const logs = Stores.Logs.create({ db });
+  const logger = Logger.create({ db }, { write: terminal.write, colors: terminal.colors });
+  return { db, logs, logger };
 };

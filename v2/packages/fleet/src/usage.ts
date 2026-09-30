@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import * as jarl from "jarl";
 
 // /proc could not be read as this process, or ps could not be run, did not answer, or did not
@@ -37,11 +37,11 @@ declare module "@oligarchy/app" {
 
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
+export type Options = { readonly source: Source; readonly now?: () => bigint };
+
 // The cpu is this process busy since the last good reading; the first reading has none, so it is 0.
-export const create = (
-  source: Source,
-  now: () => bigint = () => process.hrtime.bigint(),
-): Usage => {
+export const create = App.createService<never, Options, Usage>((_, options) => {
+  const { source, now = () => process.hrtime.bigint() } = options;
   let last: { readonly reading: Reading; readonly at: bigint } | undefined;
 
   const collect = async (): Promise<jarl.Result<ProcessSample, UsageUnreadable>> => {
@@ -69,7 +69,7 @@ export const create = (
   };
 
   return { service: "usage", collect };
-};
+});
 
 // What the /proc walk reads; undefined is a path that is not there, or cannot be read.
 export type Fs = {
@@ -282,13 +282,17 @@ const nodeFs: Fs = {
 };
 
 // This process's usage: ps on macOS, /proc everywhere else.
-export const forThisProcess = (): Usage =>
+export const forThisProcess = (): App.Made<Usage> =>
   create(
-    process.platform === "darwin"
-      ? psSource({
-          pid: process.pid,
-          cpuUsage: () => process.cpuUsage(),
-          list: () => listProcesses(),
-        })
-      : procSource(nodeFs),
+    {},
+    {
+      source:
+        process.platform === "darwin"
+          ? psSource({
+              pid: process.pid,
+              cpuUsage: () => process.cpuUsage(),
+              list: () => listProcesses(),
+            })
+          : procSource(nodeFs),
+    },
   );

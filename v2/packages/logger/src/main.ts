@@ -1,4 +1,6 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
+import type * as Db from "@oligarchy/db";
+import * as DbSchema from "@oligarchy/db/schema";
 import * as jarl from "jarl";
 import * as Palette from "./palette.ts";
 import * as Render from "./render.ts";
@@ -7,15 +9,6 @@ export type Level = "info" | "warning" | "error" | "fatal";
 
 // location is a text bucket: a session id, or the process's own name.
 export type Attribution = { readonly location?: string; readonly agentId?: string };
-
-export type Row = {
-  readonly text: string;
-  readonly level: Level;
-  readonly location: string | null;
-  readonly agentId: string | null;
-};
-
-export type Store = (row: Row) => Promise<jarl.Result<void, { readonly message: string }>>;
 
 type Write = (text: string, attribution?: Attribution) => void;
 
@@ -34,19 +27,17 @@ declare module "@oligarchy/app" {
   }
 }
 
-const messageOf = (thrown: unknown): string =>
-  thrown instanceof Error ? thrown.message : String(thrown);
-
-// Without a store a line is written at once. With one, rows are stored one at a time in call
-// order and each line is written once its row has landed; a refused row is still written,
-// followed by a line saying why, which is not stored.
-export const create = (options: {
+export type Options = {
   readonly write: (line: string) => void;
   readonly colors: boolean;
-  readonly store?: Store;
   readonly now?: () => number;
-}): Logger => {
-  const { write, colors, store } = options;
+};
+
+// Rows go into the logs table one at a time in call order, and each line is written once its row
+// has landed; a refused row is still written, followed by a line saying why, which is not stored.
+// A connection the database drops is an error line of its own.
+export const create = App.createService<Db.Database, Options, Logger>(({ db }, options) => {
+  const { write, colors } = options;
   const now = options.now ?? Date.now;
   let palette = Palette.empty;
   let landed: Promise<void> = Promise.resolve();
@@ -55,17 +46,13 @@ export const create = (options: {
     write(Render.renderLine(line, colors));
   };
 
-  const keep = async (line: Render.Line, row: Row, into: Store) => {
-    let failure: string | undefined;
-    try {
-      const stored = await into(row);
-      failure = jarl.is_err(stored) ? stored.error.message : undefined;
-    } catch (thrown) {
-      failure = messageOf(thrown);
-    }
+  const keep = async (line: Render.Line, location: string | null) => {
+    const stored = await db.run(async (d) => {
+      await d.insert(DbSchema.logs).values({ text: line.text, level: line.level, location });
+    });
     print(line);
-    if (failure !== undefined) {
-      print({ text: `db: log insert failed: ${failure}`, level: "error" });
+    if (jarl.is_err(stored)) {
+      print({ text: `db: log insert failed: ${stored.error.message}`, level: "error" });
     }
   };
 
@@ -86,20 +73,20 @@ export const create = (options: {
         ...(location === undefined ? {} : { location }),
         ...(color === undefined ? {} : { color }),
       };
-      if (store === undefined) {
-        print(line);
-        return;
-      }
-      const row: Row = { text, level, location: location ?? null, agentId: agentId ?? null };
-      landed = landed.then(() => keep(line, row, store));
+      landed = landed.then(() => keep(line, location ?? null));
     };
+
+  const error = emit("error");
+  db.onPoolError((cause) => {
+    error(`db: pool error: ${cause.message}`);
+  });
 
   return {
     service: "logger",
     info: emit("info"),
     warning: emit("warning"),
-    error: emit("error"),
+    error,
     fatal: emit("fatal"),
     flush: () => landed,
   };
-};
+});

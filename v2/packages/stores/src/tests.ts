@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { and, asc, desc, eq, getTableColumns, inArray, notInArray, sql } from "drizzle-orm";
@@ -307,7 +307,7 @@ const openRunOf =
 
 // Each transition locks its row, checks the state it is in and whatever holds it, and only
 // then writes: a refused call changes nothing, and two calls cannot both pass one check.
-export const create = (db: Db.Database): Tests => {
+export const create = App.createService<Db.Database, void, Tests>(({ db }) => {
   const moveJob = (
     fn: string,
     id: string,
@@ -870,4 +870,4 @@ export const create = (db: Db.Database): Tests => {
     abortJob: (jobId, reason) =>
       moveJob("abortJob", jobId, job.open, { status: "aborted", reason, finishedAt: now }),
   };
-};
+});

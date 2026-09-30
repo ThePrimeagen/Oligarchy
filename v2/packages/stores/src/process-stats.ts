@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { sql } from "drizzle-orm";
@@ -34,7 +34,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = (db: Db.Database): ProcessStats => ({
+export const create = App.createService<Db.Database, void, ProcessStats>(({ db }) => ({
   service: "processStats",
 
   report: (name, type, stats) =>
@@ -95,4 +95,4 @@ export const create = (db: Db.Database): ProcessStats => ({
       }
       return series;
     }),
-});
+}));

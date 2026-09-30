@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import * as jarl from "jarl";
 
@@ -160,9 +160,9 @@ const parsed = (text: string, asked: Asked): jarl.Result<unknown, HttpInvalid> =
   }
 };
 
-export const create = (
-  options: { readonly fetch?: Fetch; readonly timeoutMs?: number } = {},
-): Http => {
+export type Options = { readonly fetch?: Fetch; readonly timeoutMs?: number };
+
+export const create = App.createService<never, Options, Http>((_, options) => {
   const send = options.fetch ?? fetch;
   const defaultMs = options.timeoutMs ?? TIMEOUT_MS;
 
@@ -250,4 +250,4 @@ export const create = (
   }
 
   return { service: "http", fetch: request };
-};
+});
