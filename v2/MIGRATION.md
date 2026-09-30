@@ -105,6 +105,7 @@ meet plus one happy path, and every service is faked except the database.
       nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
       variable and never its value. Tests that only read what was logged use
       `@oligarchy/logger/testing`.
+
 ## 3. The flow that replaces the Linear board
 
 In V1 the board drove everything: `ctrl` filed tickets, a webhook and a thirty-second board watch
