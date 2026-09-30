@@ -8,10 +8,10 @@ export type VmStatusRow = typeof DbSchema.vmStatus.$inferSelect;
 
 export type Live = "downloading" | "running";
 
-// How a VM ended. Only a crash says why: nothing else the host sees carries a cause.
+// How a VM ended. Only a crash or an error says why: nothing else the host sees carries a cause.
 export type End =
   | { readonly status: "shutdown" | "stopped" | "panicked" }
-  | { readonly status: "crashed"; readonly reason: string };
+  | { readonly status: "crashed" | "errored"; readonly reason: string };
 
 export type VmStatus = {
   readonly service: "vmStatus";
@@ -19,7 +19,7 @@ export type VmStatus = {
   readonly stop: (jobId: string, end: End) => Answer<void>;
   readonly current: (jobId: string) => Answer<VmStatusRow | undefined>;
   readonly history: (jobId: string) => Answer<ReadonlyArray<VmStatusRow>>;
-  readonly stopLost: (serverUrl: string) => Answer<ReadonlyArray<string>>;
+  readonly clearPastRunningVms: (serverUrl: string) => Answer<ReadonlyArray<string>>;
 };
 
 declare module "@oligarchy/app" {
@@ -28,7 +28,7 @@ declare module "@oligarchy/app" {
   }
 }
 
-const RESTARTED = "qemu server restarted";
+const CRASHED_WHILE_RUNNING = "the qemu server crashed and came back to find this VM still running";
 
 const LIVE: ReadonlyArray<VmStatusRow["status"]> = ["downloading", "running"];
 
@@ -67,9 +67,10 @@ export const create = (db: Db.Database): VmStatus => ({
         .orderBy(asc(DbSchema.vmStatus.id)),
     ),
 
-  // A qemu server that comes back holds no VM, so every VM routed to it whose newest change is
-  // still live died with the last process.
-  stopLost: (serverUrl) =>
+  // A qemu server that boots holds no VM yet, so every VM routed to it whose newest change is still
+  // downloading or running was left by a process that crashed. Errors them; killing a QEMU that
+  // outlived that process is the qemu server's.
+  clearPastRunningVms: (serverUrl) =>
     db.run((d) =>
       d.transaction(async (tx) => {
         const newest = await tx
@@ -81,15 +82,17 @@ export const create = (db: Db.Database): VmStatus => ({
           .innerJoin(DbSchema.jobServers, eq(DbSchema.jobServers.jobId, DbSchema.vmStatus.jobId))
           .where(eq(DbSchema.jobServers.serverUrl, serverUrl))
           .orderBy(DbSchema.vmStatus.jobId, desc(DbSchema.vmStatus.id));
-        const lost = newest.filter((row) => LIVE.includes(row.status)).map((row) => row.jobId);
-        if (lost.length > 0) {
-          await tx
-            .insert(DbSchema.vmStatus)
-            .values(
-              lost.map((jobId) => ({ jobId, status: "crashed" as const, reason: RESTARTED })),
-            );
+        const past = newest.filter((row) => LIVE.includes(row.status)).map((row) => row.jobId);
+        if (past.length > 0) {
+          await tx.insert(DbSchema.vmStatus).values(
+            past.map((jobId) => ({
+              jobId,
+              status: "errored" as const,
+              reason: CRASHED_WHILE_RUNNING,
+            })),
+          );
         }
-        return lost;
+        return past;
       }),
     ),
 });

@@ -240,8 +240,9 @@ export const jobServers = pgTable("job_servers", {
 
 // What the host can see of a VM. Live: downloading its ISO, then running. Ended, by QEMU's SHUTDOWN
 // reason: shutdown (the guest powered itself off), stopped (the host ended it), panicked (the
-// guest's pvpanic device fired); or crashed, QEMU gone with no SHUTDOWN at all. A shutdown says
-// the guest asked to power off, never whether its run went well. Named apart from the vm_status
+// guest's pvpanic device fired); crashed, QEMU gone with no SHUTDOWN at all; or errored, a VM the
+// qemu server gave up on, such as one its crashed last process left running. A shutdown says the
+// guest asked to power off, never whether its run went well. Named apart from the vm_status
 // table, since a table's row type takes the table's name.
 export const vmState = pgEnum("vm_state", [
   "downloading",
@@ -250,11 +251,12 @@ export const vmState = pgEnum("vm_state", [
   "stopped",
   "panicked",
   "crashed",
+  "errored",
 ]);
 
 // Each change in a job's VM is a row of its own, never updated: its status is its newest row, and
 // when it started or ended is when that row was written. id orders the changes, which can share a
-// timestamp. reason is set exactly on a crash: its exit code or signal and the end of its stderr.
+// timestamp. reason is set exactly on a crash or an error, and says what went wrong.
 export const vmStatus = pgTable(
   "vm_status",
   {
@@ -269,8 +271,8 @@ export const vmStatus = pgTable(
   (table) => [
     index("vm_status_job_id_id_idx").on(table.jobId, table.id),
     check(
-      "vm_status_reason_crashed_check",
-      sql`(${table.status} = 'crashed') = (${table.reason} IS NOT NULL)`,
+      "vm_status_reason_check",
+      sql`(${table.status} IN ('crashed', 'errored')) = (${table.reason} IS NOT NULL)`,
     ),
   ],
 );
