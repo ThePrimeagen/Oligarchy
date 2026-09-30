@@ -41,15 +41,16 @@ meet plus one happy path, and every service is faked except the database.
       `src/harness/intent.ts` and `src/driver/client.ts`, over `packages/http/src/proxy-client.ts`.
       Controlling a qemu guest over HTTP for the AI's tools: what the driver's model calls to
       drive a guest, and the calls the harness makes around them, each on `@oligarchy/http` to the
-      qemu reverse proxy, which forwards it to the job's qemu server. The model's tools: get-image, get-serial, send-keys, and the mouse's move, click, double-click,
-      scroll, drag, hold and release, each a tool of its own with typed arguments and its own
-      description. The harness's calls: start, intent start and end, stop and save. Each call
-      names its job by id where V1's named an agent and a session. V1 gives the model one `client`
-      tool, whose arguments are `./client`'s words and whose description is `client.md`, and runs
-      them through `src/client`; V2 does neither. `start` needs a long timeout of its own (45
-      minutes in V1) because a first ISO download blocks it. The proxy's other calls go with the
-      apps that make them: the automation client's reserve and relinquish, `ctrl mint`'s minted
-      and viz's follow.
+      qemu reverse proxy, which forwards it to the job's qemu server. The model's tools:
+      get-image, get-serial, send-keys, and the mouse's move, click, double-click, scroll, drag,
+      hold and release, each a tool of its own with typed arguments and its own description. The
+      harness's calls: start, intent start and end, stop and save. Each call names its job by id
+      where V1's named an agent and a session. V1 gives the model one `client` tool, whose
+      arguments are `./client`'s words and whose description is `client.md`, and runs them
+      through `src/client`; V2 does neither. `start` needs a long timeout of its own (45 minutes
+      in V1) because a first ISO download blocks it. The proxy's other calls go with the apps that
+      make them: the automation client's reserve and relinquish, `ctrl mint`'s minted and viz's
+      follow.
 - [ ] **Automation client client.** V1: `apps/automation-server/src/client.ts`. The automation
       server's reserve, run and abort calls to an automation client, with `OLIGARCHY_TOKEN` as the
       bearer.
