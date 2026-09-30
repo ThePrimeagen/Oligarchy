@@ -105,10 +105,10 @@ record, and the automation server acts on it directly.
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
       `prompts/driving-agent.html` and `prompts/diagnosing-agent.html` take the job id where they
-      take `{{LINEAR_TICKET}}`. `prompts/custom-harness-driving-agent.html`, the driver's
-      system prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its
-      `client` tool, and `prompts/driving-agent.html` names them where it names `./client`. `prompts/linear-issue.html` and
-      `prompts/mint-issue.html` were ticket bodies and go.
+      take `{{LINEAR_TICKET}}`. `prompts/custom-harness-driving-agent.html`, the driver's system
+      prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
+      tool, and `prompts/driving-agent.html` names them where it names `./client`.
+      `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go.
 - [ ] **Close a drive or mint.** `completeJob` when the driver ran to its end, then queue a diagnose
       job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
