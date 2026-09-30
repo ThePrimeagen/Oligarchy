@@ -4,7 +4,8 @@ import * as jarl from "jarl";
 import * as Http from "./main.ts";
 
 // "unreachable" throws as fetch does on no connection; "hang" answers only when the request's
-// signal aborts, as fetch does, so a timeout or the caller's abort ends it.
+// signal aborts, as fetch does, so a timeout or the caller's abort ends it. A request whose signal
+// has already aborted is refused before any reply and never recorded, as fetch never sends it.
 export type Reply = Response | "unreachable" | "hang";
 
 export type Asked = {
@@ -77,6 +78,9 @@ export const http = (
   };
 
   const fetch: Http.Fetch = async (url, init) => {
+    if (init.signal?.aborted === true) {
+      throw init.signal.reason;
+    }
     const one: Asked = {
       url,
       method: init.method ?? "GET",
