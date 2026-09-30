@@ -198,6 +198,48 @@ describe("createService types", () => {
     void (() => app.run({ counter: counted, greeter: greeting }, closes));
   });
 
+  it("takes its options as one bag, which may be left out when nothing in it is required (happy)", () => {
+    void App.createService<never, { readonly url: string; readonly retries?: number }, Counter>(
+      (_, options) => {
+        expectTypeOf(options).toEqualTypeOf<{ readonly url: string; readonly retries?: number }>();
+        return { service: "counter", increment: () => undefined, read: () => 0 };
+      },
+    );
+    void App.createService<never, App.NoOptions, Counter>((_, options) => {
+      expectTypeOf(options).toEqualTypeOf<App.NoOptions>();
+      return { service: "counter", increment: () => undefined, read: () => 0 };
+    });
+    expectTypeOf(Counters.create({})).toEqualTypeOf<App.Made<Counter>>();
+    expectTypeOf(Counters.create({}, {})).toEqualTypeOf<App.Made<Counter>>();
+  });
+
+  it("refuses options that are not an object bag (unhappy)", () => {
+    const counts = () => ({
+      service: "counter" as const,
+      increment: () => undefined,
+      read: () => 0,
+    });
+    // @ts-expect-error options are a bag, not void
+    void App.createService<never, void, Counter>(counts);
+    // @ts-expect-error options are a bag, not a string
+    void App.createService<never, string, Counter>(counts);
+    // @ts-expect-error options are a bag, not a number
+    void App.createService<never, number, Counter>(counts);
+    // @ts-expect-error options are a bag, not a list
+    void App.createService<never, ReadonlyArray<string>, Counter>(counts);
+    // @ts-expect-error options are a bag, not a function
+    void App.createService<never, () => string, Counter>(counts);
+  });
+
+  it("refuses a call whose options are not the bag its service names (unhappy)", () => {
+    // @ts-expect-error a counter is told nothing
+    void Counters.create({}, { start: 1 });
+    // @ts-expect-error a counter's options are a bag, not a number
+    void Counters.create({}, 1);
+    // @ts-expect-error a greeter's options are a bag, not its greeting
+    void Greeters.create({ counter: counter() }, "hi");
+  });
+
   it("refuses a call missing a service it wants (unhappy)", () => {
     // @ts-expect-error a greeter wants a counter
     void Greeters.create({}, { greeting: "hi" });
@@ -225,7 +267,7 @@ describe("createService types", () => {
   });
 
   it("refuses a service that reads a service it did not want (unhappy)", () => {
-    void App.createService<never, void, Counter>((services) => {
+    void App.createService<never, App.NoOptions, Counter>((services) => {
       // @ts-expect-error a counter wants nothing
       void services.greeter;
       return { service: "counter", increment: () => undefined, read: () => 0 };
@@ -236,8 +278,8 @@ describe("createService types", () => {
     const unread = () => ({ service: "counter" as const, increment: () => undefined });
     const echoes = () => ({ service: "greeter" as const, greet: (name: string) => name });
     // @ts-expect-error a counter reads its count
-    void App.createService<never, void, Counter>(unread);
+    void App.createService<never, App.NoOptions, Counter>(unread);
     // @ts-expect-error a greeter is not a counter
-    void App.createService<never, void, Counter>(echoes);
+    void App.createService<never, App.NoOptions, Counter>(echoes);
   });
 });

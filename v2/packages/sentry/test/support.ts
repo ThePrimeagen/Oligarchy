@@ -7,11 +7,8 @@ export const JOB_ID = "1baaad43-674b-4bdb-88d7-3f18fce50aba";
 export const TRACE_ID = "1baaad43674b4bdb88d73f18fce50aba";
 
 // A service whose requests go to the fake instead of Sentry.
-export const ingest = (
-  replies: Parameters<typeof Fake.http>[0],
-  options: { readonly timeoutMs?: number } = {},
-) => {
-  const fake = Fake.http(replies, options);
+export const ingest = (options: Fake.Options) => {
+  const fake = Fake.http(options);
   const sentry = Sentry.create({ http: fake.http }, { dsn: DSN, environment: "test" });
   return { sentry, asked: fake.asked };
 };

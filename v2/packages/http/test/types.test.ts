@@ -14,13 +14,23 @@ type Team = { readonly id: string };
 const decodeTeam = (body: unknown): jarl.Result<Team, NoTeam> =>
   typeof body === "string" ? jarl.ok({ id: body }) : jarl.err(new NoTeam("no team"));
 
-const { http } = Fake.http(Fake.json({}));
+const { http } = Fake.http({ replies: Fake.json({}) });
 
 describe("the http service", () => {
   it("is built by createService, the fake too, wanting no service and taking only its options (happy)", () => {
     expectTypeOf(http).toEqualTypeOf<App.Made<Http.Http>>();
     expectTypeOf<ReturnType<typeof Http.create>>().toEqualTypeOf<App.Made<Http.Http>>();
     expectTypeOf<Parameters<typeof Http.create>[1]>().toEqualTypeOf<Http.Options | undefined>();
+    expectTypeOf<Parameters<typeof Fake.http>>().toEqualTypeOf<[options: Fake.Options]>();
+  });
+
+  it("the fake takes one bag, not its replies and options apart (unhappy)", () => {
+    // @ts-expect-error the replies go in the bag
+    void Fake.http(Fake.json({}));
+    // @ts-expect-error the timeout goes in the bag with the replies
+    void Fake.http({ replies: Fake.json({}) }, { timeoutMs: 5 });
+    // @ts-expect-error the bag needs its replies
+    void Fake.http({ timeoutMs: 5 });
   });
 });
 
