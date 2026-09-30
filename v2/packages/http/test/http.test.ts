@@ -97,6 +97,31 @@ describe("fetch", () => {
     expect(Fake.failure(named, RateLimited).message).toBe("slow down; again in 7s");
   });
 
+  it('read "bytes" hands decode the 2xx body\'s bytes as they came, not parsed (happy)', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
+    const fake = Fake.http(new Response(png, { headers: { "Content-Type": "image/png" } }));
+
+    const image = await fake.http.fetch(URL, init, {
+      read: "bytes",
+      decode: (body) => jarl.ok(Array.from(body)),
+    });
+
+    expect(image).toEqual(jarl.ok(Array.from(png)));
+  });
+
+  it('read "bytes": a status\'s error still carries its body as text (sad)', async () => {
+    const fake = Fake.http(Fake.status(404, "no guest for job-1"));
+
+    const image = await fake.http.fetch(URL, init, {
+      read: "bytes",
+      decode: (body) => jarl.ok(Array.from(body)),
+    });
+
+    const missing = Fake.failure(image, Http.HttpNotFound);
+    expect(missing.body).toBe("no guest for job-1");
+    expect(missing.message).toBe(`${WHERE}: 404: no guest for job-1`);
+  });
+
   type Case = {
     readonly name: string;
     readonly reply: Fake.Reply;

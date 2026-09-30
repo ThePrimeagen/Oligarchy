@@ -17,6 +17,9 @@ meet plus one happy path, and every service is faked except the database.
   package. Calls out go through `@oligarchy/http`.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
+- **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
+  nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
+  guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
 
 ## 1. Services to write
 
@@ -34,12 +37,25 @@ meet plus one happy path, and every service is faked except the database.
       attempts in all. It fails with `OpenRouterRefused`, `OpenRouterUnreachable` (which also
       names attempts run out), `OpenRouterOutOfTime` (a wait to ask again that would reach the
       request's deadline) or `Aborted`.
-- [ ] **Proxy client.** V1: `packages/http/src/proxy-client.ts`. The calls the driver, `./client`
-      and the automation client make to the qemu reverse proxy: reserve, relinquish, start, image,
-      serial, send-keys, the mouse calls, intent start and end, stop, save and follow. On
-      `@oligarchy/http`. `start` needs a long timeout of its own (45 minutes in V1) because a first
-      ISO download blocks it. `follow` streams the guest's output in V1, and `@oligarchy/http`
-      reads whole bodies: decide whether `follow` needs streaming added to it.
+- [x] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
+      `src/harness/intent.ts`, `src/harness/pointer.ts` and `src/driver/client.ts`, over
+      `packages/http/src/proxy-client.ts`. Controlling one job's qemu guest over HTTP for the AI's
+      tools. `create({ job, baseUrl, token, http, signal })` names the job once; every call
+      carries it, and `OLIGARCHY_TOKEN` as the bearer, on `@oligarchy/http` to the qemu reverse
+      proxy. The harness's calls are `start`, `intentStart`, `intentEnd`, `stop` and `save`. The
+      guest's are `image` (the PNG's bytes, through `@oligarchy/http`'s `read: "bytes"`),
+      `serial`, `sendKeys` and `mouse`, which keeps the pointer as V1's harness did: a move,
+      scroll, hold or release leaves it at its point, a click and a double-click press there, a
+      drag starts there and leaves it at its end, a nudge moves it 0.02, and a call that failed
+      leaves it where it was. `tools` and `run(name, args)` are the model's native tool calls
+      over the guest's calls, one per action, each checked by its zod schema before anything is
+      sent. The driver owns steps, reasons and Done, and takes its own fields out of a call's
+      arguments before `run`. Nothing is asked again: every error comes back in the result,
+      `@oligarchy/http`'s own and `GuestOff` (a 409 from the screen, keys or mouse), `IntentOpen`
+      (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
+      waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
+      other calls go with the apps that make them: the automation client's reserve and
+      relinquish, `ctrl mint`'s minted and viz's follow.
 - [ ] **Automation client client.** V1: `apps/automation-server/src/client.ts`. The automation
       server's reserve, run and abort calls to an automation client, with `OLIGARCHY_TOKEN` as the
       bearer.
@@ -95,8 +111,10 @@ record, and the automation server acts on it directly.
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
       `prompts/driving-agent.html` and `prompts/diagnosing-agent.html` take the job id where they
-      take `{{LINEAR_TICKET}}`. `prompts/linear-issue.html` and `prompts/mint-issue.html` were
-      ticket bodies and go.
+      take `{{LINEAR_TICKET}}`. `prompts/custom-harness-driving-agent.html`, the driver's system
+      prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
+      tool, and `prompts/driving-agent.html` names them where it names `./client`.
+      `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go.
 - [ ] **Close a drive or mint.** `completeJob` when the driver ran to its end, then queue a diagnose
       job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
@@ -126,6 +144,10 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       `/image`, `/serial`, `/follow`, `/stats`, `/minted`, `/send-keys`, `/mouse/*`,
       `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`. Saves a failed
       guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but nothing calls it.
+      Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
+      and a session; `/image` and `/serial` answer bytes; and a 409 is a guest that is off on
+      `/image`, `/send-keys` and `/mouse/*`, an intent already open on `/intent/start` (V1
+      answered that one 400) and a guest that did not power off on `/save`.
 - [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
@@ -139,14 +161,12 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
-      Needs the proxy client. It creates the OpenRouter client with `timeouts.header` from
+      Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
       `oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
       `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
       client, which `@oligarchy/openrouter` does not have yet.
-- [ ] **client** (`src/client`). `./client`, the agent's commands against the proxy. Needs the proxy
-      client.
 - [ ] **ctrl** (`apps/ctrl`). `test` (define, details, list, run, testsuite, start),
       `test-results`, `mint`, `session` (becomes a job's view: status, logs, definition, run,
       actions, images, debug log, diagnosis), `error-type` (new, list), `diagnose` and
@@ -157,7 +177,8 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       V2's `db.open` makes a pool, so the database service needs a way to run there. It carries
       `packages/shared/src/steps.ts`, which places intents against a definition's steps.
 - [ ] **viz** (`apps/viz`) and the **session REPL** (`src/session`). Terminal views of a running
-      guest.
+      guest. viz reads the guest's output through the proxy's `/follow`, which streams in V1, and
+      `@oligarchy/http` reads whole bodies: decide whether `follow` needs streaming added to it.
 
 ## 5. Cutover
 
@@ -173,7 +194,8 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
 - [ ] **Docs and skills.** The root `AGENTS.md`, `client.md`, `ctrl.md`, `ctrl-linear.md`,
       `ctrl-diagnose.md`, `minted-disks.md`, `SUPER_RUN.md` and the skills in `.cursor/skills`
       describe V1 and its Linear board: a driving agent takes its task from a ticket, and a run is
-      watched on the board. Rewrite them for V2 as its apps land; `ctrl-linear.md` goes.
+      watched on the board. Rewrite them for V2 as its apps land; `client.md` and `ctrl-linear.md`
+      go.
 - [ ] **Retire V1.** Delete `apps/`, `packages/` and `src/`, V1's scripts and workspaces in the
       root `package.json`, and `LINEAR_*` from every env file, then move `v2/` to the root.
 
@@ -183,6 +205,8 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
   templates and `LINEAR_*`.
 - Sessions: `SessionStore`, `agent_runs`, and routing by session or agent, which `routeJob` and
   `serverForJob` replace.
+- `./client`: `src/client`, its wrapper, `client.md`, and the driver's one `client` tool.
+  qemu-http-tools replaces them.
 - `Database.ping`.
 - The shared HTTP API package: V1's contract, middleware, `serve` and wire errors. Each app's Hono
   routes are its contract.
