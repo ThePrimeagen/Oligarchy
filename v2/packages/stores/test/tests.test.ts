@@ -33,21 +33,24 @@ const said = (result: jarl.Result<unknown, Error>) =>
     : `${result.error.name}: ${result.error.message.replaceAll(UUID, "<id>")}`;
 
 const SUITE: Tests.SuiteInput = {
-  name: "nightly",
-  iso: "https://example.com/omarchy.iso",
+  iso: "https://iso.omarchy.org/omarchy-4.0.4.iso",
   serverUrl: "http://qemu-1",
 };
 
-const definition = async (tests: Store, name = "lock-screen") =>
+const SINGLE = { iso: "https://iso.omarchy.org/omarchy-4.1.0.iso", serverUrl: "http://qemu-2" };
+
+const definition = async (tests: Store, name = "lock-screen", resume = true) =>
   jarl.unwrap(
-    await tests.defineTestDefinition({ name, description: "", instruction: "", proof: "" }),
+    await tests.defineTestDefinition({ name, description: "", instruction: "", proof: "", resume }),
   ).id;
 
 const newSuite = async (tests: Store) => jarl.unwrap(await tests.createTestSuite(SUITE));
 
 const newRun = async (tests: Store, suiteId?: string, name?: string) => {
   const suite = suiteId ?? (await newSuite(tests)).id;
-  return jarl.unwrap(await tests.createTestRun(suite, await definition(tests, name)));
+  return jarl.unwrap(
+    await tests.createTestRun({ suiteId: suite, definitionId: await definition(tests, name) }),
+  );
 };
 
 const newJob = async (tests: Store, runId?: string, action: Tests.JobAction = "drive") => {
@@ -165,7 +168,8 @@ const SUITE_MOVES: Readonly<Record<string, Move>> = {
   startSuite: (tests, id) => tests.startSuite(id),
   completeSuite: (tests, id) => tests.completeSuite(id, "passed", null),
   abortSuite: (tests, id) => tests.abortSuite(id, "operator"),
-  createTestRun: async (tests, id) => tests.createTestRun(id, await definition(tests, "wifi")),
+  createTestRun: async (tests, id) =>
+    tests.createTestRun({ suiteId: id, definitionId: await definition(tests, "wifi") }),
 };
 const SUITE_NEEDS = {
   startSuite: "pending",
@@ -248,6 +252,17 @@ const createdAt = (db: Db.Database, id: string, second: number) =>
       .where(eq(DbSchema.jobs.id, id)),
   );
 
+describe("a suite's name", () => {
+  it("is the version in its ISO's file name (happy)", () => {
+    expect(Tests.suiteName("https://iso.omarchy.org/omarchy-4.0.4.iso")).toBe("4.0.4");
+  });
+
+  it("is the whole ISO url when its file name names no version, whatever its host (unhappy)", () => {
+    const iso = "http://10.0.0.5:8080/omarchy-latest.iso";
+    expect(Tests.suiteName(iso)).toBe(iso);
+  });
+});
+
 describe("a test, start to finish", () => {
   it("it starts on its model, its drive runs and completes, its diagnose passes it, and the suite passes (happy)", async () => {
     const { tests } = await database();
@@ -262,7 +277,10 @@ describe("a test, start to finish", () => {
     };
 
     const suite = await step("createTestSuite", tests.createTestSuite(SUITE));
-    const run = await step("createTestRun", tests.createTestRun(suite.id, await definition(tests)));
+    const run = await step(
+      "createTestRun",
+      tests.createTestRun({ suiteId: suite.id, definitionId: await definition(tests) }),
+    );
     await step("startSuite", tests.startSuite(suite.id));
     await step("startRun", tests.startRun(run.id, MODEL));
     const drive = await step("createJob drive", tests.createJob(run.id, "drive"));
@@ -298,6 +316,41 @@ describe("a test, start to finish", () => {
         .jobs.map((job) => `${job.action} ${job.status}`),
     ).toEqual(["drive succeeded", "diagnose completed"]);
     expect(jarl.unwrap(await tests.getTestRun(run.id)).model).toBe(MODEL);
+    expect(suite.name).toBe("4.0.4");
+    const details = jarl.unwrap(await tests.getJobDetails(drive.id));
+    expect({
+      suite: details.suite?.id,
+      iso: details.run.iso,
+      serverUrl: details.run.serverUrl,
+      resume: details.definition.resume,
+    }).toEqual({ suite: suite.id, ...SUITE, resume: true });
+  });
+});
+
+describe("a single test run, with no suite", () => {
+  it("carries its own iso and server, queues its drive and takes its verdict; nothing names a suite (happy)", async () => {
+    const { tests } = await database();
+
+    const run = jarl.unwrap(
+      await tests.createTestRun({ definitionId: await definition(tests), ...SINGLE }),
+    );
+    jarl.unwrap(await tests.startRun(run.id, MODEL));
+    const drive = jarl.unwrap(await tests.createJob(run.id, "drive"));
+    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    jarl.unwrap(await tests.runJob(drive.id, SERVER));
+    jarl.unwrap(await tests.completeJob(drive.id));
+    jarl.unwrap(await tests.finalizeJob(drive.id, "succeeded", null));
+    const closed = jarl.unwrap(await tests.completeRun(run.id, "passed", null));
+
+    expect(queued?.id).toBe(drive.id);
+    expect(closed.status).toBe("passed");
+    expect({ suiteId: run.suiteId, iso: run.iso, serverUrl: run.serverUrl }).toEqual({
+      suiteId: null,
+      ...SINGLE,
+    });
+    expect(jarl.unwrap(await tests.getTestRun(run.id)).suite).toBeNull();
+    expect(jarl.unwrap(await tests.getTestRunDetails(run.id)).suite).toBeNull();
+    expect(jarl.unwrap(await tests.getJobDetails(drive.id)).suite).toBeNull();
   });
 });
 
@@ -425,11 +478,11 @@ describe("a test run, state by state", () => {
 });
 
 describe("a suite, state by state", () => {
-  it("pending: it starts, is aborted or takes test runs, one per definition, and refuses completing (unhappy)", async () => {
+  it("pending: it starts, is aborted or takes test runs, a definition as often as asked, and refuses completing (unhappy)", async () => {
     const setup = await database();
     const suite = await newSuite(setup.tests);
     const lockScreen = await definition(setup.tests);
-    jarl.unwrap(await setup.tests.createTestRun(suite.id, lockScreen));
+    jarl.unwrap(await setup.tests.createTestRun({ suiteId: suite.id, definitionId: lockScreen }));
 
     expect(await suiteMoves(setup, "pending")).toEqual(
       expected(SUITE_NEEDS, "test suite <id> is pending", {
@@ -438,10 +491,11 @@ describe("a suite, state by state", () => {
         createTestRun: "pending",
       }),
     );
-    expect(said(await setup.tests.createTestRun(suite.id, lockScreen))).toBe(
-      `Duplicate: createTestRun: test suite <id> already has test definition ${String(lockScreen)}`,
-    );
-    expect(said(await setup.tests.createTestRun(suite.id, 999))).toBe(
+    jarl.unwrap(await setup.tests.createTestRun({ suiteId: suite.id, definitionId: lockScreen }));
+    expect(
+      jarl.unwrap(await setup.tests.listTestRuns(suite.id)).map((listed) => listed.definitionId),
+    ).toEqual([lockScreen, lockScreen]);
+    expect(said(await setup.tests.createTestRun({ suiteId: suite.id, definitionId: 999 }))).toBe(
       "NotFound: createTestRun: no test definition 999",
     );
   });
@@ -502,6 +556,17 @@ describe("the reads with rules of their own", () => {
     expect(jarl.unwrap(await setup.tests.nextPendingJob([]))).toBeUndefined();
   });
 
+  it("a definition's resume is kept with each wording: a newer wording that boots fresh does not resume, the older still does", async () => {
+    const { tests } = await database();
+    await definition(tests, "lock-screen", true);
+    await definition(tests, "lock-screen", false);
+
+    expect(jarl.unwrap(await tests.findTestDefinition("lock-screen"))?.resume).toBe(false);
+    expect(
+      jarl.unwrap(await tests.listTestDefinitionHistory("lock-screen")).map((row) => row.resume),
+    ).toEqual([true, false]);
+  });
+
   it("latestJob is a test run's newest job of an action, or nothing", async () => {
     const { db, tests } = await database();
     const run = await newRun(tests);
@@ -550,7 +615,7 @@ describe("a row that does not exist", () => {
   it("every call that names one by id refuses it with NotFound (unhappy)", async () => {
     const { tests } = await database();
     const calls: Readonly<Record<string, () => Promise<jarl.Result<unknown, Error>>>> = {
-      createTestRun: () => tests.createTestRun(MISSING, 1),
+      createTestRun: () => tests.createTestRun({ suiteId: MISSING, definitionId: 1 }),
       createJob: () => tests.createJob(MISSING, "drive"),
       runJob: () => tests.runJob(MISSING, SERVER),
       completeJob: () => tests.completeJob(MISSING),
@@ -597,6 +662,9 @@ describe("a row that does not exist", () => {
       Object.fromEntries(
         Object.keys(calls).map((fn) => [fn, `NotFound: ${fn}: no ${nouns[fn] ?? "job"} <id>`]),
       ),
+    );
+    expect(said(await tests.createTestRun({ definitionId: 999, ...SINGLE }))).toBe(
+      "NotFound: createTestRun: no test definition 999",
     );
   });
 });

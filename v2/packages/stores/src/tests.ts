@@ -14,10 +14,6 @@ export type InvalidState = InstanceType<typeof InvalidState>;
 export const NotFound = jarl.error.define("NotFound");
 export type NotFound = InstanceType<typeof NotFound>;
 
-// A suite already holds a test run for that definition.
-export const Duplicate = jarl.error.define("Duplicate");
-export type Duplicate = InstanceType<typeof Duplicate>;
-
 export type DefinitionRow = typeof DbSchema.testDefinitions.$inferSelect;
 
 export type BasePromptRow = typeof DbSchema.testBasePrompts.$inferSelect;
@@ -35,10 +31,10 @@ export type JobStatus = JobRow["status"];
 export type RunStatus = RunRow["status"];
 
 // runs counts the suite's test runs in each status. In a summary, test is the definition's
-// name and suite the suite's.
+// name and suite the suite's, null for a test run filed on its own.
 export type TestSuiteSummary = SuiteRow & { readonly runs: Readonly<Record<RunStatus, number>> };
 
-export type TestRunSummary = RunRow & { readonly test: string; readonly suite: string };
+export type TestRunSummary = RunRow & { readonly test: string; readonly suite: string | null };
 
 export type JobSummary = JobRow & { readonly test: string };
 
@@ -65,9 +61,10 @@ export type TestSuiteDetails = {
   }>;
 };
 
+// suite is null for a test run filed on its own.
 export type TestRunDetails = {
   readonly run: RunRow;
-  readonly suite: SuiteRow;
+  readonly suite: SuiteRow | null;
   readonly definition: DefinitionRow;
   readonly jobs: ReadonlyArray<JobRow>;
 };
@@ -75,7 +72,7 @@ export type TestRunDetails = {
 export type JobDetails = {
   readonly job: JobRow;
   readonly run: RunRow;
-  readonly suite: SuiteRow;
+  readonly suite: SuiteRow | null;
   readonly definition: DefinitionRow;
 };
 
@@ -84,6 +81,7 @@ export type DefinitionInput = {
   readonly description: string;
   readonly instruction: string;
   readonly proof: string;
+  readonly resume: boolean;
 };
 
 export type DefinedDefinition = {
@@ -93,9 +91,20 @@ export type DefinedDefinition = {
 };
 
 export type SuiteInput = {
-  readonly name: string;
   readonly iso: string;
   readonly serverUrl: string;
+};
+
+// A test run in a suite takes the suite's ISO and server; one filed on its own names its own.
+export type RunInput =
+  | { readonly definitionId: number; readonly suiteId: string }
+  | { readonly definitionId: number; readonly iso: string; readonly serverUrl: string };
+
+// The version in the ISO's file name (`omarchy-4.0.4.iso` is `4.0.4`), or the whole url when
+// it names none. Only the file name is read, so a host such as 10.0.0.5 is never a version.
+export const suiteName = (iso: string): string => {
+  const file = iso.split(/[?#]/, 1)[0]?.split("/").pop() ?? "";
+  return /\d+(?:\.\d+){2,}/.exec(file)?.[0] ?? iso;
 };
 
 export type SuiteVerdict = "passed" | "failed";
@@ -129,10 +138,7 @@ export type Tests = {
   ) => Moved<SuiteRow>;
   readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
 
-  readonly createTestRun: (
-    suiteId: string,
-    definitionId: number,
-  ) => Promise<jarl.Result<RunRow, Db.DatabaseError | InvalidState | NotFound | Duplicate>>;
+  readonly createTestRun: (input: RunInput) => Moved<RunRow>;
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
   readonly listTestRuns: (suiteId: string) => Answer<ReadonlyArray<TestRunSummary>>;
@@ -210,7 +216,7 @@ const countRuns = async (d: Db.Drizzle, suiteIds: ReadonlyArray<string>) => {
     .where(inArray(DbSchema.testRuns.suiteId, [...suiteIds]))
     .groupBy(DbSchema.testRuns.suiteId, DbSchema.testRuns.status);
   for (const row of rows) {
-    const counted = counts.get(row.suiteId);
+    const counted = row.suiteId === null ? undefined : counts.get(row.suiteId);
     if (counted !== undefined) {
       counted[row.status] = row.count;
     }
@@ -489,7 +495,13 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
 
     createTestSuite: (input) =>
       db.run(async (d) =>
-        only(await d.insert(DbSchema.testSuites).values(input).returning(), "createTestSuite"),
+        only(
+          await d
+            .insert(DbSchema.testSuites)
+            .values({ ...input, name: suiteName(input.iso) })
+            .returning(),
+          "createTestSuite",
+        ),
       ),
 
     getTestSuite: (suiteId) =>
@@ -583,13 +595,25 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         openRunOf("abortSuite"),
       ),
 
-    createTestRun: (suiteId, definitionId) =>
+    // A test run in a suite locks the suite, which must still be pending, and takes its ISO and
+    // server; one filed on its own names its own.
+    createTestRun: (input) =>
       db
         .run((d) =>
-          d.transaction(
-            async (tx): Promise<jarl.Result<RunRow, InvalidState | NotFound | Duplicate>> => {
+          d.transaction(async (tx): Promise<jarl.Result<RunRow, Refusal>> => {
+            const placed = async (): Promise<
+              jarl.Result<{ suiteId: string | null; iso: string; serverUrl: string }, Refusal>
+            > => {
+              if (!("suiteId" in input)) {
+                return jarl.ok({ suiteId: null, iso: input.iso, serverUrl: input.serverUrl });
+              }
+              const { suiteId } = input;
               const [held] = await tx
-                .select({ status: DbSchema.testSuites.status })
+                .select({
+                  status: DbSchema.testSuites.status,
+                  iso: DbSchema.testSuites.iso,
+                  serverUrl: DbSchema.testSuites.serverUrl,
+                })
                 .from(DbSchema.testSuites)
                 .where(eq(DbSchema.testSuites.id, suiteId))
                 .for("update");
@@ -603,39 +627,32 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
                   ),
                 );
               }
-              const [known] = await tx
-                .select({ id: DbSchema.testDefinitions.id })
-                .from(DbSchema.testDefinitions)
-                .where(eq(DbSchema.testDefinitions.id, definitionId));
-              if (known === undefined) {
-                return jarl.err(
-                  new NotFound(`createTestRun: no test definition ${String(definitionId)}`),
-                );
-              }
-              const [twin] = await tx
-                .select({ id: DbSchema.testRuns.id })
-                .from(DbSchema.testRuns)
-                .where(
-                  and(
-                    eq(DbSchema.testRuns.suiteId, suiteId),
-                    eq(DbSchema.testRuns.definitionId, definitionId),
-                  ),
-                );
-              if (twin !== undefined) {
-                return jarl.err(
-                  new Duplicate(
-                    `createTestRun: test suite ${suiteId} already has test definition ${String(definitionId)}`,
-                  ),
-                );
-              }
-              return jarl.ok(
-                only(
-                  await tx.insert(DbSchema.testRuns).values({ suiteId, definitionId }).returning(),
-                  "createTestRun",
-                ),
+              return jarl.ok({ suiteId, iso: held.iso, serverUrl: held.serverUrl });
+            };
+            const where = await placed();
+            if (jarl.is_err(where)) {
+              return where;
+            }
+            const { definitionId } = input;
+            const [known] = await tx
+              .select({ id: DbSchema.testDefinitions.id })
+              .from(DbSchema.testDefinitions)
+              .where(eq(DbSchema.testDefinitions.id, definitionId));
+            if (known === undefined) {
+              return jarl.err(
+                new NotFound(`createTestRun: no test definition ${String(definitionId)}`),
               );
-            },
-          ),
+            }
+            return jarl.ok(
+              only(
+                await tx
+                  .insert(DbSchema.testRuns)
+                  .values({ ...jarl.value(where), definitionId })
+                  .returning(),
+                "createTestRun",
+              ),
+            );
+          }),
         )
         .then(settle),
 
@@ -649,7 +666,7 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
               DbSchema.testDefinitions,
               eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
             )
-            .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+            .leftJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
             .where(eq(DbSchema.testRuns.id, runId));
           return row === undefined
             ? jarl.err(new NotFound(`getTestRun: no test run ${runId}`))
@@ -667,7 +684,7 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
               definition: DbSchema.testDefinitions,
             })
             .from(DbSchema.testRuns)
-            .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+            .leftJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
             .innerJoin(
               DbSchema.testDefinitions,
               eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
@@ -694,7 +711,7 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
             DbSchema.testDefinitions,
             eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),
           )
-          .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+          .leftJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
           .where(eq(DbSchema.testRuns.suiteId, suiteId))
           .orderBy(asc(DbSchema.testRuns.createdAt), asc(DbSchema.testRuns.id)),
       ),
@@ -786,7 +803,7 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
             })
             .from(DbSchema.jobs)
             .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
-            .innerJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
+            .leftJoin(DbSchema.testSuites, eq(DbSchema.testSuites.id, DbSchema.testRuns.suiteId))
             .innerJoin(
               DbSchema.testDefinitions,
               eq(DbSchema.testDefinitions.id, DbSchema.testRuns.definitionId),

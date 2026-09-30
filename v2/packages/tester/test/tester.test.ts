@@ -70,7 +70,7 @@ describe("the tester against a fake postgres", () => {
       );
       await query(
         fake.url,
-        "insert into test_runs (suite_id, definition_id, status) values ($1, $2, $3)",
+        "insert into test_runs (suite_id, definition_id, iso, server_url, status) values ($1, $2, 'omarchy.iso', 'http://s1', $3)",
         [suite?.["id"], definition?.["id"], status],
       );
     }

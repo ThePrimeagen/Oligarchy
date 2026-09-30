@@ -56,11 +56,7 @@ export const database = async () => {
 // A job on a test run of its own, in a suite of its own.
 export const newJob = async (tests: Tests.Tests, action: Tests.JobAction = "drive") => {
   const suite = jarl.unwrap(
-    await tests.createTestSuite({
-      name: "nightly",
-      iso: "omarchy.iso",
-      serverUrl: "http://qemu-1",
-    }),
+    await tests.createTestSuite({ iso: "omarchy.iso", serverUrl: "http://qemu-1" }),
   );
   const definition = jarl.unwrap(
     await tests.defineTestDefinition({
@@ -68,9 +64,12 @@ export const newJob = async (tests: Tests.Tests, action: Tests.JobAction = "driv
       description: "",
       instruction: "",
       proof: "",
+      resume: true,
     }),
   );
-  const run = jarl.unwrap(await tests.createTestRun(suite.id, definition.id));
+  const run = jarl.unwrap(
+    await tests.createTestRun({ suiteId: suite.id, definitionId: definition.id }),
+  );
   return jarl.unwrap(await tests.createJob(run.id, action));
 };
 
