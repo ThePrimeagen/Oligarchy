@@ -1,8 +1,22 @@
+import type * as App from "@oligarchy/app";
+import type * as Http from "@oligarchy/http";
 import * as Fake from "@oligarchy/http/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type * as Sentry from "../src/main.ts";
+import * as SentryTesting from "../src/testing.ts";
 import { errors, held, ingest, JOB_ID, spans, TRACE_ID, within } from "./support.ts";
 
 const answered = () => Fake.json({ id: "stored" });
+
+describe("the sentry service", () => {
+  it("is built by createService over the http it wants, the fake too (happy)", () => {
+    expectTypeOf(ingest(answered()).sentry).toEqualTypeOf<App.Made<Sentry.Sentry>>();
+    expectTypeOf(SentryTesting.sentry().sentry).toEqualTypeOf<App.Made<Sentry.Sentry>>();
+    expectTypeOf<Parameters<typeof Sentry.create>[0]>().toEqualTypeOf<{
+      readonly http: App.Made<Http.Http>;
+    }>();
+  });
+});
 
 describe("sentry", () => {
   it("puts a job's spans, their children and the errors sent through them on the job's trace, and wait resolves once Sentry has them (happy)", async () => {

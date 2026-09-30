@@ -2,11 +2,17 @@
 import * as jarl from "jarl";
 import { describe, expectTypeOf, it } from "vitest";
 import * as App from "../src/main.ts";
-import { counter, greeter, type Counter, type Greeter } from "./support.ts";
+import * as Counters from "./counter.ts";
+import * as Greeters from "./greeter.ts";
+
+type Counter = Counters.Counter;
+type Greeter = Greeters.Greeter;
 
 type Reads = { readonly flags: { readonly name: string } };
 const environment = { command: "", flags: { name: "ada" } } as const;
 const closes = () => undefined;
+const counter = () => Counters.create({});
+const greeter = () => Greeters.create({ counter: counter() }, { greeting: "hi" });
 
 const counts = async (app: App.App<Reads, Counter>) => {
   app.services.counter.increment();
@@ -85,8 +91,9 @@ describe("App types", () => {
     void (() => new App.App(environment).run({ clock: counter() }, closes));
     // @ts-expect-error a service, not an object of services
     void (() => app.run(counter(), closes));
-    // @ts-expect-error the fake has no read
-    void (() => app.run({ counter: { service: "counter", increment: () => undefined } }, closes));
+    const loose: Counter = { service: "counter", increment: () => undefined, read: () => 0 };
+    // @ts-expect-error a counter no create built
+    void (() => app.run({ counter: loose }, closes));
     // @ts-expect-error clock is not a service, even beside one that is
     void (() => app.run({ counter: counter(), clock: counter() }, closes));
   });
@@ -173,5 +180,64 @@ describe("App types", () => {
     app.onExit((count: number) => void count);
     // @ts-expect-error a handler hands back no value
     app.onExit(() => 1);
+  });
+});
+
+describe("createService types", () => {
+  it("hands a service exactly what it wants and the options it names, and what it builds is a service (happy)", () => {
+    void App.createService<Counter, Greeters.Options, Greeter>((services, options) => {
+      expectTypeOf(services).toEqualTypeOf<{ readonly counter: Counter }>();
+      expectTypeOf(options).toEqualTypeOf<Greeters.Options>();
+      return { service: "greeter", greet: (name) => `${options.greeting} ${name}` };
+    });
+    const counted = counter();
+    const greeting = Greeters.create({ counter: counted }, { greeting: "hi" });
+    expectTypeOf(greeting).toEqualTypeOf<App.Made<Greeter>>();
+    expectTypeOf(greeting.greet).toEqualTypeOf<Greeter["greet"]>();
+    const app = new App.App(environment).main(both);
+    void (() => app.run({ counter: counted, greeter: greeting }, closes));
+  });
+
+  it("refuses a call missing a service it wants (unhappy)", () => {
+    // @ts-expect-error a greeter wants a counter
+    void Greeters.create({}, { greeting: "hi" });
+    // @ts-expect-error a greeter wants its greeting
+    void Greeters.create({ counter: counter() }, {});
+  });
+
+  it("refuses services handed to a service that wants none (unhappy)", () => {
+    // @ts-expect-error a counter wants no service
+    void Counters.create({ greeter: greeter() });
+  });
+
+  it("refuses the wrong service where one is wanted (unhappy)", () => {
+    // @ts-expect-error a greeter is not a counter
+    void Greeters.create({ counter: greeter() }, { greeting: "hi" });
+  });
+
+  it("refuses a service no create built, to a create and to run (unhappy)", () => {
+    const loose: Counter = { service: "counter", increment: () => undefined, read: () => 0 };
+    // @ts-expect-error a counter no create built
+    void Greeters.create({ counter: loose }, { greeting: "hi" });
+    const app = new App.App(environment).main(counts);
+    // @ts-expect-error a counter no create built
+    void (() => app.run({ counter: loose }, closes));
+  });
+
+  it("refuses a service that reads a service it did not want (unhappy)", () => {
+    void App.createService<never, void, Counter>((services) => {
+      // @ts-expect-error a counter wants nothing
+      void services.greeter;
+      return { service: "counter", increment: () => undefined, read: () => 0 };
+    });
+  });
+
+  it("refuses a service that builds something other than the service it names (unhappy)", () => {
+    const unread = () => ({ service: "counter" as const, increment: () => undefined });
+    const echoes = () => ({ service: "greeter" as const, greet: (name: string) => name });
+    // @ts-expect-error a counter reads its count
+    void App.createService<never, void, Counter>(unread);
+    // @ts-expect-error a greeter is not a counter
+    void App.createService<never, void, Counter>(echoes);
   });
 });

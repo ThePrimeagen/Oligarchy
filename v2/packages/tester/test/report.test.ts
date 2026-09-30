@@ -1,14 +1,10 @@
 import * as Db from "@oligarchy/db";
-import * as Logger from "@oligarchy/logger";
+import * as LoggerTesting from "@oligarchy/logger/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import { report } from "../src/report.ts";
 
-const logging = () => {
-  const lines: Array<string> = [];
-  const logger = Logger.create({ write: (line) => lines.push(line), colors: false });
-  return { lines, logger };
-};
+const logging = () => LoggerTesting.logger();
 
 describe("the tester's report", () => {
   it("says the running suites and the passing and failing tests as info when nothing fails (happy)", () => {

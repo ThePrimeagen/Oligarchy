@@ -35,7 +35,7 @@ const scripted = (busy: ReadonlyArray<number | Error>, cores = 2) => {
 
 const sampled = (source: Host.Source, times: number) => {
   const { lines, logger } = logging();
-  const host = Host.create({ source, logger, attribution: { location: "qemu-server" } });
+  const host = Host.create({ logger }, { source, attribution: { location: "qemu-server" } });
   for (let i = 0; i < times; i += 1) {
     host.sample();
   }

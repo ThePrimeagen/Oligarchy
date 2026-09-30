@@ -4,6 +4,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import * as Env from "../src/main.ts";
 
 const SENTINEL = "s3cr3t-sentinel-value";
+const DATABASE_URL = `postgres://oligarchy:${SENTINEL}@db.example:5432/oligarchy`;
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
 const ISO = "https://example.com/omarchy.iso";
 
@@ -37,7 +38,7 @@ describe("create", () => {
   it("runs the command the words name, with its own flags and every one above it (happy)", async () => {
     const result = await Env.create(
       ctrl,
-      io({ argv: [...RUN_ONE, "--session-id", "s-1"], env: { DATABASE_URL: SENTINEL } }),
+      io({ argv: [...RUN_ONE, "--session-id", "s-1"], env: { DATABASE_URL } }),
     );
     const env = jarl.unwrap(result);
     expectTypeOf(env.command).toEqualTypeOf<"mint" | "test run one">();
@@ -57,7 +58,7 @@ describe("create", () => {
       iso: ISO,
       name: "lock-screen",
     });
-    expect(env.vars.databaseUrl.reveal()).toBe(SENTINEL);
+    expect(env.vars.databaseUrl.reveal()).toBe(DATABASE_URL);
     expect(JSON.stringify(env)).not.toContain(SENTINEL);
   });
 
@@ -66,7 +67,7 @@ describe("create", () => {
       ctrl,
       io({
         argv: ["mint", "--iso", ISO],
-        env: { DATABASE_URL: SENTINEL, AUTOMATION_SERVER_URL: "http://automation" },
+        env: { DATABASE_URL, AUTOMATION_SERVER_URL: "http://automation" },
       }),
     );
     if (!jarl.error.is(result, Env.MissingVariable)) {
@@ -75,12 +76,23 @@ describe("create", () => {
     expect(result.error.message).toBe("OLIGARCHY_TOKEN is not set");
   });
 
+  it("refuses a DATABASE_URL that is not a url, naming the variable and never its value (unhappy)", async () => {
+    for (const value of [SENTINEL, `postgres://oligarchy:${SENTINEL}@db.example:port/x`]) {
+      const result = await Env.create(ctrl, io({ argv: RUN_ONE, env: { DATABASE_URL: value } }));
+      if (!jarl.error.is(result, Env.InvalidVariable)) {
+        throw new Error("expected InvalidVariable");
+      }
+      expect(result.error.variable).toBe("DATABASE_URL");
+      expect(result.error.message).toBe("DATABASE_URL is not a url");
+      expect(result.error.cause).toBeUndefined();
+      expect(JSON.stringify(result.error)).not.toContain(SENTINEL);
+      expect(String(result.error.stack)).not.toContain(SENTINEL);
+    }
+  });
+
   it("refuses a command whose required flag is not given (unhappy)", async () => {
     const withoutName = RUN_ONE.filter((arg) => arg !== "--name" && arg !== "lock-screen");
-    const result = await Env.create(
-      ctrl,
-      io({ argv: withoutName, env: { DATABASE_URL: SENTINEL } }),
-    );
+    const result = await Env.create(ctrl, io({ argv: withoutName, env: { DATABASE_URL } }));
     if (!jarl.error.is(result, Env.UsageError)) {
       throw new Error("expected UsageError");
     }
@@ -97,7 +109,7 @@ describe("create", () => {
           ".prod-env":
             "AUTOMATION_SERVER_URL=from-file\nOLIGARCHY_TOKEN=from-file\nSESSION_ID=from-file\n",
           ".env":
-            "AUTOMATION_SERVER_URL=from-dot\nOLIGARCHY_TOKEN=from-dot\nDATABASE_URL=from-dot\n",
+            "AUTOMATION_SERVER_URL=from-dot\nOLIGARCHY_TOKEN=from-dot\nDATABASE_URL=postgres://from-dot@db.example/oligarchy\n",
         },
       }),
     );
@@ -107,7 +119,7 @@ describe("create", () => {
     }
     expect(env.vars.automationServerUrl).toBe("from-env");
     expect(env.vars.oligarchyToken.reveal()).toBe("from-file");
-    expect(env.vars.databaseUrl.reveal()).toBe("from-dot");
+    expect(env.vars.databaseUrl.reveal()).toBe("postgres://from-dot@db.example/oligarchy");
     expect(env.flags.sessionId).toBe("from-file");
   });
 
@@ -122,7 +134,7 @@ describe("create", () => {
       ctrl,
       io({
         argv: RUN_ONE,
-        env: { DATABASE_URL: SENTINEL },
+        env: { DATABASE_URL },
         files: { [Env.CONFIG_PATH]: JSON.stringify(file) },
       }),
     );

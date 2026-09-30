@@ -26,9 +26,10 @@ const created = async () => {
     ),
   );
   const lines: Array<string> = [];
-  const services: Services = jarl.unwrap(
-    createServices(env, { write: (line) => lines.push(line), colors: false }),
-  );
+  const services: Services = createServices(env, {
+    write: (line) => lines.push(line),
+    colors: false,
+  });
   cleanups.push(() => services.db.close());
   return { fake, lines, services };
 };

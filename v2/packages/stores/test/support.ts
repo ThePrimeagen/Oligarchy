@@ -30,7 +30,7 @@ const opened = async (url: string) => {
       Env.fakeIo({ env: { DATABASE_URL: url }, files: { [Env.CONFIG_PATH]: CONFIG } }),
     ),
   );
-  const db = jarl.unwrap(Db.open({ url: env.vars.databaseUrl, onPoolError: () => undefined }));
+  const db = Db.create({}, { url: env.vars.databaseUrl });
   cleanups.push(() => db.close());
   return db;
 };
@@ -42,14 +42,14 @@ export const database = async () => {
   const db = await opened(fake.url);
   return {
     db,
-    tests: Tests.create(db),
-    actions: Actions.create(db),
-    debugLogs: DebugLogs.create(db),
-    diagnosis: Diagnosis.create(db),
-    logs: Logs.create(db),
-    servers: Servers.create(db),
-    setupRequests: SetupRequests.create(db),
-    vmStatus: VmStatus.create(db),
+    tests: Tests.create({ db }),
+    actions: Actions.create({ db }),
+    debugLogs: DebugLogs.create({ db }),
+    diagnosis: Diagnosis.create({ db }),
+    logs: Logs.create({ db }),
+    servers: Servers.create({ db }),
+    setupRequests: SetupRequests.create({ db }),
+    vmStatus: VmStatus.create({ db }),
   };
 };
 
