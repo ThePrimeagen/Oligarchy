@@ -130,7 +130,7 @@ export const automation = flag({
 export const dataDir = flag({
   schema: words.default(`${homedir()}/.oligarchy`),
   description:
-    "Where this server keeps its iso cache and minted disks; OLIGARCHY_DATA_DIR when omitted, else ~/.oligarchy",
+    "Where this server keeps its iso cache and setup disks; OLIGARCHY_DATA_DIR when omitted, else ~/.oligarchy",
   env: "OLIGARCHY_DATA_DIR",
 });
 
@@ -139,8 +139,8 @@ export const dataDir = flag({
 // ---------------------------------------------------------------------------
 
 export const action = flag({
-  schema: z.enum(["drive", "mint"]),
-  description: "drive or mint; the model is that action's in oligarchy.json",
+  schema: z.enum(["drive", "setup"]),
+  description: "drive or setup; the model is that action's in oligarchy.json",
 });
 
 export const prompt = flag({ schema: words, description: "The user prompt" });
@@ -196,10 +196,10 @@ export const iso = flag({
   description: "HTTPS URL of the ISO",
 });
 
-export const unminted = flag({
+export const notSetUp = flag({
   schema: toggle,
   description:
-    "Mint only on the live qemu servers that do not hold the ISO's minted disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",
+    "Set up only on the live qemu servers that do not hold the ISO's setup disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",
 });
 
 export const model = flag({ schema: words, description: "Cursor model id doing the work" });

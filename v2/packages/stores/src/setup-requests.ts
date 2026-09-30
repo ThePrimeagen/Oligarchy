@@ -6,7 +6,7 @@ import type { Answer } from "./answer.ts";
 
 export type JobStatus = (typeof DbSchema.jobs.$inferSelect)["status"];
 
-// One setup row as the watcher reads it, after looking it up again. jobId null means no mint job
+// One setup row as the watcher reads it, after looking it up again. jobId null means no setup job
 // holds the lock yet. jobStatus is null then, and for a job retention swept: the row can outlive
 // its job.
 export type Situation = {
@@ -36,10 +36,10 @@ declare module "@oligarchy/app" {
   }
 }
 
-// A mint pending, running, or completed and waiting on its verdict holds the server.
-const heldByLiveMint = sql`exists (select 1 from ${DbSchema.jobs} where ${DbSchema.jobs.id} = ${DbSchema.setupRequests.jobId} and ${DbSchema.jobs.status} in ('pending', 'running', 'completed'))`;
+// A setup pending, running, or completed and waiting on its verdict holds the server.
+const heldByLiveSetup = sql`exists (select 1 from ${DbSchema.jobs} where ${DbSchema.jobs.id} = ${DbSchema.setupRequests.jobId} and ${DbSchema.jobs.status} in ('pending', 'running', 'completed'))`;
 
-// Read at the moment of the delete: no job yet, or a mint that ended without success. A mint
+// Read at the moment of the delete: no job yet, or a setup that ended without success. A setup
 // that succeeded, or one retention swept, keeps its row.
 const releasable = sql`(${DbSchema.setupRequests.jobId} is null or exists (select 1 from ${DbSchema.jobs} where ${DbSchema.jobs.id} = ${DbSchema.setupRequests.jobId} and ${DbSchema.jobs.status} in ('failed', 'errored', 'aborted', 'timed_out')))`;
 
@@ -77,7 +77,7 @@ export const create = App.createService<Db.Database, App.NoOptions, SetupRequest
         .onConflictDoUpdate({
           target: [DbSchema.setupRequests.iso, DbSchema.setupRequests.serverUrl],
           set: { jobId },
-          setWhere: sql`${DbSchema.setupRequests.jobId} is not null and not ${heldByLiveMint}`,
+          setWhere: sql`${DbSchema.setupRequests.jobId} is not null and not ${heldByLiveSetup}`,
         })
         .returning({ iso: DbSchema.setupRequests.iso });
       return rows.length > 0;

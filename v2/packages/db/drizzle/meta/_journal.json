@@ -64,6 +64,13 @@
       "when": 1790806745453,
       "tag": "0009_runs_carry_their_iso",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790812524561,
+      "tag": "0010_mint_is_setup",
+      "breakpoints": true
     }
   ]
 }

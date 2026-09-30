@@ -1,6 +1,6 @@
 import * as jarl from "jarl";
 
-// A 409 from the guest's screen, keys or mouse: the guest is off, as a mint's last act leaves it.
+// A 409 from the guest's screen, keys or mouse: the guest is off, as a setup's last act leaves it.
 export const GuestOff = jarl.error.define("GuestOff");
 export type GuestOff = InstanceType<typeof GuestOff>;
 

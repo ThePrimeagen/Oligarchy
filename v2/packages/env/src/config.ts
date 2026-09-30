@@ -9,10 +9,10 @@ import type * as Io from "./io.ts";
 // as a migrations folder, is written relative to it.
 export const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
-// The harness's non-secret configuration, checked in at the root. There is no default: a guessed
-// model or ceiling would run the fleet on the wrong one. A token key is refused; it stays in the
-// environment.
-export const PATH = join(ROOT, "oligarchy.json");
+// The harness's non-secret configuration, checked in beside V2's packages: the root's is V1's,
+// which still calls setup mint. There is no default: a guessed model or ceiling would run the
+// fleet on the wrong one. A token key is refused; it stays in the environment.
+export const PATH = join(ROOT, "v2", "oligarchy.json");
 
 const UNIT_MS: Readonly<Record<string, number>> = {
   milli: 1,
@@ -58,8 +58,8 @@ const isHttpUrl = (value: string): boolean => {
 
 const File = z
   .strictObject({
-    models: z.strictObject({ drive: ModelId, diagnose: ModelId, mint: ModelId }),
-    reasoning: z.strictObject({ drive: Effort, diagnose: Effort, mint: Effort }),
+    models: z.strictObject({ drive: ModelId, diagnose: ModelId, setup: ModelId }),
+    reasoning: z.strictObject({ drive: Effort, diagnose: Effort, setup: Effort }),
     openRouterBaseUrl: z.string().refine(isHttpUrl, "must be an http or https url"),
     timeouts: z.strictObject({ header: Duration, chunk: Duration }),
     runCeiling: Duration,
