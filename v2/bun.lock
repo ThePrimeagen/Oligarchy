@@ -116,6 +116,22 @@
         "vitest": "catalog:",
       },
     },
+    "packages/openrouter": {
+      "name": "@oligarchy/openrouter",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/async": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "jarl": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/sentry": {
       "name": "@oligarchy/sentry",
       "dependencies": {
@@ -277,6 +293,8 @@
     "@oligarchy/http": ["@oligarchy/http@workspace:packages/http"],
 
     "@oligarchy/logger": ["@oligarchy/logger@workspace:packages/logger"],
+
+    "@oligarchy/openrouter": ["@oligarchy/openrouter@workspace:packages/openrouter"],
 
     "@oligarchy/sentry": ["@oligarchy/sentry@workspace:packages/sentry"],
 
@@ -574,13 +592,13 @@
 
     "@oligarchy/db/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
-    "@oligarchy/env/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
-
     "@oligarchy/fake-postgres/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/fleet/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/logger/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
+
+    "@oligarchy/sentry/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 
     "@oligarchy/stores/jarl": ["jarl@github:ThePrimeagen/jarl#931cecd", {}, "ThePrimeagen-jarl-931cecd", "sha512-OaWj+maSxSbeBpX33iFBN5SW/sTNhPhnQw2lxFsxufpAFoofEVF66OQ69l6nmNZpsPb2jaRF7ERWRGpSksXe1g=="],
 

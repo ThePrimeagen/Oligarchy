@@ -1,0 +1,37 @@
+import * as jarl from "jarl";
+
+// OpenRouter answered and refused the request: a 4xx other than 429. The message is the body's.
+export class OpenRouterRefused extends jarl.error.define("OpenRouterRefused") {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(`openrouter: ${String(status)}: ${message}`);
+    this.status = status;
+  }
+}
+
+// No completion came: nothing answered, the answer was not a completion, or the provider failed
+// in a way asking again will not mend.
+export const OpenRouterUnreachable = jarl.error.define("OpenRouterUnreachable");
+export type OpenRouterUnreachable = InstanceType<typeof OpenRouterUnreachable>;
+
+// Asking again could have answered, but its wait would reach the request's deadline.
+export const OpenRouterOutOfTime = jarl.error.define("OpenRouterOutOfTime");
+export type OpenRouterOutOfTime = InstanceType<typeof OpenRouterOutOfTime>;
+
+// A 429, as the client's handler for that status builds it: the body's message, and the
+// Retry-After the response named, if it named one.
+export class RateLimited extends jarl.error.define("RateLimited") {
+  readonly retryAfter: string | null;
+  constructor(message: string, retryAfter: string | null) {
+    super(message);
+    this.retryAfter = retryAfter;
+  }
+}
+
+export const unreachable = (message: string, cause?: unknown): OpenRouterUnreachable => {
+  const error = new OpenRouterUnreachable(message);
+  if (cause !== undefined) {
+    error.cause = cause;
+  }
+  return error;
+};
