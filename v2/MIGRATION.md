@@ -97,12 +97,12 @@ record, and the automation server acts on it directly.
       drive job each, then `startSuite`. `ctrl mint`, and the proxy's first reserve of an ISO on a
       qemu server: a mint test run and job for each server, holding that server's setup lock with
       `setupRequests.claim`.
-- [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then `runJob` naming a live
-      automation client, round robin (a mint only on the server its setup lock names), and only
-      then that client's reserve and `/run` with the prompt. The job moves before any client is
-      asked, so a database reply lost at the claim leaves no client holding the job. One reserve is
-      in flight at a time. V1 reserved first, so a full client passed the job to the next; decide
-      what a refused reserve does to a job already running. V1: `dispatch` in `worker.ts`.
+- [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
+      automation client, round robin (a mint only on the server its setup lock names). Only once
+      that client has reserved the job does `runJob` move it to running, naming the client, and
+      `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
+      loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. V1:
+      `dispatch` in `worker.ts`.
 - [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
