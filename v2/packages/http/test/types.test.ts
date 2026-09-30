@@ -20,8 +20,20 @@ describe("fetch types", () => {
     const named = () =>
       http.fetch("u", {}, { decode: decodeTeam, status: { 429: () => new RateLimited("x") } });
     const bare = () => http.fetch("u", {}, { decode: decodeTeam });
+    const withHeaders = () =>
+      http.fetch(
+        "u",
+        {},
+        {
+          decode: decodeTeam,
+          status: { 429: (body, headers) => new RateLimited(headers.get("retry-after") ?? body) },
+        },
+      );
 
     expectTypeOf<Awaited<ReturnType<typeof named>>>().toEqualTypeOf<
+      jarl.Result<Team, NoTeam | RateLimited | Http.HttpFailure>
+    >();
+    expectTypeOf<Awaited<ReturnType<typeof withHeaders>>>().toEqualTypeOf<
       jarl.Result<Team, NoTeam | RateLimited | Http.HttpFailure>
     >();
     expectTypeOf<Awaited<ReturnType<typeof bare>>>().toEqualTypeOf<

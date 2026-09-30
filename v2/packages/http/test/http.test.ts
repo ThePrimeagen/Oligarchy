@@ -56,10 +56,45 @@ describe("fetch", () => {
     expect(Fake.failure(limited, RateLimited).message).toBe("rate limited: slow down");
 
     const retried = await Async.repeat(ask, 2, {
-      errorFilter: (error) => jarl.error.is(error, RateLimited),
+      retry: (error) =>
+        jarl.error.is(error, RateLimited) ? { retry: true, delay: 0 } : { retry: false },
     })();
     expect(retried).toEqual(jarl.ok({ id: "team-1" }));
     expect(fake.asked).toHaveLength(3);
+  });
+
+  it("a status's error carries the response's headers, and a named status's handler is handed them (sad)", async () => {
+    const headers = { "Retry-After": "7" };
+    const fake = Fake.http([
+      Fake.status(400, "bad query", headers),
+      Fake.status(404, "", headers),
+      Fake.status(503, "busy", headers),
+      Fake.status(418, "teapot", headers),
+      Fake.status(429, "slow down", headers),
+    ]);
+    const ask = () => fake.http.fetch(URL, init, { decode: decodeTeam });
+
+    const failures = [
+      Fake.failure(await ask(), Http.HttpBadRequest),
+      Fake.failure(await ask(), Http.HttpNotFound),
+      Fake.failure(await ask(), Http.HttpServerError),
+      Fake.failure(await ask(), Http.HttpUnhandled),
+    ];
+    const named = await fake.http.fetch(URL, init, {
+      decode: decodeTeam,
+      status: {
+        429: (body, sent) =>
+          new RateLimited(`${body}; again in ${sent.get("retry-after") ?? "?"}s`),
+      },
+    });
+
+    expect(failures.map((failure) => failure.headers.get("retry-after"))).toEqual([
+      "7",
+      "7",
+      "7",
+      "7",
+    ]);
+    expect(Fake.failure(named, RateLimited).message).toBe("slow down; again in 7s");
   });
 
   type Case = {

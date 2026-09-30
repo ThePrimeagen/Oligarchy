@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import * as Async from "@oligarchy/async";
 import * as Env from "@oligarchy/env";
 import * as Fake from "@oligarchy/http/testing";
 import * as jarl from "jarl";
+import { vi } from "vitest";
 import * as OpenRouter from "../src/main.ts";
 
 export const TOKEN = "sk-or-s3cret";
@@ -11,6 +11,10 @@ export const ENDPOINT = `${BASE_URL}/chat/completions`;
 export const NOW = Date.UTC(2026, 8, 29, 12);
 export const TIMEOUT_MS = 20;
 export const DEFAULT_RETRY_MS = 1_000;
+export const ATTEMPTS = 5;
+
+// Longer than any wait a test makes the client take.
+const RUN_MS = 10 * 60_000;
 
 export const REQUEST: OpenRouter.Request = {
   model: "moonshotai/kimi-k2",
@@ -75,26 +79,33 @@ export const completion = (
     ],
   });
 
-// The client over a fake transport, on a clock stopped at NOW. A wait to ask again is recorded
-// and not slept; onSleep runs as each one starts.
+// The client over a fake transport, answering each request with the next reply and recording
+// when it was asked. Run under fake timers: complete moves the clock on until the answer.
 export const client = async (
-  replies: Fake.Reply | ReadonlyArray<Fake.Reply>,
-  options: { readonly onSleep?: () => void } = {},
+  replies: ReadonlyArray<Fake.Reply>,
+  options: { readonly attempts?: number } = {},
 ) => {
-  const fake = Fake.http(replies);
-  const slept: Array<number> = [];
+  const at: Array<number> = [];
+  const fake = Fake.http(() => {
+    at.push(Date.now());
+    const reply = replies[at.length - 1];
+    if (reply === undefined) {
+      throw new Error(`fake http: no reply for request ${String(at.length)}`);
+    }
+    return reply;
+  });
   const openRouter = OpenRouter.create({
     token: await token(),
     baseUrl: BASE_URL,
     timeoutMs: TIMEOUT_MS,
     defaultRetry: DEFAULT_RETRY_MS,
+    attempts: options.attempts ?? ATTEMPTS,
     http: fake.http,
-    now: () => NOW,
-    sleep: (ms, signal) => {
-      slept.push(ms);
-      options.onSleep?.();
-      return Async.sleep(0, signal);
-    },
   });
-  return { openRouter, asked: fake.asked, slept };
+  const complete = async (request: OpenRouter.Request) => {
+    const answer = openRouter.complete(request);
+    await vi.advanceTimersByTimeAsync(RUN_MS);
+    return answer;
+  };
+  return { complete, asked: fake.asked, at };
 };

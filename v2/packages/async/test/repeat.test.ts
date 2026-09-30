@@ -44,33 +44,58 @@ describe("repeat", () => {
     expect(calls).toBe(3);
   });
 
-  it("waits the delay between one call and the next (happy)", async () => {
+  it("waits the delay each error's decision names before the next call (happy)", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const { fn, at } = failing();
 
-    const result = track(repeat(fn, 3, { delay: 2_000 })());
-    await vi.advanceTimersByTimeAsync(4_000);
+    const result = track(
+      repeat(fn, 3, { retry: (error) => ({ retry: true, delay: error.n === 1 ? 2_000 : 500 }) })(),
+    );
+    await vi.advanceTimersByTimeAsync(2_500);
 
-    expect(at).toEqual([0, 2_000, 4_000]);
+    expect(at).toEqual([0, 2_000, 2_500]);
     expect(result.value).toEqual(jarl.err(new Boom(3)));
   });
 
-  it("stops at the first error errorFilter refuses (unhappy)", async () => {
+  it("stops at the first error its decision refuses (unhappy)", async () => {
     const { fn, at } = failing();
 
-    const result = await repeat(fn, 5, { errorFilter: (error) => error.n !== 2 })();
+    const result = await repeat(fn, 5, {
+      retry: (error) => (error.n === 2 ? { retry: false } : { retry: true, delay: 0 }),
+    })();
 
     expect(at).toHaveLength(2);
     expect(result).toEqual(jarl.err(new Boom(2)));
   });
 
-  it("is Aborted and calls no more when the signal aborts during the delay (unhappy)", async () => {
+  it("calls no more than count, even while every decision says retry (unhappy)", async () => {
+    const { fn, at } = failing();
+    let asked = 0;
+
+    const result = await repeat(fn, 3, {
+      retry: () => {
+        asked += 1;
+        return { retry: true, delay: 0 };
+      },
+    })();
+
+    expect(at).toHaveLength(3);
+    expect(asked).toBe(2);
+    expect(result).toEqual(jarl.err(new Boom(3)));
+  });
+
+  it("is Aborted and calls no more when the signal aborts during a decision's delay (unhappy)", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
     const { fn, at } = failing();
 
-    const result = track(repeat(fn, 3, { delay: 2_000, signal: controller.signal })());
+    const result = track(
+      repeat(fn, 3, {
+        retry: () => ({ retry: true, delay: 2_000 }),
+        signal: controller.signal,
+      })(),
+    );
     await vi.advanceTimersByTimeAsync(500);
     controller.abort();
     await vi.advanceTimersByTimeAsync(10_000);
