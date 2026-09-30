@@ -58,7 +58,7 @@ describe("a job's VM", () => {
 });
 
 describe("a restarted qemu server's past running VMs", () => {
-  it("each VM its crashed process left downloading or running is errored, saying so, and its job is named (happy)", async () => {
+  it("each VM its crashed process left downloading or running is a server error, saying so, and its job is named (happy)", async () => {
     const { vmStatus, running, downloading } = await leftBehind();
 
     const cleared = jarl.unwrap(await vmStatus.clearPastRunningVms(RESTARTED));
@@ -66,7 +66,7 @@ describe("a restarted qemu server's past running VMs", () => {
     expect([...cleared].sort()).toEqual([running, downloading].sort());
     for (const jobId of [running, downloading]) {
       expect(jarl.unwrap(await vmStatus.current(jobId))).toMatchObject({
-        status: "errored",
+        status: "server-error",
         reason: "the qemu server crashed and came back to find this VM still running",
       });
     }
