@@ -37,20 +37,25 @@ meet plus one happy path, and every service is faked except the database.
       attempts in all. It fails with `OpenRouterRefused`, `OpenRouterUnreachable` (which also
       names attempts run out), `OpenRouterOutOfTime` (a wait to ask again that would reach the
       request's deadline) or `Aborted`.
-- [ ] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
-      `src/harness/intent.ts` and `src/driver/client.ts`, over `packages/http/src/proxy-client.ts`.
-      Controlling a qemu guest over HTTP for the AI's tools: what the driver's model calls to
-      drive a guest, and the calls the harness makes around them, each on `@oligarchy/http` to the
-      qemu reverse proxy, which forwards it to the job's qemu server. The model's tools:
-      get-image, get-serial, send-keys, and the mouse's move, click, double-click, scroll, drag,
-      hold and release, each a tool of its own with typed arguments and its own description. The
-      harness's calls: start, intent start and end, stop and save. Each call names its job by id
-      where V1's named an agent and a session. V1 gives the model one `client` tool, whose
-      arguments are `./client`'s words and whose description is `client.md`, and runs them
-      through `src/client`; V2 does neither. `start` needs a long timeout of its own (45 minutes
-      in V1) because a first ISO download blocks it. The proxy's other calls go with the apps that
-      make them: the automation client's reserve and relinquish, `ctrl mint`'s minted and viz's
-      follow.
+- [x] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
+      `src/harness/intent.ts`, `src/harness/pointer.ts` and `src/driver/client.ts`, over
+      `packages/http/src/proxy-client.ts`. Controlling one job's qemu guest over HTTP for the AI's
+      tools. `create({ job, baseUrl, token, http, signal })` names the job once; every call
+      carries it, and `OLIGARCHY_TOKEN` as the bearer, on `@oligarchy/http` to the qemu reverse
+      proxy. The harness's calls are `start`, `intentStart`, `intentEnd`, `stop` and `save`. The
+      guest's are `image` (the PNG's bytes, through `@oligarchy/http`'s `read: "bytes"`),
+      `serial`, `sendKeys` and `mouse`, which keeps the pointer as V1's harness did: a move,
+      scroll, hold or release leaves it at its point, a click and a double-click press there, a
+      drag starts there and leaves it at its end, a nudge moves it 0.02, and a call that failed
+      leaves it where it was. `tools` and `run(name, args)` are the model's native tool calls
+      over the guest's calls, one per action, each checked by its zod schema before anything is
+      sent. The driver owns steps, reasons and Done, and takes its own fields out of a call's
+      arguments before `run`. Nothing is asked again: every error comes back in the result,
+      `@oligarchy/http`'s own and `GuestOff` (a 409 from the screen, keys or mouse), `IntentOpen`
+      (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
+      waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
+      other calls go with the apps that make them: the automation client's reserve and
+      relinquish, `ctrl mint`'s minted and viz's follow.
 - [ ] **Automation client client.** V1: `apps/automation-server/src/client.ts`. The automation
       server's reserve, run and abort calls to an automation client, with `OLIGARCHY_TOKEN` as the
       bearer.
@@ -139,6 +144,10 @@ None of V1's apps are ported. Each becomes a V2 app: its `main` reads its enviro
       `/image`, `/serial`, `/follow`, `/stats`, `/minted`, `/send-keys`, `/mouse/*`,
       `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`. Saves a failed
       guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but nothing calls it.
+      Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
+      and a session; `/image` and `/serial` answer bytes; and a 409 is a guest that is off on
+      `/image`, `/send-keys` and `/mouse/*`, an intent already open on `/intent/start` (V1
+      answered that one 400) and a guest that did not power off on `/save`.
 - [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the mint lock watcher on `setup_requests`). Serves
