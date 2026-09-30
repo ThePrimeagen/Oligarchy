@@ -6,3 +6,4 @@ export * as ProcessStats from "./process-stats.ts";
 export * as Servers from "./servers.ts";
 export * as SetupRequests from "./setup-requests.ts";
 export * as Tests from "./tests.ts";
+export * as VmStatus from "./vm-status.ts";
