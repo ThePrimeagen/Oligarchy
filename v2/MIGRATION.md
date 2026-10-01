@@ -232,7 +232,8 @@ bearer, and runs under `@oligarchy/app`.
       qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
       `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
       `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
-      `/stats`. Forgets silent servers with `fleet.forget`. A resume reserve that no server can
+      `/stats`. Forgets silent servers with `fleet.forget`, in a loop of its own as the
+      automation server does. A resume reserve that no server can
       take, because those with room hold no setup disk for its ISO, takes each such server's setup
       lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
       setup needed. One setup per ISO and server: a reserve while that setup is in flight files
@@ -248,12 +249,12 @@ bearer, and runs under `@oligarchy/app`.
             until the server is killed, waiting `automationServer.dispatchInterval` each pass;
             the kill ends the wait at once. A database that cannot be reached does not stop it.
             `restart`, `shutdown` and the loop's pass do nothing yet.
-      - [x] **Forget silent clients.** A sub-app beside dispatch runs
-            `fleet.forget("automation-client")` until the server is killed, as V1's `Sweep.forget`
-            did, so dispatch never reserves on a client that died without deleting its row. It
-            sweeps at once and then every `automationServer.forgetInterval` from
-            `v2/oligarchy.json` (30 seconds); a client is silent after 10 minutes, as the `servers`
-            store decides.
+      - [x] **Forget silent clients.** A sub-app beside dispatch forgets the automation clients
+            silent for longer than `automationServer.forgetAfter` (10 minutes), as V1's
+            `Sweep.forget` did, so dispatch never reserves on a client that died without deleting
+            its row. Its main is a loop that runs until the server is killed: each pass is one
+            `fleet.forget` sweep, then a wait of `automationServer.forgetInterval` (30 seconds).
+            `fleet.forget` is one sweep and has no loop of its own.
       - [ ] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own,
             on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer, so the environment needs
             `oligarchyToken` from here on (V1: `client.ts`). Each names its job. A reserve refused
