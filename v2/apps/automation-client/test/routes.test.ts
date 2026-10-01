@@ -13,18 +13,19 @@ const RESERVE: Routes.ReserveRequest = { job: JOB, action: "drive", iso: ISO, mo
 const RUN: Routes.RunRequest = { job: JOB, prompt: PROMPT };
 const ABORT: Routes.AbortRequest = { job: JOB };
 
-const client = (made: Routes.Sessions, token: string | undefined = TOKEN) =>
+// A null token sends no bearer at all.
+const client = (made: Routes.Sessions, token: string | null = TOKEN) =>
   testClient(
     Routes.routes({ token: TOKEN, sessions: made }),
     {},
     undefined,
-    token === undefined ? {} : { headers: { Authorization: `Bearer ${token}` } },
+    token === null ? {} : { headers: { Authorization: `Bearer ${token}` } },
   );
 
 describe("the automation client's routes", () => {
   it("refuse every request without the bearer, 401, and never ask the sessions (unhappy)", async () => {
     const { sessions: made, handed } = sessions();
-    const without = client(made, undefined);
+    const without = client(made, null);
     const wrong = client(made, "not-the-token");
 
     const statuses = [

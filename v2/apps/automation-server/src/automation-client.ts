@@ -1,6 +1,10 @@
+import type * as ClientRoutes from "@oligarchy/automation-client/routes";
 import type * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
+import { hc, type InferRequestType } from "hono/client";
 import * as jarl from "jarl";
+
+export type { Ran, Reserved, Stopped } from "@oligarchy/automation-client/routes";
 
 // One automation client, as the automation server reaches it. signal ends any call in flight.
 export type Client = {
@@ -10,32 +14,20 @@ export type Client = {
   readonly signal?: AbortSignal;
 };
 
-// Each request is the body posted, as it is. A drive and a setup take a guest on the proxy too: a
-// drive boots its ISO from that ISO's setup disk when it resumes and fresh otherwise, and a setup
-// boots fresh on the qemu server its setup lock names. A diagnose takes no guest.
-export type ReserveRequest =
-  | { readonly job: string; readonly action: "diagnose" }
-  | {
-      readonly job: string;
-      readonly action: "drive";
-      readonly iso: string;
-      readonly mode: "resume" | "fresh";
-    }
-  | {
-      readonly job: string;
-      readonly action: "setup";
-      readonly iso: string;
-      readonly server: string;
-    };
-export type RunRequest = { readonly job: string; readonly prompt: string };
-export type AbortRequest = { readonly job: string };
+// The automation client's routes are the one definition of each call: its body, its path and
+// every status it answers. hono/client reads them; @oligarchy/http sends.
+type Api = ReturnType<typeof hc<ClientRoutes.Routes>>;
+type Route = "reserve" | "run" | "abort";
+type Status<R extends Route> = Awaited<ReturnType<Api[R]["$post"]>>["status"];
 
-// A refusal is no failure: the job stays pending and is asked for again.
-export type Reserved = "reserved" | "at-capacity" | "setup-needed";
-// The driver or opencode ran to its end, or an abort ended it.
-export type Ran = "ended" | "aborted";
-// A client that does not hold the job has nothing to stop.
-export type Stopped = "stopped" | "not-held";
+export type ReserveRequest = InferRequestType<Api["reserve"]["$post"]>["json"];
+export type RunRequest = InferRequestType<Api["run"]["$post"]>["json"];
+export type AbortRequest = InferRequestType<Api["abort"]["$post"]>["json"];
+
+const AT_CAPACITY = 503 satisfies Status<"reserve">;
+const SETUP_NEEDED = 409 satisfies Status<"reserve">;
+const RUN_ABORTED = 409 satisfies Status<"run">;
+const NOT_HELD = 404 satisfies Status<"abort">;
 
 type Answer<T> = Promise<jarl.Result<T, Http.HttpFailure>>;
 
@@ -51,13 +43,12 @@ const answering =
   () =>
     jarl.ok(value);
 
-const where = (client: Client, path: string): string =>
-  new URL(path, client.url.endsWith("/") ? client.url : `${client.url}/`).toString();
+const api = (client: Client): Api => hc<ClientRoutes.Routes>(client.url);
 
 // Carries OLIGARCHY_TOKEN as the bearer. Nothing is asked again.
 const posting = (
   client: Client,
-  request: Readonly<Record<string, unknown>>,
+  request: ReserveRequest | RunRequest | AbortRequest,
   timeout: { readonly timeoutMs?: number } = {},
 ): Http.Init => ({
   method: "POST",
@@ -70,15 +61,22 @@ const posting = (
   ...(client.signal === undefined ? {} : { signal: client.signal }),
 });
 
-export const reserve = async (client: Client, request: ReserveRequest): Answer<Reserved> => {
-  const reserved = await client.http.fetch(where(client, "reserve"), posting(client, request), {
-    decode: answering("reserved"),
-    status: { 409: () => new SetupNeeded("setup needed") },
-  });
+export const reserve = async (
+  client: Client,
+  request: ReserveRequest,
+): Answer<ClientRoutes.Reserved> => {
+  const reserved = await client.http.fetch(
+    api(client).reserve.$url().toString(),
+    posting(client, request),
+    {
+      decode: answering("reserved"),
+      status: { [SETUP_NEEDED]: () => new SetupNeeded("setup needed") },
+    },
+  );
   if (jarl.error.is(reserved, SetupNeeded)) {
     return jarl.ok("setup-needed");
   }
-  if (jarl.error.is(reserved, Http.HttpServerError) && reserved.error.status === 503) {
+  if (jarl.error.is(reserved, Http.HttpServerError) && reserved.error.status === AT_CAPACITY) {
     return jarl.ok("at-capacity");
   }
   return reserved;
@@ -86,11 +84,11 @@ export const reserve = async (client: Client, request: ReserveRequest): Answer<R
 
 // Answers once the driver or opencode has ended, however long that takes, unless the client's
 // signal aborts first.
-export const run = async (client: Client, request: RunRequest): Answer<Ran> => {
+export const run = async (client: Client, request: RunRequest): Answer<ClientRoutes.Ran> => {
   const ran = await client.http.fetch(
-    where(client, "run"),
+    api(client).run.$url().toString(),
     posting(client, request, { timeoutMs: RUN_TIMEOUT_MS }),
-    { decode: answering("ended"), status: { 409: () => new RunAborted("aborted") } },
+    { decode: answering("ended"), status: { [RUN_ABORTED]: () => new RunAborted("aborted") } },
   );
   if (jarl.error.is(ran, RunAborted)) {
     return jarl.ok("aborted");
@@ -98,11 +96,16 @@ export const run = async (client: Client, request: RunRequest): Answer<Ran> => {
   return ran;
 };
 
-export const abort = async (client: Client, request: AbortRequest): Answer<Stopped> => {
-  const stopped = await client.http.fetch(where(client, "abort"), posting(client, request), {
-    decode: answering("stopped"),
-  });
-  if (jarl.error.is(stopped, Http.HttpNotFound)) {
+export const abort = async (
+  client: Client,
+  request: AbortRequest,
+): Answer<ClientRoutes.Stopped> => {
+  const stopped = await client.http.fetch(
+    api(client).abort.$url().toString(),
+    posting(client, request),
+    { decode: answering("stopped") },
+  );
+  if (jarl.error.is(stopped, Http.HttpNotFound) && stopped.error.status === NOT_HELD) {
     return jarl.ok("not-held");
   }
   return stopped;
