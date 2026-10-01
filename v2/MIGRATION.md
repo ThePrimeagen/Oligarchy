@@ -140,6 +140,14 @@ meet plus one happy path, and every service is faked except the database.
       setups first. The config's `models.setup` and `reasoning.setup` replace `mint`, in V2's own
       `v2/oligarchy.json`; the driver's `--action` is `drive` or `setup`; `ctrl setup`'s
       `--setup-only` replaces `--unminted`; and a minted disk is a setup disk.
+- [x] **`tests`: a setup takes its lock.** `createSetupRun({ definitionId, iso, serverUrl })`
+      inserts the setup lock on its ISO and server, and only when that insert lands writes a test
+      run of its own, its pending setup job, and the job's id on the lock, in one transaction. A
+      lock already held answers `undefined` and writes nothing. Of two at once, the lock's primary
+      key lets one insert land; PGlite runs one transaction at a time, so no test races them. A
+      missing definition is `NotFound`, checked before the lock, and a failed write is the
+      database's error; neither leaves a lock. The proxy's flow no longer calls
+      `setupRequests.insert` or `setJob`.
 
 ## 3. The flow that replaces the Linear board
 
@@ -148,7 +156,7 @@ queued jobs from the tickets' columns, and each close moved a ticket on. That lo
 `packages/jobs` and `apps/automation-server/src/worker.ts`. In V2 the `tests` store is the whole
 record, and the automation server acts on it directly.
 
-- [ ] **File.** Three ways in:
+- [ ] **File.** Four ways in:
       - A single test run (`ctrl test run`): `createTestRun({ definitionId, iso, serverUrl })`,
         which writes the test run and its drive together, with no suite.
       - A suite (`ctrl test suite` and the dashboard's create-suite): one
@@ -156,16 +164,14 @@ record, and the automation server acts on it directly.
         which writes the suite, its test runs and their drives in one transaction.
         `nextPendingJob` does not look at suites, so the queue never sees part of a suite.
       - A setup. The proxy's first resume reserve of an ISO on a qemu server holding no setup disk
-        for it (section 4) inserts the setup lock, then files a single test run of `setup` with
-        that ISO and the proxy's url, and a setup job, and names the job on the lock with
-        `setupRequests.setJob`: `claim` refuses a lock that has no job yet. The run, its setup job
-        and `setJob` must be one transaction too, or a crash leaves a lock with no job.
-        `ctrl setup` (section 6) is one suite holding a setup run per server, each taking its
-        server's lock with `setupRequests.claim`, which refuses a lock a live setup holds.
-        Open: the store files every test run with a drive, so a setup run needs a setup job
-        instead (by the definition, or by an action `createTestRun` and `createTestSuite` are
-        given), and the lock lives in `setupRequests`, another store, so the one transaction
-        spans two stores.
+        for it (section 4) calls `createSetupRun({ definitionId, iso, serverUrl })` with the
+        `setup` definition and the proxy's url. Its insert of the setup lock decides: only when it
+        lands does it file a test run of its own and its setup job and name the job on the lock,
+        all in one transaction. A lock already held files nothing.
+      - `ctrl setup` (section 6) is one suite holding a setup run per server, each taking its
+        server's lock with `setupRequests.claim`, which refuses a lock a live setup holds. The
+        caller names the job a test run is filed with, so `createTestRun` and `createTestSuite`
+        take it when `ctrl setup` comes.
 - [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
@@ -237,10 +243,10 @@ bearer, and runs under `@oligarchy/app`.
       `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
       `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
       `/stats`. Forgets silent servers with `fleet.forget`. A resume reserve that no server can
-      take, because those with room hold no setup disk for its ISO, takes each such server's setup
-      lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
+      take, because those with room hold no setup disk for its ISO, files a setup on each such
+      server with `tests.createSetupRun`, which takes its lock (section 3's File), and answers
       setup needed. One setup per ISO and server: a reserve while that setup is in flight files
-      none, and one that ended without passing releases the lock (V1: `setup.ts`).
+      none, and the watcher releases the lock of one that ended without passing (V1: `setup.ts`).
 - [ ] **automation-server** (`apps/automation-server`). Section 3's dispatch, close, abort, restart
       and shutdown, and `/abort`. Its reserve, run and abort calls to an automation client are its
       own, on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). `/linear`,
