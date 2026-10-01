@@ -17,10 +17,11 @@ const settled = async (promise: Promise<unknown>): Promise<boolean> => {
 };
 
 describe("the jobs an automation client holds", () => {
-  it("an abort aborts the job's signal, answers once its holder lets it go, and the job is no longer held (happy)", async () => {
+  it("an abort aborts the job's signal, answers once its holder lets it go, and the job is no longer held or counted (happy)", async () => {
     const jobs = Jobs.create();
     const held = jarl.unwrap(jobs.hold(JOB));
     const other = jarl.unwrap(jobs.hold(OTHER));
+    expect(jobs.count()).toBe(2);
 
     const aborting = jobs.abort({ jobId: JOB });
 
@@ -28,8 +29,10 @@ describe("the jobs an automation client holds", () => {
     expect(jarl.error.is(held.signal.reason, Aborted)).toBe(true);
     expect(other.signal.aborted).toBe(false);
     expect(await settled(aborting)).toBe(false);
+    expect(jobs.count()).toBe(2);
     held.release();
     expect(await aborting).toBe("stopped");
+    expect(jobs.count()).toBe(1);
     expect(await jobs.abort({ jobId: JOB })).toBe("not-held");
     expect(jarl.is_ok(jobs.hold(JOB))).toBe(true);
   });
