@@ -2,19 +2,20 @@ import * as App from "@oligarchy/app";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
-import { dispatch } from "./dispatch.ts";
 import { environment, type Run } from "./environment.ts";
 import { restart } from "./restart.ts";
 import { closeServices, createServices } from "./services.ts";
 import { shutdown } from "./shutdown.ts";
+import { tick } from "./tick.ts";
 
 const LOCATION = "automation-server";
 
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
-// Dispatch runs until the app's signal aborts; shutdown then runs before main returns, so it
-// finishes before any exit handler closes the services under it.
+// The dispatch tick runs as a sub-app until the server is killed. Shutdown runs only once the tick
+// has closed down, and before main returns, so it finishes before any exit handler closes the
+// services under it. A tick that stops or fails is the sub-app's error, so the server exits 1.
 const main = async (app: App.App<Run, Logger.Logger>) => {
   const { logger } = app.services;
   const { models, automationServer } = app.environment.config;
@@ -23,9 +24,17 @@ const main = async (app: App.App<Run, Logger.Logger>) => {
     { location: LOCATION },
   );
   await restart();
-  await dispatch({ interval: automationServer.dispatchInterval }, app.signal);
+
+  const dispatch = tick(() => undefined, automationServer.dispatchInterval, app.signal);
+  app.sub(new App.App(app.environment).main(() => dispatch.done));
+  const dispatched = await dispatch.done;
+
   await shutdown();
-  logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
+  if (jarl.is_err(dispatched)) {
+    logger.error(`stopped; dispatch ${dispatched.error.message}`, { location: LOCATION });
+  } else {
+    logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
+  }
   return jarl.ok(undefined);
 };
 
