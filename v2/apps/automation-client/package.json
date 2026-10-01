@@ -1,8 +1,10 @@
 {
-  "name": "@oligarchy/automation-server",
+  "name": "@oligarchy/automation-client",
   "private": true,
   "type": "module",
-  "exports": {},
+  "exports": {
+    "./routes": "./src/routes.ts"
+  },
   "scripts": {
     "start": "bun --no-env-file src/main.ts",
     "check:types": "tsc --noEmit -p tsconfig.json",
@@ -11,14 +13,11 @@
   "dependencies": {
     "@hono/zod-validator": "catalog:",
     "@oligarchy/app": "workspace:*",
-    "@oligarchy/async": "workspace:*",
     "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
-    "@oligarchy/fleet": "workspace:*",
     "@oligarchy/http": "workspace:*",
     "@oligarchy/logger": "workspace:*",
     "@oligarchy/sentry": "workspace:*",
-    "@oligarchy/stores": "workspace:*",
     "hono": "catalog:",
     "jarl": "catalog:",
     "zod": "catalog:"
