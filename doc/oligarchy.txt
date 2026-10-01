@@ -93,6 +93,14 @@ checks out, merges, or modifies your working files. Git uses your existing
 origin credentials. Missing branches and fetch errors appear in the pane.
 Pending requests and fetches are cancelled on navigation away or pane close.
 
+While the selected agent is running, a spinner shows "refreshing in Xs...".
+The conversation and run status refresh every five seconds, without fetching
+the Git branch. Entry and manual refresh still fetch the branch. Slow requests
+finish before another refresh starts; the spinner shows "refreshing..." while
+requests or actions are pending. Polling stops when the run finishes, you return
+to the jobs list, or you close the pane. A final history request collects the
+completed reply. Automatic refresh preserves your prompt and folded sections.
+
 The g and d actions read fresh job metadata to find its current PR. Diff
 retrieval uses GitHub's API directly; private repositories need GITHUB_TOKEN
 (or GH_TOKEN) in .env or the environment. CURSOR_API_TOKEN is never used as

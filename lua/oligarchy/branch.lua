@@ -3,11 +3,11 @@ local M = {}
 function M.sync(root, client, id, callback, run)
   run = run or vim.system
   local cancelled = false
-  local process, cancel_request
+  local process, cancel_request, status
   local function done(err, branch)
     vim.schedule(function()
       if not cancelled then
-        callback(err, branch)
+        callback(err, branch, status)
       end
     end)
   end
@@ -17,6 +17,7 @@ function M.sync(root, client, id, callback, run)
       done(err)
       return
     end
+    status = agent.status
     local branch = type(agent.target) == "table" and agent.target.branchName
     if type(branch) ~= "string" or branch == "" then
       done("No branch published for this job")

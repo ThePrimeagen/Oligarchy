@@ -12,6 +12,31 @@ local cache, sync_branch, open_url, http
 local composer
 local skip_files = {}
 local start_review
+local Refresh = require("oligarchy.refresh")
+local refresh_cancel, refresh_clock, refresh_timer
+local refresh_namespace = vim.api.nvim_create_namespace("oligarchy.refresh")
+local refresh_text = ""
+
+local function show_refresh()
+  if buffer and vim.api.nvim_buf_is_valid(buffer) then
+    vim.api.nvim_buf_clear_namespace(buffer, refresh_namespace, 0, -1)
+    if refresh_text ~= "" then
+      vim.api.nvim_buf_set_extmark(buffer, refresh_namespace, 3, 0, {
+        virt_text = { { refresh_text, "Comment" } },
+        virt_text_pos = "eol",
+      })
+    end
+  end
+end
+
+local function stop_refresh()
+  if refresh_cancel then
+    refresh_cancel()
+    refresh_cancel = nil
+  end
+  refresh_text = ""
+  show_refresh()
+end
 
 local function render(lines)
   vim.bo[buffer].modifiable = true
@@ -20,6 +45,7 @@ local function render(lines)
 end
 
 local function stop()
+  stop_refresh()
   if action == "send" and composer then
     composer.lock(false)
   end
@@ -143,6 +169,7 @@ local function show_conversation()
     conversation.name:gsub("[\r\n]", " "),
     "J/K: next/previous  Enter/za: fold  r: refresh  a: abort",
     "i: prompt  Ctrl-Enter: send  P: Push & Review  g: PR  d: diff  Ctrl-b: jobs  q: close",
+    "",
   }
   for _, status in ipairs({ message_status, branch_status, action_status }) do
     vim.list_extend(lines, vim.split(status, "\n", { plain = true }))
@@ -164,6 +191,7 @@ local function show_conversation()
   end
   render(lines)
   vim.b[buffer].oligarchy_conversation = state.messages
+  show_refresh()
   vim.b[buffer].oligarchy_boxes = boxes
   if anchor then
     for index, box in ipairs(boxes) do
@@ -178,21 +206,7 @@ local function show_conversation()
   vim.api.nvim_win_set_cursor(window, cursor)
 end
 
-local function load_conversation(agent)
-  stop()
-  local entering = not conversation or conversation.id ~= agent.id
-  conversation = agent
-  rows = {}
-  if entering then
-    close_composer()
-    state = cache.read(agent.id)
-    box_rows = {}
-  end
-  message_status = state.messages and "Cached conversation — updating…"
-    or "Loading conversation…"
-  branch_status, action_status = "Fetching branch…", ""
-  open_composer()
-  show_conversation()
+local function refresh_messages(agent)
   cancel = client:get_conversation(agent.id, function(err, messages)
     cancel = nil
     if err then
@@ -204,12 +218,85 @@ local function load_conversation(agent)
     end
     show_conversation()
   end)
-  -- Independent of the history request: cached messages remain usable during fetch.
-  branch_cancel = sync_branch(agent.id, function(err, branch)
+end
+
+local load_conversation
+local function start_refresh()
+  if refresh_cancel or not Refresh.active(conversation.status) then
+    return
+  end
+  local frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+  refresh_cancel = Refresh.start({
+    now = refresh_clock,
+    new_timer = refresh_timer,
+    busy = function()
+      return cancel ~= nil or branch_cancel ~= nil or action ~= nil or vim.fn.bufwinid(buffer) == -1
+    end,
+    refresh = function()
+      load_conversation(conversation, true)
+    end,
+    display = function(seconds, busy, time)
+      local label = busy and "refreshing..." or ("refreshing in " .. seconds .. "s...")
+      refresh_text = frames[math.floor(time / 100) % #frames + 1] .. " " .. label
+      show_refresh()
+    end,
+  })
+end
+
+load_conversation = function(agent, automatic)
+  stop()
+  local entering = not conversation or conversation.id ~= agent.id
+  conversation = agent
+  rows = {}
+  if entering then
+    close_composer()
+    state = cache.read(agent.id)
+    box_rows = {}
+  end
+  message_status = state.messages and "Cached conversation — updating…"
+    or "Loading conversation…"
+  if not automatic then
+    branch_status = "Fetching branch…"
+    action_status = ""
+    open_composer()
+  end
+  show_conversation()
+  refresh_messages(agent)
+  local function refreshed(err, branch, status)
     branch_cancel = nil
-    branch_status = err or ("Branch updated: " .. branch)
+    if not automatic then
+      branch_status = err or ("Branch updated: " .. branch)
+    elseif err then
+      message_status = err
+    end
+    if status then
+      local was_active = Refresh.active(agent.status)
+      agent.status = status
+      if Refresh.active(status) then
+        start_refresh()
+      else
+        stop_refresh()
+        -- History may have arrived before the final turn finished.
+        if was_active then
+          if cancel then
+            cancel()
+          end
+          refresh_messages(agent)
+        end
+      end
+    end
     show_conversation()
-  end)
+  end
+  -- Automatic refresh needs run status, but never fetches Git refs.
+  if automatic then
+    branch_cancel = client:get_agent(agent.id, function(err, metadata)
+      refreshed(err, nil, metadata and metadata.status)
+    end)
+  else
+    -- Independent of history: cached messages remain usable during fetch.
+    branch_cancel = sync_branch(agent.id, refreshed)
+  end
+  start_refresh()
 end
 
 function M.send()
@@ -242,6 +329,7 @@ function M.send()
       if save_error then
         vim.notify(save_error, vim.log.levels.WARN)
       end
+      conversation.status = "RUNNING"
       load_conversation(conversation)
       action_status = "Message sent"
     end
@@ -302,6 +390,11 @@ function M.abort()
   show_conversation()
   action_cancel = client:abort_agent(conversation.id, function(err)
     action_cancel, action = nil, nil
+    if not err then
+      stop()
+      conversation.status = "STOPPED"
+      refresh_messages(conversation)
+    end
     action_status = err or "Agent stopped"
     show_conversation()
   end)
@@ -405,6 +498,9 @@ function M.push_review()
           err = err .. "\nLocal review branch: " .. result.branch
         end
         update(err)
+        if conversation then
+          start_refresh()
+        end
         return
       end
       table.insert(agents, 1, agent)
@@ -587,6 +683,7 @@ function M.setup(options)
     close_popup = nil
   end
   options = options or {}
+  refresh_clock, refresh_timer = options.refresh_clock, options.refresh_timer
   root = options.root or root
   skip_files = options.skip_files or {}
   start_review = options.start_review or require("oligarchy.review").start

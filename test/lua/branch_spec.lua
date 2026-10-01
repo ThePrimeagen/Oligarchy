@@ -39,12 +39,17 @@ describe("branch fetching", function()
     vim.fn.writefile({ "unsaved local change" }, root .. "/file.txt")
     for attempt = 1, 2 do
       local done, error
-      Branch.sync(root, client, "first", function(err, branch)
+      Branch.sync(root, client, "first", function(err, branch, status)
         error, done = err, true
         assert.equals("cursor/topic", branch)
+        assert.equals("RUNNING", status)
       end)
       assert.equals("https://api.cursor.com/v0/agents/first", S.request(http, attempt).url)
-      http:respond(attempt, { id = "first", target = { branchName = "cursor/topic" } })
+      http:respond(attempt, {
+        id = "first",
+        status = "RUNNING",
+        target = { branchName = "cursor/topic" },
+      })
       S.wait(function()
         return done
       end)
@@ -57,6 +62,20 @@ describe("branch fetching", function()
         git(remote, "commit", "-qam", "update")
       end
     end
+  end)
+  it("reports completion even when no branch has been published", function()
+    local result
+    Branch.sync(root, client, "first", function(err, branch, status)
+      result = { err = err, branch = branch, status = status }
+    end)
+    S.request(http, 1)
+    http:respond(1, { id = "first", status = "FINISHED" })
+    S.wait(function()
+      return result
+    end)
+    assert.equals("No branch published for this job", result.err)
+    assert.equals("FINISHED", result.status)
+    assert.is_nil(result.branch)
   end)
   it("reports unavailable branches and cancels pending metadata", function()
     local error
