@@ -148,9 +148,6 @@ meet plus one happy path, and every service is faked except the database.
       missing definition is `NotFound`, checked before the lock, and a failed write is the
       database's error; neither leaves a lock. The proxy's flow no longer calls
       `setupRequests.insert` or `setJob`.
-=======
-      `--setup-only` replaces `--unminted`; and a minted disk is a setup disk.
->>>>>>> cursor/v2-rename-mint-to-setup-a582
 
 ## 3. The flow that replaces the Linear board
 
