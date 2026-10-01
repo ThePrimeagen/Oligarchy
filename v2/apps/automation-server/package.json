@@ -9,6 +9,8 @@
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "catalog:",
+    "@hono/zod-validator": "catalog:",
     "@oligarchy/app": "workspace:*",
     "@oligarchy/async": "workspace:*",
     "@oligarchy/db": "workspace:*",
@@ -18,7 +20,9 @@
     "@oligarchy/logger": "workspace:*",
     "@oligarchy/sentry": "workspace:*",
     "@oligarchy/stores": "workspace:*",
-    "jarl": "catalog:"
+    "hono": "catalog:",
+    "jarl": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@oligarchy/fake-postgres": "workspace:*",
