@@ -243,9 +243,12 @@ bearer, and runs under `@oligarchy/app`.
       the board watch (`backlog.ts`) and the webhook signature (`signature.ts`) go.
       The skeleton is in (`v2/apps/automation-server`, `bun run automation-server`): `main` needs
       `DATABASE_URL`, builds its services with Sentry, says it started with its models, runs
-      `restart`, then `dispatch` until SIGINT or SIGTERM, then `shutdown`, says it stopped, and
-      closes its services. `restart` and `shutdown` do nothing yet, and `dispatch` only ticks
-      every `automationServer.dispatchInterval`. It serves nothing yet: `--port`, `OLIGARCHY_TOKEN` and `/abort` come
+      `restart`, then the dispatch tick until SIGINT or SIGTERM, then `shutdown`, says it
+      stopped, and closes its services. The tick is a sub-app whose main awaits a hand-written
+      loop (`tick.ts`): while alive, it sleeps `automationServer.dispatchInterval`, raced against
+      the kill, then calls its callback. A kill ends it cleanly once the call in flight returns;
+      its `stop`, or a callback that throws, fails the server. `restart`, `shutdown` and the
+      tick's callback do nothing yet. It serves nothing yet: `--port`, `OLIGARCHY_TOKEN` and `/abort` come
       with their tasks.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
