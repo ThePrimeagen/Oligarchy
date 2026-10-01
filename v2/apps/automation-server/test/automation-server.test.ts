@@ -12,7 +12,7 @@ const { models } = JSON.parse(readFileSync(Env.CONFIG_PATH, "utf8"));
 const STARTED = `[INFO] [global] automation-server: started; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`;
 const STOPPED = "[INFO] [global] automation-server: stopped; SIGTERM received";
 const SILENT = "http://127.0.0.1:1/silent-client";
-const FORGOTTEN = `[INFO] [global] automation-server: server forgotten; ${SILENT} silent for 10 minutes`;
+const FORGOTTEN = `[INFO] [global] automation-server: server forgotten; ${SILENT} silent for 600 seconds`;
 const SWEEP_FAILED = "[ERROR] [global] automation-server: stale server cleanup failed: ";
 
 const cleanups: Array<() => Promise<unknown> | unknown> = [];
@@ -100,7 +100,7 @@ describe("the automation server as a process", () => {
       {
         level: "info",
         location: "automation-server",
-        text: `server forgotten; ${SILENT} silent for 10 minutes`,
+        text: `server forgotten; ${SILENT} silent for 600 seconds`,
       },
       { level: "info", location: "automation-server", text: "stopped; SIGTERM received" },
     ]);
