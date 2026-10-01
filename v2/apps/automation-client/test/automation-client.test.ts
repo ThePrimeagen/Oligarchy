@@ -16,8 +16,6 @@ const HEARTBEAT_FAILED = "[ERROR] [global] automation-client: heartbeat failed: 
 const startedText = (port: number) =>
   `started on 127.0.0.1:${String(port)}; name ${NAME}; announcing ${CLIENT_URL}`;
 const startedLine = (port: number) => `[INFO] [global] automation-client: ${startedText(port)}`;
-const unannouncedText = (port: number) =>
-  `started on 127.0.0.1:${String(port)}; name ${NAME}; announcing nothing without --url`;
 
 const cleanups: Array<() => Promise<unknown> | unknown> = [];
 
@@ -95,8 +93,7 @@ const automationClient = (argv: ReadonlyArray<string>, env: Readonly<Record<stri
   return { child, exited, lines, stderr: () => stderr };
 };
 
-const unannounced = (port: number) => ["--port", String(port), "--name", NAME];
-const flags = (port: number) => [...unannounced(port), "--url", CLIENT_URL];
+const flags = (port: number) => ["--port", String(port), "--name", NAME, "--url", CLIENT_URL];
 
 // What the automation server's listLiveServers reads: a client heard from in the last 45 seconds.
 const LIVE_CLIENTS =
@@ -138,32 +135,19 @@ describe("the automation client as a process", () => {
     ]);
   });
 
-  it("with no --url, says it announces nothing, writes no row, and still serves until SIGTERM (unhappy)", async () => {
+  it("with no --url, refuses to start: says so on stderr, serves nothing, writes no row and exits 1 (unhappy)", async () => {
     const fake = await started();
     const port = await freePort();
-    const running = automationClient(unannounced(port), {
+    const running = automationClient(["--port", String(port), "--name", NAME], {
       DATABASE_URL: fake.url,
       OLIGARCHY_TOKEN: TOKEN,
     });
 
-    await vi.waitFor(
-      () =>
-        expect(running.lines()).toContain(
-          `[INFO] [global] automation-client: ${unannouncedText(port)}`,
-        ),
-      { timeout: 15_000 },
-    );
-    const unauthorized = await fetch(`http://127.0.0.1:${String(port)}/run`, { method: "POST" });
-    expect(unauthorized.status).toBe(401);
-    running.child.kill("SIGTERM");
-
-    expect(await running.exited).toBe(0);
-    expect(running.lines()).toEqual([
-      `[INFO] [global] automation-client: ${unannouncedText(port)}`,
-      STOPPED,
-    ]);
+    expect(await running.exited).toBe(1);
+    expect(running.stderr()).toBe("--url is required\n");
+    expect(running.lines()).toEqual([]);
     expect(await query(fake.url, "select url from servers")).toEqual([]);
-    expect(await query(fake.url, READINGS)).toEqual([]);
+    expect(await query(fake.url, "select text from logs")).toEqual([]);
   });
 
   it("with its port already taken, says it could not listen and exits 1, announcing nothing (unhappy)", async () => {
