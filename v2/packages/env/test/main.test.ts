@@ -19,7 +19,7 @@ const ctrl = Env.cli({ name: "ctrl", description: "Record and inspect test runs"
   .flags({ serverUrl: Env.args.serverUrl(false), sessionId: Env.args.sessionId(false) })
   .needs("databaseUrl")
   .command("setup", "Set the ISO up on every live qemu server")
-  .flags({ iso: Env.args.iso(), notSetUp: Env.args.notSetUp(false) })
+  .flags({ iso: Env.args.iso(), setupOnly: Env.args.setupOnly(false) })
   .needs("oligarchyToken", "automationServerUrl")
   .done()
   .command("test", "Test definitions and their runs")
@@ -103,7 +103,7 @@ describe("create", () => {
     const result = await Env.create(
       ctrl,
       io({
-        argv: ["setup", "--iso", ISO, "--not-set-up", "--env-file", ".prod-env"],
+        argv: ["setup", "--iso", ISO, "--setup-only", "--env-file", ".prod-env"],
         env: { AUTOMATION_SERVER_URL: "from-env" },
         files: {
           ".prod-env":
@@ -117,7 +117,7 @@ describe("create", () => {
     if (env.command !== "setup") {
       throw new Error(`expected setup, got ${env.command}`);
     }
-    expect(env.flags.notSetUp).toBe(true);
+    expect(env.flags.setupOnly).toBe(true);
     expect(env.vars.automationServerUrl).toBe("from-env");
     expect(env.vars.oligarchyToken.reveal()).toBe("from-file");
     expect(env.vars.databaseUrl.reveal()).toBe("postgres://from-dot@db.example/oligarchy");

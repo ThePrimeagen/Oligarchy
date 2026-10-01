@@ -139,7 +139,7 @@ meet plus one happy path, and every service is faked except the database.
       definition named `mint` to `setup`, rows already written included. The queue hands out
       setups first. The config's `models.setup` and `reasoning.setup` replace `mint`, in V2's own
       `v2/oligarchy.json`; the driver's `--action` is `drive` or `setup`; `ctrl setup`'s
-      `--not-set-up` replaces `--unminted`; and a minted disk is a setup disk.
+      `--setup-only` replaces `--unminted`; and a minted disk is a setup disk.
 - [x] **`tests`: a setup takes its lock.** `createSetupRun({ definitionId, iso, serverUrl })`
       inserts the setup lock on its ISO and server, and only when that insert lands writes a test
       run of its own, its pending setup job, and the job's id on the lock, in one transaction. A
@@ -148,6 +148,9 @@ meet plus one happy path, and every service is faked except the database.
       missing definition is `NotFound`, checked before the lock, and a failed write is the
       database's error; neither leaves a lock. The proxy's flow no longer calls
       `setupRequests.insert` or `setJob`.
+=======
+      `--setup-only` replaces `--unminted`; and a minted disk is a setup disk.
+>>>>>>> cursor/v2-rename-mint-to-setup-a582
 
 ## 3. The flow that replaces the Linear board
 
