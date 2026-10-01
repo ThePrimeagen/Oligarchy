@@ -325,13 +325,14 @@ bearer, and runs under `@oligarchy/app`.
             `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409 and a
             `RunFailed` 500 naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
             fakes `Sessions`. The tasks below write the functions.
-      - [x] **Announce.** A required `--name` and an optional `--url`. Once the port is bound, an
-            announce sub-app runs `fleet.announce` as `automation-client` under `--url`, with the
-            host's cpu sampled between heartbeats, so the automation server's `listLiveServers`
-            finds it; its row goes on shutdown, before the services close. The started line names
-            both. With no `--url` it announces nothing and stays out of the fleet, as V1's did, and
-            a port it cannot bind announces nothing. It reports no guests, and no jobs until
-            Reserve counts them.
+      - [x] **Announce.** A required `--name` and a required `--url`: a client the automation
+            server cannot reach is no client, so one with no `--url` refuses to start (V1's was
+            optional, though every script passed it). Once the port is bound, an announce sub-app
+            runs `fleet.announce` as `automation-client` under `--url`, with the host's cpu
+            sampled between heartbeats, so the automation server's `listLiveServers` finds it;
+            its row goes on shutdown, before the services close. The started line names both. A
+            port it cannot bind announces nothing. It reports no guests, and no jobs until Reserve
+            counts them.
       - [ ] **Reserve** against `--max-jobs`: a slot for the job, and for a drive or setup a guest
             reserved at the qemu reverse proxy first; 503 at capacity, 409 when the proxy answers
             setup needed. One reserve at a time. The reservation is `jobs.hold(jobId)`: a second
