@@ -313,8 +313,8 @@ bearer, and runs under `@oligarchy/app`.
             line and exit 1), says it started, and on SIGINT or SIGTERM closes the listener, says
             it stopped, and closes its services. `routes.ts` is one chained Hono app behind the
             bearer, exported as `Routes` (`@oligarchy/automation-client/routes`) for the
-            automation server's client. Each route's body is checked, and each answers 501 until
-            its task hands `routes({ token, sessions })` its `Sessions` function:
+            automation server's client. Each route's body is checked, and `/reserve` and `/run`
+            answer 501 until each task hands `routes({ token, sessions })` its `Sessions` function:
             - `/reserve`: `{ jobId, action }`, where a drive may name `resume` (the ISO's url), a
               setup names `setupServer` (the qemu server its setup lock names), and a diagnose
               names neither.
@@ -329,13 +329,28 @@ bearer, and runs under `@oligarchy/app`.
             automation server's `listLiveServers` finds it, and its row goes on shutdown.
       - [ ] **Reserve** against `--max-jobs`: a slot for the job, and for a drive or setup a guest
             reserved at the qemu reverse proxy first; 503 at capacity, 409 when the proxy answers
-            setup needed. One reserve at a time.
+            setup needed. One reserve at a time. The reservation is `jobs.hold(jobId)`: a second
+            hold of the job is `AlreadyHeld`, and one once shutdown has begun is `ShuttingDown`
+            (503). When the held signal aborts before a run takes the job, the reservation gives
+            its guest back at the proxy and then calls `release`.
       - [ ] **Run.** Consumes the job's reservation and spawns `./driver` for a drive or setup or
             opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
-            409 when an abort ended it, 500 when it failed.
-      - [ ] **Abort.** Kills the job's run, or gives back its reservation; 404 for a job it does
-            not hold.
-      - [ ] **Shutdown.** Kills every run and gives back every reservation before it exits.
+            409 when an abort ended it, 500 when it failed. It spawns on the held signal: when it
+            aborts the child is sent SIGTERM, and SIGKILL after a grace (V1's was 5 seconds).
+            Only a child that kill reached answers 409; one that had already exited answers as it
+            ended. The run calls `release` once the child is reaped.
+      - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
+            each job it has reserved or is running, in memory only, by an `AbortController`;
+            `main` creates it and hands `jobs.abort` to the routes as their `Sessions` abort.
+            `jobs.abort({ jobId })` aborts that job's signal with `Aborted` and answers `stopped`
+            (200) once the job's holder has called `release`: its run is killed, or its guest
+            given back. A job it does not hold is `not-held` (404). Neither abort nor shutdown
+            writes a job's status; the client has no `tests` store, and setting a status is left
+            to the automation server (section 3's Abort, and Restart and shutdown).
+      - [x] **Shutdown.** On SIGINT or SIGTERM `main` closes the listener, which ends the
+            connections but not a `/run` still under way, then `jobs.shutdown()` aborts every
+            held job and waits until each is let go, before it says it stopped and the services
+            close. From the moment shutdown begins, every hold is refused.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
       Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
