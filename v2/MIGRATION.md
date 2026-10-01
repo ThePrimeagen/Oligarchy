@@ -278,8 +278,10 @@ bearer, and runs under `@oligarchy/app`.
             the address, and a port that cannot be bound is a fatal line and exit 1. On a signal
             the listener closes before `shutdown`.
       - [ ] **`/abort`** (section 3's Abort), by job id or by suite id. The route and its contract
-            are in: a body of `{ jobId }` or `{ suiteId }`, each a uuid, or 400 `name a jobId or
-            a suiteId`. Until this task it answers 501 `abort is not written yet`.
+            are in: a body of `{ jobId }` or `{ suiteId }`, each a uuid, never both, since a job
+            filed on its own has no suite; anything else is 400 `name a jobId or a suiteId`, and
+            the typed client refuses it too. Until this task it answers 501 `abort is not written
+            yet`.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
