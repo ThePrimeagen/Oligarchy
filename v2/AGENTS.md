@@ -1,6 +1,10 @@
 1. No private members.
 2. No classes, except `App`.
-3. Tests test business logic only, never that a third-party interface works.
+3. Tests test business logic only, never that a third-party interface works. Never test again
+   what is already tested, or what the types already promise. A unit does not re-test the
+   packages it calls: an app does not test env's refusal of a missing variable or an unknown
+   flag, or how `oligarchy.json` is read, and a new config key, flag or variable adds no test of
+   its own. Rule 5's errors are the ones the unit's own code decides what to do with.
 4. Every service is faked in tests: HTTP, the process's io, the clock, all of them. The
    database is the one exception: a test starts its own with `@oligarchy/fake-postgres` and stops
    it inside the test, so a full flow and a real shutdown are proven. Nothing a test needs is
