@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/main.ts",
+    "./client": "./src/client.ts",
     "./testing": "./src/testing.ts"
   },
   "scripts": {
@@ -13,11 +14,14 @@
   "dependencies": {
     "@oligarchy/app": "workspace:*",
     "@oligarchy/async": "workspace:*",
+    "hono": "catalog:",
     "jarl": "catalog:"
   },
   "devDependencies": {
+    "@hono/zod-validator": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }
