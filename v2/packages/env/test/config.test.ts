@@ -17,7 +17,11 @@ const valid = {
   runCeiling: "1.5 hours",
   stepLimit: 200,
   harness: { defaultRetry: "1 second" },
-  automationServer: { dispatchInterval: "30 seconds", forgetInterval: "30 seconds" },
+  automationServer: {
+    dispatchInterval: "30 seconds",
+    forgetInterval: "30 seconds",
+    forgetAfter: "10 minutes",
+  },
 };
 
 const loadText = (text: string) => Config.load(Io.fake({ files: { [Config.PATH]: text } }));

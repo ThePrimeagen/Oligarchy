@@ -21,6 +21,7 @@
   },
   "automationServer": {
     "dispatchInterval": "30 seconds",
-    "forgetInterval": "30 seconds"
+    "forgetInterval": "30 seconds",
+    "forgetAfter": "10 minutes"
   }
 }

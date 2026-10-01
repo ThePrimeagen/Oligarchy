@@ -34,17 +34,20 @@ const dispatch = async (sub: App.App<Run>) => {
   return jarl.ok(undefined);
 };
 
-// The forget sub-app's main. Until the server is killed, it forgets each automation client silent
-// for ten minutes, at once and then every interval, so dispatch never reserves on a dead one.
+// The forget sub-app's main. It runs until the server is killed: each pass forgets the automation
+// clients silent for longer than forgetAfter, so dispatch never reserves on a dead one, then waits
+// the interval, and the kill ends the wait at once.
 const forgetClients = async (sub: App.App<Run, Stores.Servers.Servers | Logger.Logger>) => {
   const { servers, logger } = sub.services;
-  const { forgetInterval } = sub.environment.config.automationServer;
-  await Fleet.forget(
-    "automation-client",
-    { servers, logger, attribution: { location: LOCATION } },
-    sub.signal,
-    { every: forgetInterval },
-  );
+  const { forgetInterval, forgetAfter } = sub.environment.config.automationServer;
+  while (!sub.signal.aborted) {
+    await Fleet.forget(
+      "automation-client",
+      { servers, logger, attribution: { location: LOCATION } },
+      { silentFor: forgetAfter },
+    );
+    await Async.sleep(forgetInterval, sub.signal);
+  }
   return jarl.ok(undefined);
 };
 
