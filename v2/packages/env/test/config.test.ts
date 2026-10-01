@@ -9,9 +9,9 @@ const valid = {
   models: {
     drive: "meta/muse-spark-1.3-contributor",
     diagnose: "meta/muse-spark-1.3-contributor",
-    mint: "meta/muse-spark-1.3-contributor",
+    setup: "meta/muse-spark-1.3-contributor",
   },
-  reasoning: { drive: "minimal", diagnose: "xhigh", mint: "minimal" },
+  reasoning: { drive: "minimal", diagnose: "xhigh", setup: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",
@@ -40,8 +40,9 @@ describe("load", () => {
     expect(config.runCeiling).toBe(5_400_000);
     expect(config.harness.defaultRetry).toBe(1_000);
     expect(config.reasoning.diagnose).toBe("xhigh");
+    expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
+    expect(config.reasoning.setup).toBe("minimal");
   });
-
   it("refuses a missing file rather than guessing a default (unhappy)", async () => {
     const result = await Config.load(Io.fake());
     if (!jarl.error.is(result, Errors.FileMissing)) {

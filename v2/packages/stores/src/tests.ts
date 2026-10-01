@@ -266,10 +266,10 @@ const countRuns = async (d: Db.Drizzle, suiteIds: ReadonlyArray<string>) => {
   return counts;
 };
 
-// Queue order: every pending mint, then every pending diagnose, then every pending drive,
-// each oldest first; id breaks a tie. A mint is the install a resume waits on, so it never
+// Queue order: every pending setup, then every pending diagnose, then every pending drive,
+// each oldest first; id breaks a tie. A setup is the install a resume waits on, so it never
 // waits behind that resume, and a diagnose closes a drive already done.
-const queueRank = sql`case ${DbSchema.jobs.action} when 'mint' then 0 when 'diagnose' then 1 else 2 end`;
+const queueRank = sql`case ${DbSchema.jobs.action} when 'setup' then 0 when 'diagnose' then 1 else 2 end`;
 
 const runSummary = {
   ...getTableColumns(DbSchema.testRuns),
@@ -294,12 +294,12 @@ const job = {
   running: { accepts: (row) => row.status === "running", need: "running" },
   completedJudged: {
     accepts: (row) => row.status === "completed" && row.action !== "diagnose",
-    need: "a completed drive or mint",
+    need: "a completed drive or setup",
   },
   errorable: {
     accepts: (row) =>
       row.status === "running" || (row.status === "completed" && row.action !== "diagnose"),
-    need: "running, or a completed drive or mint",
+    need: "running, or a completed drive or setup",
   },
   open: {
     accepts: (row) => row.status === "pending" || row.status === "running",

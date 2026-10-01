@@ -49,7 +49,7 @@ export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]
 // boot guests; an automation-client is a host that announces itself the same way.
 export const serverType = pgEnum("server_type", ["qemu", "automation-client"]);
 
-export const jobAction = pgEnum("job_action", ["drive", "diagnose", "mint"]);
+export const jobAction = pgEnum("job_action", ["drive", "diagnose", "setup"]);
 export const jobStatus = pgEnum("job_status", [
   "pending",
   "running",
@@ -135,7 +135,7 @@ export const postRunErrorTypes = pgTable("post_run_error_types", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// One diagnosis per ended job, keyed by the job it reviews, a drive or a mint, never the diagnose
+// One diagnosis per ended job, keyed by the job it reviews, a drive or a setup, never the diagnose
 // job that wrote it: a row absent is a job nobody has reviewed. verdict is the reviewer's, written after reading the evidence, and may disagree with
 // the driver's stop status and the test run's status. error_type names the cause of a failed verdict and is
 // null exactly when the verdict is passed: a pass has no cause to name, and the check keeps the two
@@ -279,12 +279,12 @@ export const vmStatus = pgTable(
 );
 
 // One setup in flight, or finished and left in place, per iso and server. The primary key is
-// the lock: a second insert fails, so one mint per pair. job_id is the one mint job holding
+// the lock: a second insert fails, so one setup per pair. job_id is the one setup job holding
 // the lock, null until that job exists. A job that ends without success releases the lock and
-// a new mint job takes it; a job that succeeded keeps it. Not a foreign key, and server_url is
+// a new setup job takes it; a job that succeeded keeps it. Not a foreign key, and server_url is
 // not one either: forgetting a server does not cascade the row away, and a success stays when
 // retention sweeps the job. A server deletes its own rows once, when it comes online, so a
-// restarted host cannot keep a stale lock. Many null job ids are allowed; one mint job holds
+// restarted host cannot keep a stale lock. Many null job ids are allowed; one setup job holds
 // one lock at most. server_url is indexed
 // on its own — the primary key leads with iso — for that delete. Not unique: one server, many isos.
 export const setupRequests = pgTable(
@@ -308,7 +308,7 @@ export const setupRequests = pgTable(
 // it ran against. A name's newest wording is its highest id, and its version is the
 // row's place among the name's rows by id; name is indexed for those lookups, not
 // unique. resume: a drive of this wording boots its test run's ISO from that ISO's
-// minted disk; otherwise it boots fresh. A mint job always boots fresh.
+// setup disk; otherwise it boots fresh. A setup job always boots fresh.
 export const testDefinitions = pgTable(
   "test_definitions",
   {
@@ -385,7 +385,7 @@ export const testRuns = pgTable(
 // One automation step for a test run: drive the guest, or diagnose after. Inserted
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
 // status. A job runs once and is never run again: a failed job stays failed, and trying
-// again is a new job, so a test run holds every mint, drive and diagnose it took. Queue order is created_at among pending rows; capacity limits stay out of this table.
+// again is a new job, so a test run holds every setup, drive and diagnose it took. Queue order is created_at among pending rows; capacity limits stay out of this table.
 // server_id is the servers.id that claimed the job, so /abort can find that client after
 // a restart; null while the row is pending. Attribution, not a relation: forgetting a
 // server must keep the job row.

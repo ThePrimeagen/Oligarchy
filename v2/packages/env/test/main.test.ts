@@ -18,8 +18,8 @@ const io = (options: {
 const ctrl = Env.cli({ name: "ctrl", description: "Record and inspect test runs" })
   .flags({ serverUrl: Env.args.serverUrl(false), sessionId: Env.args.sessionId(false) })
   .needs("databaseUrl")
-  .command("mint", "Mint the ISO on every live qemu server")
-  .flags({ iso: Env.args.iso(), unminted: Env.args.unminted(false) })
+  .command("setup", "Set the ISO up on every live qemu server")
+  .flags({ iso: Env.args.iso(), setupOnly: Env.args.setupOnly(false) })
   .needs("oligarchyToken", "automationServerUrl")
   .done()
   .command("test", "Test definitions and their runs")
@@ -41,7 +41,7 @@ describe("create", () => {
       io({ argv: [...RUN_ONE, "--session-id", "s-1"], env: { DATABASE_URL } }),
     );
     const env = jarl.unwrap(result);
-    expectTypeOf(env.command).toEqualTypeOf<"mint" | "test run one">();
+    expectTypeOf(env.command).toEqualTypeOf<"setup" | "test run one">();
     if (env.command !== "test run one") {
       throw new Error(`expected test run one, got ${env.command}`);
     }
@@ -66,7 +66,7 @@ describe("create", () => {
     const result = await Env.create(
       ctrl,
       io({
-        argv: ["mint", "--iso", ISO],
+        argv: ["setup", "--iso", ISO],
         env: { DATABASE_URL, AUTOMATION_SERVER_URL: "http://automation" },
       }),
     );
@@ -103,7 +103,7 @@ describe("create", () => {
     const result = await Env.create(
       ctrl,
       io({
-        argv: ["mint", "--iso", ISO, "--env-file", ".prod-env"],
+        argv: ["setup", "--iso", ISO, "--setup-only", "--env-file", ".prod-env"],
         env: { AUTOMATION_SERVER_URL: "from-env" },
         files: {
           ".prod-env":
@@ -114,9 +114,10 @@ describe("create", () => {
       }),
     );
     const env = jarl.unwrap(result);
-    if (env.command !== "mint") {
-      throw new Error(`expected mint, got ${env.command}`);
+    if (env.command !== "setup") {
+      throw new Error(`expected setup, got ${env.command}`);
     }
+    expect(env.flags.setupOnly).toBe(true);
     expect(env.vars.automationServerUrl).toBe("from-env");
     expect(env.vars.oligarchyToken.reveal()).toBe("from-file");
     expect(env.vars.databaseUrl.reveal()).toBe("postgres://from-dot@db.example/oligarchy");
@@ -126,7 +127,7 @@ describe("create", () => {
   it("hands the program oligarchy.json as the file says it (happy)", async () => {
     const file = {
       ...JSON.parse(CONFIG),
-      models: { drive: "test/drive", diagnose: "test/diagnose", mint: "test/mint" },
+      models: { drive: "test/drive", diagnose: "test/diagnose", setup: "test/setup" },
       stepLimit: 7,
       timeouts: { header: "2 seconds", chunk: "5 seconds" },
     };
