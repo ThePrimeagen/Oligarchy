@@ -7,10 +7,13 @@
       "packages/*"
     ],
     "catalog": {
+      "@hono/node-server": "^2.1.3",
+      "@hono/zod-validator": "^0.9.1",
       "@sentry/bun": "10.73.0",
       "@types/node": "^26.4.0",
       "@types/pg": "^8.23.1",
       "drizzle-orm": "^0.45.2",
+      "hono": "^4.13.12",
       "jarl": "github:ThePrimeagen/jarl#v1.2.0",
       "pg": "^8.23.0",
       "typescript": "7.0.2",
