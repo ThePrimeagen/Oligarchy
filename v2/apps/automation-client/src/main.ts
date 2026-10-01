@@ -23,18 +23,19 @@ type Announcing =
   | Stores.ProcessStats.ProcessStats
   | Logger.Logger;
 
-// The announce sub-app's main: the servers row under url, written now and every heartbeat with
+// The announce sub-app's main: the servers row under --url, written now and every heartbeat with
 // the host's cpu sampled in between, until the client is killed; then the row goes. It boots no
 // guests, and holds no jobs until reserve is written.
-const announcing = (url: string) => async (sub: App.App<Run, Announcing>) => {
+const announcing = async (sub: App.App<Run, Announcing>) => {
   const { host, usage, servers, processStats, logger } = sub.services;
+  const { name, url } = sub.environment.flags;
   await Promise.all([
     Fleet.Host.sampling(host, sub.signal),
     Fleet.announce(
       {
         type: "automation-client",
         url,
-        name: sub.environment.flags.name,
+        name,
         attribution: { location: LOCATION },
         report: async () => jarl.ok({ qemus: 0, jobs: 0 }),
       },
@@ -62,14 +63,11 @@ const main = async (app: App.App<Run, Announcing>) => {
     logger.fatal(listened.error.message, { location: LOCATION });
     return listened;
   }
-  const { url } = flags;
   logger.info(
-    `started on ${HOST}:${String(flags.port)}; name ${flags.name}; announcing ${url ?? "nothing without --url"}`,
+    `started on ${HOST}:${String(flags.port)}; name ${flags.name}; announcing ${flags.url}`,
     { location: LOCATION },
   );
-  if (url !== undefined) {
-    app.sub(new App.App(app.environment).main(announcing(url)));
-  }
+  app.sub(new App.App(app.environment).main(announcing));
   await App.waitForAbort(app.signal);
   await jarl.value(listened).close();
   await jobs.shutdown();
