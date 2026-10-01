@@ -5,6 +5,7 @@ import { and, asc, desc, eq, getTableColumns, inArray, notInArray, sql } from "d
 import { alias, type PgUpdateSetSource } from "drizzle-orm/pg-core";
 import * as jarl from "jarl";
 import { type Answer, settle } from "./answer.ts";
+import { claimLock } from "./setup-requests.ts";
 
 // A transition asked of a row that is not in a state it moves from, or a create given nothing
 // to create. The message says what was asked and what was needed.
@@ -91,19 +92,24 @@ export type DefinedDefinition = {
 };
 
 // definitionIds may name a definition more than once: each is a test run of its own.
+// setupServers, when given, is one qemu server per id, in the same order: a suite of the
+// setup definition, each run claiming that server's lock.
 export type SuiteInput = {
   readonly iso: string;
   readonly serverUrl: string;
   readonly definitionIds: ReadonlyArray<number>;
+  readonly setupServers?: ReadonlyArray<string>;
 };
 
 export type RunInput = {
   readonly definitionId: number;
   readonly iso: string;
   readonly serverUrl: string;
+  // The qemu server whose setup lock a setup run names its job on. A drive names none.
+  readonly setupServer?: string;
 };
 
-// A test run filed on its own, and the drive it was filed with.
+// A test run filed on its own, and the job it was filed with.
 export type NewTestRun = { readonly run: RunRow; readonly job: JobRow };
 
 // The version in the ISO's file name (`omarchy-4.0.4.iso` is `4.0.4`), or the whole url when
@@ -143,7 +149,7 @@ export type Tests = {
   ) => Moved<SuiteRow>;
   readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
 
-  readonly createTestRun: (input: RunInput) => Found<NewTestRun>;
+  readonly createTestRun: (input: RunInput) => Moved<NewTestRun>;
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
   readonly listTestRuns: (suiteId: string) => Answer<ReadonlyArray<TestRunSummary>>;
@@ -203,8 +209,19 @@ type Placement = Pick<
   "suiteId" | "definitionId" | "iso" | "serverUrl"
 >;
 
-// A test run and the pending drive it is filed with.
-const fileRun = async (tx: Tx, fn: string, placement: Placement): Promise<NewTestRun> => {
+// The definition that installs an ISO. Filing it writes a setup job; every other definition
+// writes a drive. A caller does not choose the action, so a setup cannot be filed as a drive.
+const SETUP = "setup";
+
+const filedAction = (name: string): "drive" | "setup" => (name === SETUP ? "setup" : "drive");
+
+// A test run and the pending job it is filed with. The action is the definition's.
+const fileRun = async (
+  tx: Tx,
+  fn: string,
+  placement: Placement,
+  action: "drive" | "setup",
+): Promise<NewTestRun> => {
   const filed = only(
     await tx
       .insert(DbSchema.testRuns)
@@ -212,15 +229,20 @@ const fileRun = async (tx: Tx, fn: string, placement: Placement): Promise<NewTes
       .returning(),
     fn,
   );
-  const drive = only(
+  const job = only(
     await tx
       .insert(DbSchema.jobs)
-      .values({ runId: filed.id, action: "drive", createdAt: clock })
+      .values({ runId: filed.id, action, createdAt: clock })
       .returning(),
     fn,
   );
-  return { run: filed, job: drive };
+  return { run: filed, job };
 };
+
+// A refusal thrown inside a transaction, so the transaction rolls back, then returned as the
+// result. Any other throw stays a throw, and the database's run reports it.
+const caught = (error: unknown): Refusal | undefined =>
+  error instanceof InvalidState || error instanceof NotFound ? error : undefined;
 
 // Each definition's name, for those of the ids that name one.
 const definitionNames = async (tx: Tx, ids: ReadonlyArray<number>) => {
@@ -535,47 +557,93 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
       }),
 
     // The whole suite in one transaction: the suite, running, and each test run with its pending
-    // drive, in the order named. The queue never sees part of a suite.
-    createTestSuite: ({ iso, serverUrl, definitionIds }) =>
+    // job, in the order named. A setup definition files a setup job and claims that run's server;
+    // any other files a drive. The queue never sees part of a suite, nor a setup job with no lock.
+    createTestSuite: ({ iso, serverUrl, definitionIds, setupServers }) =>
       db
-        .run((d) =>
-          d.transaction(async (tx): Promise<jarl.Result<TestSuiteDetails, Refusal>> => {
-            if (definitionIds.length === 0) {
-              return jarl.err(
-                new InvalidState("createTestSuite: needs at least one test definition"),
-              );
-            }
-            const names = await definitionNames(tx, definitionIds);
-            const named: Array<{ readonly definitionId: number; readonly test: string }> = [];
-            for (const definitionId of definitionIds) {
-              const test = names.get(definitionId);
-              if (test === undefined) {
-                return jarl.err(
-                  new NotFound(`createTestSuite: no test definition ${String(definitionId)}`),
+        .run(async (d): Promise<jarl.Result<TestSuiteDetails, Refusal>> => {
+          try {
+            return await d.transaction(
+              async (tx): Promise<jarl.Result<TestSuiteDetails, Refusal>> => {
+                if (definitionIds.length === 0) {
+                  return jarl.err(
+                    new InvalidState("createTestSuite: needs at least one test definition"),
+                  );
+                }
+                const names = await definitionNames(tx, definitionIds);
+                const named: Array<{ readonly definitionId: number; readonly test: string }> = [];
+                for (const definitionId of definitionIds) {
+                  const test = names.get(definitionId);
+                  if (test === undefined) {
+                    return jarl.err(
+                      new NotFound(`createTestSuite: no test definition ${String(definitionId)}`),
+                    );
+                  }
+                  named.push({ definitionId, test });
+                }
+                const setups = named.filter(({ test }) => test === SETUP).length;
+                if (setups > 0 && setups < named.length) {
+                  return jarl.err(
+                    new InvalidState(
+                      "createTestSuite: a setup definition and a drive definition cannot share a suite",
+                    ),
+                  );
+                }
+                if (setups === named.length && setupServers?.length !== named.length) {
+                  return jarl.err(
+                    new InvalidState(
+                      "createTestSuite: a setup suite needs one server per test run",
+                    ),
+                  );
+                }
+                if (setups === 0 && setupServers !== undefined) {
+                  return jarl.err(
+                    new InvalidState("createTestSuite: a drive suite names no setup server"),
+                  );
+                }
+                const filed = only(
+                  await tx
+                    .insert(DbSchema.testSuites)
+                    .values({ iso, serverUrl, name: suiteName(iso), status: "running" })
+                    .returning(),
+                  "createTestSuite",
                 );
-              }
-              named.push({ definitionId, test });
-            }
-            const filed = only(
-              await tx
-                .insert(DbSchema.testSuites)
-                .values({ iso, serverUrl, name: suiteName(iso), status: "running" })
-                .returning(),
-              "createTestSuite",
+                const runs: Array<TestSuiteDetails["runs"][number]> = [];
+                for (const [index, { definitionId, test }] of named.entries()) {
+                  const action = filedAction(test);
+                  const written = await fileRun(
+                    tx,
+                    "createTestSuite",
+                    { suiteId: filed.id, definitionId, iso, serverUrl },
+                    action,
+                  );
+                  if (action === "setup") {
+                    const server = setupServers?.[index];
+                    if (server === undefined) {
+                      throw new InvalidState(
+                        "createTestSuite: a setup suite needs one server per test run",
+                      );
+                    }
+                    const claimed = await claimLock(tx, iso, server, written.job.id);
+                    if (!claimed) {
+                      throw new InvalidState(
+                        `createTestSuite: ${server} did not take its setup lock`,
+                      );
+                    }
+                  }
+                  runs.push({ run: written.run, test, jobs: [written.job] });
+                }
+                return jarl.ok({ suite: filed, runs });
+              },
             );
-            const runs: Array<TestSuiteDetails["runs"][number]> = [];
-            for (const { definitionId, test } of named) {
-              const { run: written, job: drive } = await fileRun(tx, "createTestSuite", {
-                suiteId: filed.id,
-                definitionId,
-                iso,
-                serverUrl,
-              });
-              runs.push({ run: written, test, jobs: [drive] });
+          } catch (error) {
+            const refusal = caught(error);
+            if (refusal !== undefined) {
+              return jarl.err(refusal);
             }
-            return jarl.ok({ suite: filed, runs });
-          }),
-        )
+            throw error;
+          }
+        })
         .then(settle),
 
     getTestSuite: (suiteId) =>
@@ -667,22 +735,93 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         openRunOf("abortSuite"),
       ),
 
-    // A test run on its own and its pending drive, in one transaction.
-    createTestRun: ({ definitionId, iso, serverUrl }) =>
+    // A test run on its own and its pending job, in one transaction. A setup names that job on
+    // the server's existing lock before the transaction commits, so a crash cannot leave the
+    // job with no server, or the lock with no job.
+    createTestRun: ({ definitionId, iso, serverUrl, setupServer }) =>
       db
-        .run((d) =>
-          d.transaction(async (tx): Promise<jarl.Result<NewTestRun, NotFound>> => {
-            const names = await definitionNames(tx, [definitionId]);
-            if (!names.has(definitionId)) {
-              return jarl.err(
-                new NotFound(`createTestRun: no test definition ${String(definitionId)}`),
+        .run(async (d): Promise<jarl.Result<NewTestRun, Refusal>> => {
+          try {
+            return await d.transaction(async (tx): Promise<jarl.Result<NewTestRun, Refusal>> => {
+              const names = await definitionNames(tx, [definitionId]);
+              const name = names.get(definitionId);
+              if (name === undefined) {
+                return jarl.err(
+                  new NotFound(`createTestRun: no test definition ${String(definitionId)}`),
+                );
+              }
+              if (name === SETUP) {
+                if (setupServer === undefined) {
+                  return jarl.err(
+                    new InvalidState("createTestRun: a setup needs the server whose lock it takes"),
+                  );
+                }
+                const [lock] = await tx
+                  .select({ jobId: DbSchema.setupRequests.jobId })
+                  .from(DbSchema.setupRequests)
+                  .where(
+                    and(
+                      eq(DbSchema.setupRequests.iso, iso),
+                      eq(DbSchema.setupRequests.serverUrl, setupServer),
+                    ),
+                  )
+                  .for("update");
+                if (lock === undefined) {
+                  return jarl.err(
+                    new NotFound(`createTestRun: no setup lock for ${iso} on ${setupServer}`),
+                  );
+                }
+                if (lock.jobId !== null) {
+                  return jarl.err(
+                    new InvalidState(
+                      `createTestRun: setup lock for ${iso} on ${setupServer} already has a job`,
+                    ),
+                  );
+                }
+                const filed = await fileRun(
+                  tx,
+                  "createTestRun",
+                  { suiteId: null, definitionId, iso, serverUrl },
+                  "setup",
+                );
+                const named = await tx
+                  .update(DbSchema.setupRequests)
+                  .set({ jobId: filed.job.id })
+                  .where(
+                    and(
+                      eq(DbSchema.setupRequests.iso, iso),
+                      eq(DbSchema.setupRequests.serverUrl, setupServer),
+                      sql`${DbSchema.setupRequests.jobId} is null`,
+                    ),
+                  )
+                  .returning({ iso: DbSchema.setupRequests.iso });
+                if (named.length === 0) {
+                  throw new InvalidState(
+                    `createTestRun: setup lock for ${iso} on ${setupServer} already has a job`,
+                  );
+                }
+                return jarl.ok(filed);
+              }
+              if (setupServer !== undefined) {
+                return jarl.err(new InvalidState("createTestRun: a drive names no setup server"));
+              }
+              return jarl.ok(
+                await fileRun(
+                  tx,
+                  "createTestRun",
+                  { suiteId: null, definitionId, iso, serverUrl },
+                  "drive",
+                ),
               );
+            });
+          } catch (error) {
+            const refusal = caught(error);
+            if (refusal !== undefined) {
+              return jarl.err(refusal);
             }
-            return jarl.ok(
-              await fileRun(tx, "createTestRun", { suiteId: null, definitionId, iso, serverUrl }),
-            );
-          }),
-        )
+            throw error;
+          }
+        })
         .then(settle),
 
     getTestRun: (runId) =>
