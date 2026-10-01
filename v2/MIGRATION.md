@@ -26,11 +26,17 @@ meet plus one happy path, and every service is faked except the database.
   package. An app's routes are one chained Hono app, each body checked by a zod schema through
   `@hono/zod-validator`, and its type is exported as `Routes`, so a caller's `hc<Routes>` and a
   test's `testClient` are typed by the routes themselves. Calls out go through `@oligarchy/http`.
-  A caller takes each call from the callee's `Routes` through `hono/client`, a type import with
-  no runtime code: its body from `InferRequestType`, its path from `$url()`, and each status it
-  reads `satisfies` the statuses that route answers, so a route that changes stops its callers
-  compiling. An app exports its routes, and a fake of what they are handed as `./testing`, for
-  its callers and their tests; there is still no shared API package.
+  A caller reaches another app through `@oligarchy/http/client`, typed by that app's `Routes`
+  (a type import, through `hono/types`' `ExtractSchema`, with no runtime code):
+  `create<Routes>()({ http, url, token, signal? }, specs)` is made once from the url its row
+  names, and `post(path, body)` takes only the routes' paths and each route's body, joins the
+  path to the url and carries the token as the bearer. `specs` holds one entry per route: its
+  `ok` word for a 2xx, a word for each other status it answers that is no failure, and any
+  `timeoutMs`; every status left out stays `@oligarchy/http`'s error. A route left out, a route
+  the app lacks, a status the route never answers and a route with no POST do not compile, so
+  a route that changes stops its callers compiling. An app exports its routes, and a fake of
+  what they are handed as `./testing`, for its callers and their tests; there is still no
+  shared API package.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
 - **Modern terminals only.** Output is coloured when stdout is a TTY, and the terminal is assumed
@@ -262,21 +268,19 @@ bearer, and runs under `@oligarchy/app`.
             its row. Its main is a loop that runs until the server is killed: each pass is one
             `fleet.forget` sweep, then a wait of `automationServer.forgetInterval` (30 seconds).
             `fleet.forget` is one sweep and has no loop of its own.
-      - [x] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own
-            (`src/automation-client.ts`, V1: `client.ts`), are plain calls, not a service. Each
-            takes a `Client` struct, `{ http, url, token, signal? }`, and posts its request
-            struct as it is through that `http` with `OLIGARCHY_TOKEN` as the bearer; nothing is
-            asked again, and the signal ends any call in flight. Each request, path and status
-            comes from the automation client's `Routes` (`@oligarchy/automation-client/routes`),
-            as Decided says. A reserve's request is `ReserveRequest`; it answers `reserved`, or
-            `at-capacity` (503) or `setup-needed` (409), neither a failure. `run` answers `ended`
-            once the driver or opencode has ended, or `aborted` (409) when an abort ended it; it
-            waits as long as a timer can (2³¹−1 ms), so only the client or the signal ends it.
-            `abort` answers `stopped`, or `not-held` (404) for a job the client does not hold.
-            Every other answer is `@oligarchy/http`'s error. The tests send through
-            `@oligarchy/http/testing` to the automation client's own routes, over its fake
-            sessions. Open for Restart: a client whose host vanished mid-run leaves its `/run`
-            waiting until the signal.
+      - [x] **Calls to an automation client.** `AutomationClient.create({ http, url, token,
+            signal? })` (`src/automation-client.ts`, V1: `client.ts`) is an
+            `@oligarchy/http/client` over the automation client's `Routes`
+            (`@oligarchy/automation-client/routes`), made once from the url its row names, with
+            `OLIGARCHY_TOKEN` as the token; nothing is asked again. Its specs: `/reserve` answers
+            `reserved`, or `at-capacity` (503) or `setup-needed` (409), neither a failure; `/run`
+            answers `ended` once the driver or opencode has ended, or `aborted` (409) when an
+            abort ended it, and waits as long as a timer can (2³¹−1 ms), so only the client or
+            the signal ends it; `/abort` answers `stopped`, or `not-held` (404) for a job the
+            client does not hold. Every other answer is `@oligarchy/http`'s error. The tests send
+            through `@oligarchy/http/testing` to the automation client's own routes, over its
+            fake sessions. Open for Restart: a client whose host vanished mid-run leaves its
+            `/run` waiting until the signal.
       - [ ] **Dispatch** (section 3's Dispatch) in the loop's pass. Needs the client calls, and
             the prompt from section 3's The mission.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
