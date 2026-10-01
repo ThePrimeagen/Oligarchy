@@ -4,7 +4,7 @@ local Github = require("oligarchy.github")
 local S = require("support")
 
 describe("diff hunk navigation", function()
-  it("handles new, deleted, renamed, quoted files and multiple hunks", function()
+  it("skips deleted files while keeping new, renamed, quoted files and multiple hunks", function()
     local patch = table.concat({
       "diff --git a/new.lua b/new.lua",
       "--- /dev/null",
@@ -37,15 +37,23 @@ describe("diff hunk navigation", function()
       "+new",
     }, "\n")
     local result = Diff.hunks(patch, "/project")
-    assert.equals(5, #result)
+    assert.equals(4, #result)
     assert.equals("/project/new.lua", result[1].filename)
     assert.equals(1, result[1].lnum)
-    assert.equals("/project/old.lua", result[2].filename)
-    assert.equals(4, result[2].lnum)
-    assert.is_true(result[2].user_data.deleted)
-    assert.equals("/project/after.lua", result[3].filename)
-    assert.equals(22, result[4].lnum)
-    assert.equals("/project/sp ace.lua", result[5].filename)
+    assert.equals("/project/after.lua", result[2].filename)
+    assert.equals(22, result[3].lnum)
+    assert.equals("/project/sp ace.lua", result[4].filename)
+  end)
+  it("skips deletion-only patches but keeps removed lines within a surviving file", function()
+    local deleted = "--- a/gone.lua\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-one\n-two\n"
+    assert.same({}, Diff.hunks(deleted, "/project"))
+    assert.same({}, Diff.hunks("diff --git a/gone.lua b/gone.lua\n" .. deleted, "/project"))
+    local result =
+      Diff.hunks("--- a/keep.lua\n+++ b/keep.lua\n@@ -4,2 +3,0 @@\n-one\n-two\n", "/project")
+    assert.equals(1, #result)
+    assert.equals("/project/keep.lua", result[1].filename)
+    assert.equals(3, result[1].lnum)
+    assert.matches("-one\n-two", result[1].user_data.diff, 1, true)
   end)
   it("rejects invalid patches and paths outside the project", function()
     assert.has_error(function()
@@ -55,6 +63,34 @@ describe("diff hunk navigation", function()
       Diff.hunks("--- a/../../bad\n+++ b/../../bad\n@@ -1 +1 @@", "/project")
     end)
     assert.same({}, Diff.hunks("", "/project"))
+  end)
+  it("maps additions and removals to the new file's lines", function()
+    local result = Diff.hunks(
+      table.concat({
+        "--- a/file.lua",
+        "+++ b/file.lua",
+        "@@ -3,5 +3,5 @@",
+        " context",
+        "-old one",
+        "-old two",
+        "+new one",
+        "+new two",
+        " context",
+        "-last",
+        "+last replacement",
+        "\\ No newline at end of file",
+        "@@ -20,2 +20,0 @@",
+        "-removed one",
+        "-removed two",
+      }, "\n"),
+      "/project"
+    )
+    assert.same({
+      { lnum = 4, added = true, removed = true },
+      { lnum = 5, added = true },
+      { lnum = 7, added = true, removed = true },
+    }, result[1].user_data.changes)
+    assert.same({ { lnum = 20, removed = true } }, result[2].user_data.changes)
   end)
 end)
 

@@ -9,6 +9,7 @@ local action_cancel, branch_cancel, action
 local state, box_rows = { closed = {} }, {}
 local message_status, branch_status, action_status = "", "", ""
 local cache, sync_branch, open_url, http
+local composer
 
 local function render(lines)
   vim.bo[buffer].modifiable = true
@@ -17,6 +18,9 @@ local function render(lines)
 end
 
 local function stop()
+  if action == "send" and composer then
+    composer.lock(false)
+  end
   if action_cancel then
     action_cancel()
     action_cancel = nil
@@ -32,7 +36,49 @@ local function stop()
   end
 end
 
+local function close_composer(deferred)
+  if composer then
+    local old = composer
+    composer = nil
+    old.close(deferred)
+  end
+end
+
+local function open_composer()
+  if not conversation then
+    return
+  end
+  if not composer then
+    local draft_state, agent_id, store = state, conversation.id, cache
+    composer = require("oligarchy.composer").new({
+      send = function()
+        M.send()
+      end,
+      changed = function(text)
+        draft_state.draft = text
+      end,
+      save = function()
+        local err = store.write(agent_id, draft_state)
+        if err then
+          vim.notify(err, vim.log.levels.WARN)
+        end
+      end,
+    })
+  end
+  composer.open(vim.fn.bufwinid(buffer), state.draft)
+  composer.lock(action == "send")
+end
+
+function M.prompt()
+  if not conversation then
+    return
+  end
+  open_composer()
+  composer.focus()
+end
+
 local function show_list(message)
+  close_composer()
   conversation = nil
   box_rows = {}
   vim.b[buffer].oligarchy_boxes = nil
@@ -94,7 +140,7 @@ local function show_conversation()
   local lines = {
     conversation.name:gsub("[\r\n]", " "),
     "J/K: next/previous  Enter/za: fold  r: refresh  a: abort",
-    "g: PR  d: diff  Backspace: jobs  q: close",
+    "i: prompt  Ctrl-Enter: send  g: PR  d: diff  Ctrl-b: jobs  q: close",
   }
   for _, status in ipairs({ message_status, branch_status, action_status }) do
     vim.list_extend(lines, vim.split(status, "\n", { plain = true }))
@@ -136,12 +182,14 @@ local function load_conversation(agent)
   conversation = agent
   rows = {}
   if entering then
+    close_composer()
     state = cache.read(agent.id)
     box_rows = {}
   end
   message_status = state.messages and "Cached conversation — updating…"
     or "Loading conversation…"
   branch_status, action_status = "Fetching branch…", ""
+  open_composer()
   show_conversation()
   cancel = client:get_conversation(agent.id, function(err, messages)
     cancel = nil
@@ -158,6 +206,43 @@ local function load_conversation(agent)
   branch_cancel = sync_branch(agent.id, function(err, branch)
     branch_cancel = nil
     branch_status = err or ("Branch updated: " .. branch)
+    show_conversation()
+  end)
+end
+
+function M.send()
+  if not conversation or not composer or action then
+    return
+  end
+  local text = composer.text()
+  if vim.trim(text) == "" then
+    action_status = "Write a message before sending"
+    show_conversation()
+    return
+  end
+  state.draft = text
+  local err = cache.write(conversation.id, state)
+  if err then
+    vim.notify(err, vim.log.levels.WARN)
+  end
+  action, action_status = "send", "Sending message…"
+  composer.lock(true)
+  show_conversation()
+  action_cancel = client:send_message(conversation.id, text, function(failure)
+    action, action_cancel = nil, nil
+    composer.lock(false)
+    if failure then
+      action_status = failure
+    else
+      composer.clear()
+      state.draft = ""
+      local save_error = cache.write(conversation.id, state)
+      if save_error then
+        vim.notify(save_error, vim.log.levels.WARN)
+      end
+      load_conversation(conversation)
+      action_status = "Message sent"
+    end
     show_conversation()
   end)
 end
@@ -224,6 +309,7 @@ function M.pr(diff)
   if not conversation or action then
     return
   end
+  local origin = vim.fn.bufwinid(buffer)
   action, action_status = "pr", "Getting current PR…"
   show_conversation()
   action_cancel = client:get_agent(conversation.id, function(err, agent)
@@ -262,12 +348,28 @@ function M.pr(diff)
         done("Could not parse PR diff")
         return
       end
+      local first = #vim.fn.getqflist() + 1
       if #items > 0 then
         vim.fn.setqflist({}, "a", { items = items, title = "Oligarchy PR diff" })
       end
+      require("oligarchy.diff").show(items)
       done(tostring(#items) .. " diff hunks added to quickfix")
       if #items > 0 then
-        vim.cmd("copen")
+        close_composer()
+        vim.api.nvim_set_current_win(origin)
+        vim.cmd("botright new")
+        vim.wo.signcolumn = "auto:2"
+        local editor = vim.api.nvim_get_current_win()
+        for _, window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+          if window ~= editor then
+            -- Hide file buffers so unsaved edits survive closing their windows.
+            vim.api.nvim_win_call(window, function()
+              vim.cmd("hide close")
+            end)
+          end
+        end
+        vim.cmd("cc " .. first)
+        vim.cmd("botright copen")
       end
     end)
   end)
@@ -360,6 +462,7 @@ function M.refresh()
 end
 
 function M.open()
+  require("oligarchy.diff").clear()
   if buffer and vim.api.nvim_buf_is_valid(buffer) then
     local window = vim.fn.bufwinid(buffer)
     if window ~= -1 then
@@ -375,6 +478,7 @@ function M.open()
     vim.bo[buffer].filetype = "oligarchy"
     vim.keymap.set("n", "<CR>", M.enter, { buffer = buffer, desc = "Open conversation" })
     vim.keymap.set("n", "<BS>", M.back, { buffer = buffer, desc = "Back to jobs" })
+    vim.keymap.set("n", "<C-b>", M.back, { buffer = buffer, desc = "Back to jobs" })
     vim.keymap.set("n", "a", function()
       if conversation then
         M.abort()
@@ -403,6 +507,8 @@ function M.open()
     vim.keymap.set("n", "zo", function()
       M.fold(false)
     end, { buffer = buffer })
+    vim.keymap.set("n", "i", M.prompt, { buffer = buffer, desc = "Focus prompt" })
+    vim.keymap.set("n", "<C-CR>", M.send, { buffer = buffer, desc = "Send prompt to Cursor" })
     vim.keymap.set("n", "r", M.refresh, { buffer = buffer, desc = "Refresh" })
     vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buffer, desc = "Close cloud jobs" })
     vim.api.nvim_create_autocmd("BufWipeout", {
@@ -410,6 +516,7 @@ function M.open()
       once = true,
       callback = function()
         stop()
+        close_composer(true)
         if close_popup then
           -- Closing the float here can reenter and interrupt the parent's wipeout.
           close_popup(true)
@@ -429,6 +536,7 @@ end
 
 function M.setup(options)
   stop()
+  close_composer()
   if close_popup then
     close_popup()
     close_popup = nil
@@ -446,7 +554,12 @@ function M.setup(options)
   local group = vim.api.nvim_create_augroup("OligarchyConversation", { clear = true })
   vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
     group = group,
-    callback = show_conversation,
+    callback = function()
+      if composer then
+        composer.resize()
+      end
+      show_conversation()
+    end,
   })
   conversation = nil
   archiving = false
@@ -455,6 +568,7 @@ function M.setup(options)
     M.open,
     { desc = "Show recent Cursor cloud jobs" }
   )
+  vim.keymap.set("n", "<leader>c", M.open, { desc = "Open Cursor cloud jobs" })
 end
 
 return M

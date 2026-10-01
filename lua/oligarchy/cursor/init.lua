@@ -26,7 +26,7 @@ function M.new(options)
   local client = {}
 
   -- Shared authenticated JSON request. Each operation reads the current .env.
-  local function request(method, path, callback)
+  local function request(method, path, callback, body)
     local cancelled, stop = false, nil
     local function deliver(err, data, status)
       vim.schedule(function()
@@ -49,8 +49,10 @@ function M.new(options)
           headers = {
             Accept = "application/json",
             Authorization = "Basic " .. vim.base64.encode(token .. ":"),
+            ["Content-Type"] = body and "application/json" or nil,
           },
           env = env,
+          body = body and vim.json.encode(body) or nil,
         },
         vim.schedule_wrap(function(failure, response)
           stop = nil
@@ -92,6 +94,31 @@ function M.new(options)
         stop = nil
       end
     end
+  end
+
+  function client:send_message(agent_id, text, callback)
+    if vim.trim(text) == "" then
+      local cancelled = false
+      vim.schedule(function()
+        if not cancelled then
+          callback("Write a message before sending")
+        end
+      end)
+      return function()
+        cancelled = true
+      end
+    end
+    return request("POST", "/v0/agents/" .. encode(agent_id) .. "/followup", function(err, data)
+      if err then
+        callback(err)
+        return
+      end
+      if data.id ~= agent_id then
+        callback("Cursor returned an invalid follow-up response")
+        return
+      end
+      callback(nil)
+    end, { prompt = { text = text } })
   end
 
   function client:get_conversation(agent_id, callback)

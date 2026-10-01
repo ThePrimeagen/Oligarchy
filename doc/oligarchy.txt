@@ -15,8 +15,8 @@ non-empty environment variables take precedence. It accepts export prefixes,
 single-line quoted values, and comments. Double quotes support \n, \r, \t,
 \" and \\. Values are literal: no variable expansion or shell execution.
 
-:OligarchyJobs opens the pane. Move onto a job's name or ID and press Enter
-to load its conversation into the same window. Backspace returns to the
+:OligarchyJobs or <leader>c opens the pane. Move onto a job's name or ID and press Enter
+to load its conversation into the same window. Ctrl-b or Backspace returns to the
 cached job list; q closes. Your messages start with --- user --- and align
 right across about 85% of the pane width. Assistant output starts with
 --- clanker --- and aligns left at the same width. There are no outlines.
@@ -32,6 +32,8 @@ message can still be a progress update while a job is running. All original
 messages remain in the cache and can be expanded; none are discarded.
 
 Inside a conversation:
+  i           Focus the prompt below the conversation and enter insert mode.
+  Ctrl-Enter  Send the prompt (also works in insert mode in the prompt).
   J / K       Jump to the next / previous section header: user, thoughts,
               output, next user, etc. Counts work (3J); jumps stop at the ends.
               K inside a section returns to its header.
@@ -41,9 +43,17 @@ Inside a conversation:
   a           Abort the running agent (stop execution, without archiving).
   g           Open the job's current GitHub pull request in your browser.
   d           Fetch that PR's diff and append each textual hunk to quickfix.
-  Backspace   Return to the cached job list.
+  Ctrl-b / Backspace  Return to the cached job list (normal mode).
 
-Conversation history and collapsed-section state are saved under
+Opening a conversation also opens a three-line prompt below it. It wraps long
+lines and grows with the draft, up to half the conversation area. Enter adds
+a newline; Ctrl-Enter sends the entire draft. Successful sends clear the prompt
+and refresh the conversation and branch. Failed sends keep the draft for retry.
+Sending temporarily locks the prompt to prevent edits or duplicate submissions.
+Unsent drafts are saved when leaving the conversation or reloading the plugin,
+and restored separately for each agent.
+
+Conversation history, drafts and collapsed-section state are saved under
 stdpath('cache')/oligarchy, separated by project and agent. Cache files are
 private (0600) and atomically replaced. They contain conversation text, not
 tokens. Cached history appears immediately; every entry and r still requests
@@ -64,11 +74,24 @@ The g and d actions read fresh job metadata to find its current PR. Diff
 retrieval uses GitHub's API directly; private repositories need GITHUB_TOKEN
 (or GH_TOKEN) in .env or the environment. CURSOR_API_TOKEN is never used as
 GitHub authentication. A missing PR or HTTP error is shown without clearing
-history or quickfix. d opens quickfix after appending hunks. :cnext / :cprev
-navigate the local project files at the new-side hunk line (old-side for deleted
-files). The full hunk is also in each entry's user_data.diff. Binary changes
-have no textual hunks. Line positions describe the PR, so local file contents
+history or quickfix. After appending hunks, d closes the other windows in the
+current tab and leaves one editing window plus quickfix. Unsaved file buffers
+remain available. The first new hunk opens in the editing window, and quickfix
+gets focus. <leader>c reopens the Cursor pane. :cnext / :cprev
+navigate the local project files at the new-side hunk line. Deleted files are
+excluded; removed lines within a surviving file still appear. The full hunk
+is also in each entry's user_data.diff. Binary changes have no textual hunks.
+Line positions describe the PR, so local file contents
 can differ until you choose to check out its branch.
+
+The editing gutter shows green + signs for added lines and red - signs for
+removed lines, using Neovim's Added and Removed highlight groups. Removals
+anchor to a nearby remaining line, or the last line at the end of a file.
+Replacements show both signs. Markers use the PR's new-file line numbers;
+added lines beyond the local file's end have no marker. Fetching another diff
+replaces the previous markers. Files are decorated when opened, without
+loading other files just to add signs. Opening the Cursor pane with <leader>c
+or :OligarchyJobs removes all diff markers until another diff is fetched.
 
 On a job in the list, a opens a centered confirmation popup. Archive is red;
 Cancel has a gray background and is initially selected. Tab, arrow keys, h
@@ -78,7 +101,8 @@ is removed only after success. Failure keeps the job and shows an error.
 Archived jobs are excluded even if the server includes them in a response.
 
 Conversation history uses GET /v0/agents/{id}/conversation, the documented
-history endpoint. Abort uses POST /v0/agents/{id}/stop. Archiving uses
+history endpoint. Sending uses POST /v0/agents/{id}/followup with a JSON
+body containing prompt.text. Abort uses POST /v0/agents/{id}/stop. Archiving uses
 POST /v1/agents/{id}/archive. No message is
 sent and no job is archived merely by opening its conversation.
 
@@ -88,7 +112,21 @@ pages, so fewer than ten may belong to this project. The client uses Basic
 authentication and GET /v1/agents?limit=10&includeArchived=false. Repository
 details in the response are reused; missing details are fetched concurrently.
 SSH and HTTPS GitHub remotes match the same repository. Each HTTP request has
-a three-second connection timeout and a five-second total timeout.
+a ten-second connection timeout and a thirty-second total timeout. Requests
+are not automatically retried. If sending times out, refresh the conversation
+before retrying: the server may already have accepted the message.
+
+The HTTP request log is stdpath('state')/oligarchy/http.log. Open it with:
+>
+  :execute 'edit ' .. fnameescape(stdpath('state') .. '/oligarchy/http.log')
+<
+Each line is JSON with a UTC timestamp, method, URL (without credentials,
+query or fragment), elapsed milliseconds, curl exit code, HTTP status when
+available, and whether the request was cancelled. Exit code 28 means a timeout;
+-1 means curl could not start. The log records completed requests, including
+HTTP errors and cancellations. Headers, tokens, prompts, response bodies and
+curl stderr are excluded. The file is created with private permissions (0600).
+The log starts after loading this version; it cannot recover earlier failures.
 
 Full job records are available in the jobs buffer for further inspection:
 >
@@ -110,6 +148,7 @@ Lua API:
   end)
   -- cancel() stops the request and suppresses its callback.
   client:get_conversation(agent_id, function(err, messages) end)
+  client:send_message(agent_id, "Please add a regression test.", function(err) end)
   client:archive_agent(agent_id, function(err) end)
   client:abort_agent(agent_id, function(err) end)
   client:get_agent(agent_id, function(err, metadata) end)
@@ -130,7 +169,8 @@ Inject an HTTP caller when constructing a client or configuring the UI:
 The caller has this contract:
 >
   local function fake_http(request, callback)
-    -- request: { method, url, headers, env }
+    -- request: { method, url, headers, env, body? }
+    -- body is an optional JSON string, present for follow-up prompts.
     -- Inspect or record the request, then provide the raw HTTP response:
     callback(nil, { status = 200, body = '{"items":[]}' })
     -- For a transport failure, use callback("error message") instead.
@@ -139,7 +179,8 @@ The caller has this contract:
 <
 The callback may fire immediately or later. Cancellation suppresses delivery
 to the client even if a late response arrives. The default HTTP caller lives
-in lua/oligarchy/cursor/http.lua and executes curl asynchronously.
+in lua/oligarchy/cursor/http.lua and executes curl asynchronously. Headers and
+prompt bodies go through stdin, keeping tokens and prompt text out of argv.
 
 Project tools and checks (Linux x86_64):
 >
@@ -175,6 +216,10 @@ exercise real Neovim buffers, windows, commands and keybindings. They assert
 job contents and control behavior, without presentation or layout snapshots.
 The offline suite never calls Cursor or uses your token. Its HTTP fake can
 deliver responses after cancellation to exercise refresh/close races.
+Transport tests inject a vim.system-compatible process runner into
+http.request(request, callback, run). They inspect curl arguments and stdin,
+then return simulated stdout, stderr and exit codes to check response parsing,
+timeout handling, logging and cancellation. They start no server or curl process.
 
 Run the separate live suite explicitly to use CURSOR_API_TOKEN from .env:
 >

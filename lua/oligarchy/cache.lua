@@ -35,7 +35,11 @@ function M.new(root, directory)
         end
       end
     end
-    return { closed = closed, messages = valid and data.messages or nil }
+    return {
+      closed = closed,
+      messages = valid and data.messages or nil,
+      draft = type(data.draft) == "string" and data.draft or nil,
+    }
   end
   function cache.write(id, data)
     local fd, temporary
@@ -43,7 +47,12 @@ function M.new(root, directory)
       vim.fn.mkdir(dir, "p", 448) -- private directory, 0700
       fd, temporary = vim.uv.fs_mkstemp(path(id) .. ".XXXXXX")
       assert(fd)
-      local bytes = vim.json.encode({ version = 1, messages = data.messages, closed = data.closed })
+      local bytes = vim.json.encode({
+        version = 1,
+        messages = data.messages,
+        closed = data.closed,
+        draft = data.draft,
+      })
       assert(vim.uv.fs_write(fd, bytes, 0) == #bytes)
       assert(vim.uv.fs_close(fd))
       fd = nil
