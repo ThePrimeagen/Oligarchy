@@ -144,7 +144,10 @@ describe("an automation client's reserve", () => {
 
   it("a proxy at capacity, or with no setup disk for the ISO, is that refusal: the job is let go and nothing is given back (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({
-      reserve: [Fake.json({ error: "at capacity" }, 503), Fake.json({ error: "setup needed" }, 409)],
+      reserve: [
+        Fake.json({ error: "at capacity" }, 503),
+        Fake.json({ error: "setup needed" }, 409),
+      ],
     });
 
     const full = await reservations.reserve(DRIVE);
@@ -224,15 +227,15 @@ describe("an automation client's reserve", () => {
 
     expect(aborted).toBe("stopped");
     expect(jobs.count()).toBe(0);
-    expect(said.map(({ level, text, report }) => ({ level, text, agentId: report.agentId }))).toEqual(
-      [
-        {
-          level: "error",
-          text: `relinquish failed: POST ${PROXY}/relinquish: 502: {"error":"server down"}`,
-          agentId: JOB,
-        },
-      ],
-    );
+    expect(
+      said.map(({ level, text, report }) => ({ level, text, agentId: report.agentId })),
+    ).toEqual([
+      {
+        level: "error",
+        text: `relinquish failed: POST ${PROXY}/relinquish: 502: {"error":"server down"}`,
+        agentId: JOB,
+      },
+    ]);
   });
 
   it("a reservation a run has taken is the run's: an abort aborts the run's signal, gives nothing back, and waits on the run's release (unhappy)", async () => {
