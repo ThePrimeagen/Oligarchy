@@ -1,0 +1,574 @@
+local M = {}
+local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
+local client = require("oligarchy.cursor").new({ root = root })
+local buffer, cancel, close_popup
+local agents, rows = {}, {}
+local conversation
+local archiving = false
+local action_cancel, branch_cancel, action
+local state, box_rows = { closed = {} }, {}
+local message_status, branch_status, action_status = "", "", ""
+local cache, sync_branch, open_url, http
+local composer
+
+local function render(lines)
+  vim.bo[buffer].modifiable = true
+  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+  vim.bo[buffer].modifiable = false
+end
+
+local function stop()
+  if action == "send" and composer then
+    composer.lock(false)
+  end
+  if action_cancel then
+    action_cancel()
+    action_cancel = nil
+  end
+  if branch_cancel then
+    branch_cancel()
+    branch_cancel = nil
+  end
+  action = nil
+  if cancel then
+    cancel()
+    cancel = nil
+  end
+end
+
+local function close_composer(deferred)
+  if composer then
+    local old = composer
+    composer = nil
+    old.close(deferred)
+  end
+end
+
+local function open_composer()
+  if not conversation then
+    return
+  end
+  if not composer then
+    local draft_state, agent_id, store = state, conversation.id, cache
+    composer = require("oligarchy.composer").new({
+      send = function()
+        M.send()
+      end,
+      changed = function(text)
+        draft_state.draft = text
+      end,
+      save = function()
+        local err = store.write(agent_id, draft_state)
+        if err then
+          vim.notify(err, vim.log.levels.WARN)
+        end
+      end,
+    })
+  end
+  composer.open(vim.fn.bufwinid(buffer), state.draft)
+  composer.lock(action == "send")
+end
+
+function M.prompt()
+  if not conversation then
+    return
+  end
+  open_composer()
+  composer.focus()
+end
+
+local function show_list(message)
+  close_composer()
+  conversation = nil
+  box_rows = {}
+  vim.b[buffer].oligarchy_boxes = nil
+  rows = {}
+  vim.b[buffer].oligarchy_conversation = nil
+  vim.b[buffer].oligarchy_agents = agents
+  local lines = {
+    "Recent Cursor cloud jobs — " .. vim.fn.fnamemodify(root, ":t"),
+    "",
+    "Enter: conversation    a: archive    r: refresh    q: close",
+    "",
+  }
+  if message then
+    vim.list_extend(lines, vim.split(message, "\n", { plain = true }))
+    table.insert(lines, "")
+  end
+  if #agents == 0 then
+    table.insert(lines, "No recent cloud jobs for this project among the latest 10.")
+  end
+  local first_row
+  for _, agent in ipairs(agents) do
+    local line = #lines + 1
+    first_row = first_row or line
+    rows[line], rows[line + 1] = agent, agent
+    table.insert(lines, agent.status .. "  " .. agent.name:gsub("[\r\n]", " "))
+    table.insert(lines, "  " .. agent.id)
+    table.insert(lines, "")
+  end
+  render(lines)
+  local window = vim.fn.bufwinid(buffer)
+  if window ~= -1 then
+    vim.api.nvim_win_set_cursor(window, { first_row or 1, 0 })
+  end
+end
+
+local function show_conversation()
+  if not conversation or not buffer or not vim.api.nvim_buf_is_valid(buffer) then
+    return
+  end
+  local window = vim.fn.bufwinid(buffer)
+  if window == -1 then
+    return
+  end
+  if require("oligarchy.conversation").defaults(state.messages or {}, state.closed) then
+    local err = cache.write(conversation.id, state)
+    if err then
+      action_status = err
+    end
+  end
+  local cursor = vim.api.nvim_win_get_cursor(window)
+  local anchor = box_rows[cursor[1]]
+  local offset = 0
+  for _, box in ipairs(vim.b[buffer].oligarchy_boxes or {}) do
+    if box.id == anchor then
+      offset = cursor[1] - box.line
+      break
+    end
+  end
+  local lines = {
+    conversation.name:gsub("[\r\n]", " "),
+    "J/K: next/previous  Enter/za: fold  r: refresh  a: abort",
+    "i: prompt  Ctrl-Enter: send  g: PR  d: diff  Ctrl-b: jobs  q: close",
+  }
+  for _, status in ipairs({ message_status, branch_status, action_status }) do
+    vim.list_extend(lines, vim.split(status, "\n", { plain = true }))
+  end
+  table.insert(lines, "")
+  local width = vim.api.nvim_win_get_width(window) - vim.fn.getwininfo(window)[1].textoff
+  local body, boxes, positions =
+    require("oligarchy.conversation").render(state.messages or {}, state.closed, width)
+  box_rows = {}
+  for row, id in pairs(positions) do
+    box_rows[row + #lines] = id
+  end
+  for _, box in ipairs(boxes) do
+    box.line = box.line + #lines
+  end
+  vim.list_extend(lines, body)
+  if state.messages and #state.messages == 0 then
+    table.insert(lines, "No conversation messages yet.")
+  end
+  render(lines)
+  vim.b[buffer].oligarchy_conversation = state.messages
+  vim.b[buffer].oligarchy_boxes = boxes
+  if anchor then
+    for index, box in ipairs(boxes) do
+      if box.id == anchor then
+        local last = boxes[index + 1] and boxes[index + 1].line - 2 or #lines - 1
+        cursor = { box.closed and box.line or math.min(box.line + offset, last), cursor[2] }
+        break
+      end
+    end
+  end
+  cursor[1] = math.min(cursor[1], #lines)
+  vim.api.nvim_win_set_cursor(window, cursor)
+end
+
+local function load_conversation(agent)
+  stop()
+  local entering = not conversation or conversation.id ~= agent.id
+  conversation = agent
+  rows = {}
+  if entering then
+    close_composer()
+    state = cache.read(agent.id)
+    box_rows = {}
+  end
+  message_status = state.messages and "Cached conversation — updating…"
+    or "Loading conversation…"
+  branch_status, action_status = "Fetching branch…", ""
+  open_composer()
+  show_conversation()
+  cancel = client:get_conversation(agent.id, function(err, messages)
+    cancel = nil
+    if err then
+      message_status = err
+    else
+      state.messages = messages
+      require("oligarchy.conversation").defaults(messages, state.closed)
+      message_status = cache.write(agent.id, state) or "Conversation up to date"
+    end
+    show_conversation()
+  end)
+  -- Independent of the history request: cached messages remain usable during fetch.
+  branch_cancel = sync_branch(agent.id, function(err, branch)
+    branch_cancel = nil
+    branch_status = err or ("Branch updated: " .. branch)
+    show_conversation()
+  end)
+end
+
+function M.send()
+  if not conversation or not composer or action then
+    return
+  end
+  local text = composer.text()
+  if vim.trim(text) == "" then
+    action_status = "Write a message before sending"
+    show_conversation()
+    return
+  end
+  state.draft = text
+  local err = cache.write(conversation.id, state)
+  if err then
+    vim.notify(err, vim.log.levels.WARN)
+  end
+  action, action_status = "send", "Sending message…"
+  composer.lock(true)
+  show_conversation()
+  action_cancel = client:send_message(conversation.id, text, function(failure)
+    action, action_cancel = nil, nil
+    composer.lock(false)
+    if failure then
+      action_status = failure
+    else
+      composer.clear()
+      state.draft = ""
+      local save_error = cache.write(conversation.id, state)
+      if save_error then
+        vim.notify(save_error, vim.log.levels.WARN)
+      end
+      load_conversation(conversation)
+      action_status = "Message sent"
+    end
+    show_conversation()
+  end)
+end
+
+function M.jump(direction)
+  if not conversation then
+    return
+  end
+  local points = vim.b[buffer].oligarchy_boxes or {}
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local target, remaining = row, vim.v.count1
+  local first, last = 1, #points
+  if direction < 0 then
+    first, last = #points, 1
+  end
+  for index = first, last, direction do
+    local line = points[index].line
+    if (line - row) * direction > 0 then
+      target = line
+      remaining = remaining - 1
+      if remaining == 0 then
+        break
+      end
+    end
+  end
+  if target ~= row then
+    vim.api.nvim_win_set_cursor(0, { target, 0 })
+  end
+end
+
+function M.fold(closed)
+  if not conversation then
+    return
+  end
+  local id = box_rows[vim.api.nvim_win_get_cursor(0)[1]]
+  if not id then
+    return
+  end
+  if closed == nil then
+    closed = not state.closed[id]
+  end
+  state.closed[id] = closed
+  local err = cache.write(conversation.id, state)
+  if err then
+    action_status = err
+  end
+  show_conversation()
+end
+
+function M.abort()
+  if not conversation or action then
+    return
+  end
+  action, action_status = "abort", "Stopping agent…"
+  show_conversation()
+  action_cancel = client:abort_agent(conversation.id, function(err)
+    action_cancel, action = nil, nil
+    action_status = err or "Agent stopped"
+    show_conversation()
+  end)
+end
+
+function M.pr(diff)
+  if not conversation or action then
+    return
+  end
+  local origin = vim.fn.bufwinid(buffer)
+  action, action_status = "pr", "Getting current PR…"
+  show_conversation()
+  action_cancel = client:get_agent(conversation.id, function(err, agent)
+    action_cancel = nil
+    local url = agent and type(agent.target) == "table" and agent.target.prUrl
+    local function done(message)
+      action, action_cancel = nil, nil
+      action_status = message
+      show_conversation()
+    end
+    if err then
+      done(err)
+      return
+    end
+    if not require("oligarchy.github").pr(url) then
+      done("No GitHub PR for this job")
+      return
+    end
+    if not diff then
+      local ok, result, failure = pcall(open_url, url)
+      done(
+        ok and not failure and "Opened PR in browser"
+          or ("Could not open browser: " .. tostring(ok and failure or result))
+      )
+      return
+    end
+    action_status = "Fetching PR diff…"
+    show_conversation()
+    action_cancel = require("oligarchy.github").diff(root, url, http, function(failure, patch)
+      if failure then
+        done(failure)
+        return
+      end
+      local ok, items = pcall(require("oligarchy.diff").hunks, patch, root)
+      if not ok then
+        done("Could not parse PR diff")
+        return
+      end
+      local first = #vim.fn.getqflist() + 1
+      if #items > 0 then
+        vim.fn.setqflist({}, "a", { items = items, title = "Oligarchy PR diff" })
+      end
+      require("oligarchy.diff").show(items)
+      done(tostring(#items) .. " diff hunks added to quickfix")
+      if #items > 0 then
+        close_composer()
+        vim.api.nvim_set_current_win(origin)
+        vim.cmd("botright new")
+        vim.wo.signcolumn = "auto:2"
+        local editor = vim.api.nvim_get_current_win()
+        for _, window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+          if window ~= editor then
+            -- Hide file buffers so unsaved edits survive closing their windows.
+            vim.api.nvim_win_call(window, function()
+              vim.cmd("hide close")
+            end)
+          end
+        end
+        vim.cmd("cc " .. first)
+        vim.cmd("botright copen")
+      end
+    end)
+  end)
+end
+
+function M.back()
+  if archiving or not conversation then
+    return
+  end
+  stop()
+  show_list()
+end
+
+function M.enter()
+  if conversation then
+    M.fold()
+    return
+  end
+  if archiving or close_popup then
+    return
+  end
+  local agent = rows[vim.api.nvim_win_get_cursor(0)[1]]
+  if agent then
+    load_conversation(agent)
+  end
+end
+
+function M.archive()
+  if archiving or conversation or close_popup then
+    return
+  end
+  local agent = rows[vim.api.nvim_win_get_cursor(0)[1]]
+  if not agent then
+    return
+  end
+  close_popup = require("oligarchy.confirm").archive(agent.name, function(confirmed)
+    close_popup = nil
+    if not confirmed then
+      return
+    end
+    archiving = true
+    rows = {}
+    render({ "Archiving " .. agent.name:gsub("[\r\n]", " ") .. "…" })
+    cancel = client:archive_agent(agent.id, function(err)
+      cancel = nil
+      archiving = false
+      if not buffer or not vim.api.nvim_buf_is_valid(buffer) then
+        return
+      end
+      if not err then
+        agents = vim.tbl_filter(function(item)
+          return item.id ~= agent.id
+        end, agents)
+      end
+      show_list(err)
+    end)
+  end)
+end
+
+function M.refresh()
+  if archiving or close_popup or action then
+    return
+  end
+  if not buffer or not vim.api.nvim_buf_is_valid(buffer) then
+    M.open()
+    return
+  end
+  if conversation then
+    load_conversation(conversation)
+    return
+  end
+  stop()
+  rows = {}
+  vim.b[buffer].oligarchy_agents = nil
+  render({ "Loading Cursor cloud jobs…" })
+  cancel = client:get_cloud_agents(function(err, result)
+    cancel = nil
+    if not buffer or not vim.api.nvim_buf_is_valid(buffer) then
+      return
+    end
+    if err then
+      local lines = vim.split(err, "\n", { plain = true })
+      vim.list_extend(lines, { "", "r: retry    q: close" })
+      render(lines)
+      return
+    end
+    agents = result
+    show_list()
+  end)
+end
+
+function M.open()
+  require("oligarchy.diff").clear()
+  if buffer and vim.api.nvim_buf_is_valid(buffer) then
+    local window = vim.fn.bufwinid(buffer)
+    if window ~= -1 then
+      vim.api.nvim_set_current_win(window)
+      M.refresh()
+      return
+    end
+  else
+    buffer = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buffer, "oligarchy://cloud-jobs")
+    vim.bo[buffer].bufhidden = "wipe"
+    vim.bo[buffer].swapfile = false
+    vim.bo[buffer].filetype = "oligarchy"
+    vim.keymap.set("n", "<CR>", M.enter, { buffer = buffer, desc = "Open conversation" })
+    vim.keymap.set("n", "<BS>", M.back, { buffer = buffer, desc = "Back to jobs" })
+    vim.keymap.set("n", "<C-b>", M.back, { buffer = buffer, desc = "Back to jobs" })
+    vim.keymap.set("n", "a", function()
+      if conversation then
+        M.abort()
+      else
+        M.archive()
+      end
+    end, { buffer = buffer, desc = "Archive job / abort conversation" })
+    vim.keymap.set("n", "g", function()
+      M.pr(false)
+    end, { buffer = buffer })
+    vim.keymap.set("n", "d", function()
+      M.pr(true)
+    end, { buffer = buffer })
+    vim.keymap.set("n", "J", function()
+      M.jump(1)
+    end, { buffer = buffer, desc = "Next conversation point" })
+    vim.keymap.set("n", "K", function()
+      M.jump(-1)
+    end, { buffer = buffer, desc = "Previous conversation point" })
+    vim.keymap.set("n", "za", function()
+      M.fold()
+    end, { buffer = buffer })
+    vim.keymap.set("n", "zc", function()
+      M.fold(true)
+    end, { buffer = buffer })
+    vim.keymap.set("n", "zo", function()
+      M.fold(false)
+    end, { buffer = buffer })
+    vim.keymap.set("n", "i", M.prompt, { buffer = buffer, desc = "Focus prompt" })
+    vim.keymap.set("n", "<C-CR>", M.send, { buffer = buffer, desc = "Send prompt to Cursor" })
+    vim.keymap.set("n", "r", M.refresh, { buffer = buffer, desc = "Refresh" })
+    vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buffer, desc = "Close cloud jobs" })
+    vim.api.nvim_create_autocmd("BufWipeout", {
+      buffer = buffer,
+      once = true,
+      callback = function()
+        stop()
+        close_composer(true)
+        if close_popup then
+          -- Closing the float here can reenter and interrupt the parent's wipeout.
+          close_popup(true)
+          close_popup = nil
+        end
+        buffer, conversation = nil, nil
+        archiving = false
+        agents, rows = {}, {}
+      end,
+    })
+  end
+  vim.cmd("botright vsplit")
+  vim.api.nvim_win_set_buf(0, buffer)
+  vim.wo.wrap = false
+  M.refresh()
+end
+
+function M.setup(options)
+  stop()
+  close_composer()
+  if close_popup then
+    close_popup()
+    close_popup = nil
+  end
+  options = options or {}
+  root = options.root or root
+  http = options.http or require("oligarchy.cursor.http").request
+  client = require("oligarchy.cursor").new({ root = root, http = http })
+  cache = require("oligarchy.cache").new(root, options.cache_dir)
+  open_url = options.open_url or vim.ui.open
+  sync_branch = options.sync_branch
+    or function(id, callback)
+      return require("oligarchy.branch").sync(root, client, id, callback)
+    end
+  local group = vim.api.nvim_create_augroup("OligarchyConversation", { clear = true })
+  vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
+    group = group,
+    callback = function()
+      if composer then
+        composer.resize()
+      end
+      show_conversation()
+    end,
+  })
+  conversation = nil
+  archiving = false
+  vim.api.nvim_create_user_command(
+    "OligarchyJobs",
+    M.open,
+    { desc = "Show recent Cursor cloud jobs" }
+  )
+  vim.keymap.set("n", "<leader>c", M.open, { desc = "Open Cursor cloud jobs" })
+end
+
+return M

@@ -1,8 +1,6 @@
 import { Aborted } from "@oligarchy/async";
 import * as jarl from "jarl";
-
-export const NotHeld = jarl.error.define("NotHeld");
-export type NotHeld = InstanceType<typeof NotHeld>;
+import type * as Routes from "./routes.ts";
 
 export const AlreadyHeld = jarl.error.define("AlreadyHeld");
 export type AlreadyHeld = InstanceType<typeof AlreadyHeld>;
@@ -22,7 +20,7 @@ export type Held = {
 export type Jobs = {
   readonly hold: (jobId: string) => jarl.Result<Held, AlreadyHeld | ShuttingDown>;
   // Aborts the job and settles once its holder has let it go.
-  readonly abort: (jobId: string) => Promise<jarl.Result<void, NotHeld>>;
+  readonly abort: Routes.Sessions["abort"];
   // Aborts every job held and settles once each has been let go. From its start no job is held
   // again, so a reserve that lands meanwhile is refused instead of outliving the process.
   readonly shutdown: () => Promise<void>;
@@ -71,13 +69,13 @@ export const create = (): Jobs => {
       held.set(jobId, entry);
       return jarl.ok({ signal: aborter.signal, release: entry.release });
     },
-    abort: async (jobId) => {
+    abort: async ({ jobId }) => {
       const entry = held.get(jobId);
       if (entry === undefined) {
-        return jarl.err(new NotHeld(`job ${jobId} is not held`));
+        return "not-held";
       }
       await stop(entry, new Aborted(`job ${jobId} aborted`));
-      return jarl.ok(undefined);
+      return "stopped";
     },
     shutdown: async () => {
       shuttingDown = true;

@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import * as jarl from "jarl";
 import * as z from "zod";
-import type * as Jobs from "./jobs.ts";
 
 // A drive may name the ISO it resumes; a setup names the qemu server its setup lock names; a
 // diagnose names neither. Each action's body is strict, so a key another action takes is refused.
@@ -20,10 +19,33 @@ export type RunRequest = z.infer<typeof RunRequest>;
 export const AbortRequest = z.strictObject({ jobId: z.uuid() });
 export type AbortRequest = z.infer<typeof AbortRequest>;
 
+// A refusal is no failure: the job stays pending and is asked for again.
+export type Reserved = "reserved" | "at-capacity" | "setup-needed";
+// The driver or opencode ran to its end, or an abort ended it.
+export type Ran = "ended" | "aborted";
+// A client that does not hold the job has nothing to stop.
+export type Stopped = "stopped" | "not-held";
+
+// The driver or opencode could not run the job to its end; the message says why.
+export const RunFailed = jarl.error.define("RunFailed");
+export type RunFailed = InstanceType<typeof RunFailed>;
+
+// What the routes hand each request to. A run answers once the driver or opencode has ended.
+export type Sessions = {
+  readonly reserve: (request: ReserveRequest) => Promise<Reserved>;
+  readonly run: (request: RunRequest) => Promise<jarl.Result<Ran, RunFailed>>;
+  readonly abort: (request: AbortRequest) => Promise<Stopped>;
+};
+
 // Every route takes OLIGARCHY_TOKEN as its bearer. One chain, so `Routes` carries each route's
-// request and every answer it can give, and the automation server's `hc<Routes>` is typed by it.
-export const routes = (options: { readonly token: string; readonly jobs: Jobs.Jobs }) =>
-  new Hono()
+// request and every answer it can give, and the automation server's client is typed by it. A
+// route whose session is not handed in yet answers 501 until its task is written.
+export const routes = (options: {
+  readonly token: string;
+  readonly sessions?: Partial<Sessions>;
+}) => {
+  const { reserve, run, abort } = options.sessions ?? {};
+  return new Hono()
     .use(bearerAuth({ token: options.token }))
     .post(
       "/reserve",
@@ -38,28 +60,55 @@ export const routes = (options: { readonly token: string; readonly jobs: Jobs.Jo
               400,
             ),
       ),
-      (c) => c.json({ error: "reserve is not written yet" }, 501),
+      async (c) => {
+        if (reserve === undefined) {
+          return c.json({ error: "reserve is not written yet" }, 501);
+        }
+        const reserved = await reserve(c.req.valid("json"));
+        if (reserved === "at-capacity") {
+          return c.json({ error: "at capacity" }, 503);
+        }
+        if (reserved === "setup-needed") {
+          return c.json({ error: "setup needed" }, 409);
+        }
+        return c.json({}, 200);
+      },
     )
     .post(
       "/run",
       zValidator("json", RunRequest, (result, c) =>
         result.success ? undefined : c.json({ error: "name a jobId and a prompt" }, 400),
       ),
-      (c) => c.json({ error: "run is not written yet" }, 501),
+      async (c) => {
+        if (run === undefined) {
+          return c.json({ error: "run is not written yet" }, 501);
+        }
+        const ran = await run(c.req.valid("json"));
+        if (jarl.is_err(ran)) {
+          return c.json({ error: ran.error.message }, 500);
+        }
+        if (jarl.value(ran) === "aborted") {
+          return c.json({ error: "aborted" }, 409);
+        }
+        return c.json({}, 200);
+      },
     )
     .post(
       "/abort",
       zValidator("json", AbortRequest, (result, c) =>
         result.success ? undefined : c.json({ error: "name a jobId" }, 400),
       ),
-      // Answers once the job has been let go: its run killed, or its guest given back.
       async (c) => {
-        const aborted = await options.jobs.abort(c.req.valid("json").jobId);
-        if (jarl.is_err(aborted)) {
-          return c.json({ error: aborted.error.message }, 404);
+        if (abort === undefined) {
+          return c.json({ error: "abort is not written yet" }, 501);
+        }
+        const stopped = await abort(c.req.valid("json"));
+        if (stopped === "not-held") {
+          return c.json({ error: "job not found" }, 404);
         }
         return c.json({}, 200);
       },
     );
+};
 
 export type Routes = ReturnType<typeof routes>;

@@ -22,10 +22,10 @@ const main = async (app: App.App<Run, Logger.Logger>) => {
   const { logger } = app.services;
   const { flags, vars } = app.environment;
   const jobs = Jobs.create();
-  const listened = await listen(routes({ token: vars.oligarchyToken.reveal(), jobs }).fetch, {
-    hostname: HOST,
-    port: flags.port,
-  });
+  const listened = await listen(
+    routes({ token: vars.oligarchyToken.reveal(), sessions: { abort: jobs.abort } }).fetch,
+    { hostname: HOST, port: flags.port },
+  );
   if (jarl.is_err(listened)) {
     logger.fatal(listened.error.message, { location: LOCATION });
     return listened;

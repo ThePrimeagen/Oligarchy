@@ -22,26 +22,25 @@ describe("the jobs an automation client holds", () => {
     const held = jarl.unwrap(jobs.hold(JOB));
     const other = jarl.unwrap(jobs.hold(OTHER));
 
-    const aborting = jobs.abort(JOB);
+    const aborting = jobs.abort({ jobId: JOB });
 
     expect(held.signal.aborted).toBe(true);
     expect(jarl.error.is(held.signal.reason, Aborted)).toBe(true);
     expect(other.signal.aborted).toBe(false);
     expect(await settled(aborting)).toBe(false);
     held.release();
-    expect(jarl.is_ok(await aborting)).toBe(true);
-    expect(jarl.error.is(await jobs.abort(JOB), Jobs.NotHeld)).toBe(true);
+    expect(await aborting).toBe("stopped");
+    expect(await jobs.abort({ jobId: JOB })).toBe("not-held");
     expect(jarl.is_ok(jobs.hold(JOB))).toBe(true);
   });
 
-  it("an abort of a job it does not hold is NotHeld, naming the job (unhappy)", async () => {
+  it("an abort of a job it does not hold is not-held, and aborts nothing (unhappy)", async () => {
     const jobs = Jobs.create();
     const other = jarl.unwrap(jobs.hold(OTHER));
 
-    const aborted = await jobs.abort(JOB);
+    const aborted = await jobs.abort({ jobId: JOB });
 
-    expect(jarl.error.is(aborted, Jobs.NotHeld)).toBe(true);
-    expect(jarl.is_err(aborted) && aborted.error.message).toBe(`job ${JOB} is not held`);
+    expect(aborted).toBe("not-held");
     expect(other.signal.aborted).toBe(false);
   });
 
@@ -54,10 +53,10 @@ describe("the jobs an automation client holds", () => {
     expect(jarl.error.is(again, Jobs.AlreadyHeld)).toBe(true);
     expect(jarl.is_err(again) && again.error.message).toBe(`job ${JOB} is already held`);
     expect(first.signal.aborted).toBe(false);
-    const aborting = jobs.abort(JOB);
+    const aborting = jobs.abort({ jobId: JOB });
     expect(first.signal.aborted).toBe(true);
     first.release();
-    expect(jarl.is_ok(await aborting)).toBe(true);
+    expect(await aborting).toBe("stopped");
   });
 
   it("shutdown aborts every job it holds and settles once each is let go (happy)", async () => {
@@ -73,8 +72,8 @@ describe("the jobs an automation client holds", () => {
     expect(await settled(shutting)).toBe(false);
     other.release();
     await shutting;
-    expect(jarl.error.is(await jobs.abort(JOB), Jobs.NotHeld)).toBe(true);
-    expect(jarl.error.is(await jobs.abort(OTHER), Jobs.NotHeld)).toBe(true);
+    expect(await jobs.abort({ jobId: JOB })).toBe("not-held");
+    expect(await jobs.abort({ jobId: OTHER })).toBe("not-held");
   });
 
   it("a hold once shutdown has begun is ShuttingDown, and the job is never held (unhappy)", async () => {
@@ -86,7 +85,7 @@ describe("the jobs an automation client holds", () => {
 
     expect(jarl.error.is(late, Jobs.ShuttingDown)).toBe(true);
     expect(jarl.is_err(late) && late.error.message).toBe(`shutting down; job ${OTHER} not held`);
-    expect(jarl.error.is(await jobs.abort(OTHER), Jobs.NotHeld)).toBe(true);
+    expect(await jobs.abort({ jobId: OTHER })).toBe("not-held");
     held.release();
     await shutting;
   });

@@ -1,31 +1,31 @@
 import { testClient } from "hono/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
-import * as Jobs from "../src/jobs.ts";
-import { routes } from "../src/routes.ts";
+import { type Sessions, RunFailed, routes } from "../src/routes.ts";
+import { sessions } from "../src/testing.ts";
 
 const TOKEN = "oligarchy-token";
 const JOB_ID = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
 const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 const QEMU = "http://127.0.0.1:42069";
 
-const client = (token?: string, jobs = Jobs.create()) =>
+const client = (token?: string) =>
   testClient(
-    routes({ token: TOKEN, jobs }),
+    routes({ token: TOKEN }),
     {},
     undefined,
     token === undefined ? {} : { headers: { Authorization: `Bearer ${token}` } },
   );
 
-// Whether promise has settled once everything already queued has run.
-const settled = async (promise: Promise<unknown>): Promise<boolean> => {
-  let done = false;
-  void promise.then(() => {
-    done = true;
+const RESERVE = { jobId: JOB_ID, action: "drive", resume: ISO } as const;
+const RUN = { jobId: JOB_ID, prompt: "drive the guest" };
+const ABORT = { jobId: JOB_ID };
+
+// The routes over sessions, with the bearer.
+const handedTo = (made: Sessions) =>
+  testClient(routes({ token: TOKEN, sessions: made }), {}, undefined, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
   });
-  await new Promise((resolve) => setImmediate(resolve));
-  return done;
-};
 
 describe("the automation client's routes", () => {
   it("a route with no bearer is 401 (unhappy)", async () => {
@@ -72,13 +72,14 @@ describe("the automation client's routes", () => {
     expect(await response.json()).toEqual({ error: "name a jobId" });
   });
 
-  it("/reserve and /run with the bearer and a fitting body are 501 until each is written (happy)", async () => {
+  it("/reserve, /run and /abort with the bearer and a fitting body are 501 until each is written (happy)", async () => {
     const answers = [
       await client(TOKEN).reserve.$post({ json: { jobId: JOB_ID, action: "drive", resume: ISO } }),
       await client(TOKEN).reserve.$post({
         json: { jobId: JOB_ID, action: "setup", setupServer: QEMU },
       }),
       await client(TOKEN).run.$post({ json: { jobId: JOB_ID, prompt: "drive the guest" } }),
+      await client(TOKEN).abort.$post({ json: { jobId: JOB_ID } }),
     ];
 
     for (const response of answers) {
@@ -86,30 +87,83 @@ describe("the automation client's routes", () => {
     }
     expect(await answers[0]?.json()).toEqual({ error: "reserve is not written yet" });
     expect(await answers[2]?.json()).toEqual({ error: "run is not written yet" });
+    expect(await answers[3]?.json()).toEqual({ error: "abort is not written yet" });
   });
 
-  it("/abort of a job it holds aborts the job and answers 200 once its holder has let it go (happy)", async () => {
-    const jobs = Jobs.create();
-    const held = jarl.unwrap(jobs.hold(JOB_ID));
+  it("hand each request to its session as it is, and answer 200 once it went through (happy)", async () => {
+    const { sessions: made, handed } = sessions();
+    const at = handedTo(made);
 
-    const answering = client(TOKEN, jobs).abort.$post({ json: { jobId: JOB_ID } });
+    const answers = [
+      await at.reserve.$post({ json: RESERVE }),
+      await at.run.$post({ json: RUN }),
+      await at.abort.$post({ json: ABORT }),
+    ];
 
-    expect(await settled(answering)).toBe(false);
-    expect(held.signal.aborted).toBe(true);
-    held.release();
-    const response = await answering;
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({});
+    expect(answers.map((answer) => answer.status)).toEqual([200, 200, 200]);
+    expect(handed).toEqual([RESERVE, RUN, ABORT]);
   });
 
-  it("/abort of a job it does not hold is 404, naming the job (unhappy)", async () => {
-    const jobs = Jobs.create();
-    const other = jarl.unwrap(jobs.hold("0d9f4b1a-5c2e-4f7a-8b3d-1e6a9c2f4b70"));
+  it("never hand a session a request without the bearer or with a body it refuses (unhappy)", async () => {
+    const { sessions: made, handed } = sessions();
+    const without = testClient(routes({ token: TOKEN, sessions: made }));
 
-    const response = await client(TOKEN, jobs).abort.$post({ json: { jobId: JOB_ID } });
+    const answers = [
+      await without.reserve.$post({ json: RESERVE }),
+      // @ts-expect-error: a run carries its prompt.
+      await handedTo(made).run.$post({ json: { jobId: JOB_ID } }),
+    ];
 
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: `job ${JOB_ID} is not held` });
-    expect(other.signal.aborted).toBe(false);
+    expect(answers.map((answer) => answer.status)).toEqual([401, 400]);
+    expect(handed).toEqual([]);
+  });
+
+  it("answer a reserve at --max-jobs 503, at capacity (unhappy)", async () => {
+    const at = handedTo(sessions({ reserve: async () => "at-capacity" }).sessions);
+
+    const answer = await at.reserve.$post({ json: RESERVE });
+
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({ error: "at capacity" });
+  });
+
+  it("answer a reserve no qemu server holds a setup disk for yet 409, setup needed (unhappy)", async () => {
+    const at = handedTo(sessions({ reserve: async () => "setup-needed" }).sessions);
+
+    const answer = await at.reserve.$post({ json: RESERVE });
+
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toEqual({ error: "setup needed" });
+  });
+
+  it("answer a run an abort ended 409, aborted (unhappy)", async () => {
+    const at = handedTo(sessions({ run: async () => jarl.ok("aborted") }).sessions);
+
+    const answer = await at.run.$post({ json: RUN });
+
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toEqual({ error: "aborted" });
+  });
+
+  it("answer a run whose driver failed 500, naming why (unhappy)", async () => {
+    const at = handedTo(
+      sessions({
+        run: async () => jarl.err(new RunFailed("driver exited 1: OpenRouterUnreachable")),
+      }).sessions,
+    );
+
+    const answer = await at.run.$post({ json: RUN });
+
+    expect(answer.status).toBe(500);
+    expect(await answer.json()).toEqual({ error: "driver exited 1: OpenRouterUnreachable" });
+  });
+
+  it("answer an abort of a job they do not hold 404, job not found (unhappy)", async () => {
+    const at = handedTo(sessions({ abort: async () => "not-held" }).sessions);
+
+    const answer = await at.abort.$post({ json: ABORT });
+
+    expect(answer.status).toBe(404);
+    expect(await answer.json()).toEqual({ error: "job not found" });
   });
 });

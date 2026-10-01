@@ -26,6 +26,17 @@ meet plus one happy path, and every service is faked except the database.
   package. An app's routes are one chained Hono app, each body checked by a zod schema through
   `@hono/zod-validator`, and its type is exported as `Routes`, so a caller's `hc<Routes>` and a
   test's `testClient` are typed by the routes themselves. Calls out go through `@oligarchy/http`.
+  A caller reaches another app through `@oligarchy/http/client`, typed by that app's `Routes`
+  (a type import, through `hono/types`' `ExtractSchema`, with no runtime code):
+  `create<Routes>()({ http, url, token, signal? }, specs)` is made once from the url its row
+  names, and `post(path, body)` takes only the routes' paths and each route's body, joins the
+  path to the url and carries the token as the bearer. `specs` holds one entry per route: its
+  `ok` word for a 2xx, a word for each other status it answers that is no failure, and any
+  `timeoutMs`; every status left out stays `@oligarchy/http`'s error. A route left out, a route
+  the app lacks, a status the route never answers and a route with no POST do not compile, so
+  a route that changes stops its callers compiling. An app exports its routes, and a fake of
+  what they are handed as `./testing`, for its callers and their tests; there is still no
+  shared API package.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
 - **Modern terminals only.** Output is coloured when stdout is a TTY, and the terminal is assumed
@@ -257,16 +268,22 @@ bearer, and runs under `@oligarchy/app`.
             its row. Its main is a loop that runs until the server is killed: each pass is one
             `fleet.forget` sweep, then a wait of `automationServer.forgetInterval` (30 seconds).
             `fleet.forget` is one sweep and has no loop of its own.
-      - [ ] **Calls to an automation client.** `reserve`, `run` and `abort`, through
-            `hc<Routes>` with the automation client's `Routes` (`@oligarchy/automation-client/routes`),
-            so a request or answer that does not match the client's routes fails to compile, with
-            `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). Each names its job. A reserve
-            refused for capacity (503) or for a setup still needed (409) is not a failure; `run`
-            answers once the driver or opencode has ended, and with a 409 when an abort ended it;
-            an `abort` of a job the client does not hold is a 404. Decide how `hc` gets
-            `@oligarchy/http`'s timeouts and errors (its `fetch` option), and `run`'s own timeout,
-            the run ceiling and more. Its fake produces every one of those, and each of
-            `@oligarchy/http`'s errors.
+      - [x] **Calls to an automation client.** `AutomationClient.create({ http, url, token,
+            signal? })` (`src/automation-client.ts`, V1: `client.ts`) is an
+            `@oligarchy/http/client` over the automation client's `Routes`
+            (`@oligarchy/automation-client/routes`), made once from the url its row names, with
+            `OLIGARCHY_TOKEN` as the token; each call names its `jobId`, and nothing is asked
+            again. It sends through `@oligarchy/http` rather than through `hc`, whose `fetch`
+            option would lose `@oligarchy/http`'s timeouts and errors; only the routes' types are
+            read. Its specs: `/reserve` answers `reserved`, or `at-capacity` (503) or
+            `setup-needed` (409), neither a failure; `/run` answers `ended` once the driver or
+            opencode has ended, or `aborted` (409) when an abort ended it, and waits as long as a
+            timer can (2³¹−1 ms), so only the client or the signal ends it; `/abort` answers
+            `stopped`, or `not-held` (404) for a job the client does not hold. Every other answer,
+            a route's 501 included, is `@oligarchy/http`'s error. The tests send through
+            `@oligarchy/http/testing` to the automation client's own routes, over its fake
+            sessions. Open for Restart: a client whose host vanished mid-run leaves its `/run`
+            waiting until the signal.
       - [ ] **Dispatch** (section 3's Dispatch) in the loop's pass. Needs the client calls, and
             the prompt from section 3's The mission.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
@@ -296,13 +313,18 @@ bearer, and runs under `@oligarchy/app`.
             line and exit 1), says it started, and on SIGINT or SIGTERM closes the listener, says
             it stopped, and closes its services. `routes.ts` is one chained Hono app behind the
             bearer, exported as `Routes` (`@oligarchy/automation-client/routes`) for the
-            automation server's `hc<Routes>`. Each route's body is checked, and `/reserve` and
-            `/run` answer 501 until each task is written:
+            automation server's client. Each route's body is checked, and `/reserve` and `/run`
+            answer 501 until each task hands `routes({ token, sessions })` its `Sessions` function:
             - `/reserve`: `{ jobId, action }`, where a drive may name `resume` (the ISO's url), a
               setup names `setupServer` (the qemu server its setup lock names), and a diagnose
               names neither.
             - `/run`: `{ jobId, prompt }`.
             - `/abort`: `{ jobId }`.
+
+            Handed its function, a route answers what it says: a reserve `reserved` is 200,
+            `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409 and a
+            `RunFailed` 500 naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
+            fakes `Sessions`. The tasks below write the functions.
       - [ ] **Announce.** `--name`, `--url` and `fleet.announce` as `automation-client`, so the
             automation server's `listLiveServers` finds it, and its row goes on shutdown.
       - [ ] **Reserve** against `--max-jobs`: a slot for the job, and for a drive or setup a guest
@@ -319,12 +341,12 @@ bearer, and runs under `@oligarchy/app`.
             ended. The run calls `release` once the child is reaped.
       - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
             each job it has reserved or is running, in memory only, by an `AbortController`;
-            `main` creates it and hands it to the routes. `/abort` calls
-            `jobs.abort(jobId)`, which aborts that job's signal with `Aborted`, and answers 200
-            `{}` once the job's holder has called `release`: its run is killed, or its guest
-            given back. A job it does not hold is `NotHeld`, a 404 naming the job. Neither abort
-            nor shutdown writes a job's status; the client has no `tests` store, and setting a
-            status is left to the automation server (section 3's Abort, and Restart and shutdown).
+            `main` creates it and hands `jobs.abort` to the routes as their `Sessions` abort.
+            `jobs.abort({ jobId })` aborts that job's signal with `Aborted` and answers `stopped`
+            (200) once the job's holder has called `release`: its run is killed, or its guest
+            given back. A job it does not hold is `not-held` (404). Neither abort nor shutdown
+            writes a job's status; the client has no `tests` store, and setting a status is left
+            to the automation server (section 3's Abort, and Restart and shutdown).
       - [x] **Shutdown.** On SIGINT or SIGTERM `main` closes the listener, which ends the
             connections but not a `/run` still under way, then `jobs.shutdown()` aborts every
             held job and waits until each is let go, before it says it stopped and the services
