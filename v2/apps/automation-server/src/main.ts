@@ -18,15 +18,6 @@ const HOST = "127.0.0.1";
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
-const aborted = (signal: AbortSignal): Promise<void> =>
-  new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
-
 // The dispatch sub-app's main. It runs until the server is killed: each pass waits the interval,
 // and the kill ends the wait at once. It dispatches nothing yet.
 const dispatch = async (sub: App.App<Run>) => {
@@ -77,7 +68,7 @@ const main = async (app: App.App<Run, Stores.Servers.Servers | Logger.Logger>) =
   await restart();
   app.sub(new App.App(app.environment).main(forgetClients));
   app.sub(new App.App(app.environment).main(dispatch));
-  await aborted(app.signal);
+  await App.waitForAbort(app.signal);
   await listening.close();
   await shutdown();
   logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });

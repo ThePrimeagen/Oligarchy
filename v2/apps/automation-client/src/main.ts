@@ -13,15 +13,6 @@ const HOST = "127.0.0.1";
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
-const aborted = (signal: AbortSignal): Promise<void> =>
-  new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
-
 // Nothing starts unless the port is bound. On a signal the listener closes before main returns,
 // so it finishes before any exit handler closes the services under it.
 const main = async (app: App.App<Run, Logger.Logger>) => {
@@ -36,7 +27,7 @@ const main = async (app: App.App<Run, Logger.Logger>) => {
     return listened;
   }
   logger.info(`started on ${HOST}:${String(flags.port)}`, { location: LOCATION });
-  await aborted(app.signal);
+  await App.waitForAbort(app.signal);
   await jarl.value(listened).close();
   logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
   return jarl.ok(undefined);
