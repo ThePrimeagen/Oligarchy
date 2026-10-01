@@ -1,7 +1,9 @@
 import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import * as Env from "@oligarchy/env";
+import * as Fleet from "@oligarchy/fleet";
 import type * as Logger from "@oligarchy/logger";
+import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
 import { restart } from "./restart.ts";
@@ -32,9 +34,26 @@ const dispatch = async (sub: App.App<Run>) => {
   return jarl.ok(undefined);
 };
 
+// The forget sub-app's main. It runs until the server is killed: each pass forgets the automation
+// clients silent for longer than forgetAfter, so dispatch never reserves on a dead one, then waits
+// the interval, and the kill ends the wait at once.
+const forgetClients = async (sub: App.App<Run, Stores.Servers.Servers | Logger.Logger>) => {
+  const { servers, logger } = sub.services;
+  const { forgetInterval, forgetAfter } = sub.environment.config.automationServer;
+  while (!sub.signal.aborted) {
+    await Fleet.forget(
+      "automation-client",
+      { servers, logger, attribution: { location: LOCATION } },
+      { silentFor: forgetAfter },
+    );
+    await Async.sleep(forgetInterval, sub.signal);
+  }
+  return jarl.ok(undefined);
+};
+
 // Shutdown runs before main returns, so it finishes before any exit handler closes the services
 // under it.
-const main = async (app: App.App<Run, Logger.Logger>) => {
+const main = async (app: App.App<Run, Stores.Servers.Servers | Logger.Logger>) => {
   const { logger } = app.services;
   const { models } = app.environment.config;
   logger.info(
@@ -42,6 +61,7 @@ const main = async (app: App.App<Run, Logger.Logger>) => {
     { location: LOCATION },
   );
   await restart();
+  app.sub(new App.App(app.environment).main(forgetClients));
   app.sub(new App.App(app.environment).main(dispatch));
   await aborted(app.signal);
   await shutdown();

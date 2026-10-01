@@ -1,15 +1,11 @@
-import * as Async from "@oligarchy/async";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { attempt } from "./failure.ts";
-import { HEARTBEAT_MS } from "./member.ts";
 
-// Forgets, now and then every heartbeat, the servers of one kind silent for ten minutes, with one
-// info line per url. The process that reads a kind sweeps it (the qemu reverse proxy its fleet,
-// the automation server its clients), so a kind is swept while its reader runs even when none of
-// its servers does. A sweep that fails is one error line and the next tick runs. Settles once
-// signal aborts and the sweep in flight has said what went.
+// Forgets the servers of one kind silent for longer than silentFor milliseconds, with one info
+// line per url. A sweep that fails is one error line. The process that reads a kind sweeps it
+// (the qemu reverse proxy its fleet, the automation server its clients), as often as it decides.
 export const forget = async (
   type: Stores.Servers.ServerType,
   needs: {
@@ -17,19 +13,20 @@ export const forget = async (
     readonly logger: Logger.Logger;
     readonly attribution: Logger.Attribution;
   },
-  signal: AbortSignal,
-  options: { readonly every?: number } = {},
+  options: { readonly silentFor: number },
 ): Promise<void> => {
   const { servers, logger, attribution } = needs;
-  const sweep = async () => {
-    const forgotten = await jarl.or_else(
-      attempt(needs, "stale server cleanup failed", () => servers.removeStaleServers(type)),
-      [],
+  const { silentFor } = options;
+  const forgotten = await jarl.or_else(
+    attempt(needs, "stale server cleanup failed", () =>
+      servers.removeStaleServers(type, silentFor),
+    ),
+    [],
+  );
+  for (const url of forgotten) {
+    logger.info(
+      `server forgotten; ${url} silent for ${String(silentFor / 1_000)} seconds`,
+      attribution,
     );
-    for (const url of forgotten) {
-      logger.info(`server forgotten; ${url} silent for 10 minutes`, attribution);
-    }
-  };
-  await sweep();
-  await Async.tick(sweep, options.every ?? HEARTBEAT_MS, signal);
+  }
 };

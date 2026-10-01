@@ -35,7 +35,11 @@ export type Servers = {
   readonly listServers: (type: ServerType) => Answer<ReadonlyArray<string>>;
   readonly listMachines: () => Answer<ReadonlyArray<Machine>>;
   readonly listLiveServers: (type: ServerType) => Answer<ReadonlyArray<LiveServer>>;
-  readonly removeStaleServers: (type: ServerType) => Answer<ReadonlyArray<string>>;
+  // Deletes the servers of one kind silent for longer than silentFor milliseconds.
+  readonly removeStaleServers: (
+    type: ServerType,
+    silentFor: number,
+  ) => Answer<ReadonlyArray<string>>;
   readonly findServer: (id: string) => Answer<LiveServer | undefined>;
   readonly routeJob: (jobId: string, url: string) => Answer<void>;
   readonly serverForJob: (jobId: string) => Answer<string | undefined>;
@@ -122,14 +126,14 @@ export const create = App.createService<Db.Database, App.NoOptions, Servers>(({ 
         .orderBy(DbSchema.servers.createdAt, DbSchema.servers.url),
     ),
 
-  removeStaleServers: (type) =>
+  removeStaleServers: (type, silentFor) =>
     db.run(async (d) => {
       const rows = await d
         .delete(DbSchema.servers)
         .where(
           and(
             eq(DbSchema.servers.type, type),
-            sql`coalesce(${DbSchema.servers.heartbeatAt}, ${DbSchema.servers.createdAt}) < now() - interval '10 minutes'`,
+            sql`coalesce(${DbSchema.servers.heartbeatAt}, ${DbSchema.servers.createdAt}) < now() - ${silentFor}::double precision * interval '1 millisecond'`,
           ),
         )
         .returning({ url: DbSchema.servers.url });
