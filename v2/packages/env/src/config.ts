@@ -65,6 +65,7 @@ const File = z
     runCeiling: Duration,
     stepLimit: z.int().min(1, "stepLimit must be at least 1"),
     harness: z.strictObject({ defaultRetry: Duration }),
+    automationServer: z.strictObject({ dispatchInterval: Duration }),
   })
   .superRefine((config, ctx) => {
     // Header before chunk before defaultRetry: the order the file writes them.

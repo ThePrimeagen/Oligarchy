@@ -164,7 +164,8 @@ record, and the automation server acts on it directly.
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
       `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
-      loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. A drive's
+      loop sleeps `automationServer.dispatchInterval` from `v2/oligarchy.json` (30 seconds)
+      before it asks again. One reserve is in flight at a time. A drive's
       reserve resumes its test run's ISO when its definition resumes and asks for a fresh boot
       otherwise; a setup's never resumes. A resume that no qemu server holds the setup disk for is
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
@@ -197,7 +198,8 @@ record, and the automation server acts on it directly.
 
 ## 4. Apps
 
-None of V1's apps are ported. Each becomes a V2 app: its `main` reads its environment with
+None of V1's apps are ported yet; the automation server has a skeleton. Each becomes a V2 app
+under `v2/apps/`: its `main` reads its environment with
 `@oligarchy/env`, builds its services with a `createServices` (Sentry among them, handed to its
 logger and waited for on exit, as the tester's are), serves Hono behind the `OLIGARCHY_TOKEN`
 bearer, and runs under `@oligarchy/app`.
@@ -235,10 +237,39 @@ bearer, and runs under `@oligarchy/app`.
       lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
       setup needed. One setup per ISO and server: a reserve while that setup is in flight files
       none, and one that ended without passing releases the lock (V1: `setup.ts`).
-- [ ] **automation-server** (`apps/automation-server`). Section 3's dispatch, close, abort, restart
-      and shutdown, and `/abort`. Its reserve, run and abort calls to an automation client are its
-      own, on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). `/linear`,
-      the board watch (`backlog.ts`) and the webhook signature (`signature.ts`) go.
+- [ ] **automation-server** (`v2/apps/automation-server`). Section 3's dispatch, close, abort,
+      restart and shutdown, and `/abort`. `/linear`, the board watch (`backlog.ts`) and the
+      webhook signature (`signature.ts`) go. Done when every task below is ticked, roughly in
+      their order.
+      - [x] **Skeleton.** `bun run automation-server`. `main` needs `DATABASE_URL`, builds its
+            services with Sentry, says it started with its models, runs `restart`, starts the
+            dispatch sub-app, and waits for SIGINT or SIGTERM; then it runs `shutdown`, says it
+            stopped, and closes its services. The dispatch sub-app's main is a loop that runs
+            until the server is killed, waiting `automationServer.dispatchInterval` each pass;
+            the kill ends the wait at once. A database that cannot be reached does not stop it.
+            `restart`, `shutdown` and the loop's pass do nothing yet.
+      - [ ] **Forget silent clients.** `fleet.forget("automation-client")` runs beside dispatch
+            until the server is killed, as V1's `Sweep.forget` did, so dispatch never reserves on
+            a client that died without deleting its row.
+      - [ ] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own,
+            on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer, so the environment needs
+            `oligarchyToken` from here on (V1: `client.ts`). Each names its job. A reserve refused
+            for capacity (503) or for a setup still needed (409) is not a failure; `run` answers
+            once the driver or opencode has ended, and with a 409 when an abort ended it; an
+            `abort` of a job the client does not hold is a 404. Its fake produces every one of those, and each of `@oligarchy/http`'s errors.
+      - [ ] **Dispatch** (section 3's Dispatch) in the loop's pass. Needs the client calls, and
+            the prompt from section 3's The mission.
+      - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
+            answers.
+      - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
+      - [ ] **Shutdown** (section 3's Restart and shutdown, at shutdown) in `shutdown`. Today
+            it runs as soon as the signal lands, beside a dispatch pass still in flight; decide
+            whether it moves to an exit handler of the dispatch sub-app, which runs only once the
+            loop has ended and before the services close.
+      - [ ] **Serve.** A Hono app behind the `OLIGARCHY_TOKEN` bearer on a required `--port`,
+            listening on 127.0.0.1. The started line names the port, and a port that cannot be
+            bound is a fatal line and exit 1.
+      - [ ] **`/abort`** (section 3's Abort), by job id or by suite id.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.

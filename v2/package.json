@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": {
     "packages": [
+      "apps/*",
       "packages/*"
     ],
     "catalog": {
@@ -25,6 +26,7 @@
     "test:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.env run db:migrate",
     "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --env-file=../.prod-env run db:migrate",
     "tester": "bun --no-env-file packages/tester/src/main.ts",
+    "automation-server": "bun --no-env-file apps/automation-server/src/main.ts",
     "check:types": "bun run --workspaces check:types",
     "test:unit": "bun run --workspaces --if-present test:unit"
   }

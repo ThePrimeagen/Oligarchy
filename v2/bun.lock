@@ -5,6 +5,28 @@
     "": {
       "name": "oligarchy-v2",
     },
+    "apps/automation-server": {
+      "name": "@oligarchy/automation-server",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/async": "workspace:*",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/logger": "workspace:*",
+        "@oligarchy/sentry": "workspace:*",
+        "@oligarchy/stores": "workspace:*",
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@oligarchy/fake-postgres": "workspace:*",
+        "@types/node": "catalog:",
+        "@types/pg": "catalog:",
+        "pg": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/app": {
       "name": "@oligarchy/app",
       "dependencies": {
@@ -306,6 +328,8 @@
     "@oligarchy/app": ["@oligarchy/app@workspace:packages/app"],
 
     "@oligarchy/async": ["@oligarchy/async@workspace:packages/async"],
+
+    "@oligarchy/automation-server": ["@oligarchy/automation-server@workspace:apps/automation-server"],
 
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
@@ -622,6 +646,8 @@
     "@oligarchy/openrouter/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "@oligarchy/qemu-http-tools/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
+    "@oligarchy/tester/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "import-in-the-middle/es-module-lexer": ["es-module-lexer@3.0.2", "", {}, "sha512-BuIB67FngDSyQ/dpQNOZybwdEBDUGJQvOqwWr4ha/ufYiqzuEwPkKO2zLhRAgay28tStRIHUeWmszZAJo3GCOg=="],
 

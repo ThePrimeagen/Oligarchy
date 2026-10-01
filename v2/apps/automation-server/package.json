@@ -1,0 +1,30 @@
+{
+  "name": "@oligarchy/automation-server",
+  "private": true,
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "start": "bun --no-env-file src/main.ts",
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/async": "workspace:*",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/http": "workspace:*",
+    "@oligarchy/logger": "workspace:*",
+    "@oligarchy/sentry": "workspace:*",
+    "@oligarchy/stores": "workspace:*",
+    "jarl": "catalog:"
+  },
+  "devDependencies": {
+    "@oligarchy/fake-postgres": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
