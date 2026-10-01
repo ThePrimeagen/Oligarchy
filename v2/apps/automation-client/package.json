@@ -17,9 +17,11 @@
     "@oligarchy/async": "workspace:*",
     "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
+    "@oligarchy/fleet": "workspace:*",
     "@oligarchy/http": "workspace:*",
     "@oligarchy/logger": "workspace:*",
     "@oligarchy/sentry": "workspace:*",
+    "@oligarchy/stores": "workspace:*",
     "hono": "catalog:",
     "jarl": "catalog:",
     "zod": "catalog:"
