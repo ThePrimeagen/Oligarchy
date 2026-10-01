@@ -15,7 +15,7 @@ non-empty environment variables take precedence. It accepts export prefixes,
 single-line quoted values, and comments. Double quotes support \n, \r, \t,
 \" and \\. Values are literal: no variable expansion or shell execution.
 
-:OligarchyJobs or <leader>c opens the pane. Move onto a job's name or ID and press Enter
+:OligarchyJobs or <leader>C opens the pane. Move onto a job's name or ID and press Enter
 to load its conversation into the same window. Ctrl-b or Backspace returns to the
 cached job list; q closes. Your messages start with --- user --- and align
 right across about 85% of the pane width. Assistant output starts with
@@ -32,6 +32,7 @@ message can still be a progress update while a job is running. All original
 messages remain in the cache and can be expanded; none are discarded.
 
 Inside a conversation:
+  P           Push & Review: publish a commit and start a grok-review job.
   i           Focus the prompt below the conversation and enter insert mode.
   Ctrl-Enter  Send the prompt (also works in insert mode in the prompt).
   J / K       Jump to the next / previous section header: user, thoughts,
@@ -52,6 +53,28 @@ and refresh the conversation and branch. Failed sends keep the draft for retry.
 Sending temporarily locks the prompt to prevent edits or duplicate submissions.
 Unsent drafts are saved when leaving the conversation or reloading the plugin,
 and restored separately for each agent.
+
+Push & Review is available with P in both the jobs list and a conversation.
+It asks for a commit message, stages all local changes with git add --all
+(including untracked files, respecting .gitignore), and creates a new commit.
+With no local changes it stops without pushing or starting a review. Save
+your buffers first; it commits the files on disk.
+Cancelling the message prompt leaves Git untouched. The action creates and
+switches to a branch such as review/wobbly-wombat-a1b2c3, then pushes the
+selected commit to that branch on origin. The local checkout stays on it.
+
+After the push succeeds, a new Cursor job follows
+.cursor/skills/grok-review/SKILL.md to review the commit and apply appropriate
+fixes on the review branch. That skill must exist in the published commit.
+The job appears at the top of the jobs list; Enter opens its conversation.
+This uses the configured Cursor model to orchestrate the skill's Grok review.
+It does not automatically create a pull request.
+
+Failures show the completed branch name when available. Closing the pane
+cancels pending work, but completed commits, branches and pushes remain.
+If the Cursor request times out after the push, check the jobs list before
+retrying: the job may already have started. No push or job creation is retried
+automatically. CURSOR_API_TOKEN and an HTTPS or SSH origin are required.
 
 Conversation history, drafts and collapsed-section state are saved under
 stdpath('cache')/oligarchy, separated by project and agent. Cache files are
@@ -77,7 +100,7 @@ GitHub authentication. A missing PR or HTTP error is shown without clearing
 history or quickfix. After appending hunks, d closes the other windows in the
 current tab and leaves one editing window plus quickfix. Unsaved file buffers
 remain available. The first new hunk opens in the editing window, and quickfix
-gets focus. <leader>c reopens the Cursor pane. :cnext / :cprev
+gets focus. <leader>C reopens the Cursor pane. :cnext / :cprev
 navigate the local project files at the new-side hunk line. Deleted files are
 excluded; removed lines within a surviving file still appear. The full hunk
 is also in each entry's user_data.diff. Binary changes have no textual hunks.
@@ -90,8 +113,27 @@ anchor to a nearby remaining line, or the last line at the end of a file.
 Replacements show both signs. Markers use the PR's new-file line numbers;
 added lines beyond the local file's end have no marker. Fetching another diff
 replaces the previous markers. Files are decorated when opened, without
-loading other files just to add signs. Opening the Cursor pane with <leader>c
+loading other files just to add signs. Opening the Cursor pane with <leader>C
 or :OligarchyJobs removes all diff markers until another diff is fetched.
+
+To exclude files from diff calculation, edit the setup call in .nvimrc:
+>
+  plugin.setup({
+    skip_files = {
+      'bun.lock',
+      'path/to/generated-file.json',
+      { partial = true, match = 'package.json' },
+    },
+  })
+<
+Strings match exact paths relative to the repository root. An entry such as
+{ partial = true, match = 'package.json' } matches that literal text anywhere
+in the relative path, including nested directories and longer filenames.
+Matching is case-sensitive and uses the new path for renamed files.
+Skipped files produce no quickfix hunks or gutter markers.
+The list defaults to empty. Run :source .nvimrc after editing it; the next
+diff fetch uses the updated list. Existing quickfix entries remain until
+cleared, for example with :cexpr [].
 
 On a job in the list, a opens a centered confirmation popup. Archive is red;
 Cancel has a gray background and is initially selected. Tab, arrow keys, h

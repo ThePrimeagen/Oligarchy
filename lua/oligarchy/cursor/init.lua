@@ -96,6 +96,43 @@ function M.new(options)
     end
   end
 
+  function client:create_review(review, callback)
+    return request("POST", "/v1/agents", function(err, data)
+      if err then
+        callback(err)
+        return
+      end
+      local agent = data.agent
+      if
+        type(agent) ~= "table"
+        or agent.id ~= review.agent_id
+        or type(agent.name) ~= "string"
+        or type(agent.status) ~= "string"
+      then
+        callback("Cursor returned an invalid review agent")
+        return
+      end
+      callback(nil, agent)
+    end, {
+      agentId = review.agent_id,
+      name = "Review " .. review.branch,
+      repos = { { url = review.repository, startingRef = review.branch } },
+      workOnCurrentBranch = true,
+      autoCreatePR = false,
+      prompt = {
+        text = "Use the grok-review skill at .cursor/skills/grok-review/SKILL.md.\n"
+          .. "Review commit "
+          .. review.commit
+          .. " on branch "
+          .. review.branch
+          .. ".\n"
+          .. "Use git show to inspect this commit, including its commit message and changes. "
+          .. "Follow the skill's review and fix workflow, including its restriction on running tests. "
+          .. "Keep any fixes on this review branch and summarize the findings and changes.",
+      },
+    })
+  end
+
   function client:send_message(agent_id, text, callback)
     if vim.trim(text) == "" then
       local cancelled = false
