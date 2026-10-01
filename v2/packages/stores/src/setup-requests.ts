@@ -46,6 +46,29 @@ const releasable = sql`(${DbSchema.setupRequests.jobId} is null or exists (selec
 const pair = (iso: string, serverUrl: string) =>
   and(eq(DbSchema.setupRequests.iso, iso), eq(DbSchema.setupRequests.serverUrl, serverUrl));
 
+type Tx = Parameters<Parameters<Db.Drizzle["transaction"]>[0]>[0];
+
+// Takes the lock for a job, or refuses it. A row that is not there is inserted. A row a live
+// setup holds, and a row still waiting on its job, stay as they are: the insert's conflict
+// updates nothing and returns nothing.
+export const claimLock = async (
+  tx: Tx,
+  iso: string,
+  serverUrl: string,
+  jobId: string,
+): Promise<boolean> => {
+  const rows = await tx
+    .insert(DbSchema.setupRequests)
+    .values({ iso, serverUrl, jobId })
+    .onConflictDoUpdate({
+      target: [DbSchema.setupRequests.iso, DbSchema.setupRequests.serverUrl],
+      set: { jobId },
+      setWhere: sql`${DbSchema.setupRequests.jobId} is not null and not ${heldByLiveSetup}`,
+    })
+    .returning({ iso: DbSchema.setupRequests.iso });
+  return rows.length > 0;
+};
+
 export const create = App.createService<Db.Database, App.NoOptions, SetupRequests>(({ db }) => ({
   service: "setupRequests",
 
@@ -70,18 +93,7 @@ export const create = App.createService<Db.Database, App.NoOptions, SetupRequest
     }),
 
   claim: (iso, serverUrl, jobId) =>
-    db.run(async (d) => {
-      const rows = await d
-        .insert(DbSchema.setupRequests)
-        .values({ iso, serverUrl, jobId })
-        .onConflictDoUpdate({
-          target: [DbSchema.setupRequests.iso, DbSchema.setupRequests.serverUrl],
-          set: { jobId },
-          setWhere: sql`${DbSchema.setupRequests.jobId} is not null and not ${heldByLiveSetup}`,
-        })
-        .returning({ iso: DbSchema.setupRequests.iso });
-      return rows.length > 0;
-    }),
+    db.run((d) => d.transaction((tx) => claimLock(tx, iso, serverUrl, jobId))),
 
   remove: (iso, serverUrl) =>
     db.run(async (d) => {
