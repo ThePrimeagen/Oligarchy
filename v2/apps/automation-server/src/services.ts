@@ -6,6 +6,7 @@ import * as Logger from "@oligarchy/logger";
 import * as Sentry from "@oligarchy/sentry";
 import * as Stores from "@oligarchy/stores";
 import type * as jarl from "jarl";
+import * as AutomationClient from "./automation-client.ts";
 
 export type Services = {
   readonly http: App.Made<Http.Http>;
@@ -15,6 +16,7 @@ export type Services = {
   readonly tests: App.Made<Stores.Tests.Tests>;
   readonly servers: App.Made<Stores.Servers.Servers>;
   readonly setupRequests: App.Made<Stores.SetupRequests.SetupRequests>;
+  readonly automationClient: App.Made<AutomationClient.AutomationClient>;
 };
 
 export type Terminal = {
@@ -39,7 +41,7 @@ const live = (): World => ({
 // Every line is printed and stored in the logs table; an error or fatal line, and a line that
 // could not be stored, also go to the project's Sentry.
 export const createServices = (
-  env: { readonly vars: { readonly databaseUrl: Env.Secret } },
+  env: { readonly vars: { readonly databaseUrl: Env.Secret; readonly oligarchyToken: Env.Secret } },
   world: World = live(),
 ): Services => {
   const { terminal, http } = world;
@@ -49,7 +51,8 @@ export const createServices = (
   const tests = Stores.Tests.create({ db });
   const servers = Stores.Servers.create({ db });
   const setupRequests = Stores.SetupRequests.create({ db });
-  return { http, sentry, db, logger, tests, servers, setupRequests };
+  const automationClient = AutomationClient.create({ http }, { token: env.vars.oligarchyToken });
+  return { http, sentry, db, logger, tests, servers, setupRequests, automationClient };
 };
 
 // Every line waits on its insert, so the pool stays open until the last one lands; a line the
