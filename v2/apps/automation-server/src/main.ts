@@ -7,10 +7,13 @@ import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
 import { restart } from "./restart.ts";
+import { routes } from "./routes.ts";
+import { listen } from "./serve.ts";
 import { closeServices, createServices } from "./services.ts";
 import { shutdown } from "./shutdown.ts";
 
 const LOCATION = "automation-server";
+const HOST = "127.0.0.1";
 
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
@@ -51,19 +54,31 @@ const forgetClients = async (sub: App.App<Run, Stores.Servers.Servers | Logger.L
   return jarl.ok(undefined);
 };
 
-// Shutdown runs before main returns, so it finishes before any exit handler closes the services
-// under it.
+// Nothing starts unless the port is bound. On a signal the listener closes first, so no request
+// lands during shutdown, and shutdown runs before main returns, so it finishes before any exit
+// handler closes the services under it.
 const main = async (app: App.App<Run, Stores.Servers.Servers | Logger.Logger>) => {
   const { logger } = app.services;
-  const { models } = app.environment.config;
+  const { config, flags, vars } = app.environment;
+  const { models } = config;
+  const listened = await listen(routes({ token: vars.oligarchyToken.reveal() }).fetch, {
+    hostname: HOST,
+    port: flags.port,
+  });
+  if (jarl.is_err(listened)) {
+    logger.fatal(listened.error.message, { location: LOCATION });
+    return listened;
+  }
+  const listening = jarl.value(listened);
   logger.info(
-    `started; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`,
+    `started on ${HOST}:${String(flags.port)}; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`,
     { location: LOCATION },
   );
   await restart();
   app.sub(new App.App(app.environment).main(forgetClients));
   app.sub(new App.App(app.environment).main(dispatch));
   await aborted(app.signal);
+  await listening.close();
   await shutdown();
   logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
   return jarl.ok(undefined);
