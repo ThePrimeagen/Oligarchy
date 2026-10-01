@@ -299,6 +299,14 @@ bearer, and runs under `@oligarchy/app`.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
+      Its routes are in (`v2/apps/automation-client/src/routes.ts`), exported as `./routes` with
+      their `Routes`: `routes({ token, sessions })` behind the bearer, each body checked by its
+      zod schema (`ReserveRequest`: `{ job, action }`, a drive adding `iso` and `mode`, `resume`
+      or `fresh`, and a setup `iso` and its lock's `server`; `RunRequest`: `{ job, prompt }`;
+      `AbortRequest`: `{ job }`), a body refused 400. A reserve at capacity is 503 and one
+      needing a setup 409; a run an abort ended is 409 and one that failed (`RunFailed`) 500,
+      naming why; an abort of a job not held is 404. `Sessions` is what they are handed, and
+      `./testing` fakes it. Left: the `Sessions` service, `main`, spawning and announcing.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
       Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
