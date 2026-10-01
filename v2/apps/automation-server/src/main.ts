@@ -2,13 +2,13 @@ import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import * as Env from "@oligarchy/env";
 import * as Fleet from "@oligarchy/fleet";
+import { listen } from "@oligarchy/http/serve";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
 import { restart } from "./restart.ts";
 import { routes } from "./routes.ts";
-import { listen } from "./serve.ts";
 import { closeServices, createServices } from "./services.ts";
 import { shutdown } from "./shutdown.ts";
 
