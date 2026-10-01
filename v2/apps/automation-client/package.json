@@ -13,6 +13,7 @@
   "dependencies": {
     "@hono/zod-validator": "catalog:",
     "@oligarchy/app": "workspace:*",
+    "@oligarchy/async": "workspace:*",
     "@oligarchy/db": "workspace:*",
     "@oligarchy/env": "workspace:*",
     "@oligarchy/http": "workspace:*",
