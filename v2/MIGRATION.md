@@ -339,8 +339,8 @@ bearer, and runs under `@oligarchy/app`.
             port it cannot bind announces nothing. It reports no guests, and no jobs until Reserve
             counts them.
       - [x] **Reserve** (`src/reserve.ts`) against a required `--max-jobs`: a slot for the job,
-            and for a drive or setup a guest reserved first at the qemu reverse proxy at
-            `--server-url` (`SERVER_URL`, else `http://127.0.0.1:42069`); a diagnose asks the
+            and for a drive or setup a guest reserved first at the qemu reverse proxy at a
+            required `--server-url` (or `SERVER_URL`), which has no default; a diagnose asks the
             proxy for nothing. At `--max-jobs`, or while another reserve is still asking the
             proxy, it is 503 at capacity and the proxy is not asked. The reservation is
             `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
