@@ -117,7 +117,7 @@ describe("create", () => {
     if (env.command !== "setup") {
       throw new Error(`expected setup, got ${env.command}`);
     }
-    expect(env.flags.notSetUp).toBe(true);
+    expect(env.flags.setupOnly).toBe(true);
     expect(env.vars.automationServerUrl).toBe("from-env");
     expect(env.vars.oligarchyToken.reveal()).toBe("from-file");
     expect(env.vars.databaseUrl.reveal()).toBe("postgres://from-dot@db.example/oligarchy");

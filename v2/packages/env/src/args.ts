@@ -196,7 +196,7 @@ export const iso = flag({
   description: "HTTPS URL of the ISO",
 });
 
-export const notSetUp = flag({
+export const setupOnly = flag({
   schema: toggle,
   description:
     "Set up only on the live qemu servers that do not hold the ISO's setup disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",

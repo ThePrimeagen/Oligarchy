@@ -139,7 +139,7 @@ meet plus one happy path, and every service is faked except the database.
       definition named `mint` to `setup`, rows already written included. The queue hands out
       setups first. The config's `models.setup` and `reasoning.setup` replace `mint`, in V2's own
       `v2/oligarchy.json`; the driver's `--action` is `drive` or `setup`; `ctrl setup`'s
-      `--not-set-up` replaces `--unminted`; and a minted disk is a setup disk.
+      `--setup-only` replaces `--unminted`; and a minted disk is a setup disk.
 
 ## 3. The flow that replaces the Linear board
 
