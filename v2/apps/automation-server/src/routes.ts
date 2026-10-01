@@ -3,9 +3,11 @@ import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import * as z from "zod";
 
+// One job, or one whole suite, never both: a job filed on its own has no suite. Each side names
+// the other's key as never, so the typed client refuses both as the server does.
 export const AbortRequest = z.union([
-  z.strictObject({ jobId: z.uuid() }),
-  z.strictObject({ suiteId: z.uuid() }),
+  z.strictObject({ jobId: z.uuid(), suiteId: z.never().optional() }),
+  z.strictObject({ suiteId: z.uuid(), jobId: z.never().optional() }),
 ]);
 export type AbortRequest = z.infer<typeof AbortRequest>;
 
