@@ -258,20 +258,22 @@ bearer, and runs under `@oligarchy/app`.
             `fleet.forget` sweep, then a wait of `automationServer.forgetInterval` (30 seconds).
             `fleet.forget` is one sweep and has no loop of its own.
       - [x] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own
-            `automationClient` service (`src/automation-client.ts`), on `@oligarchy/http` with
-            `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). Each takes the client's url and
-            names its job, and nothing is asked again. A reserve POSTs `/reserve` with
+            (`src/automation-client.ts`, V1: `client.ts`), are plain calls, not a service. Each
+            takes a `Client` struct, `{ http, url, token, signal? }`, and posts its request
+            struct as it is through that `http` with `OLIGARCHY_TOKEN` as the bearer; nothing is
+            asked again, and the signal ends any call in flight. A reserve posts `/reserve` with
             `{ job, action }`, a drive adding `iso` and `mode` (`resume` or `fresh`) and a setup
             `iso` and the `server` its lock names; it answers `reserved`, or `at-capacity` (503)
-            or `setup-needed` (409), neither a failure. `run` POSTs `/run` with `{ job, prompt }`
+            or `setup-needed` (409), neither a failure. `run` posts `/run` with `{ job, prompt }`
             and answers `ended` once the driver or opencode has ended, or `aborted` (409) when an
             abort ended it; it waits as long as a timer can (2³¹−1 ms), so only the client or
-            the caller's signal ends it. `abort` POSTs `/abort` with `{ job }` and answers
-            `stopped`, or `not-held` (404) for a job the client does not hold. Every other answer
-            is `@oligarchy/http`'s error. Its fake (`test/fake-automation-client.ts`) is told
-            each call's answer, records each call, and builds each of `@oligarchy/http`'s errors
-            with `failure`. Open for Restart: a client whose host vanished mid-run leaves its
-            `/run` waiting until the caller's signal.
+            the signal ends it. `abort` posts `/abort` with `{ job }` and answers `stopped`, or
+            `not-held` (404) for a job the client does not hold. Every other answer is
+            `@oligarchy/http`'s error. The fake is `@oligarchy/http/testing`'s, which answers
+            each of those statuses and produces each of its errors. The request structs are
+            typed by hand: once the automation client exports its `Routes`, they come from its
+            `hc<Routes>`. Open for Restart: a client whose host vanished mid-run leaves its `/run`
+            waiting until the signal.
       - [ ] **Dispatch** (section 3's Dispatch) in the loop's pass. Needs the client calls, and
             the prompt from section 3's The mission.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
