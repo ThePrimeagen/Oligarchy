@@ -164,7 +164,8 @@ record, and the automation server acts on it directly.
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
       `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
-      loop sleeps 30 seconds before it asks again. One reserve is in flight at a time. A drive's
+      loop sleeps `automationServer.dispatchInterval` from `v2/oligarchy.json` (30 seconds)
+      before it asks again. One reserve is in flight at a time. A drive's
       reserve resumes its test run's ISO when its definition resumes and asks for a fresh boot
       otherwise; a setup's never resumes. A resume that no qemu server holds the setup disk for is
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
@@ -244,7 +245,7 @@ bearer, and runs under `@oligarchy/app`.
       `DATABASE_URL`, builds its services with Sentry, says it started with its models, runs
       `restart`, then `dispatch` until SIGINT or SIGTERM, then `shutdown`, says it stopped, and
       closes its services. `restart` and `shutdown` do nothing yet, and `dispatch` only ticks
-      every 30 seconds. It serves nothing yet: `--port`, `OLIGARCHY_TOKEN` and `/abort` come
+      every `automationServer.dispatchInterval`. It serves nothing yet: `--port`, `OLIGARCHY_TOKEN` and `/abort` come
       with their tasks.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
