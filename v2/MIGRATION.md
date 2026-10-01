@@ -197,7 +197,8 @@ record, and the automation server acts on it directly.
 
 ## 4. Apps
 
-None of V1's apps are ported. Each becomes a V2 app: its `main` reads its environment with
+None of V1's apps are ported yet; the automation server has a skeleton. Each becomes a V2 app
+under `v2/apps/`: its `main` reads its environment with
 `@oligarchy/env`, builds its services with a `createServices` (Sentry among them, handed to its
 logger and waited for on exit, as the tester's are), serves Hono behind the `OLIGARCHY_TOKEN`
 bearer, and runs under `@oligarchy/app`.
@@ -239,6 +240,12 @@ bearer, and runs under `@oligarchy/app`.
       and shutdown, and `/abort`. Its reserve, run and abort calls to an automation client are its
       own, on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). `/linear`,
       the board watch (`backlog.ts`) and the webhook signature (`signature.ts`) go.
+      The skeleton is in (`v2/apps/automation-server`, `bun run automation-server`): `main` needs
+      `DATABASE_URL`, builds its services with Sentry, says it started with its models, runs
+      `restart`, then `dispatch` until SIGINT or SIGTERM, then `shutdown`, says it stopped, and
+      closes its services. `restart` and `shutdown` do nothing yet, and `dispatch` only ticks
+      every 30 seconds. It serves nothing yet: `--port`, `OLIGARCHY_TOKEN` and `/abort` come
+      with their tasks.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
