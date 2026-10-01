@@ -469,6 +469,89 @@ describe("a single test run, with no suite", () => {
   });
 });
 
+describe("a setup, filed by taking its lock", () => {
+  const AT = { iso: SINGLE.iso, serverUrl: "http://proxy" };
+
+  it("takes the lock on its ISO and server, writes a test run of its own with a pending setup job, and names that job on the lock (happy)", async () => {
+    const { tests, setupRequests } = await database();
+    const definitionId = await definition(tests, "setup", false);
+
+    const filed = jarl.unwrap(await tests.createSetupRun({ definitionId, ...AT }));
+
+    if (filed === undefined) {
+      throw new Error("the lock was free, yet nothing was filed");
+    }
+    const { run, job } = filed;
+    expect({ suiteId: run.suiteId, iso: run.iso, serverUrl: run.serverUrl }).toEqual({
+      suiteId: null,
+      ...AT,
+    });
+    expect(`${job.action} ${job.status}`).toBe("setup pending");
+    expect(job.runId).toBe(run.id);
+    expect(jarl.unwrap(await setupRequests.inspect(AT.iso, AT.serverUrl))).toEqual({
+      ...AT,
+      jobId: job.id,
+      jobStatus: "pending",
+    });
+    expect(jarl.unwrap(await setupRequests.serverForJob(job.id))).toBe(AT.serverUrl);
+    expect(jarl.unwrap(await tests.nextPendingJob([]))?.id).toBe(job.id);
+  });
+
+  it("on a lock already held, files nothing and leaves the lock with the job holding it (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const definitionId = await definition(tests, "setup", false);
+    const first = jarl.unwrap(await tests.createSetupRun({ definitionId, ...AT }));
+
+    const second = jarl.unwrap(await tests.createSetupRun({ definitionId, ...AT }));
+
+    expect(second).toBeUndefined();
+    expect(await counted(db)).toEqual({ suites: 0, runs: 1, jobs: 1 });
+    expect(jarl.unwrap(await setupRequests.inspect(AT.iso, AT.serverUrl))?.jobId).toBe(
+      first?.job.id,
+    );
+  });
+
+  it("of a definition that does not exist, is refused and takes no lock (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+
+    const refused = await tests.createSetupRun({ definitionId: 999, ...AT });
+
+    expect(said(refused)).toBe("NotFound: createSetupRun: no test definition 999");
+    expect(jarl.unwrap(await setupRequests.list())).toEqual([]);
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+
+  it("when its job cannot be written, it is the database's error and neither the lock nor the test run is left (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const definitionId = await definition(tests, "setup", false);
+    await refuseJobs(db);
+
+    const failed = await tests.createSetupRun({ definitionId, ...AT });
+
+    expect(jarl.error.is(failed, Db.DatabaseError)).toBe(true);
+    expect(said(failed)).toMatch(/jobs refused by the test/);
+    expect(jarl.unwrap(await setupRequests.list())).toEqual([]);
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+
+  it("two at once for one ISO and server: one takes the lock and files, the other files nothing (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const definitionId = await definition(tests, "setup", false);
+
+    const both = await Promise.all([
+      tests.createSetupRun({ definitionId, ...AT }),
+      tests.createSetupRun({ definitionId, ...AT }),
+    ]);
+
+    const filed = both.map((result) => jarl.unwrap(result)).filter((each) => each !== undefined);
+    expect(filed.length).toBe(1);
+    expect(await counted(db)).toEqual({ suites: 0, runs: 1, jobs: 1 });
+    expect(jarl.unwrap(await setupRequests.inspect(AT.iso, AT.serverUrl))?.jobId).toBe(
+      filed[0]?.job.id,
+    );
+  });
+});
+
 describe("a job, state by state", () => {
   it("pending: it runs or is aborted, refuses every other move, and holds its test run (unhappy)", async () => {
     const setup = await database();
