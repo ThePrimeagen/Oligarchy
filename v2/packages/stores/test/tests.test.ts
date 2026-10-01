@@ -99,6 +99,28 @@ const refuseJobs = async (db: Db.Database) => {
   );
 };
 
+// Every update of a setup lock fails from here on, so naming a job on one must roll the run back.
+const refuseLockJob = async (db: Db.Database) => {
+  jarl.unwrap(
+    await db.run((d) =>
+      d.execute(
+        sql.raw(
+          "create function refuse_lock_job() returns trigger language plpgsql as $$ begin raise exception 'setup lock refused by the test'; end $$",
+        ),
+      ),
+    ),
+  );
+  jarl.unwrap(
+    await db.run((d) =>
+      d.execute(
+        sql.raw(
+          "create trigger refuse_lock_job before update on setup_requests for each row execute function refuse_lock_job()",
+        ),
+      ),
+    ),
+  );
+};
+
 const counted = async (db: Db.Database) =>
   jarl.unwrap(
     await db.run(async (d) => ({
@@ -466,6 +488,220 @@ describe("a single test run, with no suite", () => {
 
     expect(jarl.error.is(failed, Db.DatabaseError)).toBe(true);
     expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+});
+
+const QEMU_A = "http://qemu-a";
+const QEMU_B = "http://qemu-b";
+
+describe("a setup definition is filed with a setup job", () => {
+  it("a single setup run names the job on the server's lock and queues that setup (happy)", async () => {
+    const { tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+    jarl.unwrap(await setupRequests.insert(SINGLE.iso, QEMU_A));
+
+    const { run, job } = jarl.unwrap(
+      await tests.createTestRun({ definitionId: setupId, ...SINGLE, setupServer: QEMU_A }),
+    );
+    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+
+    expect(`${job.action} ${job.status}`).toBe("setup pending");
+    expect(queued?.id).toBe(job.id);
+    expect(jarl.unwrap(await setupRequests.inspect(SINGLE.iso, QEMU_A))?.jobId).toBe(job.id);
+    expect({ suiteId: run.suiteId, iso: run.iso, serverUrl: run.serverUrl }).toEqual({
+      suiteId: null,
+      ...SINGLE,
+    });
+  });
+
+  it("a setup suite claims one lock per server and queues a setup job for each (happy)", async () => {
+    const { tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+
+    const filed = jarl.unwrap(
+      await tests.createTestSuite({
+        ...SUITE,
+        definitionIds: [setupId, setupId],
+        setupServers: [QEMU_A, QEMU_B],
+      }),
+    );
+    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    const [first, second] = filed.runs;
+
+    expect(filed.suite.status).toBe("running");
+    expect(
+      filed.runs.map(({ test, jobs }) => ({
+        test,
+        jobs: jobs.map((job) => `${job.action} ${job.status}`),
+      })),
+    ).toEqual([
+      { test: "setup", jobs: ["setup pending"] },
+      { test: "setup", jobs: ["setup pending"] },
+    ]);
+    expect(jarl.unwrap(await setupRequests.inspect(SUITE.iso, QEMU_A))?.jobId).toBe(
+      first?.jobs[0]?.id,
+    );
+    expect(jarl.unwrap(await setupRequests.inspect(SUITE.iso, QEMU_B))?.jobId).toBe(
+      second?.jobs[0]?.id,
+    );
+    expect(queued?.id).toBe(first?.jobs[0]?.id);
+    expect(jarl.unwrap(await tests.getTestSuiteDetails(filed.suite.id))).toEqual(filed);
+  });
+
+  it("a setup run with no server is refused, and nothing is written (unhappy)", async () => {
+    const { db, tests } = await database();
+    const setupId = await definition(tests, "setup");
+
+    const refused = await tests.createTestRun({ definitionId: setupId, ...SINGLE });
+
+    expect(said(refused)).toBe(
+      "InvalidState: createTestRun: a setup needs the server whose lock it takes",
+    );
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+
+  it("a setup run whose lock was never inserted is refused, and nothing is written (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+
+    const refused = await tests.createTestRun({
+      definitionId: setupId,
+      ...SINGLE,
+      setupServer: QEMU_A,
+    });
+
+    expect(said(refused)).toBe(
+      `NotFound: createTestRun: no setup lock for ${SINGLE.iso} on ${QEMU_A}`,
+    );
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+    expect(jarl.unwrap(await setupRequests.list())).toEqual([]);
+  });
+
+  it("a setup run whose lock already has a job is refused, and that job stays (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+    jarl.unwrap(await setupRequests.insert(SINGLE.iso, QEMU_A));
+    jarl.unwrap(await setupRequests.setJob(SINGLE.iso, QEMU_A, MISSING));
+
+    const refused = await tests.createTestRun({
+      definitionId: setupId,
+      ...SINGLE,
+      setupServer: QEMU_A,
+    });
+
+    expect(said(refused)).toBe(
+      `InvalidState: createTestRun: setup lock for ${SINGLE.iso} on ${QEMU_A} already has a job`,
+    );
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+    expect(jarl.unwrap(await setupRequests.inspect(SINGLE.iso, QEMU_A))?.jobId).toBe(MISSING);
+  });
+
+  it("a drive that names a setup server is refused, and the lock is left alone (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const wifi = await definition(tests, "wifi");
+    jarl.unwrap(await setupRequests.insert(SINGLE.iso, QEMU_A));
+
+    const refused = await tests.createTestRun({
+      definitionId: wifi,
+      ...SINGLE,
+      setupServer: QEMU_A,
+    });
+
+    expect(said(refused)).toBe("InvalidState: createTestRun: a drive names no setup server");
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+    expect(jarl.unwrap(await setupRequests.inspect(SINGLE.iso, QEMU_A))?.jobId).toBeNull();
+  });
+
+  it("when the lock cannot take the job, it is the database's error and no run or job is left (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+    jarl.unwrap(await setupRequests.insert(SINGLE.iso, QEMU_A));
+    await refuseLockJob(db);
+
+    const failed = await tests.createTestRun({
+      definitionId: setupId,
+      ...SINGLE,
+      setupServer: QEMU_A,
+    });
+
+    expect(jarl.error.is(failed, Db.DatabaseError)).toBe(true);
+    expect(said(failed)).toMatch(/setup lock refused by the test/);
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+    expect(jarl.unwrap(await setupRequests.inspect(SINGLE.iso, QEMU_A))?.jobId).toBeNull();
+  });
+
+  it("a suite of a setup and a drive is refused, and nothing is written (unhappy)", async () => {
+    const { db, tests } = await database();
+    const setupId = await definition(tests, "setup");
+    const wifi = await definition(tests, "wifi");
+
+    const refused = await tests.createTestSuite({
+      ...SUITE,
+      definitionIds: [setupId, wifi],
+    });
+
+    expect(said(refused)).toBe(
+      "InvalidState: createTestSuite: a setup definition and a drive definition cannot share a suite",
+    );
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+
+  it("a setup suite with no server for a run is refused, and nothing is written (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+
+    const omitted = await tests.createTestSuite({ ...SUITE, definitionIds: [setupId] });
+    const short = await tests.createTestSuite({
+      ...SUITE,
+      definitionIds: [setupId, setupId],
+      setupServers: [QEMU_A],
+    });
+
+    expect(said(omitted)).toBe(
+      "InvalidState: createTestSuite: a setup suite needs one server per test run",
+    );
+    expect(said(short)).toBe(
+      "InvalidState: createTestSuite: a setup suite needs one server per test run",
+    );
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+    expect(jarl.unwrap(await setupRequests.list())).toEqual([]);
+  });
+
+  it("a drive suite that names setup servers is refused, and nothing is written (unhappy)", async () => {
+    const { db, tests } = await database();
+    const wifi = await definition(tests, "wifi");
+
+    const refused = await tests.createTestSuite({
+      ...SUITE,
+      definitionIds: [wifi],
+      setupServers: [QEMU_A],
+    });
+
+    expect(said(refused)).toBe(
+      "InvalidState: createTestSuite: a drive suite names no setup server",
+    );
+    expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
+  });
+
+  it("a setup suite whose server a live setup holds is refused, and that lock stays (unhappy)", async () => {
+    const { db, tests, setupRequests } = await database();
+    const setupId = await definition(tests, "setup");
+    const held = await newJob(tests, "setup");
+    jarl.unwrap(await setupRequests.claim(SUITE.iso, QEMU_B, held.id));
+    const before = await counted(db);
+
+    const refused = await tests.createTestSuite({
+      ...SUITE,
+      definitionIds: [setupId, setupId],
+      setupServers: [QEMU_A, QEMU_B],
+    });
+
+    expect(said(refused)).toBe(
+      `InvalidState: createTestSuite: ${QEMU_B} did not take its setup lock`,
+    );
+    expect(await counted(db)).toEqual(before);
+    expect(jarl.unwrap(await setupRequests.inspect(SUITE.iso, QEMU_A))).toBeUndefined();
+    expect(jarl.unwrap(await setupRequests.inspect(SUITE.iso, QEMU_B))?.jobId).toBe(held.id);
   });
 });
 
