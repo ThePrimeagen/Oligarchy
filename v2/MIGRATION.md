@@ -23,7 +23,9 @@ meet plus one happy path, and every service is faked except the database.
 - **No Linear.** V2 files no tickets and reads no board. The pending jobs in Postgres are the queue,
   and an agent is known by its job id.
 - **HTTP servers are Hono.** Each app's `main` builds its own Hono app; there is no shared API
-  package. Calls out go through `@oligarchy/http`.
+  package. An app's routes are one chained Hono app, each body checked by a zod schema through
+  `@hono/zod-validator`, and its type is exported as `Routes`, so a caller's `hc<Routes>` and a
+  test's `testClient` are typed by the routes themselves. Calls out go through `@oligarchy/http`.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
 - **Modern terminals only.** Output is coloured when stdout is a TTY, and the terminal is assumed
@@ -270,10 +272,14 @@ bearer, and runs under `@oligarchy/app`.
             it runs as soon as the signal lands, beside a dispatch pass still in flight; decide
             whether it moves to an exit handler of the dispatch sub-app, which runs only once the
             loop has ended and before the services close.
-      - [ ] **Serve.** A Hono app behind the `OLIGARCHY_TOKEN` bearer on a required `--port`,
-            listening on 127.0.0.1. The started line names the port, and a port that cannot be
-            bound is a fatal line and exit 1.
-      - [ ] **`/abort`** (section 3's Abort), by job id or by suite id.
+      - [x] **Serve.** `routes.ts` is one chained Hono app behind the `OLIGARCHY_TOKEN` bearer,
+            exported as `Routes`; `serve.ts` listens on 127.0.0.1 at a required `--port` through
+            `@hono/node-server`. `main` listens before anything else starts: the started line names
+            the address, and a port that cannot be bound is a fatal line and exit 1. On a signal
+            the listener closes before `shutdown`.
+      - [ ] **`/abort`** (section 3's Abort), by job id or by suite id. The route and its contract
+            are in: a body of `{ jobId }` or `{ suiteId }`, each a uuid, or 400 `name a jobId or
+            a suiteId`. Until this task it answers 501 `abort is not written yet`.
 - [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
       against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
       (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
