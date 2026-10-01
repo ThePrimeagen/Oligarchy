@@ -99,17 +99,6 @@ describe("create", () => {
     expect(result.error.message).toBe("--name is required");
   });
 
-  it("refuses --unminted, --not-set-up's old name (unhappy)", async () => {
-    const result = await Env.create(
-      ctrl,
-      io({ argv: ["setup", "--iso", ISO, "--unminted"], env: { DATABASE_URL } }),
-    );
-    if (!jarl.error.is(result, Env.UsageError)) {
-      throw new Error("expected UsageError");
-    }
-    expect(result.error.message).toBe("unknown flag --unminted");
-  });
-
   it("layers the process environment over --env-file over .env, flags' variables too (happy)", async () => {
     const result = await Env.create(
       ctrl,

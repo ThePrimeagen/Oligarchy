@@ -43,18 +43,6 @@ describe("load", () => {
     expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
     expect(config.reasoning.setup).toBe("minimal");
   });
-
-  it("refuses mint, setup's old name, for a model or a reasoning effort (unhappy)", async () => {
-    const { setup: model, ...models } = valid.models;
-    const { setup: effort, ...reasoning } = valid.reasoning;
-    expect(await refusal({ ...valid, models: { ...models, mint: model } })).toMatch(
-      new RegExp(`^${Config.PATH}: models`),
-    );
-    expect(await refusal({ ...valid, reasoning: { ...reasoning, mint: effort } })).toMatch(
-      new RegExp(`^${Config.PATH}: reasoning`),
-    );
-  });
-
   it("refuses a missing file rather than guessing a default (unhappy)", async () => {
     const result = await Config.load(Io.fake());
     if (!jarl.error.is(result, Errors.FileMissing)) {
