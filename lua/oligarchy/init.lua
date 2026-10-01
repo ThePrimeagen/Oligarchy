@@ -10,6 +10,8 @@ local state, box_rows = { closed = {} }, {}
 local message_status, branch_status, action_status = "", "", ""
 local cache, sync_branch, open_url, http
 local composer
+local skip_files = {}
+local start_review
 
 local function render(lines)
   vim.bo[buffer].modifiable = true
@@ -88,7 +90,7 @@ local function show_list(message)
   local lines = {
     "Recent Cursor cloud jobs — " .. vim.fn.fnamemodify(root, ":t"),
     "",
-    "Enter: conversation    a: archive    r: refresh    q: close",
+    "Enter: conversation    P: Push & Review    a: archive    r: refresh    q: close",
     "",
   }
   if message then
@@ -140,7 +142,7 @@ local function show_conversation()
   local lines = {
     conversation.name:gsub("[\r\n]", " "),
     "J/K: next/previous  Enter/za: fold  r: refresh  a: abort",
-    "i: prompt  Ctrl-Enter: send  g: PR  d: diff  Ctrl-b: jobs  q: close",
+    "i: prompt  Ctrl-Enter: send  P: Push & Review  g: PR  d: diff  Ctrl-b: jobs  q: close",
   }
   for _, status in ipairs({ message_status, branch_status, action_status }) do
     vim.list_extend(lines, vim.split(status, "\n", { plain = true }))
@@ -343,7 +345,7 @@ function M.pr(diff)
         done(failure)
         return
       end
-      local ok, items = pcall(require("oligarchy.diff").hunks, patch, root)
+      local ok, items = pcall(require("oligarchy.diff").hunks, patch, root, skip_files)
       if not ok then
         done("Could not parse PR diff")
         return
@@ -375,8 +377,47 @@ function M.pr(diff)
   end)
 end
 
+function M.push_review()
+  if vim.api.nvim_get_current_buf() ~= buffer or action or archiving or close_popup then
+    return
+  end
+  stop()
+  action = "review"
+  local owned = buffer
+  local function update(message)
+    action_status = message
+    if conversation then
+      show_conversation()
+    else
+      show_list(message)
+    end
+  end
+  update("Preparing Push & Review…")
+  action_cancel = start_review(
+    { root = root, client = client, progress = update },
+    vim.schedule_wrap(function(err, agent, result)
+      if buffer ~= owned then
+        return
+      end
+      action, action_cancel = nil, nil
+      if err then
+        if result.branch then
+          err = err .. "\nLocal review branch: " .. result.branch
+        end
+        update(err)
+        return
+      end
+      table.insert(agents, 1, agent)
+      if #agents > 10 then
+        table.remove(agents)
+      end
+      show_list("Review started: " .. result.branch)
+    end)
+  )
+end
+
 function M.back()
-  if archiving or not conversation then
+  if archiving or action == "review" or not conversation then
     return
   end
   stop()
@@ -384,6 +425,9 @@ function M.back()
 end
 
 function M.enter()
+  if action == "review" then
+    return
+  end
   if conversation then
     M.fold()
     return
@@ -398,7 +442,7 @@ function M.enter()
 end
 
 function M.archive()
-  if archiving or conversation or close_popup then
+  if archiving or conversation or close_popup or action then
     return
   end
   local agent = rows[vim.api.nvim_win_get_cursor(0)[1]]
@@ -477,6 +521,7 @@ function M.open()
     vim.bo[buffer].swapfile = false
     vim.bo[buffer].filetype = "oligarchy"
     vim.keymap.set("n", "<CR>", M.enter, { buffer = buffer, desc = "Open conversation" })
+    vim.keymap.set("n", "P", M.push_review, { buffer = buffer, desc = "Push & Review" })
     vim.keymap.set("n", "<BS>", M.back, { buffer = buffer, desc = "Back to jobs" })
     vim.keymap.set("n", "<C-b>", M.back, { buffer = buffer, desc = "Back to jobs" })
     vim.keymap.set("n", "a", function()
@@ -543,6 +588,8 @@ function M.setup(options)
   end
   options = options or {}
   root = options.root or root
+  skip_files = options.skip_files or {}
+  start_review = options.start_review or require("oligarchy.review").start
   http = options.http or require("oligarchy.cursor.http").request
   client = require("oligarchy.cursor").new({ root = root, http = http })
   cache = require("oligarchy.cache").new(root, options.cache_dir)
@@ -568,7 +615,7 @@ function M.setup(options)
     M.open,
     { desc = "Show recent Cursor cloud jobs" }
   )
-  vim.keymap.set("n", "<leader>c", M.open, { desc = "Open Cursor cloud jobs" })
+  vim.keymap.set("n", "<leader>C", M.open, { desc = "Open Cursor cloud jobs" })
 end
 
 return M

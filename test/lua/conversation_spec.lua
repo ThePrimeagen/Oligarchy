@@ -39,6 +39,7 @@ describe("conversation controls and persistence", function()
       root = root,
       http = http.request,
       cache_dir = root .. "/cache",
+      skip_files = { { partial = true, match = "ignored.lua" } },
       open_url = function(url)
         table.insert(opened, url)
       end,
@@ -257,7 +258,8 @@ describe("conversation controls and persistence", function()
       vim.api.nvim_get_current_tabpage(), vim.api.nvim_get_current_win()
     http:respond(
       n + 3,
-      "diff --git a/file.lua b/file.lua\n--- a/file.lua\n+++ b/file.lua\n@@ -1 +1 @@\n-old\n+new\n@@ -10,0 +11,2 @@\n+two\n+three\n"
+      "diff --git a/generated/ignored.lua b/generated/ignored.lua\n--- a/generated/ignored.lua\n+++ b/generated/ignored.lua\n@@ -1 +1 @@\n-old\n+new\n"
+        .. "diff --git a/file.lua b/file.lua\n--- a/file.lua\n+++ b/file.lua\n@@ -1 +1 @@\n-old\n+new\n@@ -10,0 +11,2 @@\n+two\n+three\n"
     )
     S.wait(function()
       return #vim.fn.getqflist() == 3
@@ -282,7 +284,7 @@ describe("conversation controls and persistence", function()
     local file = vim.api.nvim_get_current_buf()
     local namespace = vim.api.nvim_get_namespaces()["oligarchy-diff"]
     assert.is_true(#vim.api.nvim_buf_get_extmarks(file, namespace, 0, -1, {}) > 0)
-    press((vim.g.mapleader or "\\") .. "c")
+    press((vim.g.mapleader or "\\") .. "C")
     buffer = vim.api.nvim_get_current_buf()
     S.request(http, n + 4)
     assert.same({}, vim.api.nvim_buf_get_extmarks(file, namespace, 0, -1, {}))

@@ -43,6 +43,51 @@ describe("diff hunk navigation", function()
     assert.equals("/project/after.lua", result[2].filename)
     assert.equals(22, result[3].lnum)
     assert.equals("/project/sp ace.lua", result[4].filename)
+    local filtered = Diff.hunks(patch, "/project", { "new.lua", "after.lua" })
+    assert.equals(1, #filtered)
+    assert.equals("/project/sp ace.lua", filtered[1].filename)
+  end)
+  it("skips exact repository-relative paths, including a diff with every file skipped", function()
+    local patch = "--- a/bun.lock\n+++ b/bun.lock\n@@ -1 +1 @@\n-old\n+new\n"
+    assert.same({}, Diff.hunks(patch, "/project", { "bun.lock" }))
+    assert.equals(1, #Diff.hunks(patch, "/project", { "nested/bun.lock", "bun.*" }))
+  end)
+  it("mixes exact paths with literal partial matches anywhere in a path", function()
+    local patches = {}
+    for _, path in ipairs({
+      "package.json",
+      "apps/web/package.json.backup",
+      "apps/web/packageXjson",
+      "docs/notes.txt",
+    }) do
+      table.insert(
+        patches,
+        "diff --git a/"
+          .. path
+          .. " b/"
+          .. path
+          .. "\n--- a/"
+          .. path
+          .. "\n+++ b/"
+          .. path
+          .. "\n@@ -1 +1 @@\n-old\n+new\n"
+      )
+    end
+    local patch = table.concat(patches)
+    assert.equals(3, #Diff.hunks(patch, "/project", { "package.json" }))
+    local result = Diff.hunks(patch, "/project", {
+      "docs/notes.txt",
+      { partial = true, match = "package.json" },
+    })
+    assert.equals(1, #result)
+    assert.equals("/project/apps/web/packageXjson", result[1].filename)
+    assert.same(
+      {},
+      Diff.hunks(patch, "/project", {
+        { partial = true, match = "package" },
+        { partial = true, match = "docs/" },
+      })
+    )
   end)
   it("skips deletion-only patches but keeps removed lines within a surviving file", function()
     local deleted = "--- a/gone.lua\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-one\n-two\n"

@@ -10,14 +10,22 @@ local function press(key)
 end
 
 describe("Cursor jobs in Neovim", function()
-  local root, http, key, source, source_window
+  local root, http, key, source, source_window, reviews
 
   before_each(function()
     root = S.project()
     key = vim.env.CURSOR_API_TOKEN
     vim.env.CURSOR_API_TOKEN = nil
     http = S.http()
+    reviews = {}
     Plugin.setup({
+      start_review = function(options, callback)
+        local call = { options = options, complete = callback }
+        table.insert(reviews, call)
+        return function()
+          call.cancelled = true
+        end
+      end,
       sync_branch = function()
         return function() end
       end,
@@ -44,8 +52,8 @@ describe("Cursor jobs in Neovim", function()
     vim.fn.delete(root, "rf")
   end)
 
-  it("opens jobs with leader c, preserves the editing buffer, and uses r and q", function()
-    press((vim.g.mapleader or "\\") .. "c")
+  it("opens jobs with leader C, preserves the editing buffer, and uses r and q", function()
+    press((vim.g.mapleader or "\\") .. "C")
     local buffer = vim.api.nvim_get_current_buf()
     assert.are_not.equal(source_window, vim.api.nvim_get_current_win())
     assert.equals(source, vim.api.nvim_win_get_buf(source_window))
@@ -70,7 +78,7 @@ describe("Cursor jobs in Neovim", function()
     press("q")
     assert.is_false(vim.api.nvim_buf_is_valid(buffer))
     assert.equals(source, vim.api.nvim_get_current_buf())
-    press((vim.g.mapleader or "\\") .. "c")
+    press((vim.g.mapleader or "\\") .. "C")
     S.request(http, 4)
     assert.equals("oligarchy://cloud-jobs", vim.api.nvim_buf_get_name(0))
   end)
@@ -191,6 +199,42 @@ describe("Cursor jobs in Neovim", function()
     assert.matches("Job first", text(buffer), 1, true)
     assert.is_nil(vim.b[buffer].oligarchy_conversation)
     assert.equals(2, #http.requests)
+  end)
+
+  it("starts Push & Review only in the Cursor buffer and shows the returned job", function()
+    Plugin.push_review()
+    assert.equals(0, #reviews)
+    local buffer = jobs()
+    press("P")
+    assert.equals(1, #reviews)
+    assert.equals(root, reviews[1].options.root)
+    press("P")
+    press("<CR>")
+    press("a")
+    assert.equals(1, #reviews)
+    assert.equals(1, #http.requests)
+    reviews[1].options.progress("Push…")
+    assert.matches("Push…", text(buffer), 1, true)
+    reviews[1].complete(nil, S.agent("review-job"), { branch = "review/wobbly-wombat-123abc" })
+    S.wait(function()
+      return text(buffer):find("Review started:", 1, true)
+    end)
+    assert.equals("review-job", vim.b[buffer].oligarchy_agents[1].id)
+    assert.matches("review/wobbly-wombat-123abc", text(buffer), 1, true)
+  end)
+
+  it("reports Push & Review failures and cancels outstanding work when closed", function()
+    local buffer = jobs()
+    press("P")
+    reviews[1].complete("Push failed", nil, { branch = "review/local-branch-123abc" })
+    S.wait(function()
+      return text(buffer):find("Push failed", 1, true)
+    end)
+    assert.matches("Local review branch: review/local-branch-123abc", text(buffer), 1, true)
+    press("P")
+    assert.equals(2, #reviews)
+    press("q")
+    assert.is_true(reviews[2].cancelled)
   end)
 
   it("ignores a conversation response after Ctrl-b", function()

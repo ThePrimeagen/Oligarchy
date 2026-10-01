@@ -16,7 +16,15 @@ end
 
 require('plenary.reload').reload_module('oligarchy')
 local plugin = require('oligarchy')
-plugin.setup()
+plugin.setup({
+  skip_files = {
+    "bun.lock",
+    "package.json",
+    -- Strings match exact paths relative to this repository.
+    -- To match anywhere in a path, use:
+    -- { partial = true, match = "package.json" },
+  },
+})
 vim.schedule(function()
   -- Re-sourcing again before this runs supersedes the old scheduled open.
   if package.loaded.oligarchy == plugin then

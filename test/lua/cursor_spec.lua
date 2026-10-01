@@ -281,6 +281,48 @@ describe("Cursor cloud agents", function()
     assert.matches("Cursor HTTP 404", error, 1, true)
   end)
 
+  it(
+    "starts a review on the pushed branch with an idempotent agent ID and grok-review prompt",
+    function()
+      local review = {
+        repository = "https://github.com/ThePrimeagen/Oligarchy",
+        branch = "review/wobbly-wombat-123abc",
+        commit = string.rep("a", 40),
+        agent_id = "bc-00000000-0000-4000-8000-000000000001",
+      }
+      local done, failure, agent
+      client:create_review(review, function(err, value)
+        failure, agent, done = err, value, true
+      end)
+      local call = S.request(http, 1)
+      assert.equals("POST", call.method)
+      assert.equals("https://api.cursor.com/v1/agents", call.url)
+      local body = vim.json.decode(call.body)
+      assert.equals(review.agent_id, body.agentId)
+      assert.same({ { url = review.repository, startingRef = review.branch } }, body.repos)
+      assert.is_true(body.workOnCurrentBranch)
+      assert.is_false(body.autoCreatePR)
+      assert.matches(".cursor/skills/grok-review/SKILL.md", body.prompt.text, 1, true)
+      assert.matches(review.commit, body.prompt.text, 1, true)
+      http:respond(1, { agent = S.agent(review.agent_id) })
+      S.wait(function()
+        return done
+      end)
+      assert.is_nil(failure)
+      assert.equals(review.agent_id, agent.id)
+      done = false
+      client:create_review(review, function(err)
+        failure, done = err, true
+      end)
+      S.request(http, 2)
+      http:respond(2, { agent = S.agent("wrong-id") })
+      S.wait(function()
+        return done
+      end)
+      assert.equals("Cursor returned an invalid review agent", failure)
+    end
+  )
+
   it("archives with a bodyless POST and reports failures", function()
     local done, error = false, nil
     client:archive_agent("id /?", function(err)

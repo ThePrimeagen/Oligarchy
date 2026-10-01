@@ -27,7 +27,18 @@ local function filename(value)
 end
 
 -- One quickfix entry per textual hunk in a surviving file.
-function M.hunks(text, root)
+function M.hunks(text, root, skip_files)
+  local function skipped(path)
+    for _, rule in ipairs(skip_files or {}) do
+      if
+        rule == path
+        or (type(rule) == "table" and rule.partial and path:find(rule.match, 1, true))
+      then
+        return true
+      end
+    end
+    return false
+  end
   local entries, old, new, hunk = {}, nil, nil, nil
   local has_hunks = false
   local function finish()
@@ -35,7 +46,7 @@ function M.hunks(text, root)
       return
     end
     -- Deleted files have +++ /dev/null; opening them would create empty buffers.
-    if new then
+    if new and not skipped(new) then
       local changes, current = {}, hunk.line
       for i = 2, #hunk.lines do
         local operation = hunk.lines[i]:sub(1, 1)
