@@ -16,3 +16,5 @@ node_modules/
 /.local-env
 /automation-ultra-logs
 /automation-prod-logs
+/.tools/
+/nvim.log
