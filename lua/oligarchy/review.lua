@@ -18,9 +18,6 @@ function M.start(options, callback)
     end
   end
   local function git(args, label, next_step, settings)
-    if stopped then
-      return
-    end
     settings = settings or {}
     progress(label .. "…")
     local command = { "git", "-C", options.root }
@@ -82,9 +79,6 @@ function M.start(options, callback)
     end)
   end
   local function branch(message)
-    if stopped then
-      return
-    end
     local seed = vim.fn.sha256(options.root .. tostring(vim.uv.hrtime()) .. tostring(math.random()))
     local adjectives =
       { "wobbly", "cosmic", "sleepy", "spicy", "dapper", "fuzzy", "sneaky", "bouncy" }
@@ -128,12 +122,15 @@ function M.start(options, callback)
       return
     end
     git({ "remote", "get-url", "origin" }, "Read origin", function(remote)
-      local host, path = remote:match("^https?://([^/@]+)/(.+)$")
-      if not host then
-        host, path = remote:match("^[^@]+@([^:]+):(.+)$")
+      local host, path
+      local authority, rest = remote:match("^https?://([^/]+)/(.+)$")
+      if not authority then
+        authority, rest = remote:match("^ssh://([^/]+)/(.+)$")
       end
-      if not host then
-        host, path = remote:match("^ssh://[^@]+@([^/]+)/(.+)$")
+      if authority then
+        host, path = authority:gsub("^.*@", ""):gsub(":%d*$", ""), rest
+      else
+        host, path = remote:match("^[^@/]+@([^:/]+):(.+)$")
       end
       if not host then
         finish("Push & Review needs an HTTPS or SSH origin URL")

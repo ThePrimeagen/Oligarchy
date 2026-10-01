@@ -96,6 +96,33 @@ describe("Push & Review", function()
     assert.equals(0, #launches)
     assert.is_nil(result.branch)
   end)
+  it("starts the review on the HTTPS repository for credential, SSH and scp origins", function()
+    for _, remote in ipairs({
+      "https://x-access-token:secret@github.com/ThePrimeagen/Oligarchy\n",
+      "ssh://git@github.com:22/ThePrimeagen/Oligarchy.git/\n",
+      "ssh://github.com/ThePrimeagen/Oligarchy.git\n",
+      "git@github.com:ThePrimeagen/Oligarchy.git\n",
+    }) do
+      calls, complete = {}, false
+      start()
+      respond(1, "remote", remote)
+      respond(2, "status", "")
+      S.wait(function()
+        return complete
+      end)
+      assert.equals("https://github.com/ThePrimeagen/Oligarchy", result.repository)
+    end
+  end)
+  it("rejects an origin that is not HTTPS or SSH before checking local changes", function()
+    start()
+    respond(1, "remote", "/srv/git/Oligarchy.git\n")
+    S.wait(function()
+      return complete
+    end)
+    assert.equals("Push & Review needs an HTTPS or SSH origin URL", error)
+    assert.equals(1, #calls)
+    assert.is_nil(result.repository)
+  end)
   it("cancels the commit prompt without creating a branch", function()
     start()
     prepare(true)
