@@ -6,6 +6,7 @@ import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
+import * as Jobs from "./jobs.ts";
 import { routes } from "./routes.ts";
 import { closeServices, createServices } from "./services.ts";
 
@@ -45,15 +46,18 @@ const announcing = (url: string) => async (sub: App.App<Run, Announcing>) => {
 };
 
 // Nothing starts unless the port is bound, so a client that cannot serve is never announced. On a
-// signal the listener closes before main returns, and every sub-app's main has returned, its row
-// deleted, before any exit handler closes the services under it.
+// signal the listener closes first, so no request lands during shutdown; closing ends the
+// connections but not a /run still under way, so every job held is then aborted and let go. Both
+// finish before main returns, and every sub-app's main has returned, its row deleted, before any
+// exit handler closes the services under them.
 const main = async (app: App.App<Run, Announcing>) => {
   const { logger } = app.services;
   const { flags, vars } = app.environment;
-  const listened = await listen(routes({ token: vars.oligarchyToken.reveal() }).fetch, {
-    hostname: HOST,
-    port: flags.port,
-  });
+  const jobs = Jobs.create();
+  const listened = await listen(
+    routes({ token: vars.oligarchyToken.reveal(), sessions: { abort: jobs.abort } }).fetch,
+    { hostname: HOST, port: flags.port },
+  );
   if (jarl.is_err(listened)) {
     logger.fatal(listened.error.message, { location: LOCATION });
     return listened;
@@ -68,6 +72,7 @@ const main = async (app: App.App<Run, Announcing>) => {
   }
   await App.waitForAbort(app.signal);
   await jarl.value(listened).close();
+  await jobs.shutdown();
   logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
   return jarl.ok(undefined);
 };
