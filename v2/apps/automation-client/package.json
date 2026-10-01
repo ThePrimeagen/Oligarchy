@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./routes": "./src/routes.ts"
+    "./routes": "./src/routes.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "start": "bun --no-env-file src/main.ts",
