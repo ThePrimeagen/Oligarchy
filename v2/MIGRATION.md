@@ -257,12 +257,21 @@ bearer, and runs under `@oligarchy/app`.
             its row. Its main is a loop that runs until the server is killed: each pass is one
             `fleet.forget` sweep, then a wait of `automationServer.forgetInterval` (30 seconds).
             `fleet.forget` is one sweep and has no loop of its own.
-      - [ ] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own,
-            on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer, so the environment needs
-            `oligarchyToken` from here on (V1: `client.ts`). Each names its job. A reserve refused
-            for capacity (503) or for a setup still needed (409) is not a failure; `run` answers
-            once the driver or opencode has ended, and with a 409 when an abort ended it; an
-            `abort` of a job the client does not hold is a 404. Its fake produces every one of those, and each of `@oligarchy/http`'s errors.
+      - [x] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own
+            `automationClient` service (`src/automation-client.ts`), on `@oligarchy/http` with
+            `OLIGARCHY_TOKEN` as the bearer (V1: `client.ts`). Each takes the client's url and
+            names its job, and nothing is asked again. A reserve POSTs `/reserve` with
+            `{ job, action }`, a drive adding `iso` and `mode` (`resume` or `fresh`) and a setup
+            `iso` and the `server` its lock names; it answers `reserved`, or `at-capacity` (503)
+            or `setup-needed` (409), neither a failure. `run` POSTs `/run` with `{ job, prompt }`
+            and answers `ended` once the driver or opencode has ended, or `aborted` (409) when an
+            abort ended it; it waits as long as a timer can (2³¹−1 ms), so only the client or
+            the caller's signal ends it. `abort` POSTs `/abort` with `{ job }` and answers
+            `stopped`, or `not-held` (404) for a job the client does not hold. Every other answer
+            is `@oligarchy/http`'s error. Its fake (`test/fake-automation-client.ts`) is told
+            each call's answer, records each call, and builds each of `@oligarchy/http`'s errors
+            with `failure`. Open for Restart: a client whose host vanished mid-run leaves its
+            `/run` waiting until the caller's signal.
       - [ ] **Dispatch** (section 3's Dispatch) in the loop's pass. Needs the client calls, and
             the prompt from section 3's The mission.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
