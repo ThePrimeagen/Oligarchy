@@ -20,6 +20,7 @@
     "defaultRetry": "1 second"
   },
   "automationServer": {
-    "dispatchInterval": "30 seconds"
+    "dispatchInterval": "30 seconds",
+    "forgetInterval": "30 seconds"
   }
 }
