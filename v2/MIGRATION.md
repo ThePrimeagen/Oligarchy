@@ -248,9 +248,12 @@ bearer, and runs under `@oligarchy/app`.
             until the server is killed, waiting `automationServer.dispatchInterval` each pass;
             the kill ends the wait at once. A database that cannot be reached does not stop it.
             `restart`, `shutdown` and the loop's pass do nothing yet.
-      - [ ] **Forget silent clients.** `fleet.forget("automation-client")` runs beside dispatch
-            until the server is killed, as V1's `Sweep.forget` did, so dispatch never reserves on
-            a client that died without deleting its row.
+      - [x] **Forget silent clients.** A sub-app beside dispatch runs
+            `fleet.forget("automation-client")` until the server is killed, as V1's `Sweep.forget`
+            did, so dispatch never reserves on a client that died without deleting its row. It
+            sweeps at once and then every `automationServer.forgetInterval` from
+            `v2/oligarchy.json` (30 seconds); a client is silent after 10 minutes, as the `servers`
+            store decides.
       - [ ] **Calls to an automation client.** `reserve`, `run` and `abort`, the server's own,
             on `@oligarchy/http` with `OLIGARCHY_TOKEN` as the bearer, so the environment needs
             `oligarchyToken` from here on (V1: `client.ts`). Each names its job. A reserve refused
