@@ -40,7 +40,6 @@ describe("load", () => {
     expect(config.timeouts).toEqual({ header: 180_000, chunk: 180_000 });
     expect(config.runCeiling).toBe(5_400_000);
     expect(config.harness.defaultRetry).toBe(1_000);
-    expect(config.automationServer.dispatchInterval).toBe(30_000);
     expect(config.reasoning.diagnose).toBe("xhigh");
     expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
     expect(config.reasoning.setup).toBe("minimal");
@@ -79,19 +78,6 @@ describe("load", () => {
   it("refuses a zero duration (unhappy)", async () => {
     expect(await refusal({ ...valid, harness: { defaultRetry: "0 seconds" } })).toBe(
       `${Config.PATH}: harness.defaultRetry: duration must be greater than zero`,
-    );
-  });
-
-  it("refuses a file with no dispatch interval rather than guessing one (unhappy)", async () => {
-    const { automationServer: _, ...withoutInterval } = valid;
-    expect(await refusal(withoutInterval)).toMatch(
-      new RegExp(`^${Config.PATH}: automationServer: `),
-    );
-  });
-
-  it("refuses a zero dispatch interval (unhappy)", async () => {
-    expect(await refusal({ ...valid, automationServer: { dispatchInterval: "0 seconds" } })).toBe(
-      `${Config.PATH}: automationServer.dispatchInterval: duration must be greater than zero`,
     );
   });
 
