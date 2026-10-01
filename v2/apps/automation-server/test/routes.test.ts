@@ -4,6 +4,7 @@ import { routes } from "../src/routes.ts";
 
 const TOKEN = "oligarchy-token";
 const JOB_ID = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
+const SUITE_ID = "0d8a6b52-3c1f-4e2a-8b7d-5f9e1a2c3b4d";
 
 const client = (token?: string) =>
   testClient(
@@ -30,6 +31,16 @@ describe("the automation server's routes", () => {
     const response = await client(TOKEN).abort.$post({
       // @ts-expect-error: the typed client refuses this body; the server must too.
       json: { ticket: "OLI-1" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "name a jobId or a suiteId" });
+  });
+
+  it("/abort naming both a job and a suite is 400: it aborts one job or one whole suite (unhappy)", async () => {
+    const response = await client(TOKEN).abort.$post({
+      // @ts-expect-error: the typed client refuses both; the server must too.
+      json: { jobId: JOB_ID, suiteId: SUITE_ID },
     });
 
     expect(response.status).toBe(400);
