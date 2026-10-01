@@ -382,7 +382,7 @@ export const testRuns = pgTable(
   (table) => [index("test_runs_suite_id_idx").on(table.suiteId)],
 );
 
-// One automation step for a test run: drive the guest, or diagnose after. Inserted
+// One automation step for a test run: set up the disk, drive the guest, or diagnose after. Inserted
 // pending; a worker claims the oldest pending row, runs it, and closes with a terminal
 // status. A job runs once and is never run again: a failed job stays failed, and trying
 // again is a new job, so a test run holds every setup, drive and diagnose it took. Queue order is created_at among pending rows; capacity limits stay out of this table.
