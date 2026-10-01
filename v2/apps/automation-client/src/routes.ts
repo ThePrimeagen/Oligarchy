@@ -1,28 +1,22 @@
 import { zValidator } from "@hono/zod-validator";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import * as jarl from "jarl";
 import * as z from "zod";
 
-// What a reserve holds this client's slot for. A drive and a setup take a guest on the proxy too:
-// a drive boots its ISO from that ISO's setup disk when it resumes and fresh otherwise, and a
-// setup boots fresh on the qemu server its setup lock names. A diagnose takes no guest.
+// A drive may name the ISO it resumes; a setup names the qemu server its setup lock names; a
+// diagnose names neither. Each action's body is strict, so a key another action takes is refused.
 export const ReserveRequest = z.discriminatedUnion("action", [
-  z.strictObject({ job: z.uuid(), action: z.literal("diagnose") }),
-  z.strictObject({
-    job: z.uuid(),
-    action: z.literal("drive"),
-    iso: z.url(),
-    mode: z.enum(["resume", "fresh"]),
-  }),
-  z.strictObject({ job: z.uuid(), action: z.literal("setup"), iso: z.url(), server: z.url() }),
+  z.strictObject({ jobId: z.uuid(), action: z.literal("drive"), resume: z.url().optional() }),
+  z.strictObject({ jobId: z.uuid(), action: z.literal("setup"), setupServer: z.url() }),
+  z.strictObject({ jobId: z.uuid(), action: z.literal("diagnose") }),
 ]);
 export type ReserveRequest = z.infer<typeof ReserveRequest>;
 
-export const RunRequest = z.strictObject({ job: z.uuid(), prompt: z.string().min(1) });
+export const RunRequest = z.strictObject({ jobId: z.uuid(), prompt: z.string().min(1) });
 export type RunRequest = z.infer<typeof RunRequest>;
 
-export const AbortRequest = z.strictObject({ job: z.uuid() });
+export const AbortRequest = z.strictObject({ jobId: z.uuid() });
 export type AbortRequest = z.infer<typeof AbortRequest>;
 
 // A refusal is no failure: the job stays pending and is asked for again.
@@ -43,20 +37,34 @@ export type Sessions = {
   readonly abort: (request: AbortRequest) => Promise<Stopped>;
 };
 
-const refusing = (error: string) => (result: { readonly success: boolean }, c: Context) =>
-  result.success ? undefined : c.json({ error }, 400);
-
 // Every route takes OLIGARCHY_TOKEN as its bearer. One chain, so `Routes` carries each route's
-// request and every answer it can give, and the automation server's calls are typed by it.
-export const routes = (options: { readonly token: string; readonly sessions: Sessions }) => {
-  const { sessions } = options;
+// request and every answer it can give, and the automation server's client is typed by it. A
+// route whose session is not handed in yet answers 501 until its task is written.
+export const routes = (options: {
+  readonly token: string;
+  readonly sessions?: Partial<Sessions>;
+}) => {
+  const { reserve, run, abort } = options.sessions ?? {};
   return new Hono()
     .use(bearerAuth({ token: options.token }))
     .post(
       "/reserve",
-      zValidator("json", ReserveRequest, refusing("a reserve names its job and what it boots")),
+      zValidator("json", ReserveRequest, (result, c) =>
+        result.success
+          ? undefined
+          : c.json(
+              {
+                error:
+                  "name a jobId and an action: a drive may name resume, a setup names setupServer",
+              },
+              400,
+            ),
+      ),
       async (c) => {
-        const reserved = await sessions.reserve(c.req.valid("json"));
+        if (reserve === undefined) {
+          return c.json({ error: "reserve is not written yet" }, 501);
+        }
+        const reserved = await reserve(c.req.valid("json"));
         if (reserved === "at-capacity") {
           return c.json({ error: "at capacity" }, 503);
         }
@@ -68,9 +76,14 @@ export const routes = (options: { readonly token: string; readonly sessions: Ses
     )
     .post(
       "/run",
-      zValidator("json", RunRequest, refusing("a run names its job and prompt")),
+      zValidator("json", RunRequest, (result, c) =>
+        result.success ? undefined : c.json({ error: "name a jobId and a prompt" }, 400),
+      ),
       async (c) => {
-        const ran = await sessions.run(c.req.valid("json"));
+        if (run === undefined) {
+          return c.json({ error: "run is not written yet" }, 501);
+        }
+        const ran = await run(c.req.valid("json"));
         if (jarl.is_err(ran)) {
           return c.json({ error: ran.error.message }, 500);
         }
@@ -82,9 +95,14 @@ export const routes = (options: { readonly token: string; readonly sessions: Ses
     )
     .post(
       "/abort",
-      zValidator("json", AbortRequest, refusing("an abort names its job")),
+      zValidator("json", AbortRequest, (result, c) =>
+        result.success ? undefined : c.json({ error: "name a jobId" }, 400),
+      ),
       async (c) => {
-        const stopped = await sessions.abort(c.req.valid("json"));
+        if (abort === undefined) {
+          return c.json({ error: "abort is not written yet" }, 501);
+        }
+        const stopped = await abort(c.req.valid("json"));
         if (stopped === "not-held") {
           return c.json({ error: "job not found" }, 404);
         }

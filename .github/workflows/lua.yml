@@ -1,0 +1,33 @@
+name: Lua plugin
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  lua:
+    name: StyLua, Luacheck, and Neovim tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4 liblua5.4-dev luarocks curl unzip build-essential
+      - name: Install pinned Neovim
+        run: |
+          . tools/lua.env
+          curl --fail --silent --show-error --location --retry 2 \
+            "https://github.com/neovim/neovim/releases/download/v${NEOVIM_VERSION}/nvim-linux-x86_64.tar.gz" \
+            -o "$RUNNER_TEMP/neovim.tar.gz"
+          tar -xzf "$RUNNER_TEMP/neovim.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Install pinned Lua tools and Plenary
+        run: ./lua-tools install
+      - name: Check formatting, lint, and offline behavior
+        run: ./lua-tools check

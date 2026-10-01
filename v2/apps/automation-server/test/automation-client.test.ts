@@ -68,10 +68,10 @@ describe("the automation server's calls to an automation client", () => {
     it("posts each request as it is, with the bearer, to routes that hand it on, and answers reserved (happy)", async () => {
       const { client, asked, handed } = await served();
       const requests: ReadonlyArray<ClientRoutes.ReserveRequest> = [
-        { job: JOB, action: "drive", iso: ISO, mode: "resume" },
-        { job: JOB, action: "drive", iso: ISO, mode: "fresh" },
-        { job: JOB, action: "setup", iso: ISO, server: QEMU_SERVER },
-        { job: JOB, action: "diagnose" },
+        { jobId: JOB, action: "drive", resume: ISO },
+        { jobId: JOB, action: "drive" },
+        { jobId: JOB, action: "setup", setupServer: QEMU_SERVER },
+        { jobId: JOB, action: "diagnose" },
       ];
 
       const answers = [];
@@ -87,7 +87,7 @@ describe("the automation server's calls to an automation client", () => {
     it("of a client at its --max-jobs answers at-capacity: no failure (unhappy)", async () => {
       const { client } = await served({ reserve: async () => "at-capacity" });
 
-      const reserved = await client.post("/reserve", { job: JOB, action: "diagnose" });
+      const reserved = await client.post("/reserve", { jobId: JOB, action: "diagnose" });
 
       expect(reserved).toEqual(jarl.ok("at-capacity"));
     });
@@ -95,12 +95,7 @@ describe("the automation server's calls to an automation client", () => {
     it("of a resume no qemu server holds a setup disk for yet answers setup-needed: no failure (unhappy)", async () => {
       const { client } = await served({ reserve: async () => "setup-needed" });
 
-      const reserved = await client.post("/reserve", {
-        job: JOB,
-        action: "drive",
-        iso: ISO,
-        mode: "resume",
-      });
+      const reserved = await client.post("/reserve", { jobId: JOB, action: "drive", resume: ISO });
 
       expect(reserved).toEqual(jarl.ok("setup-needed"));
     });
@@ -108,11 +103,13 @@ describe("the automation server's calls to an automation client", () => {
     it("of a request the client's routes refuse does not compile, and those routes refuse it as HttpBadRequest (unhappy)", async () => {
       const { client, handed } = await served();
 
-      // @ts-expect-error: a drive names its mode, as the automation client's schema says.
-      const reserved = await client.post("/reserve", { job: JOB, action: "drive", iso: ISO });
+      // @ts-expect-error: a setup names its setupServer, as the automation client's schema says.
+      const reserved = await client.post("/reserve", { jobId: JOB, action: "setup" });
 
       expect(Fake.failure(reserved, Http.HttpBadRequest).body).toBe(
-        JSON.stringify({ error: "a reserve names its job and what it boots" }),
+        JSON.stringify({
+          error: "name a jobId and an action: a drive may name resume, a setup names setupServer",
+        }),
       );
       expect(handed).toEqual([]);
     });
@@ -124,16 +121,16 @@ describe("the automation server's calls to an automation client", () => {
         run: () => later(DEFAULT_TIMEOUT_MS * 4, jarl.ok("ended" as const)),
       });
 
-      const ran = await client.post("/run", { job: JOB, prompt: PROMPT });
+      const ran = await client.post("/run", { jobId: JOB, prompt: PROMPT });
 
       expect(ran).toEqual(jarl.ok("ended"));
-      expect(asked).toEqual([posted("run", { job: JOB, prompt: PROMPT })]);
+      expect(asked).toEqual([posted("run", { jobId: JOB, prompt: PROMPT })]);
     });
 
     it("an abort ended answers aborted: no failure (unhappy)", async () => {
       const { client } = await served({ run: async () => jarl.ok("aborted") });
 
-      const ran = await client.post("/run", { job: JOB, prompt: PROMPT });
+      const ran = await client.post("/run", { jobId: JOB, prompt: PROMPT });
 
       expect(ran).toEqual(jarl.ok("aborted"));
     });
@@ -144,7 +141,7 @@ describe("the automation server's calls to an automation client", () => {
           jarl.err(new ClientRoutes.RunFailed("driver exited 1: OpenRouterUnreachable")),
       });
 
-      const ran = await client.post("/run", { job: JOB, prompt: PROMPT });
+      const ran = await client.post("/run", { jobId: JOB, prompt: PROMPT });
 
       expect(Fake.failure(ran, Http.HttpServerError).body).toBe(
         JSON.stringify({ error: "driver exited 1: OpenRouterUnreachable" }),
@@ -156,17 +153,17 @@ describe("the automation server's calls to an automation client", () => {
     it("posts its job and answers stopped (happy)", async () => {
       const { client, asked, handed } = await served();
 
-      const stopped = await client.post("/abort", { job: JOB });
+      const stopped = await client.post("/abort", { jobId: JOB });
 
       expect(stopped).toEqual(jarl.ok("stopped"));
-      expect(asked).toEqual([posted("abort", { job: JOB })]);
-      expect(handed).toEqual([{ job: JOB }]);
+      expect(asked).toEqual([posted("abort", { jobId: JOB })]);
+      expect(handed).toEqual([{ jobId: JOB }]);
     });
 
     it("of a job the client does not hold answers not-held: no failure (unhappy)", async () => {
       const { client } = await served({ abort: async () => "not-held" });
 
-      const stopped = await client.post("/abort", { job: JOB });
+      const stopped = await client.post("/abort", { jobId: JOB });
 
       expect(stopped).toEqual(jarl.ok("not-held"));
     });

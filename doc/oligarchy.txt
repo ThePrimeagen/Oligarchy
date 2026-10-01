@@ -1,0 +1,237 @@
+*oligarchy.txt*  Cursor cloud jobs for this project
+
+The project .nvimrc loads the plugin and opens a vertical jobs pane. Enable
+'exrc' in your Neovim config and use :trust while editing .nvimrc once.
+Requires Neovim 0.10+, git and curl on PATH. The project vimrc uses
+plenary.reload to reload the plugin; the HTTP client has no package dependencies.
+
+After editing plugin code, run :source .nvimrc. It closes the old jobs pane,
+cancels its requests, unloads all oligarchy Lua modules through Plenary, and
+opens a fresh pane. Repeated sourcing does not accumulate jobs windows.
+
+Put CURSOR_API_TOKEN=your-token in the project's .env (already gitignored).
+The loader reads .env on every refresh and passes its values to curl. Existing
+non-empty environment variables take precedence. It accepts export prefixes,
+single-line quoted values, and comments. Double quotes support \n, \r, \t,
+\" and \\. Values are literal: no variable expansion or shell execution.
+
+:OligarchyJobs or <leader>c opens the pane. Move onto a job's name or ID and press Enter
+to load its conversation into the same window. Ctrl-b or Backspace returns to the
+cached job list; q closes. Your messages start with --- user --- and align
+right across about 85% of the pane width. Assistant output starts with
+--- clanker --- and aligns left at the same width. There are no outlines.
+The latest message in each consecutive assistant turn stays visible.
+Earlier messages are grouped under a single "N thoughts (inferred)" line,
+collapsed by default. Enter on that line expands them, with two blank lines
+between messages; Enter again collapses them. Text reflows on resize.
+
+This grouping is an approximation: the REST history endpoint returns only
+user/assistant messages, without thought/final labels. "Thoughts" means the
+earlier assistant messages, not a verified reasoning channel. The latest
+message can still be a progress update while a job is running. All original
+messages remain in the cache and can be expanded; none are discarded.
+
+Inside a conversation:
+  i           Focus the prompt below the conversation and enter insert mode.
+  Ctrl-Enter  Send the prompt (also works in insert mode in the prompt).
+  J / K       Jump to the next / previous section header: user, thoughts,
+              output, next user, etc. Counts work (3J); jumps stop at the ends.
+              K inside a section returns to its header.
+  Enter / za  Toggle the section under the cursor.
+  zc / zo     Close / open that section.
+  r           Refresh conversation and fetch the remote branch concurrently.
+  a           Abort the running agent (stop execution, without archiving).
+  g           Open the job's current GitHub pull request in your browser.
+  d           Fetch that PR's diff and append each textual hunk to quickfix.
+  Ctrl-b / Backspace  Return to the cached job list (normal mode).
+
+Opening a conversation also opens a three-line prompt below it. It wraps long
+lines and grows with the draft, up to half the conversation area. Enter adds
+a newline; Ctrl-Enter sends the entire draft. Successful sends clear the prompt
+and refresh the conversation and branch. Failed sends keep the draft for retry.
+Sending temporarily locks the prompt to prevent edits or duplicate submissions.
+Unsent drafts are saved when leaving the conversation or reloading the plugin,
+and restored separately for each agent.
+
+Conversation history, drafts and collapsed-section state are saved under
+stdpath('cache')/oligarchy, separated by project and agent. Cache files are
+private (0600) and atomically replaced. They contain conversation text, not
+tokens. Cached history appears immediately; every entry and r still requests
+the latest history. A failed refresh keeps cached messages visible and shows
+an error. Both closed and explicitly expanded groups keep their state when new replies
+arrive, after leaving the pane, and after re-sourcing .nvimrc. Existing caches
+receive the default-collapsed thoughts state the next time they are opened. setup({ cache_dir = path }) overrides the
+cache directory.
+
+Each entry and r also reads current job metadata and runs git fetch for the
+job's branch, independently of conversation loading. It updates
+refs/remotes/origin/<branch>, including rewritten branch history. It never
+checks out, merges, or modifies your working files. Git uses your existing
+origin credentials. Missing branches and fetch errors appear in the pane.
+Pending requests and fetches are cancelled on navigation away or pane close.
+
+The g and d actions read fresh job metadata to find its current PR. Diff
+retrieval uses GitHub's API directly; private repositories need GITHUB_TOKEN
+(or GH_TOKEN) in .env or the environment. CURSOR_API_TOKEN is never used as
+GitHub authentication. A missing PR or HTTP error is shown without clearing
+history or quickfix. After appending hunks, d closes the other windows in the
+current tab and leaves one editing window plus quickfix. Unsaved file buffers
+remain available. The first new hunk opens in the editing window, and quickfix
+gets focus. <leader>c reopens the Cursor pane. :cnext / :cprev
+navigate the local project files at the new-side hunk line. Deleted files are
+excluded; removed lines within a surviving file still appear. The full hunk
+is also in each entry's user_data.diff. Binary changes have no textual hunks.
+Line positions describe the PR, so local file contents
+can differ until you choose to check out its branch.
+
+The editing gutter shows green + signs for added lines and red - signs for
+removed lines, using Neovim's Added and Removed highlight groups. Removals
+anchor to a nearby remaining line, or the last line at the end of a file.
+Replacements show both signs. Markers use the PR's new-file line numbers;
+added lines beyond the local file's end have no marker. Fetching another diff
+replaces the previous markers. Files are decorated when opened, without
+loading other files just to add signs. Opening the Cursor pane with <leader>c
+or :OligarchyJobs removes all diff markers until another diff is fetched.
+
+On a job in the list, a opens a centered confirmation popup. Archive is red;
+Cancel has a gray background and is initially selected. Tab, arrow keys, h
+or l switch the selection; Enter chooses it. Escape or q cancels. You can
+also click either button. Confirmation sends the archive request; the job
+is removed only after success. Failure keeps the job and shows an error.
+Archived jobs are excluded even if the server includes them in a response.
+
+Conversation history uses GET /v0/agents/{id}/conversation, the documented
+history endpoint. Sending uses POST /v0/agents/{id}/followup with a JSON
+body containing prompt.text. Abort uses POST /v0/agents/{id}/stop. Archiving uses
+POST /v1/agents/{id}/archive. No message is
+sent and no job is archived merely by opening its conversation.
+
+The pane shows this project's jobs from the account's ten most recent
+non-archived agents, including idle/completed jobs. It does not scan older
+pages, so fewer than ten may belong to this project. The client uses Basic
+authentication and GET /v1/agents?limit=10&includeArchived=false. Repository
+details in the response are reused; missing details are fetched concurrently.
+SSH and HTTPS GitHub remotes match the same repository. Each HTTP request has
+a ten-second connection timeout and a thirty-second total timeout. Requests
+are not automatically retried. If sending times out, refresh the conversation
+before retrying: the server may already have accepted the message.
+
+The HTTP request log is stdpath('state')/oligarchy/http.log. Open it with:
+>
+  :execute 'edit ' .. fnameescape(stdpath('state') .. '/oligarchy/http.log')
+<
+Each line is JSON with a UTC timestamp, method, URL (without credentials,
+query or fragment), elapsed milliseconds, curl exit code, HTTP status when
+available, and whether the request was cancelled. Exit code 28 means a timeout;
+-1 means curl could not start. The log records completed requests, including
+HTTP errors and cancellations. Headers, tokens, prompts, response bodies and
+curl stderr are excluded. The file is created with private permissions (0600).
+The log starts after loading this version; it cannot recover earlier failures.
+
+Full job records are available in the jobs buffer for further inspection:
+>
+  :lua vim.print(vim.b.oligarchy_agents)
+  :lua vim.print(vim.b.oligarchy_conversation)
+<
+API reference: https://cursor.com/docs/cloud-agent/api/endpoints
+
+Lua API:
+>
+  local client = require("oligarchy.cursor").new({ root = project_root })
+  local cancel = client:get_cloud_agents(function(err, agents)
+    if err then
+      vim.notify(err, vim.log.levels.ERROR)
+      return
+    end
+    -- agents contains the matching full Cursor agent records.
+    vim.print(agents)
+  end)
+  -- cancel() stops the request and suppresses its callback.
+  client:get_conversation(agent_id, function(err, messages) end)
+  client:send_message(agent_id, "Please add a regression test.", function(err) end)
+  client:archive_agent(agent_id, function(err) end)
+  client:abort_agent(agent_id, function(err) end)
+  client:get_agent(agent_id, function(err, metadata) end)
+<
+Callbacks run on Neovim's main loop. The plugin defaults to its own project
+directory; setup({ root = "/absolute/project/path" }) overrides it.
+The original get_cloud_agents(project_root, callback) convenience function is
+also available.
+
+Inject an HTTP caller when constructing a client or configuring the UI:
+>
+  local client = require("oligarchy.cursor").new({
+    root = project_root,
+    http = fake_http,
+  })
+  require("oligarchy").setup({ root = project_root, http = fake_http })
+<
+The caller has this contract:
+>
+  local function fake_http(request, callback)
+    -- request: { method, url, headers, env, body? }
+    -- body is an optional JSON string, present for follow-up prompts.
+    -- Inspect or record the request, then provide the raw HTTP response:
+    callback(nil, { status = 200, body = '{"items":[]}' })
+    -- For a transport failure, use callback("error message") instead.
+    return function() end -- Cancel the pending request.
+  end
+<
+The callback may fire immediately or later. Cancellation suppresses delivery
+to the client even if a late response arrives. The default HTTP caller lives
+in lua/oligarchy/cursor/http.lua and executes curl asynchronously. Headers and
+prompt bodies go through stdin, keeping tokens and prompt text out of argv.
+
+Project tools and checks (Linux x86_64):
+>
+  ./lua-tools install
+  ./lua-tools check
+<
+Install requires curl, unzip, tar, a C compiler, Lua 5.4 with headers, and
+LuaRocks. On Ubuntu: apt-get install lua5.4 liblua5.4-dev luarocks curl unzip
+build-essential. Neovim 0.10+ and Git are needed for the tests.
+
+Installation stays in the ignored .tools/lua directory. tools/lua.env pins
+StyLua 2.5.2, Luacheck 1.2.0, its LuaRocks dependencies, and Plenary's commit.
+The StyLua release archive is verified against its pinned SHA-256 checksum.
+The checks use these local tools rather than whichever versions are on PATH.
+.stylua.toml sets the format; .luacheckrc defines Neovim and Busted globals.
+
+./lua-tools check runs StyLua --check, Luacheck, and all offline Plenary/Busted
+tests. ./lua-tools format fixes Lua formatting; ./lua-tools lint and
+./lua-tools test run individual checks. ./lua-tools versions reports the
+installed versions and rejects mismatched formatter/linter versions.
+
+.github/workflows/lua.yml runs the same install/check commands for every PR
+and push to master, using Neovim pinned in tools/lua.env. Live tests are never
+run by CI and need no tokens for offline checks. After updating a pin, rerun
+./lua-tools install locally; Actions reads that exact same pin.
+
+For manual Neovim test runs, test/lua/minimal_init.lua uses PLENARY_PATH when
+set, otherwise your existing stdpath('data')/lazy/plenary.nvim checkout.
+./lua-tools test sets PLENARY_PATH to the project-installed pinned checkout.
+
+Tests inject an HTTP fake, use temporary .env files and Git repositories, and
+exercise real Neovim buffers, windows, commands and keybindings. They assert
+job contents and control behavior, without presentation or layout snapshots.
+The offline suite never calls Cursor or uses your token. Its HTTP fake can
+deliver responses after cancellation to exercise refresh/close races.
+Transport tests inject a vim.system-compatible process runner into
+http.request(request, callback, run). They inspect curl arguments and stdin,
+then return simulated stdout, stderr and exit codes to check response parsing,
+timeout handling, logging and cancellation. They start no server or curl process.
+
+Run the separate live suite explicitly to use CURSOR_API_TOKEN from .env:
+>
+  OLIGARCHY_LIVE_TEST=1 nvim --headless -u test/lua/minimal_init.lua \
+    -c "PlenaryBustedDirectory test/live { minimal_init = 'test/lua/minimal_init.lua', sequential = true }"
+<
+The live tests open the real pane, refresh it twice, load one existing
+conversation, fetch its branch, and reopen cached history. They never abort
+or archive a live job. Job-list loads must show 1-10 project jobs, make one
+HTTP request, and finish in under three seconds. They need network access,
+Git credentials, and recent jobs belonging to this project with a published
+branch. Fetching updates only local remote-tracking refs. Test conversation
+caches are temporary. Output contains counts/timings, never tokens or messages.
+
+vim:tw=78:ts=2:ft=help:norl:

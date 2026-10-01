@@ -13,6 +13,12 @@ exist.
 
 ## Toolchain
 
+- The project-local Neovim plugin uses `./lua-tools install` then `./lua-tools check`
+  (StyLua, Luacheck, offline Plenary/Busted tests). Tool versions live only in
+  `tools/lua.env`; `.github/workflows/lua.yml` uses the same commands and pins.
+  This Lua tooling is separate from the Bun application checks below. See
+  `doc/oligarchy.txt` for prerequisites and individual commands.
+
 - Run on Bun 1.4 (CI installs 1.4.2), runtime and package manager both; there is no Node and no
   npm. Every executable is a `#!/bin/sh` wrapper running `bun --no-env-file` on the process's
   `main.ts` as written (`./qemu-server`, `./qemu-reverse-proxy`, `./automation-server`,
@@ -1361,7 +1367,13 @@ export const SentryLive: Layer.Layer<never> = Layer.mergeAll(
 
 - Tests are written first. No code lands until a set of failing unit tests describes it, and every
   surface has both a happy and an unhappy test. Plan for failures and how they are handled.
-- Vitest only, two lanes: `*.unit.test.{ts,tsx}` in each package's, app's and the root's
+- The Lua plugin uses Plenary/Busted: `test/lua/*_spec.lua`, with the command in
+  `doc/oligarchy.txt`. Inject the Cursor HTTP caller to test requests and responses;
+  UI tests use real Neovim buffers, windows, commands and keybindings.
+  `test/live/cursor_spec.lua` is an explicit opt-in exception for read-only Cursor
+  API timing checks and fetching the job branch into local remote-tracking refs;
+  run it separately with `OLIGARCHY_LIVE_TEST=1` (see the same doc).
+- TypeScript uses Vitest, two lanes: `*.unit.test.{ts,tsx}` in each package's, app's and the root's
   `test/` (no I/O beyond local fakes; `bun run test:unit`, part of `check:fast`) and
   `*.integration.test.ts` (spawned executables, sockets, containers, processes; `bun run
   test:integration`, which runs every package's lane). The system tests, every one that copies

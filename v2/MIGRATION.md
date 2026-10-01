@@ -272,15 +272,18 @@ bearer, and runs under `@oligarchy/app`.
             signal? })` (`src/automation-client.ts`, V1: `client.ts`) is an
             `@oligarchy/http/client` over the automation client's `Routes`
             (`@oligarchy/automation-client/routes`), made once from the url its row names, with
-            `OLIGARCHY_TOKEN` as the token; nothing is asked again. Its specs: `/reserve` answers
-            `reserved`, or `at-capacity` (503) or `setup-needed` (409), neither a failure; `/run`
-            answers `ended` once the driver or opencode has ended, or `aborted` (409) when an
-            abort ended it, and waits as long as a timer can (2³¹−1 ms), so only the client or
-            the signal ends it; `/abort` answers `stopped`, or `not-held` (404) for a job the
-            client does not hold. Every other answer is `@oligarchy/http`'s error. The tests send
-            through `@oligarchy/http/testing` to the automation client's own routes, over its
-            fake sessions. Open for Restart: a client whose host vanished mid-run leaves its
-            `/run` waiting until the signal.
+            `OLIGARCHY_TOKEN` as the token; each call names its `jobId`, and nothing is asked
+            again. It sends through `@oligarchy/http` rather than through `hc`, whose `fetch`
+            option would lose `@oligarchy/http`'s timeouts and errors; only the routes' types are
+            read. Its specs: `/reserve` answers `reserved`, or `at-capacity` (503) or
+            `setup-needed` (409), neither a failure; `/run` answers `ended` once the driver or
+            opencode has ended, or `aborted` (409) when an abort ended it, and waits as long as a
+            timer can (2³¹−1 ms), so only the client or the signal ends it; `/abort` answers
+            `stopped`, or `not-held` (404) for a job the client does not hold. Every other answer,
+            a route's 501 included, is `@oligarchy/http`'s error. The tests send through
+            `@oligarchy/http/testing` to the automation client's own routes, over its fake
+            sessions. Open for Restart: a client whose host vanished mid-run leaves its `/run`
+            waiting until the signal.
       - [ ] **Dispatch** (section 3's Dispatch) in the loop's pass. Needs the client calls, and
             the prompt from section 3's The mission.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
@@ -291,8 +294,8 @@ bearer, and runs under `@oligarchy/app`.
             whether it moves to an exit handler of the dispatch sub-app, which runs only once the
             loop has ended and before the services close.
       - [x] **Serve.** `routes.ts` is one chained Hono app behind the `OLIGARCHY_TOKEN` bearer,
-            exported as `Routes`; `serve.ts` listens on 127.0.0.1 at a required `--port` through
-            `@hono/node-server`. `main` listens before anything else starts: the started line names
+            exported as `Routes`; `@oligarchy/http/serve`'s `listen` serves it on 127.0.0.1 at a
+            required `--port` through `@hono/node-server`. `main` listens before anything else starts: the started line names
             the address, and a port that cannot be bound is a fatal line and exit 1. On a signal
             the listener closes before `shutdown`.
       - [ ] **`/abort`** (section 3's Abort), by job id or by suite id. The route and its contract
@@ -300,17 +303,39 @@ bearer, and runs under `@oligarchy/app`.
             filed on its own has no suite; anything else is 400 `name a jobId or a suiteId`, and
             the typed client refuses it too. Until this task it answers 501 `abort is not written
             yet`.
-- [ ] **automation-client** (`apps/automation-client`). `Sessions` (reserve, run, abort and shutdown
-      against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a diagnose
-      (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`.
-      Its routes are in (`v2/apps/automation-client/src/routes.ts`), exported as `./routes` with
-      their `Routes`: `routes({ token, sessions })` behind the bearer, each body checked by its
-      zod schema (`ReserveRequest`: `{ job, action }`, a drive adding `iso` and `mode`, `resume`
-      or `fresh`, and a setup `iso` and its lock's `server`; `RunRequest`: `{ job, prompt }`;
-      `AbortRequest`: `{ job }`), a body refused 400. A reserve at capacity is 503 and one
-      needing a setup 409; a run an abort ended is 409 and one that failed (`RunFailed`) 500,
-      naming why; an abort of a job not held is 404. `Sessions` is what they are handed, and
-      `./testing` fakes it. Left: the `Sessions` service, `main`, spawning and announcing.
+- [ ] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
+      shutdown against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a
+      diagnose (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
+      when every task below is ticked, roughly in their order.
+      - [x] **Skeleton and routes.** `bun run automation-client`. `main` needs `DATABASE_URL`,
+            `OLIGARCHY_TOKEN` and a required `--port`, builds its services with Sentry, listens
+            on 127.0.0.1 through `@oligarchy/http/serve` (a port that cannot be bound is a fatal
+            line and exit 1), says it started, and on SIGINT or SIGTERM closes the listener, says
+            it stopped, and closes its services. `routes.ts` is one chained Hono app behind the
+            bearer, exported as `Routes` (`@oligarchy/automation-client/routes`) for the
+            automation server's client. Each route's body is checked, and each answers 501 until
+            its task hands `routes({ token, sessions })` its `Sessions` function:
+            - `/reserve`: `{ jobId, action }`, where a drive may name `resume` (the ISO's url), a
+              setup names `setupServer` (the qemu server its setup lock names), and a diagnose
+              names neither.
+            - `/run`: `{ jobId, prompt }`.
+            - `/abort`: `{ jobId }`.
+
+            Handed its function, a route answers what it says: a reserve `reserved` is 200,
+            `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409 and a
+            `RunFailed` 500 naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
+            fakes `Sessions`. The tasks below write the functions.
+      - [ ] **Announce.** `--name`, `--url` and `fleet.announce` as `automation-client`, so the
+            automation server's `listLiveServers` finds it, and its row goes on shutdown.
+      - [ ] **Reserve** against `--max-jobs`: a slot for the job, and for a drive or setup a guest
+            reserved at the qemu reverse proxy first; 503 at capacity, 409 when the proxy answers
+            setup needed. One reserve at a time.
+      - [ ] **Run.** Consumes the job's reservation and spawns `./driver` for a drive or setup or
+            opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
+            409 when an abort ended it, 500 when it failed.
+      - [ ] **Abort.** Kills the job's run, or gives back its reservation; 404 for a job it does
+            not hold.
+      - [ ] **Shutdown.** Kills every run and gives back every reservation before it exits.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
       pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
       Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from

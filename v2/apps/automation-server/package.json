@@ -9,7 +9,6 @@
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
-    "@hono/node-server": "catalog:",
     "@hono/zod-validator": "catalog:",
     "@oligarchy/app": "workspace:*",
     "@oligarchy/async": "workspace:*",

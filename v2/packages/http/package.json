@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/main.ts",
     "./client": "./src/client.ts",
+    "./serve": "./src/serve.ts",
     "./testing": "./src/testing.ts"
   },
   "scripts": {
@@ -12,6 +13,7 @@
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "catalog:",
     "@oligarchy/app": "workspace:*",
     "@oligarchy/async": "workspace:*",
     "hono": "catalog:",
