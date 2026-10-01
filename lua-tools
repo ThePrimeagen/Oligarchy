@@ -1,0 +1,73 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+ROOT=$(pwd)
+. "$ROOT/tools/lua.env"
+TOOLS="$ROOT/.tools/lua"
+STYLUA="$TOOLS/bin/stylua"
+LUACHECK="$TOOLS/rocks/bin/luacheck"
+
+versions() {
+  test -x "$STYLUA" && test -x "$LUACHECK" || {
+    echo 'Run ./lua-tools install first.' >&2
+    exit 1
+  }
+  test "$("$STYLUA" --version)" = "stylua $STYLUA_VERSION" || {
+    echo 'Incorrect StyLua version. Run ./lua-tools install.' >&2
+    exit 1
+  }
+  "$LUACHECK" --version | head -1 | grep -Fx "Luacheck: ${LUACHECK_VERSION%-*}" >/dev/null || {
+    echo 'Incorrect Luacheck version. Run ./lua-tools install.' >&2
+    exit 1
+  }
+  "$STYLUA" --version
+  "$LUACHECK" --version
+}
+
+case "${1:-check}" in
+  install)
+    # Matches the development machine and ubuntu-24.04 GitHub runner.
+    test "$(uname -s)-$(uname -m)" = Linux-x86_64 || {
+      echo 'The pinned binary installer currently supports Linux x86_64.' >&2
+      exit 1
+    }
+    mkdir -p "$TOOLS/bin" "$TOOLS/downloads"
+    curl --fail --silent --show-error --location --retry 2 \
+      "https://github.com/JohnnyMorganz/StyLua/releases/download/v$STYLUA_VERSION/stylua-linux-x86_64.zip" \
+      -o "$TOOLS/downloads/stylua.zip"
+    printf '%s  %s\n' "$STYLUA_SHA256" "$TOOLS/downloads/stylua.zip" | sha256sum --check
+    unzip -oq "$TOOLS/downloads/stylua.zip" -d "$TOOLS/bin"
+    chmod +x "$STYLUA"
+    luarocks --lua-version=5.4 --tree="$TOOLS/rocks" install argparse "$ARGPARSE_VERSION"
+    luarocks --lua-version=5.4 --tree="$TOOLS/rocks" install luafilesystem "$LUAFILESYSTEM_VERSION"
+    luarocks --lua-version=5.4 --tree="$TOOLS/rocks" install luacheck "$LUACHECK_VERSION"
+    curl --fail --silent --show-error --location --retry 2 \
+      "https://github.com/nvim-lua/plenary.nvim/archive/$PLENARY_REVISION.tar.gz" \
+      -o "$TOOLS/downloads/plenary.tar.gz"
+    mkdir -p "$TOOLS/plenary.nvim"
+    tar -xzf "$TOOLS/downloads/plenary.tar.gz" --strip-components=1 -C "$TOOLS/plenary.nvim"
+    versions
+    ;;
+  versions) versions ;;
+  format)
+    versions
+    "$STYLUA" --config-path .stylua.toml lua test/lua test/live .luacheckrc
+    ;;
+  lint)
+    versions
+    "$LUACHECK" --config .luacheckrc lua test/lua test/live
+    ;;
+  test)
+    export PLENARY_PATH="$TOOLS/plenary.nvim"
+    export NVIM_LOG_FILE="$TOOLS/nvim.log"
+    nvim --headless -u test/lua/minimal_init.lua \
+      -c "PlenaryBustedDirectory test/lua { minimal_init = 'test/lua/minimal_init.lua', sequential = true }"
+    ;;
+  check)
+    versions
+    "$STYLUA" --check --config-path .stylua.toml lua test/lua test/live .luacheckrc
+    "$LUACHECK" --config .luacheckrc lua test/lua test/live
+    "$ROOT/lua-tools" test
+    ;;
+  *) echo 'Usage: ./lua-tools [install|check|format|lint|test|versions]' >&2; exit 2 ;;
+esac
