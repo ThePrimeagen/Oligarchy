@@ -246,7 +246,12 @@ bearer, and runs under `@oligarchy/app`.
       `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
       `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
       `/stats`. Forgets silent servers with `fleet.forget`, in a loop of its own as the
-      automation server does. A resume reserve that no server can
+      automation server does. Its `/reserve` and `/relinquish` answer as the automation
+      client's `src/proxy.ts` reads them: `/reserve` takes `{ job, resume? }` for a drive or
+      `{ job, setupServer }` for a setup, and answers 200 reserved, 503 at capacity, 409 setup
+      needed, and a 4xx only when it reserved nothing; `/relinquish` takes `{ job }`, and 404 is
+      a job it holds no guest for. Once it serves `Routes`, the client's calls move onto
+      `@oligarchy/http/client`. A resume reserve that no server can
       take, because those with room hold no setup disk for its ISO, takes each such server's setup
       lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
       setup needed. One setup per ISO and server: a reserve while that setup is in flight files
@@ -333,15 +338,29 @@ bearer, and runs under `@oligarchy/app`.
             its row goes on shutdown, before the services close. The started line names both. A
             port it cannot bind announces nothing. It reports no guests, and no jobs until Reserve
             counts them.
-      - [ ] **Reserve** against `--max-jobs`: a slot for the job, and for a drive or setup a guest
-            reserved at the qemu reverse proxy first; 503 at capacity, 409 when the proxy answers
-            setup needed. One reserve at a time. The reservation is `jobs.hold(jobId)`: a second
-            hold of the job is `AlreadyHeld`, and one once shutdown has begun is `ShuttingDown`
-            (503). When the held signal aborts before a run takes the job, the reservation gives
-            its guest back at the proxy and then calls `release`. The announce's report counts
-            the jobs held.
-      - [ ] **Run.** Consumes the job's reservation and spawns `./driver` for a drive or setup or
-            opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
+      - [x] **Reserve** (`src/reserve.ts`) against a required `--max-jobs`: a slot for the job,
+            and for a drive or setup a guest reserved first at the qemu reverse proxy at
+            `--server-url` (`SERVER_URL`, else `http://127.0.0.1:42069`); a diagnose asks the
+            proxy for nothing. At `--max-jobs`, or while another reserve is still asking the
+            proxy, it is 503 at capacity and the proxy is not asked. The reservation is
+            `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
+            shutdown has begun is `ShuttingDown` (503). The proxy's own answers are 503 at
+            capacity and 409 setup needed, each letting the job go; any other is a
+            `ReserveFailed` (500) naming why, and lets the job go too. One that may have landed
+            first, anything but a 4xx (an abort or a timeout among them), gives its guest back
+            before that. When the held signal aborts before a run takes the job, the reservation
+            gives its guest back at the proxy and then calls `release`; a relinquish that fails
+            is an error line under the job, and the job is let go all the same. `take(jobId)`
+            hands the reservation, its action and its hold to the run, and from then on nothing
+            is given back for it. The announce's report counts the jobs held. Calls to the proxy
+            are `src/proxy.ts` over `@oligarchy/http`, not `@oligarchy/http/client`, until the
+            proxy has `Routes` of its own (see qemu-reverse-proxy).
+            Open: a reservation no run takes, because the automation server died between its
+            reserve and its run, is held until it is aborted or the client restarts. V1 gave one
+            back after ten minutes unused; decide whether Restart aborts it at the client, or the
+            client expires it.
+      - [ ] **Run.** Takes the job's reservation with `take` and spawns `./driver` for a drive or
+            setup or opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
             409 when an abort ended it, 500 when it failed. It spawns on the held signal: when it
             aborts the child is sent SIGTERM, and SIGKILL after a grace (V1's was 5 seconds).
             Only a child that kill reached answers 409; one that had already exited answers as it
