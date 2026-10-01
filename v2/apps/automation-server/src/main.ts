@@ -17,13 +17,13 @@ const reasonOf = (signal: AbortSignal): string =>
 // finishes before any exit handler closes the services under it.
 const main = async (app: App.App<Run, Logger.Logger>) => {
   const { logger } = app.services;
-  const { models } = app.environment.config;
+  const { models, automationServer } = app.environment.config;
   logger.info(
     `started; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`,
     { location: LOCATION },
   );
   await restart();
-  await dispatch(app.signal);
+  await dispatch({ interval: automationServer.dispatchInterval }, app.signal);
   await shutdown();
   logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
   return jarl.ok(undefined);

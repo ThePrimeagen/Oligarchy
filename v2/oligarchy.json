@@ -18,5 +18,8 @@
   "stepLimit": 200,
   "harness": {
     "defaultRetry": "1 second"
+  },
+  "automationServer": {
+    "dispatchInterval": "30 seconds"
   }
 }
