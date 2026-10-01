@@ -143,7 +143,8 @@ meet plus one happy path, and every service is faked except the database.
 - [x] **`tests`: a setup takes its lock.** `createSetupRun({ definitionId, iso, serverUrl })`
       inserts the setup lock on its ISO and server, and only when that insert lands writes a test
       run of its own, its pending setup job, and the job's id on the lock, in one transaction. A
-      lock already held answers `undefined` and writes nothing; of two at once, one files. A
+      lock already held answers `undefined` and writes nothing. Of two at once, the lock's primary
+      key lets one insert land; PGlite runs one transaction at a time, so no test races them. A
       missing definition is `NotFound`, checked before the lock, and a failed write is the
       database's error; neither leaves a lock. The proxy's flow no longer calls
       `setupRequests.insert` or `setJob`.

@@ -533,23 +533,6 @@ describe("a setup, filed by taking its lock", () => {
     expect(jarl.unwrap(await setupRequests.list())).toEqual([]);
     expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
   });
-
-  it("two at once for one ISO and server: one takes the lock and files, the other files nothing (unhappy)", async () => {
-    const { db, tests, setupRequests } = await database();
-    const definitionId = await definition(tests, "setup", false);
-
-    const both = await Promise.all([
-      tests.createSetupRun({ definitionId, ...AT }),
-      tests.createSetupRun({ definitionId, ...AT }),
-    ]);
-
-    const filed = both.map((result) => jarl.unwrap(result)).filter((each) => each !== undefined);
-    expect(filed.length).toBe(1);
-    expect(await counted(db)).toEqual({ suites: 0, runs: 1, jobs: 1 });
-    expect(jarl.unwrap(await setupRequests.inspect(AT.iso, AT.serverUrl))?.jobId).toBe(
-      filed[0]?.job.id,
-    );
-  });
 });
 
 describe("a job, state by state", () => {
