@@ -13,11 +13,12 @@ const created = (options: {
 }) => Env.create(environment, Env.fakeIo({ ...options, files: { [Env.CONFIG_PATH]: CONFIG } }));
 
 describe("the automation server's environment", () => {
-  it("DATABASE_URL gives the database and oligarchy.json the models (happy)", async () => {
+  it("DATABASE_URL gives the database, and oligarchy.json the models and the dispatch interval (happy)", async () => {
     const env = jarl.unwrap(await created({ env: { DATABASE_URL } }));
 
     expect(env.vars.databaseUrl.reveal()).toBe(DATABASE_URL);
     expect(env.config.models).toEqual(JSON.parse(CONFIG).models);
+    expect(env.config.automationServer.dispatchInterval).toBe(30_000);
   });
 
   it("no DATABASE_URL is refused, naming it (unhappy)", async () => {
