@@ -103,7 +103,7 @@ export type RunInput = {
   readonly serverUrl: string;
 };
 
-// A test run filed on its own, and the drive it was filed with.
+// A test run filed on its own, and the job it was filed with: a drive, or a setup.
 export type NewTestRun = { readonly run: RunRow; readonly job: JobRow };
 
 // The version in the ISO's file name (`omarchy-4.0.4.iso` is `4.0.4`), or the whole url when
@@ -144,6 +144,8 @@ export type Tests = {
   readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
 
   readonly createTestRun: (input: RunInput) => Found<NewTestRun>;
+  // undefined is a setup lock already held on that ISO and server: nothing was filed.
+  readonly createSetupRun: (input: RunInput) => Found<NewTestRun | undefined>;
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
   readonly listTestRuns: (suiteId: string) => Answer<ReadonlyArray<TestRunSummary>>;
@@ -203,8 +205,13 @@ type Placement = Pick<
   "suiteId" | "definitionId" | "iso" | "serverUrl"
 >;
 
-// A test run and the pending drive it is filed with.
-const fileRun = async (tx: Tx, fn: string, placement: Placement): Promise<NewTestRun> => {
+// A test run and the pending job it is filed with.
+const fileRun = async (
+  tx: Tx,
+  fn: string,
+  placement: Placement,
+  action: JobAction,
+): Promise<NewTestRun> => {
   const filed = only(
     await tx
       .insert(DbSchema.testRuns)
@@ -212,14 +219,14 @@ const fileRun = async (tx: Tx, fn: string, placement: Placement): Promise<NewTes
       .returning(),
     fn,
   );
-  const drive = only(
+  const first = only(
     await tx
       .insert(DbSchema.jobs)
-      .values({ runId: filed.id, action: "drive", createdAt: clock })
+      .values({ runId: filed.id, action, createdAt: clock })
       .returning(),
     fn,
   );
-  return { run: filed, job: drive };
+  return { run: filed, job: first };
 };
 
 // Each definition's name, for those of the ids that name one.
@@ -565,12 +572,12 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
             );
             const runs: Array<TestSuiteDetails["runs"][number]> = [];
             for (const { definitionId, test } of named) {
-              const { run: written, job: drive } = await fileRun(tx, "createTestSuite", {
-                suiteId: filed.id,
-                definitionId,
-                iso,
-                serverUrl,
-              });
+              const { run: written, job: drive } = await fileRun(
+                tx,
+                "createTestSuite",
+                { suiteId: filed.id, definitionId, iso, serverUrl },
+                "drive",
+              );
               runs.push({ run: written, test, jobs: [drive] });
             }
             return jarl.ok({ suite: filed, runs });
@@ -679,8 +686,55 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
               );
             }
             return jarl.ok(
-              await fileRun(tx, "createTestRun", { suiteId: null, definitionId, iso, serverUrl }),
+              await fileRun(
+                tx,
+                "createTestRun",
+                { suiteId: null, definitionId, iso, serverUrl },
+                "drive",
+              ),
             );
+          }),
+        )
+        .then(settle),
+
+    // The insert of the setup lock decides who sets an ISO up on a server: only the caller whose
+    // insert lands files the setup run and its job and names the job on the lock, in the same
+    // transaction, so a lock is never left without its job. A refusal returns before the lock,
+    // since a transaction that returns is committed.
+    createSetupRun: ({ definitionId, iso, serverUrl }) =>
+      db
+        .run((d) =>
+          d.transaction(async (tx): Promise<jarl.Result<NewTestRun | undefined, NotFound>> => {
+            const names = await definitionNames(tx, [definitionId]);
+            if (!names.has(definitionId)) {
+              return jarl.err(
+                new NotFound(`createSetupRun: no test definition ${String(definitionId)}`),
+              );
+            }
+            const [locked] = await tx
+              .insert(DbSchema.setupRequests)
+              .values({ iso, serverUrl })
+              .onConflictDoNothing()
+              .returning({ iso: DbSchema.setupRequests.iso });
+            if (locked === undefined) {
+              return jarl.ok(undefined);
+            }
+            const filed = await fileRun(
+              tx,
+              "createSetupRun",
+              { suiteId: null, definitionId, iso, serverUrl },
+              "setup",
+            );
+            await tx
+              .update(DbSchema.setupRequests)
+              .set({ jobId: filed.job.id })
+              .where(
+                and(
+                  eq(DbSchema.setupRequests.iso, iso),
+                  eq(DbSchema.setupRequests.serverUrl, serverUrl),
+                ),
+              );
+            return jarl.ok(filed);
           }),
         )
         .then(settle),
