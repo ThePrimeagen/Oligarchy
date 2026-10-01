@@ -1,4 +1,3 @@
-import * as App from "@oligarchy/app";
 import { Aborted } from "@oligarchy/async";
 import * as jarl from "jarl";
 
@@ -21,7 +20,6 @@ export type Held = {
 };
 
 export type Jobs = {
-  readonly service: "jobs";
   readonly hold: (jobId: string) => jarl.Result<Held, AlreadyHeld | ShuttingDown>;
   // Aborts the job and settles once its holder has let it go.
   readonly abort: (jobId: string) => Promise<jarl.Result<void, NotHeld>>;
@@ -29,12 +27,6 @@ export type Jobs = {
   // again, so a reserve that lands meanwhile is refused instead of outliving the process.
   readonly shutdown: () => Promise<void>;
 };
-
-declare module "@oligarchy/app" {
-  interface Services {
-    jobs: App.Register<"jobs", Jobs>;
-  }
-}
 
 type Entry = {
   readonly aborter: AbortController;
@@ -44,7 +36,7 @@ type Entry = {
 
 // Held only in memory: a restarted client holds nothing, and the automation server decides what
 // becomes of the jobs it had.
-export const create = App.createService<never, App.NoOptions, Jobs>(() => {
+export const create = (): Jobs => {
   const held = new Map<string, Entry>();
   let shuttingDown = false;
 
@@ -54,7 +46,6 @@ export const create = App.createService<never, App.NoOptions, Jobs>(() => {
   };
 
   return {
-    service: "jobs",
     hold: (jobId) => {
       if (shuttingDown) {
         return jarl.err(new ShuttingDown(`shutting down; job ${jobId} not held`));
@@ -95,4 +86,4 @@ export const create = App.createService<never, App.NoOptions, Jobs>(() => {
       );
     },
   };
-});
+};

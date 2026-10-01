@@ -5,14 +5,12 @@ import * as Http from "@oligarchy/http";
 import * as Logger from "@oligarchy/logger";
 import * as Sentry from "@oligarchy/sentry";
 import type * as jarl from "jarl";
-import * as Jobs from "./jobs.ts";
 
 export type Services = {
   readonly http: App.Made<Http.Http>;
   readonly sentry: App.Made<Sentry.Sentry>;
   readonly db: App.Made<Db.Database>;
   readonly logger: App.Made<Logger.Logger>;
-  readonly jobs: App.Made<Jobs.Jobs>;
 };
 
 export type Terminal = {
@@ -44,8 +42,7 @@ export const createServices = (
   const sentry = Sentry.create({ http }, { dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT });
   const db = Db.create({}, { url: env.vars.databaseUrl });
   const logger = Logger.create({ sentry, db }, { write: terminal.write, colors: terminal.colors });
-  const jobs = Jobs.create({});
-  return { http, sentry, db, logger, jobs };
+  return { http, sentry, db, logger };
 };
 
 // Every line waits on its insert, so the pool stays open until the last one lands; a line the

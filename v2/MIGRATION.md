@@ -317,8 +317,9 @@ bearer, and runs under `@oligarchy/app`.
             aborts the child is sent SIGTERM, and SIGKILL after a grace (V1's was 5 seconds).
             Only a child that kill reached answers 409; one that had already exited answers as it
             ended. The run calls `release` once the child is reaped.
-      - [x] **Abort.** `src/jobs.ts`, the client's `jobs` service, holds each job it has
-            reserved or is running, in memory only, by an `AbortController`. `/abort` calls
+      - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
+            each job it has reserved or is running, in memory only, by an `AbortController`;
+            `main` creates it and hands it to the routes. `/abort` calls
             `jobs.abort(jobId)`, which aborts that job's signal with `Aborted`, and answers 200
             `{}` once the job's holder has called `release`: its run is killed, or its guest
             given back. A job it does not hold is `NotHeld`, a 404 naming the job. Neither abort

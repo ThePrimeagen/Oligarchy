@@ -18,7 +18,7 @@ const settled = async (promise: Promise<unknown>): Promise<boolean> => {
 
 describe("the jobs an automation client holds", () => {
   it("an abort aborts the job's signal, answers once its holder lets it go, and the job is no longer held (happy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const held = jarl.unwrap(jobs.hold(JOB));
     const other = jarl.unwrap(jobs.hold(OTHER));
 
@@ -35,7 +35,7 @@ describe("the jobs an automation client holds", () => {
   });
 
   it("an abort of a job it does not hold is NotHeld, naming the job (unhappy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const other = jarl.unwrap(jobs.hold(OTHER));
 
     const aborted = await jobs.abort(JOB);
@@ -46,7 +46,7 @@ describe("the jobs an automation client holds", () => {
   });
 
   it("holding a job already held is AlreadyHeld, and the first holder keeps it (unhappy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const first = jarl.unwrap(jobs.hold(JOB));
 
     const again = jobs.hold(JOB);
@@ -61,7 +61,7 @@ describe("the jobs an automation client holds", () => {
   });
 
   it("shutdown aborts every job it holds and settles once each is let go (happy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const held = jarl.unwrap(jobs.hold(JOB));
     const other = jarl.unwrap(jobs.hold(OTHER));
 
@@ -78,7 +78,7 @@ describe("the jobs an automation client holds", () => {
   });
 
   it("a hold once shutdown has begun is ShuttingDown, and the job is never held (unhappy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const held = jarl.unwrap(jobs.hold(JOB));
     const shutting = jobs.shutdown();
 

@@ -4,7 +4,7 @@ import { listen } from "@oligarchy/http/serve";
 import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
-import type * as Jobs from "./jobs.ts";
+import * as Jobs from "./jobs.ts";
 import { routes } from "./routes.ts";
 import { closeServices, createServices } from "./services.ts";
 
@@ -18,9 +18,10 @@ const reasonOf = (signal: AbortSignal): string =>
 // lands during shutdown; closing ends the connections but not a /run still under way, so every
 // job held is then aborted and let go. Both finish before main returns, and so before any exit
 // handler closes the services under them.
-const main = async (app: App.App<Run, Jobs.Jobs | Logger.Logger>) => {
-  const { jobs, logger } = app.services;
+const main = async (app: App.App<Run, Logger.Logger>) => {
+  const { logger } = app.services;
   const { flags, vars } = app.environment;
+  const jobs = Jobs.create();
   const listened = await listen(routes({ token: vars.oligarchyToken.reveal(), jobs }).fetch, {
     hostname: HOST,
     port: flags.port,

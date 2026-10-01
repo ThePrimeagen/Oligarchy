@@ -9,7 +9,7 @@ const JOB_ID = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
 const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 const QEMU = "http://127.0.0.1:42069";
 
-const client = (token?: string, jobs = Jobs.create({})) =>
+const client = (token?: string, jobs = Jobs.create()) =>
   testClient(
     routes({ token: TOKEN, jobs }),
     {},
@@ -89,7 +89,7 @@ describe("the automation client's routes", () => {
   });
 
   it("/abort of a job it holds aborts the job and answers 200 once its holder has let it go (happy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const held = jarl.unwrap(jobs.hold(JOB_ID));
 
     const answering = client(TOKEN, jobs).abort.$post({ json: { jobId: JOB_ID } });
@@ -103,7 +103,7 @@ describe("the automation client's routes", () => {
   });
 
   it("/abort of a job it does not hold is 404, naming the job (unhappy)", async () => {
-    const jobs = Jobs.create({});
+    const jobs = Jobs.create();
     const other = jarl.unwrap(jobs.hold("0d9f4b1a-5c2e-4f7a-8b3d-1e6a9c2f4b70"));
 
     const response = await client(TOKEN, jobs).abort.$post({ json: { jobId: JOB_ID } });
