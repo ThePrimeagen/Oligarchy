@@ -15,7 +15,7 @@ const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 const QEMU_SERVER = "http://10.0.0.5:4000";
 const PROMPT = "You are the driving agent for job 6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11.";
 // Far below the HTTP default, so a call that kept it would time out here.
-const DEFAULT_TIMEOUT_MS = 5;
+const DEFAULT_TIMEOUT_MS = 50;
 
 const POSTED = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
 
@@ -121,7 +121,7 @@ describe("the automation server's calls to an automation client", () => {
   describe("/run", () => {
     it("posts its job and prompt, and answers ended once the client answers, however long past the HTTP default that is (happy)", async () => {
       const { client, asked } = await served({
-        run: () => later(DEFAULT_TIMEOUT_MS * 10, jarl.ok("ended" as const)),
+        run: () => later(DEFAULT_TIMEOUT_MS * 4, jarl.ok("ended" as const)),
       });
 
       const ran = await client.post("/run", { job: JOB, prompt: PROMPT });
