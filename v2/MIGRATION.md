@@ -116,17 +116,14 @@ meet plus one happy path, and every service is faked except the database.
       `@oligarchy/logger/testing`.
 - [x] **`tests`: test runs carry their ISO, and suites are batches.** Migration 0009:
       `test_runs` gains `iso` and `server_url`, filled for existing rows from their suites, and
-      its `suite_id` may be null. `createTestRun({ definitionId, suiteId })` takes the suite's ISO
-      and server and needs the suite pending; `createTestRun({ definitionId, iso, serverUrl })`
-      files a test run on its own. The reads that join a test run to its suite answer `suite:
+      its `suite_id` may be null. The reads that join a test run to its suite answer `suite:
       null` for one filed on its own. V1's unique index on a run's definitions, carried over as
-      `test_runs_suite_definition_idx`, goes, and `createTestRun` no longer reads for a twin
-      before it inserts, so `Duplicate` goes: a suite can hold a setup run per server, or the same
-      test several times. `createTestSuite({ iso, serverUrl })` takes no name; `suiteName` gives
-      the version in the url's file name (`https://iso.omarchy.org/omarchy-4.0.4.iso` is `4.0.4`),
-      or the whole url when it names none, so a host such as `10.0.0.5` is never a version.
+      `test_runs_suite_definition_idx`, goes, so `Duplicate` goes: a suite can hold a setup run
+      per server, or the same test several times. `suiteName` gives the version in the url's file
+      name (`https://iso.omarchy.org/omarchy-4.0.4.iso` is `4.0.4`), or the whole url when it
+      names none, so a host such as `10.0.0.5` is never a version.
       `test_definitions.resume`, true unless a definition is defined otherwise, is kept with each
-      wording.
+      wording. A suite and a single run are written by the next item.
 - [x] **`tests`: a suite is written whole.** `createTestSuite({ iso, serverUrl, definitionIds })`
       writes the suite, running, a test run per id (an id named twice is two test runs), and each
       test run's pending drive, in one transaction, and hands back the suite's details. A missing
@@ -148,24 +145,22 @@ queued jobs from the tickets' columns, and each close moved a ticket on. That lo
 `packages/jobs` and `apps/automation-server/src/worker.ts`. In V2 the `tests` store is the whole
 record, and the automation server acts on it directly.
 
-- [ ] **File.** Three ways in:
-      - A single test run (`ctrl test run`): `createTestRun({ definitionId, iso, serverUrl })`,
-        which writes the test run and its drive together, with no suite.
-      - A suite (`ctrl test suite` and the dashboard's create-suite): one
-        `createTestSuite({ iso, serverUrl, definitionIds })` of every definition but `setup`,
-        which writes the suite, its test runs and their drives in one transaction.
-        `nextPendingJob` does not look at suites, so the queue never sees part of a suite.
-      - A setup. The proxy's first resume reserve of an ISO on a qemu server holding no setup disk
-        for it (section 4) inserts the setup lock, then files a single test run of `setup` with
-        that ISO and the proxy's url, and a setup job, and names the job on the lock with
-        `setupRequests.setJob`: `claim` refuses a lock that has no job yet. The run, its setup job
-        and `setJob` must be one transaction too, or a crash leaves a lock with no job.
-        `ctrl setup` (section 6) is one suite holding a setup run per server, each taking its
-        server's lock with `setupRequests.claim`, which refuses a lock a live setup holds.
-        Open: the store files every test run with a drive, so a setup run needs a setup job
-        instead (by the definition, or by an action `createTestRun` and `createTestSuite` are
-        given), and the lock lives in `setupRequests`, another store, so the one transaction
-        spans two stores.
+- [ ] **File a setup.** A single test run and a suite are already filed by the `tests` store
+      (section 2). `createTestRun({ definitionId, iso, serverUrl })` writes the run and its drive,
+      with no suite. `createTestSuite({ iso, serverUrl, definitionIds })` writes one suite of the
+      ids it is given — `ctrl test suite` and the dashboard pass every definition but `setup` —
+      running, with each run's drive, in one transaction. `nextPendingJob` does not look at
+      suites, so the queue never sees part of a suite. Both file a drive. A setup is still open.
+      The proxy's first resume reserve of an ISO on a qemu server holding no setup disk for it
+      (section 4) inserts the setup lock, then files a single test run of `setup` with that ISO
+      and the proxy's url, and a setup job, and names the job on the lock with
+      `setupRequests.setJob`: `claim` refuses a lock that has no job yet. The run, its setup job
+      and `setJob` must be one transaction, or a crash leaves a lock with no job. `ctrl setup`
+      (section 6) is one suite holding a setup run per server, each taking its server's lock with
+      `setupRequests.claim`, which refuses a lock a live setup holds. The store files every test
+      run with a drive, so a setup run needs a setup job instead (by the definition, or by an
+      action `createTestRun` and `createTestSuite` are given), and the lock lives in
+      `setupRequests`, another store, so that transaction spans two stores.
 - [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
