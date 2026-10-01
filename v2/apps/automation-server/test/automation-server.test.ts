@@ -70,16 +70,18 @@ const server = (env: Readonly<Record<string, string>>) => {
 };
 
 describe("the automation server as a process", () => {
-  it("says it started with its models, runs until SIGTERM, says it stopped and exits 0, each line stored (happy)", async () => {
+  it("says it started with its models, runs until SIGTERM, stops without waiting out the dispatch interval, says it stopped and exits 0, each line stored (happy)", async () => {
     const fake = await started();
     const running = server({ DATABASE_URL: fake.url });
 
     await vi.waitFor(() => expect(running.lines()).toContain(STARTED), { timeout: 15_000 });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(running.child.exitCode).toBe(null);
+    const killedAt = Date.now();
     running.child.kill("SIGTERM");
 
     expect(await running.exited).toBe(0);
+    expect(Date.now() - killedAt).toBeLessThan(5_000);
     expect(running.lines()).toEqual([STARTED, STOPPED]);
     expect(await query(fake.url, "select level, location, text from logs order by id")).toEqual([
       {
