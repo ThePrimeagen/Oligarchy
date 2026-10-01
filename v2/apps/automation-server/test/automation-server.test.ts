@@ -11,6 +11,9 @@ const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const { models } = JSON.parse(readFileSync(Env.CONFIG_PATH, "utf8"));
 const STARTED = `[INFO] [global] automation-server: started; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`;
 const STOPPED = "[INFO] [global] automation-server: stopped; SIGTERM received";
+const SILENT = "http://127.0.0.1:1/silent-client";
+const FORGOTTEN = `[INFO] [global] automation-server: server forgotten; ${SILENT} silent for 10 minutes`;
+const SWEEP_FAILED = "[ERROR] [global] automation-server: stale server cleanup failed: ";
 
 const cleanups: Array<() => Promise<unknown> | unknown> = [];
 
@@ -70,11 +73,15 @@ const server = (env: Readonly<Record<string, string>>) => {
 };
 
 describe("the automation server as a process", () => {
-  it("says it started with its models, runs until SIGTERM, stops without waiting out the dispatch interval, says it stopped and exits 0, each line stored (happy)", async () => {
+  it("says it started with its models, forgets a client silent for ten minutes, runs until SIGTERM, stops without waiting out the dispatch interval, says it stopped and exits 0, each line stored (happy)", async () => {
     const fake = await started();
+    await query(
+      fake.url,
+      `insert into servers (url, type, heartbeat_at) values ('${SILENT}', 'automation-client', now() - interval '11 minutes')`,
+    );
     const running = server({ DATABASE_URL: fake.url });
 
-    await vi.waitFor(() => expect(running.lines()).toContain(STARTED), { timeout: 15_000 });
+    await vi.waitFor(() => expect(running.lines()).toContain(FORGOTTEN), { timeout: 15_000 });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(running.child.exitCode).toBe(null);
     const killedAt = Date.now();
@@ -82,23 +89,32 @@ describe("the automation server as a process", () => {
 
     expect(await running.exited).toBe(0);
     expect(Date.now() - killedAt).toBeLessThan(5_000);
-    expect(running.lines()).toEqual([STARTED, STOPPED]);
+    expect(running.lines()).toEqual([STARTED, FORGOTTEN, STOPPED]);
+    expect(await query(fake.url, "select url from servers")).toEqual([]);
     expect(await query(fake.url, "select level, location, text from logs order by id")).toEqual([
       {
         level: "info",
         location: "automation-server",
         text: `started; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`,
       },
+      {
+        level: "info",
+        location: "automation-server",
+        text: `server forgotten; ${SILENT} silent for 10 minutes`,
+      },
       { level: "info", location: "automation-server", text: "stopped; SIGTERM received" },
     ]);
   });
 
-  it("with the database gone, still starts and stops on SIGTERM, each line followed by its refused insert (unhappy)", async () => {
+  it("with the database gone, says the sweep failed, still stops on SIGTERM, each line followed by its refused insert (unhappy)", async () => {
     const fake = await started();
     await fake.stop();
     const running = server({ DATABASE_URL: fake.url });
 
-    await vi.waitFor(() => expect(running.lines()).toContain(STARTED), { timeout: 15_000 });
+    await vi.waitFor(
+      () => expect(running.lines().some((line) => line.startsWith(SWEEP_FAILED))).toBe(true),
+      { timeout: 15_000 },
+    );
     running.child.kill("SIGTERM");
 
     expect(await running.exited).toBe(0);
