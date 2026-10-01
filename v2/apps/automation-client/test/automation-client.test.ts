@@ -8,10 +8,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const TOKEN = "oligarchy-token";
+const NAME = "c1";
+const CLIENT_URL = "http://c1.test:4100";
 const STOPPED = "[INFO] [global] automation-client: stopped; SIGTERM received";
+const HEARTBEAT_FAILED = "[ERROR] [global] automation-client: heartbeat failed: ";
 
-const startedText = (port: number) => `started on 127.0.0.1:${String(port)}`;
+const startedText = (port: number) =>
+  `started on 127.0.0.1:${String(port)}; name ${NAME}; announcing ${CLIENT_URL}`;
 const startedLine = (port: number) => `[INFO] [global] automation-client: ${startedText(port)}`;
+const unannouncedText = (port: number) =>
+  `started on 127.0.0.1:${String(port)}; name ${NAME}; announcing nothing without --url`;
 
 const cleanups: Array<() => Promise<unknown> | unknown> = [];
 
@@ -89,11 +95,19 @@ const automationClient = (argv: ReadonlyArray<string>, env: Readonly<Record<stri
   return { child, exited, lines, stderr: () => stderr };
 };
 
+const unannounced = (port: number) => ["--port", String(port), "--name", NAME];
+const flags = (port: number) => [...unannounced(port), "--url", CLIENT_URL];
+
+// What the automation server's listLiveServers reads: a client heard from in the last 45 seconds.
+const LIVE_CLIENTS =
+  "select url, name from servers where type = 'automation-client' and heartbeat_at > now() - interval '45 seconds'";
+const READINGS = "select name, type, jobs from process_stats";
+
 describe("the automation client as a process", () => {
-  it("listens on --port behind the bearer, runs until SIGTERM, says it stopped and exits 0, each line stored (happy)", async () => {
+  it("listens on --port behind the bearer, announces itself as a live automation client under --name and --url, runs until SIGTERM, takes its row back, says it stopped and exits 0, each line stored (happy)", async () => {
     const fake = await started();
     const port = await freePort();
-    const running = automationClient(["--port", String(port)], {
+    const running = automationClient(flags(port), {
       DATABASE_URL: fake.url,
       OLIGARCHY_TOKEN: TOKEN,
     });
@@ -101,6 +115,8 @@ describe("the automation client as a process", () => {
     await vi.waitFor(() => expect(running.lines()).toContain(startedLine(port)), {
       timeout: 15_000,
     });
+    await vi.waitFor(async () => expect(await query(fake.url, READINGS)).toHaveLength(1));
+    expect(await query(fake.url, LIVE_CLIENTS)).toEqual([{ url: CLIENT_URL, name: NAME }]);
     const unauthorized = await fetch(`http://127.0.0.1:${String(port)}/reserve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -112,17 +128,49 @@ describe("the automation client as a process", () => {
 
     expect(await running.exited).toBe(0);
     expect(running.lines()).toEqual([startedLine(port), STOPPED]);
+    expect(await query(fake.url, "select url from servers")).toEqual([]);
+    expect(await query(fake.url, READINGS)).toEqual([
+      { name: NAME, type: "automation-client", jobs: 0 },
+    ]);
     expect(await query(fake.url, "select level, location, text from logs order by id")).toEqual([
       { level: "info", location: "automation-client", text: startedText(port) },
       { level: "info", location: "automation-client", text: "stopped; SIGTERM received" },
     ]);
   });
 
-  it("with its port already taken, says it could not listen and exits 1 (unhappy)", async () => {
+  it("with no --url, says it announces nothing, writes no row, and still serves until SIGTERM (unhappy)", async () => {
+    const fake = await started();
+    const port = await freePort();
+    const running = automationClient(unannounced(port), {
+      DATABASE_URL: fake.url,
+      OLIGARCHY_TOKEN: TOKEN,
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(running.lines()).toContain(
+          `[INFO] [global] automation-client: ${unannouncedText(port)}`,
+        ),
+      { timeout: 15_000 },
+    );
+    const unauthorized = await fetch(`http://127.0.0.1:${String(port)}/run`, { method: "POST" });
+    expect(unauthorized.status).toBe(401);
+    running.child.kill("SIGTERM");
+
+    expect(await running.exited).toBe(0);
+    expect(running.lines()).toEqual([
+      `[INFO] [global] automation-client: ${unannouncedText(port)}`,
+      STOPPED,
+    ]);
+    expect(await query(fake.url, "select url from servers")).toEqual([]);
+    expect(await query(fake.url, READINGS)).toEqual([]);
+  });
+
+  it("with its port already taken, says it could not listen and exits 1, announcing nothing (unhappy)", async () => {
     const fake = await started();
     const { port } = await held();
 
-    const running = automationClient(["--port", String(port)], {
+    const running = automationClient(flags(port), {
       DATABASE_URL: fake.url,
       OLIGARCHY_TOKEN: TOKEN,
     });
@@ -135,10 +183,34 @@ describe("the automation client as a process", () => {
         `^\\[FATAL\\] \\[global\\] automation-client: could not listen on 127\\.0\\.0\\.1:${String(port)}: .*EADDRINUSE`,
       ),
     );
+    expect(await query(fake.url, "select url from servers")).toEqual([]);
+    expect(await query(fake.url, READINGS)).toEqual([]);
+  });
+
+  it("with the database gone, says its heartbeat failed, still stops on SIGTERM and exits 0 (unhappy)", async () => {
+    const fake = await started();
+    await fake.stop();
+    const port = await freePort();
+    const running = automationClient(flags(port), {
+      DATABASE_URL: fake.url,
+      OLIGARCHY_TOKEN: TOKEN,
+    });
+
+    await vi.waitFor(
+      () => expect(running.lines().some((line) => line.startsWith(HEARTBEAT_FAILED))).toBe(true),
+      { timeout: 15_000 },
+    );
+    running.child.kill("SIGTERM");
+
+    expect(await running.exited).toBe(0);
+    const lines = running.lines();
+    expect(lines[0]).toBe(startedLine(port));
+    expect(lines).toContain(STOPPED);
+    expect(lines.find((line) => line.startsWith(HEARTBEAT_FAILED))).toContain("ECONNREFUSED");
   });
 
   it("with no DATABASE_URL, says so on stderr and exits 1 (unhappy)", async () => {
-    const running = automationClient(["--port", String(await freePort())], {
+    const running = automationClient(flags(await freePort()), {
       OLIGARCHY_TOKEN: TOKEN,
     });
 
