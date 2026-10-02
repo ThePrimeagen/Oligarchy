@@ -1,10 +1,11 @@
 import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
-import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import * as jarl from "jarl";
 import { type Answer, settle } from "./answer.ts";
-import { NotFound } from "./tests.ts";
+import { turnOf } from "./logs.ts";
+import type { NotFound } from "./tests.ts";
 
 export type DebugLogRow = typeof DbSchema.debugLogs.$inferSelect;
 
@@ -61,42 +62,13 @@ const formatActions = (rows: ReadonlyArray<Action>): string =>
 export const create = App.createService<Db.Database, App.NoOptions, DebugLogs>(({ db }) => ({
   service: "debugLogs",
 
-  // A test run holds one open job at a time, so its lines fall into turns: a job's turn runs from
-  // when it was queued until the run's next job was queued, or until now for the newest.
   saveDebugLog: (jobId, captured) =>
     db
       .run(async (d): Promise<jarl.Result<void, NotFound>> => {
-        const [job] = await d
-          .select({ runId: DbSchema.jobs.runId, createdAt: DbSchema.jobs.createdAt })
-          .from(DbSchema.jobs)
-          .where(eq(DbSchema.jobs.id, jobId));
-        if (job === undefined) {
-          return jarl.err(new NotFound(`saveDebugLog: no job ${jobId}`));
+        const lines = await turnOf(d, "saveDebugLog", jobId);
+        if (jarl.is_err(lines)) {
+          return lines;
         }
-        const [next] = await d
-          .select({ createdAt: DbSchema.jobs.createdAt })
-          .from(DbSchema.jobs)
-          .where(
-            and(eq(DbSchema.jobs.runId, job.runId), gt(DbSchema.jobs.createdAt, job.createdAt)),
-          )
-          .orderBy(asc(DbSchema.jobs.createdAt))
-          .limit(1);
-        const lines = await d
-          .select({
-            createdAt: DbSchema.logs.createdAt,
-            level: DbSchema.logs.level,
-            location: DbSchema.logs.location,
-            text: DbSchema.logs.text,
-          })
-          .from(DbSchema.logs)
-          .where(
-            and(
-              eq(DbSchema.logs.runId, job.runId),
-              gte(DbSchema.logs.createdAt, job.createdAt),
-              next === undefined ? undefined : lt(DbSchema.logs.createdAt, next.createdAt),
-            ),
-          )
-          .orderBy(asc(DbSchema.logs.createdAt), asc(DbSchema.logs.id));
         const taken = await d
           .select({
             id: DbSchema.actions.id,
@@ -112,7 +84,7 @@ export const create = App.createService<Db.Database, App.NoOptions, DebugLogs>((
           jobId,
           sources: {
             serial: truncate(captured.serial),
-            proxy: truncate(formatLogs(lines)),
+            proxy: truncate(formatLogs(jarl.value(lines))),
             qemu: truncate(captured.qemu),
             actions: truncate(formatActions(taken)),
           },
