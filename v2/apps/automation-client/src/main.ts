@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import * as App from "@oligarchy/app";
 import * as Env from "@oligarchy/env";
 import { listen } from "@oligarchy/http/serve";
@@ -25,7 +26,7 @@ const env = jarl.value(created);
 
 const services = createServices(env);
 
-const app = new App.App(env).main(Application.main({ listen }));
+const app = new App.App(env).main(Application.main({ listen, spawn, env: process.env }));
 app.onExit(() => closeServices(services));
 await app.run(services, (errors) => {
   for (const error of errors) {
