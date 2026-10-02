@@ -5,7 +5,8 @@ before V2 can replace V1, roughly in the order they unblock each other. Tick a b
 merges.
 
 Every task follows `v2/AGENTS.md`: the failing tests come first, one test for each error a unit can
-meet plus one happy path, and every service is faked except the database.
+meet plus one happy path, and every service is faked except a database the test starts and stops.
+The test isolation work below records the completed changes and the cases left unchanged.
 
 ## Decided
 
@@ -45,6 +46,45 @@ meet plus one happy path, and every service is faked except the database.
 - **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
   nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
   guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
+
+## Test isolation work
+
+Completed in the timing and isolation pass:
+
+- **Timing.** The automation server's `/run` client test holds the response and advances fake
+  time beyond the HTTP default before releasing it. The dispatcher abort test waits until the
+  fake reserve is entered before aborting. The fleet member test holds a write and advances fake
+  time to prove shutdown waits for it. HTTP client timeout tests use fake time, and cancellation
+  waits for the fake request to start. Sentry tests use held responses and fake time; their
+  real-time `within` helper is gone. Tick and OpenRouter tests already used fake timers.
+- **Automation app lifecycle.** Both apps export `application.ts`'s `main({ listen })` so tests
+  can run them with fake listeners, services, process IO and clocks. Their lifecycle tests cover
+  startup, listener failure and shutdown ordering; the server exercises dispatch and cleanup,
+  and the client exercises announcing and releasing reservations. They no longer launch child
+  processes, bind sockets or poll for readiness.
+- **App signals.** `packages/app/test/app.test.ts` uses fake IO for SIGINT, SIGTERM and SIGHUP,
+  including a second signal while an exit handler is held. The process test and its executable
+  fixture are gone.
+- **Env IO.** `Io.node` accepts an injected source for arguments, environment and file reads.
+  Its IO tests supply content and filesystem errors directly.
+- **Fleet process listing.** `listProcesses` accepts an injected `spawn`. Its tests control
+  stdout, startup failure and process exit, with fake time for the timeout and SIGTERM/SIGKILL
+  grace period.
+- **HTTP serving.** `listen` accepts an injected `createServer`. Its tests control readiness,
+  bind errors and closure, checking that shutdown closes connections and waits for completion.
+- **Logger refusal.** `packages/logger/test/refusal.test.ts` supplies a database service whose
+  `run` always returns a known `DatabaseError`. It checks printed messages, continued processing
+  and the errors sent to fake Sentry. The logger tests no longer use an assumed unavailable port.
+
+These fake lifecycle and listener tests check application behavior; they do not prove OS signal
+delivery, executable startup or port release. Production entrypoints still use real IO.
+
+Two proposed changes were dropped from this pass, leaving these tests unchanged:
+
+- `packages/tester/test/tester.test.ts` still launches the tester executable and captures its
+  output. It points its HTTP proxies at `127.0.0.1:1` to attempt to block Sentry requests.
+- `packages/db/test/db.test.ts` still uses `127.0.0.1:1` for its connection-refusal test, assuming
+  nothing is listening there.
 
 ## 1. Services to write
 
@@ -110,8 +150,8 @@ meet plus one happy path, and every service is faked except the database.
       and agent as tags and its text as `extra.log`, unless told `skipSentry`, and a log insert's
       failure too, as V1's `Log` did. The tester's `createServices` builds it over the world's
       `http` and hands it to the logger, and `closeServices` waits for it after the logger's last
-      line; each app does the same as it is ported. A test that runs an app as a process points
-      `https_proxy` at a port nobody listens on, as V1's did, so the real project hears nothing.
+      line; each app does the same as it is ported. The automation apps' lifecycle tests use fake
+      services. The tester's retained process tests use the proxy workaround recorded above.
 - [x] **Services take their services first.** A file that registers a service exports
       `create = App.createService<Wants, Options, Service>((services, options) => service)`:
       `Wants` is the union of the services it uses, and `make` sees only those. `Options` is
@@ -127,6 +167,9 @@ meet plus one happy path, and every service is faked except the database.
       nothing. env refuses a `DATABASE_URL` that is not a url with `InvalidVariable`, naming the
       variable and never its value. Tests that only read what was logged use
       `@oligarchy/logger/testing`.
+      The automation client's `Services`, the services in its `World`, and `closeServices` now
+      use `App.Needs` rather than manually listing service fields. `createServices` checks its
+      result with `satisfies Services`, preserving the inferred `App.Made` types for callers.
 - [x] **`tests`: test runs carry their ISO, and suites are batches.** Migration 0009:
       `test_runs` gains `iso` and `server_url`, filled for existing rows from their suites, and
       its `suite_id` may be null. The reads that join a test run to its suite answer `suite:
@@ -211,11 +254,12 @@ record, and the automation server acts on it directly.
 
 ## 4. Apps
 
-None of V1's apps are ported yet; the automation server has a skeleton. Each becomes a V2 app
-under `v2/apps/`: its `main` reads its environment with
+The automation server and client have partial implementations; their remaining work is listed
+below. Each becomes a V2 app under `v2/apps/`: its entrypoint reads its environment with
 `@oligarchy/env`, builds its services with a `createServices` (Sentry among them, handed to its
 logger and waited for on exit, as the tester's are), serves Hono behind the `OLIGARCHY_TOKEN`
-bearer, and runs under `@oligarchy/app`.
+bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecycle in
+`src/application.ts`; `src/main.ts` supplies the real listener and closes services on exit.
 
 - [ ] **qemu-server** (`apps/qemu-server`). Services: `Qemu` (starts a guest; keys, mouse,
       screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `SetupDisks`
@@ -264,9 +308,10 @@ bearer, and runs under `@oligarchy/app`.
             services with Sentry, says it started with its models, runs `restart`, starts the
             dispatch sub-app, and waits for SIGINT or SIGTERM; then it runs `shutdown`, says it
             stopped, and closes its services. The dispatch sub-app's main is a loop that runs
-            until the server is killed, waiting `automationServer.dispatchInterval` each pass;
-            the kill ends the wait at once. A database that cannot be reached does not stop it.
-            `restart`, `shutdown` and the loop's pass do nothing yet.
+            until the server is killed, waiting `automationServer.dispatchInterval` when no job
+            starts; the kill ends the wait at once. A database that cannot be reached does not
+            stop it. The loop reserves jobs as described below; `restart` and `shutdown` still
+            do nothing.
       - [x] **Forget silent clients.** A sub-app beside dispatch forgets the automation clients
             silent for longer than `automationServer.forgetAfter` (10 minutes), as V1's
             `Sweep.forget` did, so dispatch never reserves on a client that died without deleting
