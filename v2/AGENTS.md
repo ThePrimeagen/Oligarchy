@@ -42,3 +42,4 @@
     crafting the right services object.
 14. jevlint should only be ran at the behest of the developer.
 15. Testing should always use fake timers.
+16. Never define your own services object, use App.Needs instead

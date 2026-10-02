@@ -8,16 +8,16 @@ import * as Sentry from "@oligarchy/sentry";
 import * as Stores from "@oligarchy/stores";
 import type * as jarl from "jarl";
 
-export type Services = {
-  readonly http: App.Made<Http.Http>;
-  readonly sentry: App.Made<Sentry.Sentry>;
-  readonly db: App.Made<Db.Database>;
-  readonly logger: App.Made<Logger.Logger>;
-  readonly host: App.Made<Fleet.Host.Host>;
-  readonly usage: App.Made<Fleet.Usage.Usage>;
-  readonly servers: App.Made<Stores.Servers.Servers>;
-  readonly processStats: App.Made<Stores.ProcessStats.ProcessStats>;
-};
+export type Services = App.Needs<
+  | Http.Http
+  | Sentry.Sentry
+  | Db.Database
+  | Logger.Logger
+  | Fleet.Host.Host
+  | Fleet.Usage.Usage
+  | Stores.Servers.Servers
+  | Stores.ProcessStats.ProcessStats
+>;
 
 export type Terminal = {
   readonly write: (line: string) => void;
@@ -25,11 +25,9 @@ export type Terminal = {
 };
 
 // Everything the services reach outside the process but the database, which env names.
-export type World = {
+export type World = App.Needs<App.Made<Http.Http> | App.Made<Fleet.Usage.Usage>> & {
   readonly terminal: Terminal;
-  readonly http: App.Made<Http.Http>;
   readonly host: Fleet.Host.Source;
-  readonly usage: App.Made<Fleet.Usage.Usage>;
 };
 
 const live = (): World => ({
@@ -47,7 +45,7 @@ const live = (): World => ({
 export const createServices = (
   env: { readonly vars: { readonly databaseUrl: Env.Secret } },
   world: World = live(),
-): Services => {
+) => {
   const { terminal, http, usage } = world;
   const sentry = Sentry.create({ http }, { dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT });
   const db = Db.create({}, { url: env.vars.databaseUrl });
@@ -58,13 +56,13 @@ export const createServices = (
   );
   const servers = Stores.Servers.create({ db });
   const processStats = Stores.ProcessStats.create({ db });
-  return { http, sentry, db, logger, host, usage, servers, processStats };
+  return { http, sentry, db, logger, host, usage, servers, processStats } satisfies Services;
 };
 
 // Every line waits on its insert, so the pool stays open until the last one lands; a line the
 // close itself logs lands, or fails to, before Sentry is waited on.
 export const closeServices = async (
-  services: Pick<Services, "db" | "logger" | "sentry">,
+  services: App.Needs<Db.Database | Logger.Logger | Sentry.Sentry>,
 ): Promise<jarl.Result<void, Db.DatabaseError>> => {
   await services.logger.flush();
   const closed = await services.db.close();
