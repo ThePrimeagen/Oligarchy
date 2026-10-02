@@ -156,6 +156,7 @@ export type Tests = {
   readonly startRun: (runId: string, model: string) => Moved<RunRow>;
   readonly completeRun: (runId: string, status: RunVerdict, reason: string | null) => Moved<RunRow>;
   readonly errorRun: (runId: string, reason: string) => Moved<RunRow>;
+  readonly timeoutRun: (runId: string, reason: string) => Moved<RunRow>;
   readonly abortRun: (runId: string, reason: string) => Moved<RunRow>;
 
   readonly createJob: (runId: string, action: JobAction) => Moved<JobRow>;
@@ -897,6 +898,15 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         run.running,
         { status: "errored", reason, finishedAt: now },
         openJobOf("errorRun"),
+      ),
+
+    timeoutRun: (runId, reason) =>
+      moveRun(
+        "timeoutRun",
+        runId,
+        run.running,
+        { status: "timed_out", reason, finishedAt: now },
+        openJobOf("timeoutRun"),
       ),
 
     abortRun: (runId, reason) =>

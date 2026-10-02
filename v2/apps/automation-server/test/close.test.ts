@@ -174,6 +174,46 @@ describe("closing a job once its /run answers", () => {
     expect(failed[0]?.report.agentId).toBe(job.id);
   });
 
+  it("a /run that timed out at its client is timed out with why, and so is its test run, with a warning under it; no diagnose is queued, a diagnose's drive is left completed, and the suite closes failed (unhappy)", async () => {
+    const timesOut = new Set<string>();
+    const why = "driver timed out: run ceiling of 60000 ms";
+    const at = await dispatching({
+      [FIRST]: {
+        run: async ({ jobId, prompt }) =>
+          timesOut.has(jobId) || prompt !== undefined
+            ? jarl.err(new ClientRoutes.RunTimedOut(why))
+            : jarl.ok("ended"),
+      },
+    });
+    await at.live(FIRST);
+    const suite = await at.suite(2);
+    const [first, second] = drives(suite);
+    if (first === undefined || second === undefined) {
+      throw new Error("a suite of two filed fewer runs");
+    }
+    timesOut.add(first.id);
+
+    await closeNext(at);
+    await closeNext(at);
+    const diagnose = await diagnoseOf(at, second.runId);
+    await closeNext(at);
+
+    const reason = `POST ${FIRST}/run: 504: {"error":"${why}"}`;
+    expect(await at.job(first.id)).toEqual({ status: "timed_out", reason });
+    expect(jarl.unwrap(await at.tests.latestJob(first.runId, "diagnose"))).toBeUndefined();
+    expect(await at.run(first.runId)).toMatchObject({ status: "timed_out", reason });
+    expect(await at.job(diagnose.id)).toEqual({ status: "timed_out", reason });
+    expect(await at.job(second.id)).toEqual({ status: "completed", reason: null });
+    expect(await at.run(second.runId)).toMatchObject({ status: "timed_out", reason });
+    expect(jarl.unwrap(await at.tests.getTestSuite(suite.suite.id)).status).toBe("failed");
+    const warned = at.said.filter((one) => one.level === "warning");
+    expect(warned.map((one) => [one.text, one.report.agentId])).toEqual([
+      [`drive timed out: ${reason}`, first.id],
+      [`diagnose timed out: ${reason}`, diagnose.id],
+    ]);
+    expect(errors(at.said)).toEqual([]);
+  });
+
   it("a /run an abort ended is aborted at its client; a job already aborted, as by an operator, stays as it was and nothing is said of it (unhappy)", async () => {
     const at = await dispatching((tests) => ({
       [FIRST]: { run: async () => jarl.ok("aborted") },

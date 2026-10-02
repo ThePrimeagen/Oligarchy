@@ -13,14 +13,26 @@ const valid = {
   },
   reasoning: { drive: "minimal", diagnose: "xhigh", setup: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
-  timeouts: { header: "3 minutes", chunk: "3 minutes" },
-  runCeiling: "1.5 hours",
-  stepLimit: 200,
-  harness: { defaultRetry: "1 second", recentActions: 10 },
+  httpTimeout: "10 seconds",
+  driver: {
+    runCeiling: "1.5 hours",
+    stepLimit: 200,
+    askTimeout: "3 minutes",
+    harness: { defaultRetry: "1 second", recentActions: 10 },
+    guest: { startTimeout: "45 minutes", saveTimeout: "5 minutes" },
+  },
+  diagnose: { runCeiling: "1.5 hours", headerTimeout: "3 minutes", chunkTimeout: "3 minutes" },
+  automationClient: {
+    driverGrace: "5 minutes",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    reserveTimeout: "1 minute",
+  },
   automationServer: {
     dispatchInterval: "30 seconds",
     forgetInterval: "30 seconds",
     forgetAfter: "10 minutes",
+    abortTimeout: "15 seconds",
   },
 };
 
@@ -41,9 +53,26 @@ describe("load", () => {
 
   it("turns every duration into milliseconds (happy)", async () => {
     const config = jarl.unwrap(await loadText(JSON.stringify(valid)));
-    expect(config.timeouts).toEqual({ header: 180_000, chunk: 180_000 });
-    expect(config.runCeiling).toBe(5_400_000);
-    expect(config.harness.defaultRetry).toBe(1_000);
+    expect(config.httpTimeout).toBe(10_000);
+    expect(config.driver).toEqual({
+      runCeiling: 5_400_000,
+      stepLimit: 200,
+      askTimeout: 180_000,
+      harness: { defaultRetry: 1_000, recentActions: 10 },
+      guest: { startTimeout: 2_700_000, saveTimeout: 300_000 },
+    });
+    expect(config.diagnose).toEqual({
+      runCeiling: 5_400_000,
+      headerTimeout: 180_000,
+      chunkTimeout: 180_000,
+    });
+    expect(config.automationClient).toEqual({
+      driverGrace: 300_000,
+      killGrace: 5_000,
+      stderrGrace: 2_000,
+      reserveTimeout: 60_000,
+    });
+    expect(config.automationServer.abortTimeout).toBe(15_000);
     expect(config.reasoning.diagnose).toBe("xhigh");
     expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
     expect(config.reasoning.setup).toBe("minimal");
@@ -74,26 +103,37 @@ describe("load", () => {
   });
 
   it("names a field whose duration it cannot read (unhappy)", async () => {
-    expect(await refusal({ ...valid, runCeiling: "soon" })).toMatch(
-      new RegExp(`^${Config.PATH}: runCeiling: `),
+    expect(await refusal({ ...valid, driver: { ...valid.driver, runCeiling: "soon" } })).toMatch(
+      new RegExp(`^${Config.PATH}: driver.runCeiling: `),
     );
   });
 
   it("refuses a zero duration (unhappy)", async () => {
-    expect(await refusal({ ...valid, harness: { defaultRetry: "0 seconds" } })).toBe(
-      `${Config.PATH}: harness.defaultRetry: duration must be greater than zero`,
+    const harness = { defaultRetry: "0 seconds", recentActions: 10 };
+    expect(await refusal({ ...valid, driver: { ...valid.driver, harness } })).toBe(
+      `${Config.PATH}: driver.harness.defaultRetry: duration must be greater than zero`,
     );
   });
 
-  it("refuses a timeout that does not fit under the run ceiling (unhappy)", async () => {
-    expect(await refusal({ ...valid, timeouts: { header: "2 hours", chunk: "3 minutes" } })).toBe(
-      `${Config.PATH}: timeouts.header: must be shorter than runCeiling`,
+  it("refuses a timeout that does not fit under its run ceiling (unhappy)", async () => {
+    expect(await refusal({ ...valid, driver: { ...valid.driver, askTimeout: "2 hours" } })).toBe(
+      `${Config.PATH}: driver.askTimeout: must be shorter than driver.runCeiling`,
+    );
+    expect(
+      await refusal({ ...valid, diagnose: { ...valid.diagnose, chunkTimeout: "2 hours" } }),
+    ).toBe(`${Config.PATH}: diagnose.chunkTimeout: must be shorter than diagnose.runCeiling`);
+  });
+
+  it("refuses an abort timeout too short for a client to stop its job (unhappy)", async () => {
+    const automationServer = { ...valid.automationServer, abortTimeout: "7 seconds" };
+    expect(await refusal({ ...valid, automationServer })).toBe(
+      `${Config.PATH}: automationServer.abortTimeout: must be longer than automationClient.killGrace plus automationClient.stderrGrace, and than httpTimeout`,
     );
   });
 
   it("refuses a step limit below one (unhappy)", async () => {
-    expect(await refusal({ ...valid, stepLimit: 0 })).toBe(
-      `${Config.PATH}: stepLimit: stepLimit must be at least 1`,
+    expect(await refusal({ ...valid, driver: { ...valid.driver, stepLimit: 0 } })).toBe(
+      `${Config.PATH}: driver.stepLimit: stepLimit must be at least 1`,
     );
   });
 

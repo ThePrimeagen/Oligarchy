@@ -1,4 +1,4 @@
-export { App } from "./app.ts";
+export { App, processIo } from "./app.ts";
 export { createService } from "./service.ts";
 export { waitForAbort } from "./wait.ts";
 export type { Services } from "./services.ts";

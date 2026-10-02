@@ -154,6 +154,7 @@ export const world = (
     startRun: unused,
     completeRun: unused,
     errorRun: unused,
+    timeoutRun: unused,
     abortRun: unused,
     createJob: unused,
     getJob: unused,
@@ -189,6 +190,8 @@ export const world = (
       job: JOB,
       baseUrl: SERVER_URL,
       token: { reveal: () => TOKEN },
+      startTimeoutMs: 90_000,
+      saveTimeoutMs: 30_000,
     },
   );
   return { calls, asked: fake.asked, requests, services, driveHarness };

@@ -18,11 +18,6 @@ export type {
   StopStatus,
 } from "./types.ts";
 
-// A first start downloads its ISO before it answers.
-export const START_TIMEOUT_MS = 45 * 60_000;
-// A save gives the guest two minutes to power off before it keeps the disk.
-export const SAVE_TIMEOUT_MS = 5 * 60_000;
-
 // A nudge's share of the screen, from where the pointer is.
 const NUDGE = 0.02;
 const NUDGES: Readonly<Record<Types.Direction, Types.Point>> = {
@@ -61,6 +56,10 @@ export type Options = {
   readonly job: string;
   readonly baseUrl: string;
   readonly token: { readonly reveal: () => string };
+  // A first start downloads its ISO before it answers; a save gives the guest time to power off
+  // before it keeps the disk.
+  readonly startTimeoutMs: number;
+  readonly saveTimeoutMs: number;
 };
 
 // One job's guest, over the qemu reverse proxy: the harness's calls, the guest's screen, keys and
@@ -215,7 +214,7 @@ class QemuHttpTools {
       this.where("start"),
       this.posting(
         { iso: boot.iso, mode: boot.resume ? "resume" : "fresh" },
-        { timeoutMs: START_TIMEOUT_MS },
+        { timeoutMs: this.options.startTimeoutMs },
       ),
       { decode: ignored },
     );
@@ -271,7 +270,7 @@ class QemuHttpTools {
   save(): Types.Answer<void, Http.HttpFailure | Errors.NotPoweredOff> {
     return this.services.http.fetch(
       this.where("save"),
-      this.posting({}, { timeoutMs: SAVE_TIMEOUT_MS }),
+      this.posting({}, { timeoutMs: this.options.saveTimeoutMs }),
       { decode: ignored, status: { 409: conflict("save", Errors.NotPoweredOff) } },
     );
   }

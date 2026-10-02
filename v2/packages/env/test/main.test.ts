@@ -134,8 +134,7 @@ describe("create", () => {
     const file = {
       ...JSON.parse(CONFIG),
       models: { drive: "test/drive", diagnose: "test/diagnose", setup: "test/setup" },
-      stepLimit: 7,
-      timeouts: { header: "2 seconds", chunk: "5 seconds" },
+      driver: { ...JSON.parse(CONFIG).driver, stepLimit: 7, askTimeout: "2 seconds" },
     };
     const result = await Env.create(
       ctrl,
@@ -147,8 +146,8 @@ describe("create", () => {
     );
     const { config } = jarl.unwrap(result);
     expect(config.models).toEqual(file.models);
-    expect(config.stepLimit).toBe(7);
-    expect(config.timeouts).toEqual({ header: 2_000, chunk: 5_000 });
+    expect(config.driver.stepLimit).toBe(7);
+    expect(config.driver.askTimeout).toBe(2_000);
   });
 });
 

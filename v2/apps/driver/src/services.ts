@@ -30,7 +30,7 @@ export const createServices = (env: {
   readonly config: Env.Config;
 }) => {
   const { vars, config } = env;
-  const http = Http.create({});
+  const http = Http.create({}, { timeoutMs: config.httpTimeout });
   const sentry = Sentry.create({ http }, { dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT });
   const db = Db.create({}, { url: vars.databaseUrl });
   const logger = Logger.create(
@@ -43,8 +43,8 @@ export const createServices = (env: {
     {
       token: vars.openRouterToken,
       baseUrl: config.openRouterBaseUrl,
-      timeoutMs: config.timeouts.header,
-      defaultRetry: config.harness.defaultRetry,
+      timeoutMs: config.driver.askTimeout,
+      defaultRetry: config.driver.harness.defaultRetry,
       attempts: ATTEMPTS,
     },
   );

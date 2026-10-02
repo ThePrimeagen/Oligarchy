@@ -208,6 +208,7 @@ const JOB_NEEDS = {
 const RUN_MOVES_WITH_A_JOB: Readonly<Record<string, Move>> = {
   createJob: (tests, id) => tests.createJob(id, "diagnose"),
   errorRun: (tests, id) => tests.errorRun(id, "given up"),
+  timeoutRun: (tests, id) => tests.timeoutRun(id, "run ceiling of 60000 ms passed"),
   abortRun: (tests, id) => tests.abortRun(id, "operator"),
 };
 
@@ -215,6 +216,7 @@ const RUN_MOVES: Readonly<Record<string, Move>> = {
   startRun: (tests, id) => tests.startRun(id, MODEL),
   completeRun: (tests, id) => tests.completeRun(id, "passed", null),
   errorRun: (tests, id) => tests.errorRun(id, "given up"),
+  timeoutRun: (tests, id) => tests.timeoutRun(id, "run ceiling of 60000 ms passed"),
   abortRun: (tests, id) => tests.abortRun(id, "operator"),
   createJob: (tests, id) => tests.createJob(id, "drive"),
 };
@@ -222,6 +224,7 @@ const RUN_NEEDS = {
   startRun: "pending",
   completeRun: "running",
   errorRun: "running",
+  timeoutRun: "running",
   abortRun: "pending or running",
   createJob: "pending or running",
 };
@@ -752,6 +755,7 @@ describe("a job, state by state", () => {
     expect(await runMovesWithAJob(setup, "completed")).toEqual({
       createJob: "pending",
       errorRun: "errored",
+      timeoutRun: "timed_out",
       abortRun: "aborted",
     });
     jarl.unwrap(await setup.tests.abortJob(diagnose.id, "operator"));
@@ -779,6 +783,7 @@ describe("a job, state by state", () => {
       expect(await runMovesWithAJob(setup, status), status).toEqual({
         createJob: "pending",
         errorRun: "errored",
+        timeoutRun: "timed_out",
         abortRun: "aborted",
       });
     }
@@ -799,13 +804,14 @@ describe("a test run, state by state", () => {
     expect(await suiteMovesWithARun(setup, "pending")).toEqual(heldByRun("pending"));
   });
 
-  it("running: it takes its verdict, errors, is aborted or takes a job, refuses starting again, and holds its suite (unhappy)", async () => {
+  it("running: it takes its verdict, errors, times out, is aborted or takes a job, refuses starting again, and holds its suite (unhappy)", async () => {
     const setup = await database();
 
     expect(await runMoves(setup, "running")).toEqual(
       expected(RUN_NEEDS, "test run <id> is running", {
         completeRun: "passed",
         errorRun: "errored",
+        timeoutRun: "timed_out",
         abortRun: "aborted",
         createJob: "pending",
       }),
@@ -957,6 +963,7 @@ describe("a row that does not exist", () => {
       startRun: () => tests.startRun(MISSING, MODEL),
       completeRun: () => tests.completeRun(MISSING, "passed", null),
       errorRun: () => tests.errorRun(MISSING, "x"),
+      timeoutRun: () => tests.timeoutRun(MISSING, "x"),
       abortRun: () => tests.abortRun(MISSING, "x"),
       completeSuite: () => tests.completeSuite(MISSING, "passed", null),
       abortSuite: () => tests.abortSuite(MISSING, "x"),
@@ -972,6 +979,7 @@ describe("a row that does not exist", () => {
       startRun: "test run",
       completeRun: "test run",
       errorRun: "test run",
+      timeoutRun: "test run",
       abortRun: "test run",
       getTestRun: "test run",
       getTestRunDetails: "test run",

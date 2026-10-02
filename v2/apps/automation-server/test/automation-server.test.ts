@@ -26,6 +26,7 @@ const DRIVE = "33333333-3333-4333-8333-333333333333";
 const DIAGNOSE = "44444444-4444-4444-8444-444444444444";
 const RESERVED = `[INFO] [${DRIVE}] automation-server: reserved drive; ${CLIENT}`;
 const QUEUED = `[INFO] [${DRIVE}] automation-server: drive completed; diagnose ${DIAGNOSE} queued`;
+const ABORTED = `[INFO] [${DRIVE}] automation-server: aborted pending drive`;
 const AT = new Date(0);
 const RUN_ROW: Stores.Tests.RunRow = {
   id: RUN,
@@ -55,14 +56,26 @@ const CONFIG = JSON.stringify({
   models: { drive: "test/drive", diagnose: "test/diagnose", setup: "test/setup" },
   reasoning: { drive: "high", diagnose: "high", setup: "high" },
   openRouterBaseUrl: "https://openrouter.test",
-  timeouts: { header: "1 second", chunk: "1 second" },
-  runCeiling: "1 minute",
-  stepLimit: 10,
-  harness: { defaultRetry: "1 second", recentActions: 10 },
+  httpTimeout: "10 seconds",
+  driver: {
+    runCeiling: "1 minute",
+    stepLimit: 10,
+    askTimeout: "1 second",
+    harness: { defaultRetry: "1 second", recentActions: 10 },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+  },
+  diagnose: { runCeiling: "1 minute", headerTimeout: "1 second", chunkTimeout: "1 second" },
+  automationClient: {
+    driverGrace: "5 minutes",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    reserveTimeout: "1 minute",
+  },
   automationServer: {
     dispatchInterval: "10 seconds",
     forgetInterval: "30 seconds",
     forgetAfter: "10 minutes",
+    abortTimeout: "15 seconds",
   },
 });
 
@@ -86,9 +99,11 @@ const started = async (
     // One live client and one pending drive, whose run ends at once and whose completion is
     // written only once this settles.
     readonly completing?: Promise<void>;
+    // An operator's abort of the pending drive is written only once this settles.
+    readonly aborting?: Promise<void>;
   } = {},
 ) => {
-  const { completing } = options;
+  const { completing, aborting } = options;
   const order: Array<string> = [];
   let pending: Array<Stores.Tests.JobRow> = completing === undefined ? [] : [job(DRIVE, "drive")];
   const env = jarl.unwrap(
@@ -153,9 +168,13 @@ const started = async (
     startRun: unexpected,
     completeRun: unexpected,
     errorRun: unexpected,
-    abortRun: unexpected,
+    timeoutRun: unexpected,
+    abortRun: async () => {
+      order.push("run aborted");
+      return jarl.ok({ ...RUN_ROW, status: "aborted" });
+    },
     createJob: async (_runId, action) => jarl.ok(job(DIAGNOSE, action)),
-    getJob: unexpected,
+    getJob: async (jobId) => jarl.ok({ ...job(jobId, "drive"), test: "lock-screen" }),
     getJobDetails: async () =>
       jarl.ok({
         job: job(DRIVE, "drive"),
@@ -187,7 +206,11 @@ const started = async (
     finalizeJob: unexpected,
     errorJob: unexpected,
     timeoutJob: unexpected,
-    abortJob: unexpected,
+    abortJob: async (jobId) => {
+      await aborting;
+      order.push("drive aborted");
+      return jarl.ok({ ...job(jobId, "drive"), status: "aborted" });
+    },
   }))({});
   const setupRequests = App.createService<never, App.NoOptions, Stores.SetupRequests.SetupRequests>(
     () => ({
@@ -226,7 +249,9 @@ const started = async (
     | Stores.Diagnosis.Diagnosis
   >;
   const addresses: Array<Parameters<typeof Serve.listen>[1]> = [];
-  const listen: typeof Serve.listen = async (_handler, address) => {
+  let served: Parameters<typeof Serve.listen>[0] = unexpected;
+  const listen: typeof Serve.listen = async (handler, address) => {
+    served = handler;
     addresses.push(address);
     if (options.listenError !== undefined) {
       return jarl.err(options.listenError);
@@ -275,9 +300,18 @@ const started = async (
     return running;
   };
   await vi.advanceTimersByTimeAsync(0);
+  const abort = (jobId: string) =>
+    served(
+      new Request(`http://127.0.0.1:${PORT}/abort`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      }),
+    );
   return {
     running,
     stop,
+    abort,
     codes,
     errors,
     stderr,
@@ -382,6 +416,39 @@ describe("the automation server lifecycle", () => {
         "exit handler",
       ]);
       expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED, STOPPED, QUEUED]);
+      expect(at.codes).toEqual([0]);
+      expect(at.errors).toEqual([]);
+    } finally {
+      release();
+      await at.stop();
+    }
+  });
+
+  it("a SIGTERM while an operator's abort is writing waits for the abort before any exit handler (unhappy)", async () => {
+    let release: () => void = () => undefined;
+    const aborting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const at = await started({ aborting });
+    try {
+      const answered = Promise.resolve(at.abort(DRIVE));
+      await vi.advanceTimersByTimeAsync(0);
+      const stopped = at.stop();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(at.order).toEqual(["close listener", "listener closed"]);
+      expect(at.codes).toEqual([]);
+
+      release();
+      await stopped;
+      expect(at.order).toEqual([
+        "close listener",
+        "listener closed",
+        "drive aborted",
+        "run aborted",
+        "exit handler",
+      ]);
+      expect((await answered).status).toBe(200);
+      expect(at.lines).toEqual([STARTED, FORGOTTEN, ABORTED, STOPPED]);
       expect(at.codes).toEqual([0]);
       expect(at.errors).toEqual([]);
     } finally {

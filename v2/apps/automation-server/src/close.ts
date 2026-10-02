@@ -5,6 +5,7 @@ import type * as Http from "@oligarchy/http";
 import type * as Logger from "@oligarchy/logger";
 import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
+import * as AutomationClient from "./automation-client.ts";
 
 const LOCATION = "automation-server";
 
@@ -18,6 +19,11 @@ export type Running = {
 };
 
 type Services = App.Needs<Stores.Tests.Tests | Stores.Diagnosis.Diagnosis | Logger.Logger>;
+
+export type Options = {
+  // The jobs an operator's /abort is stopping at their clients; each is the abort's to write.
+  readonly aborting: ReadonlySet<string>;
+};
 
 type Closed = Promise<
   jarl.Result<void, Db.DatabaseError | Stores.Tests.InvalidState | Stores.Tests.NotFound>
@@ -41,7 +47,10 @@ const queueDiagnose = async ({ tests, logger }: Services, job: Stores.Tests.JobR
 
 // A suite closes with its last open run: passed when every run passed. Two of its runs closing at
 // once can each find none open, and the one that completes the suite second is refused.
-const closeSuite = async ({ tests }: Services, suiteId: string): Closed => {
+export const closeSuite = async (
+  { tests }: App.Needs<Stores.Tests.Tests>,
+  suiteId: string,
+): Closed => {
   const found = await tests.getTestSuite(suiteId);
   if (jarl.is_err(found)) {
     return found;
@@ -101,7 +110,14 @@ const finalize = async (
 };
 
 // An operator's abort may have aborted the job before its client answered; that abort stands.
-const abort = async ({ tests, logger }: Services, job: Stores.Tests.JobRow): Closed => {
+const abort = async (
+  { tests, logger }: Services,
+  { aborting }: Options,
+  job: Stores.Tests.JobRow,
+): Closed => {
+  if (aborting.has(job.id)) {
+    return jarl.ok(undefined);
+  }
   const aborted = await tests.abortJob(job.id, ABORTED);
   if (jarl.error.is(aborted, Stores.Tests.InvalidState)) {
     return jarl.ok(undefined);
@@ -125,18 +141,38 @@ const fail = async (
   return jarl.is_err(errored) ? errored : jarl.ok(undefined);
 };
 
+// The run reached its ceiling: the job and its test run are timed out with why, nothing is
+// queued, and the run's suite closes once none of its runs is open.
+const timeOut = async (services: Services, job: Stores.Tests.JobRow, failure: Error): Closed => {
+  const { tests, logger } = services;
+  const timedOut = await tests.timeoutJob(job.id, failure.message);
+  if (jarl.is_err(timedOut)) {
+    return timedOut;
+  }
+  logger.warning(`${job.action} timed out: ${failure.message}`, at(job));
+  const closedRun = await tests.timeoutRun(job.runId, failure.message);
+  if (jarl.is_err(closedRun)) {
+    return closedRun;
+  }
+  const { suiteId } = jarl.value(closedRun);
+  return suiteId === null ? jarl.ok(undefined) : closeSuite(services, suiteId);
+};
+
 // Closes the job by how its /run answered. A write that fails stops the close where it is.
 export const close = async (
   services: Services,
+  options: Options,
   running: Running,
   ran: jarl.Result<ClientRoutes.Ran, Http.HttpFailure>,
 ): Promise<void> => {
   const { job, judgedJobId } = running;
   let closed: Awaited<Closed>;
   if (jarl.is_err(ran)) {
-    closed = await fail(services, job, ran.error);
+    closed = AutomationClient.timedOut(ran.error)
+      ? await timeOut(services, job, ran.error)
+      : await fail(services, job, ran.error);
   } else if (jarl.value(ran) === "aborted") {
-    closed = await abort(services, job);
+    closed = await abort(services, options, job);
   } else if (judgedJobId === undefined) {
     closed = await queueDiagnose(services, job);
   } else {
