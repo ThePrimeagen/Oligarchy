@@ -1,13 +1,10 @@
 # Aborts
 
-Two meanings. Do not mix them.
-
 | Word | Is | Lives in |
 | --- | --- | --- |
 | signal abort | an `AbortSignal` stops work in flight | apps, services, HTTP, business logic |
 | status abort | a row moves to `aborted` | `tests.abortJob` / `abortRun` / `abortSuite` |
-
-Also a status, not a signal: qemu `StopStatus` `"aborted"`, and Sentry `SpanStatus` `"aborted"`.
+| status abort | qemu `StopStatus` `"aborted"`, Sentry `SpanStatus` `"aborted"` | `qemu-http-tools`, `sentry` |
 
 ## Errors
 
@@ -27,10 +24,9 @@ Also a status, not a signal: qemu `StopStatus` `"aborted"`, and Sentry `SpanStat
 
 ## Application
 
-`app.signal` aborts on the first SIGINT, SIGTERM or SIGHUP, when its parent stops, or once its main returns (`packages/app/src/app.ts`).
-
 | Problem | Fact |
 | --- | --- |
+| `app.signal` aborts | on the first SIGINT, SIGTERM or SIGHUP, when its parent stops, or once its main returns |
 | main runs until killed | `await App.waitForAbort(app.signal)`. It resolves `void`. |
 | ordering on stop | close the listener, then shut down jobs, then log `stopped; ${reason}`, then `return jarl.ok(undefined)` |
 | listener `close()` | stops new connections. A handler still running is not stopped, so abort held jobs yourself. |
@@ -114,8 +110,7 @@ posting({ status: end.status }, { aborts: false });
 | a call only an abort may end | `timeoutMs: 2 ** 31 - 1` (the automation client's `/run`) |
 | failure in a loop that may be a shutdown | check `signal.aborted` first and return `Aborted` |
 | status a route answers on purpose | name it in the spec so it is a word, not a failure: `"/abort": { ok: "stopped", 404: "not-held" }` |
-
-`@oligarchy/http` runs every fetch through `Async.timeout(exchange, { ms: timeoutMs, signal })`.
+| how | `@oligarchy/http` runs every fetch through `Async.timeout(exchange, { ms: timeoutMs, signal })` |
 
 ```ts
 // apps/automation-server/src/dispatch.ts
@@ -133,7 +128,7 @@ if (jarl.is_err(reserved)) {
 
 ## The `/abort` route
 
-AGENTS.md rule 9: the path `/abort` calls a function named `abort`, which performs the abort sequence.
+- `/abort` calls a function named `abort`, which performs the abort sequence (AGENTS.md rule 9).
 
 | App | Body | Answers |
 | --- | --- | --- |
@@ -168,7 +163,9 @@ AGENTS.md rule 9: the path `/abort` calls a function named `abort`, which perfor
 
 ## Business logic: one job's abort
 
-Use a plain module, not a service (`apps/automation-client/src/jobs.ts`). It has `export const create = ()`, no `createService`, and no entry in `services.ts`. `main` creates it and hands `jobs.abort` to the routes. It keeps one `AbortController` per id, in memory only.
+- A plain module, not a service: `export const create = ()`, no `createService`, no entry in `services.ts` (`apps/automation-client/src/jobs.ts`).
+- `main` creates it and hands `jobs.abort` to the routes.
+- One `AbortController` per id, in memory only.
 
 | Problem | Fact |
 | --- | --- |
