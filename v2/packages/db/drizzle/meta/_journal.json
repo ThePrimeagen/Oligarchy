@@ -71,6 +71,13 @@
       "when": 1790812524561,
       "tag": "0010_mint_is_setup",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790978892113,
+      "tag": "0011_logs_job_id",
+      "breakpoints": true
     }
   ]
 }

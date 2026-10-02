@@ -44,6 +44,7 @@ const announcing = (jobs: Jobs.Jobs) => async (sub: App.App<Environment.Run, Ann
       },
       { host, usage, servers, processStats, logger },
       sub.signal,
+      { every: sub.environment.config.fleet.heartbeatInterval },
     ),
   ]);
   return jarl.ok(undefined);

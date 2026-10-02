@@ -199,6 +199,7 @@ export const world = (
       token: { reveal: () => TOKEN },
       startTimeoutMs: 90_000,
       saveTimeoutMs: 30_000,
+      sendKeysTimeoutMs: 20_000,
     },
   );
   return { calls, asked: fake.asked, requests, services, driveHarness };

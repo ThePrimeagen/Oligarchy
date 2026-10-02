@@ -63,6 +63,7 @@ const File = z
     openRouterBaseUrl: z.string().refine(isHttpUrl, "must be an http or https url"),
     // Any HTTP call that names no deadline of its own.
     httpTimeout: Duration,
+    fleet: z.strictObject({ heartbeatInterval: Duration }),
     // A drive's or setup's driver. askTimeout bounds each OpenRouter ask; recentActions is the
     // lines of a step the driving prompt shows, its intent among them. A guest's first start
     // downloads its ISO before it answers, and a save gives it time to power off.
@@ -74,7 +75,11 @@ const File = z
         defaultRetry: Duration,
         recentActions: z.int().min(1, "recentActions must be at least 1"),
       }),
-      guest: z.strictObject({ startTimeout: Duration, saveTimeout: Duration }),
+      guest: z.strictObject({
+        startTimeout: Duration,
+        saveTimeout: Duration,
+        sendKeysTimeout: Duration,
+      }),
     }),
     // A diagnose's opencode: killed at runCeiling, and an OpenRouter stream with no first byte,
     // or no next chunk, for its timeout is asked again.
@@ -178,6 +183,7 @@ const File = z
       });
     }
     const relationships = [
+      ["fleet", "heartbeatInterval", config.fleet.heartbeatInterval, config.qemuServer.forgetAfter],
       [
         "qemuServer",
         "reserveTimeout",

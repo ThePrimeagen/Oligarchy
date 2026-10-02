@@ -10,7 +10,7 @@ describe("the logger", () => {
     const { lines, logger, rows } = await logging();
     await logger.flush();
 
-    logger.info("booted", { jobId: "OLI-1", location: "s-1" });
+    logger.info("booted", { jobId: "11111111-1111-4111-8111-111111111111", location: "s-1" });
     logger.warning("slow");
     logger.error("qemu exited", { location: "s-1" });
     logger.fatal("config unreadable");
@@ -21,7 +21,7 @@ describe("the logger", () => {
     await logger.flush();
     expect(flushed.settled).toBe(true);
     expect(lines).toEqual([
-      "[INFO] [OLI-1] s-1: booted",
+      "[INFO] [11111111-1111-4111-8111-111111111111] s-1: booted",
       "[WARN] [global] slow",
       "[ERROR] [global] s-1: qemu exited",
       "[FATAL] [global] config unreadable",
@@ -37,9 +37,9 @@ describe("the logger", () => {
   it("a job keeps its colour across lines, and a second job takes the next (happy)", async () => {
     const { lines, logger } = await logging({ colors: true, now: () => 0 });
 
-    logger.info("x", { jobId: "A" });
-    logger.info("x", { jobId: "B" });
-    logger.info("x", { jobId: "A" });
+    logger.info("x", { jobId: "11111111-1111-4111-8111-111111111111" });
+    logger.info("x", { jobId: "22222222-2222-4222-8222-222222222222" });
+    logger.info("x", { jobId: "11111111-1111-4111-8111-111111111111" });
     await logger.flush();
 
     const painted = (jobId: string, color: string | undefined) =>
@@ -48,9 +48,9 @@ describe("the logger", () => {
         true,
       );
     expect(lines).toEqual([
-      painted("A", Render.JOB_COLORS[0]),
-      painted("B", Render.JOB_COLORS[1]),
-      painted("A", Render.JOB_COLORS[0]),
+      painted("11111111-1111-4111-8111-111111111111", Render.JOB_COLORS[0]),
+      painted("22222222-2222-4222-8222-222222222222", Render.JOB_COLORS[1]),
+      painted("11111111-1111-4111-8111-111111111111", Render.JOB_COLORS[0]),
     ]);
   });
 });
@@ -62,27 +62,27 @@ describe("the logger's Sentry", () => {
 
     logger.error("stop cleanup failed: connect ECONNREFUSED", {
       location: "s-1",
-      jobId: "OLI-1",
+      jobId: "11111111-1111-4111-8111-111111111111",
       cause,
     });
     logger.fatal("config unreadable");
     await logger.flush();
 
     expect(lines).toEqual([
-      "[ERROR] [OLI-1] s-1: stop cleanup failed: connect ECONNREFUSED",
+      "[ERROR] [11111111-1111-4111-8111-111111111111] s-1: stop cleanup failed: connect ECONNREFUSED",
       "[FATAL] [global] config unreadable",
     ]);
     expect(sent).toEqual([
       {
         error: cause,
-        jobId: "OLI-1",
+        jobId: "11111111-1111-4111-8111-111111111111",
         report: {
           level: "error",
-          tags: { location: "s-1", job_id: "OLI-1" },
+          tags: { location: "s-1", job_id: "11111111-1111-4111-8111-111111111111" },
           extra: {
             log: "stop cleanup failed: connect ECONNREFUSED",
             location: "s-1",
-            job_id: "OLI-1",
+            job_id: "11111111-1111-4111-8111-111111111111",
           },
         },
       },

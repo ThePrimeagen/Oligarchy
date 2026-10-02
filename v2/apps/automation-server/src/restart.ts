@@ -24,15 +24,16 @@ export const restart = async (services: App.Needs<Wants>, options: Abort.Options
       }).post("/abort", { jobId: job.id });
       if (jarl.is_err(stopped)) return jarl.err(new Abort.NotStopped(stopped.error.message));
     }
-    // A result committed while we stopped its client retains its result.
+    // Only the database status counts. A client that already finished still leaves an
+    // inherited running job to abort; a terminal database row needs no further transition.
     const current = await services.tests.getJob(job.id);
     if (jarl.is_err(current)) return current;
     if (jarl.value(current).status !== "running") continue;
     const reason = "automation server restarted before receiving the job result";
-    const ended = await services.tests.errorJob(job.id, reason);
+    const ended = await services.tests.abortJob(job.id, reason);
     if (jarl.error.is(ended, Stores.Tests.InvalidState)) continue;
     if (jarl.is_err(ended)) return ended;
-    const run = await services.tests.errorRun(job.runId, reason);
+    const run = await services.tests.abortRun(job.runId, reason);
     if (jarl.error.is(run, Stores.Tests.InvalidState)) continue;
     if (jarl.is_err(run)) return run;
     const suiteId = jarl.value(run).suiteId;

@@ -6,9 +6,6 @@ import { attempt } from "./failure.ts";
 import type * as Host from "./host.ts";
 import type * as Usage from "./usage.ts";
 
-// The dashboard polls as often, so a row is never more than one poll behind.
-export const HEARTBEAT_MS = 30_000;
-
 type Refusal = { readonly message: string };
 
 export type Member = {
@@ -41,7 +38,7 @@ export const announce = async (
   member: Member,
   needs: Needs,
   signal: AbortSignal,
-  options: { readonly every?: number } = {},
+  options: { readonly every: number },
 ): Promise<void> => {
   const { host, usage, servers, processStats } = needs;
   const log = { logger: needs.logger, attribution: member.attribution };
@@ -75,7 +72,7 @@ export const announce = async (
   };
 
   await tick(signal);
-  await Async.tick(tick, options.every ?? HEARTBEAT_MS, signal);
+  await Async.tick(tick, options.every, signal);
   if (onLeave !== undefined) {
     await attempt(log, "leave failed", onLeave);
   }

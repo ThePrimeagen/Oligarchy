@@ -60,6 +60,7 @@ export type Options = {
   // before it keeps the disk.
   readonly startTimeoutMs: number;
   readonly saveTimeoutMs: number;
+  readonly sendKeysTimeoutMs: number;
 };
 
 // One job's guest, over the qemu reverse proxy: the harness's calls, the guest's screen, keys and
@@ -167,8 +168,12 @@ class QemuHttpTools {
   }
 
   // A call on the guest's keys or mouse: a 409 is a guest that is off.
-  acting(path: string, fields: Readonly<Record<string, unknown>>): Types.Answer<void, Types.Guest> {
-    return this.services.http.fetch(this.where(path), this.posting(fields), {
+  acting(
+    path: string,
+    fields: Readonly<Record<string, unknown>>,
+    extra: { readonly timeoutMs?: number } = {},
+  ): Types.Answer<void, Types.Guest> {
+    return this.services.http.fetch(this.where(path), this.posting(fields, extra), {
       decode: ignored,
       status: { 409: conflict(path, Errors.GuestOff) },
     });
@@ -236,7 +241,7 @@ class QemuHttpTools {
   }
 
   sendKeys(keys: string): Types.Answer<void, Types.Guest> {
-    return this.acting("send-keys", { keys });
+    return this.acting("send-keys", { keys }, { timeoutMs: this.options.sendKeysTimeoutMs });
   }
 
   intentStart(message: string): Types.Answer<void, Http.HttpFailure | Errors.IntentOpen> {

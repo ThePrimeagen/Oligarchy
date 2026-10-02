@@ -209,6 +209,32 @@ describe("ctrl", () => {
   });
 
   describe("logs", () => {
+    it("excludes other attempts and legacy intents from the requested job's evidence", async () => {
+      const { services, ctrl, completedDrive } = await ctrlOver();
+      const { run, job: first } = await completedDrive();
+      const retry = jarl.unwrap(await services.tests.createJob(run.id, "drive"));
+      for (const [jobId, text] of [
+        [first.id, "intent start; earlier attempt"],
+        [retry.id, "intent start; retry"],
+        [null, "intent start; legacy"],
+      ] as const) {
+        jarl.unwrap(
+          await services.logs.insertLog({
+            text,
+            jobId,
+            runId: run.id,
+            level: "info",
+            location: "qemu-runner",
+          }),
+        );
+      }
+      const result = await ctrl("logs", "--job-id", retry.id);
+      expect(result).toMatchObject({ code: 0, stderr: "" });
+      expect(JSON.parse(result.stdout).intents).toEqual([
+        { text: "intent start; retry", createdAt: expect.any(String) },
+      ]);
+    });
+
     it("refuses a job that does not exist, naming it (unhappy)", async () => {
       const { ctrl } = await ctrlOver();
 

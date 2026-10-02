@@ -63,7 +63,10 @@ export const createServices = (env: Run, world: World = live(env.config)) => {
     { source: world.host, attribution: { location: "qemu-runner" } },
   );
   const servers = Stores.Servers.create({ db });
-  const processStats = Stores.ProcessStats.create({ db });
+  const processStats = Stores.ProcessStats.create(
+    { db },
+    { heartbeatInterval: env.config.fleet.heartbeatInterval },
+  );
   const tests = Stores.Tests.create({ db });
   const setupRequests = Stores.SetupRequests.create({ db });
   const vmStatus = Stores.VmStatus.create({ db });

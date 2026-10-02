@@ -1,7 +1,7 @@
 import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Answer } from "./answer.ts";
 
 // A qemu server boots guests; an automation-client is a host that announces itself the same way.
@@ -35,7 +35,7 @@ export type Servers = {
   readonly listServers: (type: ServerType) => Answer<ReadonlyArray<string>>;
   readonly listMachines: () => Answer<ReadonlyArray<Machine>>;
   readonly listLiveServers: (type: ServerType) => Answer<ReadonlyArray<LiveServer>>;
-  // Deletes the servers of one kind silent for longer than silentFor milliseconds.
+  // Deletes silent servers and, for QEMU runners, their job assignments atomically.
   readonly removeStaleServers: (
     type: ServerType,
     silentFor: number,
@@ -78,13 +78,18 @@ export const create = App.createService<Db.Database, App.NoOptions, Servers>(({ 
     }),
 
   removeServer: (url) =>
-    db.run(async (d) => {
-      const rows = await d
-        .delete(DbSchema.servers)
-        .where(eq(DbSchema.servers.url, url))
-        .returning({ url: DbSchema.servers.url });
-      return rows.length > 0;
-    }),
+    db.run((d) =>
+      d.transaction(async (tx) => {
+        const rows = await tx
+          .delete(DbSchema.servers)
+          .where(eq(DbSchema.servers.url, url))
+          .returning({ type: DbSchema.servers.type });
+        if (rows[0]?.type === "qemu") {
+          await tx.delete(DbSchema.jobServers).where(eq(DbSchema.jobServers.serverUrl, url));
+        }
+        return rows.length > 0;
+      }),
+    ),
 
   listServers: (type) =>
     db.run(async (d) => {
@@ -127,18 +132,24 @@ export const create = App.createService<Db.Database, App.NoOptions, Servers>(({ 
     ),
 
   removeStaleServers: (type, silentFor) =>
-    db.run(async (d) => {
-      const rows = await d
-        .delete(DbSchema.servers)
-        .where(
-          and(
-            eq(DbSchema.servers.type, type),
-            sql`coalesce(${DbSchema.servers.heartbeatAt}, ${DbSchema.servers.createdAt}) < now() - ${silentFor}::double precision * interval '1 millisecond'`,
-          ),
-        )
-        .returning({ url: DbSchema.servers.url });
-      return rows.map((row) => row.url);
-    }),
+    db.run((d) =>
+      d.transaction(async (tx) => {
+        const rows = await tx
+          .delete(DbSchema.servers)
+          .where(
+            and(
+              eq(DbSchema.servers.type, type),
+              sql`coalesce(${DbSchema.servers.heartbeatAt}, ${DbSchema.servers.createdAt}) <= now() - ${silentFor}::double precision * interval '1 millisecond'`,
+            ),
+          )
+          .returning({ url: DbSchema.servers.url });
+        const urls = rows.map((row) => row.url);
+        if (type === "qemu" && urls.length > 0) {
+          await tx.delete(DbSchema.jobServers).where(inArray(DbSchema.jobServers.serverUrl, urls));
+        }
+        return urls;
+      }),
+    ),
 
   findServer: (id) =>
     db.run(async (d) => {
@@ -150,9 +161,20 @@ export const create = App.createService<Db.Database, App.NoOptions, Servers>(({ 
     }),
 
   routeJob: (jobId, url) =>
-    db.run(async (d) => {
-      await d.insert(DbSchema.jobServers).values({ jobId, serverUrl: url });
-    }),
+    db.run((d) =>
+      d.transaction(async (tx) => {
+        // Removal locks this same row before deleting its assignments. A late reservation
+        // cannot recreate an assignment after cleanup has committed.
+        const [runner] = await tx
+          .select({ url: DbSchema.servers.url })
+          .from(DbSchema.servers)
+          .where(and(eq(DbSchema.servers.url, url), eq(DbSchema.servers.type, "qemu")))
+          .for("share");
+        if (runner === undefined)
+          throw new Error(`routeJob: runner ${url} is no longer registered`);
+        await tx.insert(DbSchema.jobServers).values({ jobId, serverUrl: url });
+      }),
+    ),
 
   serverForJob: (jobId) =>
     db.run(async (d) => {

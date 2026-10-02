@@ -13,16 +13,28 @@ export type LogInput = {
   readonly level: LogLevel;
   readonly location: string | null;
   readonly runId: string | null;
+  readonly jobId: string | null;
 };
 
 export type Intent = { readonly text: string; readonly createdAt: Date };
 
+export type Scope =
+  | { readonly location: string }
+  | { readonly runId: string }
+  | { readonly jobId: string };
+
+const matching = (scope: Scope) => {
+  if ("jobId" in scope) return eq(DbSchema.logs.jobId, scope.jobId);
+  if ("runId" in scope) return eq(DbSchema.logs.runId, scope.runId);
+  return eq(DbSchema.logs.location, scope.location);
+};
+
 export type Logs = {
   readonly service: "logs";
   readonly insertLog: (row: LogInput) => Answer<void>;
-  readonly listLogs: (location: string) => Answer<ReadonlyArray<LogRow>>;
+  readonly listLogs: (scope: Scope) => Answer<ReadonlyArray<LogRow>>;
   readonly listRecent: (limit: number) => Answer<ReadonlyArray<LogRow>>;
-  readonly listIntents: (runId: string) => Answer<ReadonlyArray<Intent>>;
+  readonly listIntents: (scope: Scope) => Answer<ReadonlyArray<Intent>>;
 };
 
 declare module "@oligarchy/app" {
@@ -39,12 +51,12 @@ export const create = App.createService<Db.Database, App.NoOptions, Logs>(({ db 
       await d.insert(DbSchema.logs).values(row);
     }),
 
-  listLogs: (location) =>
+  listLogs: (scope) =>
     db.run((d) =>
       d
         .select()
         .from(DbSchema.logs)
-        .where(eq(DbSchema.logs.location, location))
+        .where(matching(scope))
         .orderBy(DbSchema.logs.createdAt, DbSchema.logs.id),
     ),
 
@@ -58,14 +70,14 @@ export const create = App.createService<Db.Database, App.NoOptions, Logs>(({ db 
       return rows.reverse();
     }),
 
-  listIntents: (runId) =>
+  listIntents: (scope) =>
     db.run((d) =>
       d
         .select({ text: DbSchema.logs.text, createdAt: DbSchema.logs.createdAt })
         .from(DbSchema.logs)
         .where(
           and(
-            eq(DbSchema.logs.runId, runId),
+            matching(scope),
             or(like(DbSchema.logs.text, "intent start; %"), eq(DbSchema.logs.text, "intent end")),
           ),
         )

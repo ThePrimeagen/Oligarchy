@@ -214,6 +214,7 @@ export const create = (services: App.Needs<Wants>, options: Options) => {
     let timeoutMs = options.config.httpTimeout;
     if (operation === "start") timeoutMs = options.config.driver.guest.startTimeout;
     else if (operation === "save") timeoutMs = options.config.driver.guest.saveTimeout;
+    else if (operation === "send-keys") timeoutMs = options.config.driver.guest.sendKeysTimeout;
     else if (operation === "follow") timeoutMs = cfg.followTimeout;
     else if (["abort", "stop", "relinquish"].includes(operation)) timeoutMs = cfg.releaseTimeout;
     const init = { signal, timeoutMs };

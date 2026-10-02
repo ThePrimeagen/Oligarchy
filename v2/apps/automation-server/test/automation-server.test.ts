@@ -57,12 +57,13 @@ const CONFIG = JSON.stringify({
   reasoning: { drive: "high", diagnose: "high", setup: "high" },
   openRouterBaseUrl: "https://openrouter.test",
   httpTimeout: "10 seconds",
+  fleet: { heartbeatInterval: "15 seconds" },
   driver: {
     runCeiling: "1 minute",
     stepLimit: 10,
     askTimeout: "1 second",
     harness: { defaultRetry: "1 second", recentActions: 10 },
-    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute", sendKeysTimeout: "30 seconds" },
   },
   diagnose: { runCeiling: "1 minute", headerTimeout: "1 second", chunkTimeout: "1 second" },
   automationClient: {

@@ -45,7 +45,7 @@ const live = (config: Pick<Env.Config, "httpTimeout">): World => ({
 export const createServices = (
   env: {
     readonly vars: { readonly databaseUrl: Env.Secret };
-    readonly config: Pick<Env.Config, "httpTimeout">;
+    readonly config: Pick<Env.Config, "httpTimeout" | "fleet">;
   },
   world: World = live(env.config),
 ) => {
@@ -58,7 +58,10 @@ export const createServices = (
     { source: world.host, attribution: { location: "automation-client" } },
   );
   const servers = Stores.Servers.create({ db });
-  const processStats = Stores.ProcessStats.create({ db });
+  const processStats = Stores.ProcessStats.create(
+    { db },
+    { heartbeatInterval: env.config.fleet.heartbeatInterval },
+  );
   return { http, sentry, db, logger, host, usage, servers, processStats } satisfies Services;
 };
 

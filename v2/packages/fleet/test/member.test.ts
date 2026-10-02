@@ -85,6 +85,7 @@ describe("announcing a member", () => {
         logger,
       },
       stop.signal,
+      { every: 15_000 },
     );
     await vi.waitFor(async () => {
       expect(jarl.unwrap(await processStats.listSeries(10))).toHaveLength(1);

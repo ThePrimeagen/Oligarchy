@@ -118,9 +118,18 @@ await app.run(services, onClose);
 
 ## Log attribution
 
-- `jobId` identifies the job in terminal output, color grouping, and Sentry reports.
+- `jobId` identifies the job in stored logs, terminal output, color grouping, and Sentry reports.
 - `runId` identifies its parent test run for stored logs. Supply both when both are known;
   a drive or setup and its diagnosis have separate job IDs within the same run.
 - Pass known IDs through helpers. Before a job loads, report its known job ID without
   inventing a run ID or doing a second database lookup just to log an error.
 - Process-wide messages may omit both IDs. `location` names the component emitting the line.
+- Query evidence for one attempt by `jobId`; query the full run's history by `runId`.
+  Do not infer a log's job from its timestamp. Older rows without a job ID remain run-level logs.
+
+## Removing a runner
+
+- Delete a removed runner's routing assignments in the same transaction as its registry row.
+  Keep the jobs themselves; pending jobs can then be placed on an available runner.
+- Assignment writes must lock and validate the registry row so a reservation finishing late
+  cannot recreate a route to a runner that cleanup already removed.

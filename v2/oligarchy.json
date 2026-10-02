@@ -11,6 +11,9 @@
   },
   "openRouterBaseUrl": "https://openrouter.ai/api/v1",
   "httpTimeout": "10 seconds",
+  "fleet": {
+    "heartbeatInterval": "15 seconds"
+  },
   "driver": {
     "runCeiling": "1.5 hours",
     "stepLimit": 200,
@@ -21,7 +24,8 @@
     },
     "guest": {
       "startTimeout": "45 minutes",
-      "saveTimeout": "5 minutes"
+      "saveTimeout": "5 minutes",
+      "sendKeysTimeout": "30 seconds"
     }
   },
   "diagnose": {
@@ -48,7 +52,7 @@
     "releaseTimeout": "30 seconds",
     "setupInterval": "10 seconds",
     "forgetInterval": "30 seconds",
-    "forgetAfter": "10 minutes",
+    "forgetAfter": "45 seconds",
     "followTimeout": "1 hour"
   },
   "qemuRunner": {
@@ -65,7 +69,7 @@
     "cacheProgress": "30 seconds",
     "handshakeTimeout": "30 seconds",
     "commandTimeout": "15 seconds",
-    "keyGap": "100 millis",
+    "keyGap": "25 millis",
     "clickGap": "100 millis",
     "dragGap": "20 millis",
     "dragSteps": 20,

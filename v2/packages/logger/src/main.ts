@@ -8,7 +8,7 @@ import * as Render from "./render.ts";
 
 export type Level = "info" | "warning" | "error" | "fatal";
 
-// jobId identifies the job in terminal output and Sentry; runId associates database logs
+// jobId identifies the job in stored logs, terminal output and Sentry; runId associates logs
 // with its parent test run. location names the process or another text bucket.
 export type Attribution = {
   readonly location?: string;
@@ -78,9 +78,13 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
 
     const keep = async (line: Render.Line, location: string | null, runId: string | null) => {
       const stored = await db.run(async (d) => {
-        await d
-          .insert(DbSchema.logs)
-          .values({ text: line.text, level: line.level, location, runId });
+        await d.insert(DbSchema.logs).values({
+          text: line.text,
+          level: line.level,
+          location,
+          runId,
+          jobId: line.jobId ?? null,
+        });
       });
       print(line);
       if (jarl.is_err(stored)) {

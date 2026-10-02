@@ -28,6 +28,7 @@ export const announce = (guests: Guests) => async (app: Application) => {
       },
       app.services,
       app.signal,
+      { every: app.environment.config.fleet.heartbeatInterval },
     ),
   ]);
   return jarl.ok(undefined);

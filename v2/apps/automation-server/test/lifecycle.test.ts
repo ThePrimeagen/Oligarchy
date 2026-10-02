@@ -13,7 +13,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-it("restart stops an inherited job and marks its unknown outcome errored, leaving pending jobs queued", async () => {
+it("restart stops and aborts an inherited job and run, leaving pending jobs queued", async () => {
   const at = await dispatching({ [FIRST]: { abort: async () => "stopped" } });
   await at.live(FIRST);
   const { job, run } = await at.drive();
@@ -22,10 +22,10 @@ it("restart stops an inherited job and marks its unknown outcome errored, leavin
   jarl.unwrap(await restart(at.services, at.lifecycleOptions));
   expect(at.posted("/abort")).toEqual([[FIRST, { jobId: job.id }]]);
   expect(await at.job(job.id)).toMatchObject({
-    status: "errored",
+    status: "aborted",
     reason: expect.stringContaining("restarted"),
   });
-  expect(await at.run(run.id)).toMatchObject({ status: "errored" });
+  expect(await at.run(run.id)).toMatchObject({ status: "aborted" });
   expect(await at.job(queued.job.id)).toMatchObject({ status: "pending" });
 });
 
@@ -39,6 +39,10 @@ it("restart stops every inherited job beyond the queue display limit", async () 
   jarl.unwrap(await restart(at.services, at.lifecycleOptions));
   expect(at.posted("/abort")).toHaveLength(27);
   expect(jarl.unwrap(await at.tests.listRunningJobs())).toEqual([]);
+  for (const { run, jobs } of suite.runs) {
+    expect(await at.job(jobs[0]!.id)).toMatchObject({ status: "aborted" });
+    expect(await at.run(run.id)).toMatchObject({ status: "aborted" });
+  }
   expect(jarl.unwrap(await at.tests.getTestSuite(suite.suite.id))).toMatchObject({
     status: "failed",
   });
@@ -79,21 +83,19 @@ it("shutdown visits every running job beyond the queue display limit", async () 
   expect(stopped).toHaveLength(27);
 });
 
-it("restart preserves a result committed while stopping the inherited client", async () => {
-  const at = await dispatching((tests) => ({
-    [FIRST]: {
-      abort: async ({ jobId }) => {
-        jarl.unwrap(await tests.completeJob(jobId));
-        return "not-held";
-      },
-    },
-  }));
-  await at.live(FIRST);
-  const { job } = await at.drive();
-  await at.runOn(job, (await at.clientId(FIRST))!);
-  jarl.unwrap(await restart(at.services, at.lifecycleOptions));
-  expect(await at.job(job.id)).toEqual({ status: "completed", reason: null });
-});
+it.each([restart, shutdown])(
+  "aborts a running job even when its client has already finished and released it",
+  async (end) => {
+    const at = await dispatching({ [FIRST]: { abort: async () => "not-held" } });
+    await at.live(FIRST);
+    const { job, run } = await at.drive();
+    await at.runOn(job, (await at.clientId(FIRST))!);
+    jarl.unwrap(await end(at.services, at.lifecycleOptions));
+    expect(await at.job(job.id)).toMatchObject({ status: "aborted" });
+    expect(await at.run(run.id)).toMatchObject({ status: "aborted" });
+    expect(jarl.unwrap(await at.tests.latestJob(run.id, "diagnose"))).toBeUndefined();
+  },
+);
 
 it.each([restart, shutdown])("a client stop failure retains the running job", async (end) => {
   const at = await dispatching();

@@ -175,6 +175,7 @@ export const drive = async (
     recentActions: shown.recentActions,
     startTimeoutMs: guest.startTimeout,
     saveTimeoutMs: guest.saveTimeout,
+    sendKeysTimeoutMs: guest.sendKeysTimeout,
   });
   const at = { location: LOCATION, jobId: options.jobId };
   const loaded = await harness.loadJobHarnessData(options.jobId);

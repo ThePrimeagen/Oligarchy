@@ -136,8 +136,9 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
       and that of the qemu server holding its guest. V1's also listed the newest finished jobs, which
       viz's tickets tab and `ctrl automation --list` showed, and each job's instruction, open intent
       and the database's clock. V2 lists only the live queue; the instruction is
-      `tests.getJobDetails`, intents are `logs.listIntents` (keyed by test run, so a job keeps only
-      the lines since it was queued) and actions are `actions.listActions`.
+      `tests.getJobDetails`, intents are `logs.listIntents({ jobId })` and actions are
+      `actions.listActions`. Stored logs carry both job and run IDs; run-level queries keep the
+      full history across attempts.
 - [x] **Where a job's guest state lives.** In `vm_status`, one row per change to a job's VM, never
       updated: its status is its newest row, and when it started or ended is when that row was
       written. `downloading` and `running` are live; `shutdown` (the guest powered itself off),
@@ -307,10 +308,10 @@ record, and the automation server acts on it directly.
       run with it, all at once; when one fails, the rest still go, the first failure is the
       answer, and the suite stays open. Otherwise the suite is aborted.
 - [ ] **Restart and shutdown.** At startup, each job the last automation server left running is
-      stopped at its client and errored, except a drive or setup whose driver had already finished,
-      which is closed as it would have been. At shutdown, each running job is stopped at its client
-      and aborted. V1: `packages/jobs/src/reclaim.ts`, and `stopInherited` and `stopAtShutdown` in
-      `worker.ts`.
+      stopped at its client and aborted, along with its test run. At shutdown, each running job
+      is stopped at its client and aborted. A driver finishing without its result being recorded
+      does not change this rule: unreported outcomes are unknown and are not recovered. Pending
+      jobs remain queued, and outcomes already committed to the database remain final.
 - [ ] **Try again.** An operator's retry, from `ctrl` or the dashboard, is a new job on the same test
       run.
 

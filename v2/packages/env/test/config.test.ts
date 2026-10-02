@@ -14,12 +14,13 @@ const valid = {
   reasoning: { drive: "minimal", diagnose: "xhigh", setup: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   httpTimeout: "10 seconds",
+  fleet: { heartbeatInterval: "15 seconds" },
   driver: {
     runCeiling: "1.5 hours",
     stepLimit: 200,
     askTimeout: "3 minutes",
     harness: { defaultRetry: "1 second", recentActions: 10 },
-    guest: { startTimeout: "45 minutes", saveTimeout: "5 minutes" },
+    guest: { startTimeout: "45 minutes", saveTimeout: "5 minutes", sendKeysTimeout: "30 seconds" },
   },
   diagnose: { runCeiling: "1.5 hours", headerTimeout: "3 minutes", chunkTimeout: "3 minutes" },
   automationClient: {
@@ -88,6 +89,14 @@ const refusal = async (file: object): Promise<string> => {
 };
 
 describe("load", () => {
+  it("refuses a heartbeat interval that reaches the runner expiry deadline", async () => {
+    expect(
+      await refusal({
+        ...valid,
+        fleet: { heartbeatInterval: valid.qemuServer.forgetAfter },
+      }),
+    ).toContain("fleet.heartbeatInterval");
+  });
   it("loads the checked-in oligarchy.json (happy)", async () => {
     expect(jarl.is_ok(await loadText(readFileSync(Config.PATH, "utf8")))).toBe(true);
   });
@@ -100,7 +109,7 @@ describe("load", () => {
       stepLimit: 200,
       askTimeout: 180_000,
       harness: { defaultRetry: 1_000, recentActions: 10 },
-      guest: { startTimeout: 2_700_000, saveTimeout: 300_000 },
+      guest: { startTimeout: 2_700_000, saveTimeout: 300_000, sendKeysTimeout: 30_000 },
     });
     expect(config.diagnose).toEqual({
       runCeiling: 5_400_000,

@@ -9,6 +9,7 @@ import * as Router from "../src/router.ts";
 import { routes } from "../src/routes.ts";
 import configFile from "../../../oligarchy.json";
 const JOB = "11111111-1111-4111-8111-111111111111";
+const SEND_KEYS_TIMEOUT_MS = 20_000;
 const never = new AbortController().signal;
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -58,7 +59,13 @@ const setup = async (
   const router = Router.create(services, {
     token: { reveal: () => "token" },
     url: "http://proxy",
-    config: env.config,
+    config: {
+      ...env.config,
+      driver: {
+        ...env.config.driver,
+        guest: { ...env.config.driver.guest, sendKeysTimeout: SEND_KEYS_TIMEOUT_MS },
+      },
+    },
   });
   return {
     router,
@@ -173,6 +180,21 @@ it("all endpoints authenticate and reject invalid jobs before handling", async (
     ).status,
   ).toBe(400);
   expect(h.asked).toHaveLength(0);
+});
+
+it("send-keys waits for its own deadline, then reports the runner timeout", async () => {
+  const h = await setup("hang", { assigned: "http://runner1" });
+  let done = false;
+  const sent = h.router.handle("send-keys", { job: JOB, keys: "hello" }, never).then((result) => {
+    done = true;
+    return result;
+  });
+  await vi.advanceTimersByTimeAsync(SEND_KEYS_TIMEOUT_MS - 1);
+  expect(done).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  const response = await sent;
+  expect(response.status).toBe(502);
+  expect(await response.text()).toContain(`no answer within ${SEND_KEYS_TIMEOUT_MS} ms`);
 });
 
 it("ranks answering runners by load and skips full runners", async () => {

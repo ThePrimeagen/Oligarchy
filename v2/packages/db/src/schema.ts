@@ -99,6 +99,7 @@ export const logs = pgTable(
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     location: text("location"),
     runId: uuid("run_id"),
+    jobId: uuid("job_id"),
     level: logLevel("level").notNull().default("info"),
     text: text("text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -106,6 +107,7 @@ export const logs = pgTable(
   (table) => [
     index("logs_location_idx").on(table.location),
     index("logs_run_id_idx").on(table.runId),
+    index("logs_job_id_idx").on(table.jobId),
   ],
 );
 
@@ -171,11 +173,10 @@ export type ServerStats = {
 
 // The fleet the reverse proxy places jobs on: one row per server, keyed by the url exactly
 // as given, written by an operator (the dashboard, POST /servers) or by the server itself. A
-// server announces itself every thirty seconds: the write rewrites stats, stamps heartbeat_at
-// and counts generation up, and a shutdown deletes the row. A generation that stops moving is
-// a server that stopped without a chance to leave — killed, or cut off from the database; ten
-// minutes of that and the process that reads the row's kind deletes it, a row nobody ever
-// claimed counting from created_at. stats and heartbeat_at are null together, for a row an
+// server announces itself at the configured heartbeat interval: the write rewrites stats,
+// stamps heartbeat_at and counts generation up, and a shutdown deletes the row. After the
+// configured interval without a heartbeat, the process that reads the row's kind deletes it.
+// A row nobody ever claimed counts from created_at. stats and heartbeat_at are null together, for a row an
 // operator added that no server has claimed. type says what kind of server the row is, so a
 // reader lists and sweeps its own kind: the qemu reverse proxy the qemu fleet, the automation
 // server the automation-clients. Every writer names it, and the default is what the migration
@@ -203,7 +204,7 @@ export const servers = pgTable(
 
 // What a qemu server or automation-client said of this process at one heartbeat: current
 // jobs, VmRSS of this process and every child that still answers, and the cpu busy over
-// the last thirty seconds. One insert per tick, so a later graph can read the series.
+// the last heartbeat interval. One insert per tick, so a later graph can read the series.
 // name is the machine (--name), not a relation: the row outlives the servers row, and a
 // shutdown or an operator's delete must not erase it.
 export type ProcessStats = {
@@ -228,9 +229,8 @@ export const processStats = pgTable(
 
 // Which qemu server holds a job's guest: written when the job's slot is reserved, before the
 // guest starts, so the start and every later request for the job find the machine. One server
-// per job. The row outlives the qemu reverse proxy process, which is why it is a row. server_url
-// is attribution, not a relation: forgetting a server must keep the jobs still running on it
-// routable.
+// per job. The row outlives the qemu reverse proxy process, which is why it is a row. Removing
+// or expiring a runner clears its routes in the same transaction; the jobs themselves remain.
 export const jobServers = pgTable("job_servers", {
   jobId: uuid("job_id")
     .primaryKey()

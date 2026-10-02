@@ -19,9 +19,6 @@ export type Series = {
   readonly samples: ReadonlyArray<Sample>;
 };
 
-// A process reports every thirty seconds, so `count` readings span this many seconds.
-const HEARTBEAT_SECONDS = 30;
-
 export type ProcessStats = {
   readonly service: "processStats";
   readonly report: (name: string, type: ServerType, stats: DbSchema.ProcessStats) => Answer<void>;
@@ -34,7 +31,11 @@ declare module "@oligarchy/app" {
   }
 }
 
-export const create = App.createService<Db.Database, App.NoOptions, ProcessStats>(({ db }) => ({
+export const create = App.createService<
+  Db.Database,
+  { readonly heartbeatInterval: number },
+  ProcessStats
+>(({ db }, options) => ({
   service: "processStats",
 
   report: (name, type, stats) =>
@@ -65,7 +66,7 @@ export const create = App.createService<Db.Database, App.NoOptions, ProcessStats
         })
         .from(DbSchema.processStats)
         .where(
-          sql`${DbSchema.processStats.reportedAt} > now() - make_interval(secs => ${count * HEARTBEAT_SECONDS})`,
+          sql`${DbSchema.processStats.reportedAt} > now() - ${count * options.heartbeatInterval}::double precision * interval '1 millisecond'`,
         )
         .as("process_series");
       const rows = await d

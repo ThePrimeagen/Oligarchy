@@ -36,7 +36,10 @@ export const database = async () => {
     fake,
     db,
     servers: Stores.Servers.create({ db }),
-    processStats: Stores.ProcessStats.create({ db }),
+    processStats: Stores.ProcessStats.create(
+      { db },
+      { heartbeatInterval: env.config.fleet.heartbeatInterval },
+    ),
   };
 };
 

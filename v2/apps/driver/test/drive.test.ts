@@ -25,7 +25,7 @@ const CONFIG: Drive.Limits = {
     stepLimit: 200,
     runCeiling: 60_000,
     harness: { defaultRetry: 1_000, recentActions: 10 },
-    guest: { startTimeout: 90_000, saveTimeout: 30_000 },
+    guest: { startTimeout: 90_000, saveTimeout: 30_000, sendKeysTimeout: 20_000 },
   },
 };
 

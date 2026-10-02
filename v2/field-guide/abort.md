@@ -290,6 +290,14 @@ setTimeout(() => {
 - `runJob` refused because an abort landed during the reserve: give the job back at the client with `/abort` (`dispatch.ts` `markRunning`).
 - Only the automation server writes status. The automation client has no `tests` store.
 
+### Loss of the coordinator
+
+- Stopping the coordinator aborts its running jobs and their runs. After a crash, startup
+  performs that cleanup for every job still recorded as running before dispatching new work.
+- An unreported outcome is unknown, even if the worker finished. Do not infer success from
+  a worker having exited or released its job, and do not recover unreported outcomes.
+- Pending jobs stay queued. Outcomes already committed to the database remain final.
+
 ## Scope
 
 | Abort | Who | How | Built |
