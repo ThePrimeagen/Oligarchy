@@ -4,7 +4,6 @@ import type * as Qemu from "@oligarchy/qemu-http-tools";
 import type * as Stores from "@oligarchy/stores";
 import type * as jarl from "jarl";
 import type * as Moves from "./move.ts";
-import type * as Prompt from "./prompt.ts";
 
 export type Answer<T, E> = Promise<jarl.Result<T, E>>;
 
@@ -66,7 +65,7 @@ export type DriveHarness = {
   readonly start: (data: JobHarnessData) => Answer<void, Http.HttpFailure>;
   readonly openStep: (message: string) => Answer<void, Http.HttpFailure | Qemu.IntentOpen>;
   readonly closeStep: () => Answer<void, Http.HttpFailure>;
-  readonly prompt: (data: JobHarnessData, turn: Turn) => Answer<string, Prompt.PromptError>;
+  readonly prompt: (data: JobHarnessData, turn: Turn) => string;
   readonly ask: (request: Ask) => Answer<Move, OpenRouter.Failure | Moves.ReplyInvalid>;
   readonly act: (move: GuestMove) => Answer<Qemu.Ran, Qemu.RunFailure>;
   // A setup that succeeded keeps its disk; anything else stops the guest with its status.

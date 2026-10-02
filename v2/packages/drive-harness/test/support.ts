@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import * as App from "@oligarchy/app";
 import type * as OpenRouter from "@oligarchy/openrouter";
 import type * as Qemu from "@oligarchy/qemu-http-tools";
@@ -68,9 +67,6 @@ const unused = (): never => {
   throw new Error("unexpected call");
 };
 
-// The checked-in template, read as the real file IO would read it.
-export const readFile = async (url: URL): Promise<string> => readFileSync(url, "utf8");
-
 export const SEND_KEYS: OpenRouter.Tool = {
   type: "function",
   function: {
@@ -108,7 +104,6 @@ export const world = (
     readonly getJobDetails?: Stores.Tests.Tests["getJobDetails"];
     readonly guest?: Partial<Guest>;
     readonly turns?: ReadonlyArray<jarl.Result<OpenRouter.Turn, OpenRouter.Failure>>;
-    readonly readFile?: (url: URL, encoding: "utf8") => Promise<string>;
   } = {},
 ): World => {
   const calls: Array<Call> = [];
@@ -195,10 +190,7 @@ export const world = (
     },
   }))({});
 
-  const harness = DriveHarness.create(
-    { tests, qemuHttpTools, openRouter },
-    { readFile: script.readFile ?? readFile },
-  );
+  const harness = DriveHarness.create({ tests, qemuHttpTools, openRouter });
   return { calls, requests, harness };
 };
 

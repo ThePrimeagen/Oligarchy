@@ -26,7 +26,7 @@ it("drives a job from its harness data to its end", async () => {
   const job = jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.start(job));
   jarl.unwrap(await harness.openStep("Type the password"));
-  const first = jarl.unwrap(await harness.prompt(job, { reasons: "none" }));
+  const first = harness.prompt(job, { reasons: "none" });
   const move = jarl.unwrap(await harness.ask({ ...ASK, prompt: first }));
   expect(move).toEqual({
     kind: "guest",
@@ -37,13 +37,11 @@ it("drives a job from its harness data to its end", async () => {
   });
   if (move.kind !== "guest") throw new Error("expected a guest move");
   expect(jarl.unwrap(await harness.act(move))).toEqual({ text: "sent the keys" });
-  const next = jarl.unwrap(
-    await harness.prompt(job, {
-      reasons: "step 1: Type the password: sent the keys",
-      response: "{{REASONS}}",
-      previous: { name: move.name, arguments: move.arguments },
-    }),
-  );
+  const next = harness.prompt(job, {
+    reasons: "step 1: Type the password: sent the keys",
+    response: "{{REASONS}}",
+    previous: { name: move.name, arguments: move.arguments },
+  });
   const screen = new Uint8Array([1, 2]);
   expect(jarl.unwrap(await harness.ask({ ...ASK, prompt: next, screen }))).toEqual({
     kind: "done",
@@ -91,6 +89,12 @@ it("drives a job from its harness data to its end", async () => {
   expect(system(0)).not.toContain("<previous-move>");
   expect(system(1)).toContain("{{REASONS}}");
   expect(system(1)).toContain('"keys":"prime<ENTER>"');
+  // Every placeholder of the prompt has its value; only the inserted text still reads as one.
+  const PLACEHOLDER = /\{\{[A-Z_]+\}\}/;
+  expect(system(0).replace("Type {{MODEL}}", "")).not.toMatch(PLACEHOLDER);
+  expect(system(1).replace("Type {{MODEL}}", "").replace("{{REASONS}}", "")).not.toMatch(
+    PLACEHOLDER,
+  );
 
   // A screenshot goes to the model beside the ask; without one the ask is text alone.
   expect(requests[0]?.messages[1]).toEqual({ role: "user", content: expect.any(String) });
@@ -127,33 +131,6 @@ it.each([
   const result = await harness.loadJobHarnessData(JOB);
   expect(jarl.is_err(result)).toBe(true);
   if (jarl.is_err(result)) expect(result.error).toBe(error);
-});
-
-it("refuses a template placeholder that has no value", async () => {
-  const { harness } = world({ readFile: async () => "{{JOB_ID}} {{TYPO}}" });
-  const result = await harness.prompt(data(), { reasons: "none" });
-  expect(jarl.error.is(result, DriveHarness.PromptError)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error.message).toBe(
-      "prompt: driving-agent.html uses {{TYPO}}, which has no value",
-    );
-  }
-});
-
-it("returns a PromptError naming the template it could not read", async () => {
-  const cause = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
-  const { harness } = world({
-    readFile: async () => {
-      throw cause;
-    },
-  });
-  const result = await harness.prompt(data(), { reasons: "none" });
-  expect(jarl.error.is(result, DriveHarness.PromptError)).toBe(true);
-  if (jarl.is_err(result)) {
-    const path = new URL("../../../prompts/driving-agent.html", import.meta.url).pathname;
-    expect(result.error.message).toBe(`prompt: ${path}: ENOENT: no such file or directory`);
-    expect(result.error.cause).toBe(cause);
-  }
 });
 
 it.each([

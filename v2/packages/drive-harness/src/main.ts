@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import * as App from "@oligarchy/app";
 import type * as OpenRouter from "@oligarchy/openrouter";
 import * as Qemu from "@oligarchy/qemu-http-tools";
@@ -9,7 +8,6 @@ import * as Prompt from "./prompt.ts";
 import type * as Types from "./types.ts";
 
 export { ReplyInvalid } from "./move.ts";
-export { PromptError } from "./prompt.ts";
 export type { Ask, DriveHarness, End, GuestMove, JobHarnessData, Move, Turn } from "./types.ts";
 
 declare module "@oligarchy/app" {
@@ -21,16 +19,13 @@ declare module "@oligarchy/app" {
 // The user turn beside the system prompt; the screenshot, when there is one, goes with it.
 const ASKING = "Reply with your next tool call.";
 
-export type Options = { readonly readFile?: Prompt.ReadFile };
-
 // One job's drive. qemuHttpTools is that job's guest; the model sees its tools with step and
 // reason added, and Done.
 export const create = App.createService<
   Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter,
-  Options,
+  App.NoOptions,
   Types.DriveHarness
->(({ tests, qemuHttpTools, openRouter }, options) => {
-  const render = Prompt.renderer(options.readFile ?? readFile);
+>(({ tests, qemuHttpTools, openRouter }) => {
   const tools = Moves.tools(qemuHttpTools.tools);
 
   return {
@@ -69,7 +64,7 @@ export const create = App.createService<
       return qemuHttpTools.intentStart(message);
     },
     closeStep: () => qemuHttpTools.intentEnd(),
-    prompt: (data, turn) => render(data, turn, tools),
+    prompt: (data, turn) => Prompt.render(data, turn, tools),
     ask: async (request) => {
       const answered = await openRouter.complete({
         model: request.model,

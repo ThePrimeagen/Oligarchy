@@ -1,78 +1,89 @@
 import type * as OpenRouter from "@oligarchy/openrouter";
-import * as jarl from "jarl";
 import type * as Types from "./types.ts";
 
-export const PromptError = jarl.error.define("PromptError");
-export type PromptError = InstanceType<typeof PromptError>;
+// The driving system prompt. <last-response> and <previous-move> are dropped on a turn that has
+// neither.
+const TEMPLATE = `<role>You drive one guest, one native tool call at a time. You are not a developing agent.</role>
 
-export type ReadFile = (url: URL, encoding: "utf8") => Promise<string>;
+<agent-id>{{JOB_ID}}</agent-id>
+<test-run>{{RUN_ID}}</test-run>
+<action>{{ACTION}}</action>
 
-const TEMPLATE = "driving-agent.html";
+<mission>
+  <name>{{TEST_NAME}}</name>
+  <description>{{TEST_DESCRIPTION}}</description>
+  <def>{{TEST_DEFINITION}}</def>
+  <proof>{{TEST_PROOF}}</proof>
+</mission>
 
-const messageOf = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause);
+<progress>Past steps: {{REASONS}}</progress>
+
+<last-response>Your last response was: {{RESPONSE}}</last-response>
+
+<previous-move>
+  Your previous action was {{PREVIOUS_ACTION}} with values {{PREVIOUS_VALUES}}. When a screenshot
+  is provided, it is the result of that action.
+</previous-move>
+
+<rules>
+  * Reply with one native tool call. Use get_image, get_serial, send_keys or one of the mouse
+    tools below to control the guest.
+  * Each guest call also carries step, the ActionList line number starting at 1, and reason, that
+    line with its leading asterisk and surrounding spaces removed. General crash-reporting and
+    screenshot instructions apply throughout and do not add steps.
+  * Keep the same step until its action and proof are complete, then add 1. The harness owns these
+    fields and removes them before it runs the action.
+  * Move the mouse, then take an image and verify its position before clicking. Clicks press at
+    the current pointer; a drag starts there and names only its destination. mouse_nudge moves
+    0.02 of the screen in a direction.
+  * Take screenshots to check each step's result and report crashes or erroneous behavior.
+  * Call Done when the last ActionList step and its visible proof are complete. Done takes no
+    arguments.
+  * Where the mission asks for save or stop, call Done; the harness performs those operations
+    after the loop ends.
+  * After sending systemctl poweroff, or learning that the guest powered off, your next reply is
+    Done. Never request another image of an off guest.
+  * The harness starts the guest and manages intents. Do not call host commands or read
+    repository files.
+</rules>
+
+<tools>{{TOOLS}}</tools>
+
+<machine>
+  <user>prime</user>
+  <password>prime</password>
+  <disk_passphrase>prime</disk_passphrase>
+</machine>
+`;
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
 
 // One replacement pass: placeholders in instructions, past reasons and model replies are data.
-const fill = (text: string, values: Readonly<Record<string, string>>) => {
-  let missing: string | undefined;
-  const filled = text.replace(PLACEHOLDER, (match: string, key: string) => {
-    if (values[key] === undefined) {
-      missing ??= key;
-      return match;
-    }
-    return values[key];
-  });
-  return missing === undefined
-    ? jarl.ok(filled)
-    : jarl.err(new PromptError(`prompt: ${TEMPLATE} uses {{${missing}}}, which has no value`));
-};
-
-// The driving system prompt for one model turn. Importing this reads nothing.
-export const renderer = (readFile: ReadFile) => {
-  const read = jarl.fn(
-    (url: URL) => readFile(url, "utf8"),
-    (cause, url) => {
-      const error = new PromptError(`prompt: ${url.pathname}: ${messageOf(cause)}`);
-      error.cause = cause;
-      return error;
-    },
-  );
-  return async (
-    data: Types.JobHarnessData,
-    turn: Types.Turn,
-    tools: ReadonlyArray<OpenRouter.Tool>,
-  ): Promise<jarl.Result<string, PromptError>> => {
-    const source = await read(new URL(`../../../prompts/${TEMPLATE}`, import.meta.url));
-    if (jarl.is_err(source)) {
-      return source;
-    }
-    let text = jarl.value(source);
-    if (turn.response === undefined) {
-      text = text.replace(/\n*<last-response>[\s\S]*?<\/last-response>/, "");
-    }
-    if (turn.previous === undefined) {
-      text = text.replace(/\n*<previous-move>[\s\S]*?<\/previous-move>/, "");
-    }
-    // A stripped section gets no value, so a section the strip missed fails fill.
-    return fill(text, {
-      JOB_ID: data.jobId,
-      RUN_ID: data.runId,
-      ACTION: data.action,
-      TEST_NAME: data.name,
-      TEST_DESCRIPTION: data.description,
-      TEST_DEFINITION: data.instruction,
-      TEST_PROOF: data.proof,
-      TOOLS: JSON.stringify(tools),
-      REASONS: turn.reasons,
-      ...(turn.response === undefined ? {} : { RESPONSE: turn.response }),
-      ...(turn.previous === undefined
-        ? {}
-        : {
-            PREVIOUS_ACTION: turn.previous.name,
-            PREVIOUS_VALUES: JSON.stringify(turn.previous.arguments),
-          }),
-    });
+export const render = (
+  data: Types.JobHarnessData,
+  turn: Types.Turn,
+  tools: ReadonlyArray<OpenRouter.Tool>,
+): string => {
+  let text = TEMPLATE;
+  if (turn.response === undefined) {
+    text = text.replace(/\n*<last-response>[\s\S]*?<\/last-response>/, "");
+  }
+  if (turn.previous === undefined) {
+    text = text.replace(/\n*<previous-move>[\s\S]*?<\/previous-move>/, "");
+  }
+  const values: Readonly<Record<string, string>> = {
+    JOB_ID: data.jobId,
+    RUN_ID: data.runId,
+    ACTION: data.action,
+    TEST_NAME: data.name,
+    TEST_DESCRIPTION: data.description,
+    TEST_DEFINITION: data.instruction,
+    TEST_PROOF: data.proof,
+    TOOLS: JSON.stringify(tools),
+    REASONS: turn.reasons,
+    RESPONSE: turn.response ?? "",
+    PREVIOUS_ACTION: turn.previous?.name ?? "",
+    PREVIOUS_VALUES: turn.previous === undefined ? "" : JSON.stringify(turn.previous.arguments),
   };
+  return text.replace(PLACEHOLDER, (match: string, key: string) => values[key] ?? match);
 };
