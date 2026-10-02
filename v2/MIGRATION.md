@@ -227,31 +227,37 @@ record, and the automation server acts on it directly.
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
       releases its lock, so the drive's next reserve sets up again; decide when a drive whose ISO
       keeps failing to set up is errored instead. V1: `dispatch` in `worker.ts`.
-- [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
-      mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
-      the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
-      `v2/prompts/driving-agent.html` and `v2/prompts/diagnosing-agent.html` take the job id where
-      V1 takes `{{LINEAR_TICKET}}`. V2 has one driving prompt: `v2/prompts/driving-agent.html` is
-      the driver's system prompt and replaces both V1's `prompts/driving-agent.html` and
-      `prompts/custom-harness-driving-agent.html`. It lists qemu-http-tools' tools where V1 pastes
-      in `client.md` and describes its `client` tool.
+- [ ] **The drive harness.** V1's driving and diagnosing prompts name only the agent's Linear
+      ticket; the task was the ticket's body, and V1's driver looks it up with
+      `findResultByLinearId`. In V2 the agent is its job id, and `v2/prompts/driving-agent.html`
+      and `v2/prompts/diagnosing-agent.html` take the job id where V1 takes `{{LINEAR_TICKET}}`.
+      V2 has one driving prompt: `v2/prompts/driving-agent.html` is the driver's system prompt and
+      replaces both V1's `prompts/driving-agent.html` and
+      `prompts/custom-harness-driving-agent.html`. It lists the model's tools where V1 pastes in
+      `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
-      The V2 implementation is `@oligarchy/missions`: `load(services, { jobId })` reads
-      `tests.getJobDetails` and returns the job and run IDs, action, pinned definition, ISO,
-      proxy URL and boot mode. Only a resuming drive resumes; setup always boots fresh.
-      `@oligarchy/missions/prompts` provides `create({ readFile })` (real file IO by default),
-      with `driving(mission, { reasons, response?, previous? })` for each model turn and
-      `diagnosing(mission, { model })` for dispatching a diagnosis. Previous
-      actions are native tool names and argument objects. All replacements happen once, so
-      a definition or model reply containing `{{MODEL}}` stays literal text.
-      Its templates live in `v2/prompts/`. The driving template lists the exported
-      `qemu-http-tools.tools` catalogue followed by the driver's own Done tool. Step and reason
-      belong to the driver; it must add them to the native tools it exposes and remove them
-      before `qemu-http-tools.run`.
-      Dispatch: run and the driver port wire these entrypoints into their execution paths.
-      The diagnosis prompt identifies its own job and run and requires a verdict against
-      the preceding drive or setup job; exact evidence commands wait for the V2 ctrl port.
-      V1's root templates and ticket bodies remain until V1 is retired.
+      `@oligarchy/drive-harness` is the `driveHarness` service over `tests`, the job's
+      `qemuHttpTools` and `openRouter`, and holds only a drive or setup's steps:
+      - `loadJobHarnessData(jobId)` reads `tests.getJobDetails`: the job and run IDs, action,
+        pinned definition, ISO, proxy URL and boot mode. Only a resuming drive resumes; a setup
+        always boots fresh.
+      - `start(data)` boots that ISO. `openStep(message)` and `closeStep()` are the step's
+        intent; an open refused because the last intent is still open ends it and opens again.
+      - `prompt(data, turn)` renders the driving prompt for one model turn, with past reasons,
+        the last response and the previous move (a native tool name and its arguments). All
+        replacements happen once, so a definition or model reply containing `{{MODEL}}` stays
+        literal text.
+      - `ask({ model, reasoning, deadline, prompt, screen?, signal? })` asks the model with the
+        guest's tools, each taking `step` and `reason` beside its own arguments, and `Done`; the
+        prompt lists the same tools. Its answer is one move, a guest call or done; any other
+        turn is `ReplyInvalid`.
+      - `act(move)` runs the guest call with only its own arguments.
+      - `finish(data, end)` saves a setup that succeeded and stops the guest otherwise.
+      The loop's limits, its history and its reasons are the driver's (section 4). Dispatch: run
+      renders `v2/prompts/diagnosing-agent.html` for a diagnose; that prompt identifies its own
+      job and run and requires a verdict against the preceding drive or setup job, and exact
+      evidence commands wait for the V2 ctrl port. V1's root templates and ticket bodies remain
+      until V1 is retired.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
@@ -370,7 +376,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             head the queue, so a setup no client can take holds back every drive behind it until
             it is placed.
       - [ ] **Dispatch: run.** Once the job is running, `/run` sends the prompt, without holding
-            the next pass. Needs the prompt from section 3's The mission.
+            the next pass. Needs a renderer for `v2/prompts/diagnosing-agent.html` (section 3's
+            The drive harness); a drive or setup's driver renders its own prompt.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
             answers.
       - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
@@ -458,9 +465,10 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             connections but not a `/run` still under way, then `jobs.shutdown()` aborts every
             held job and waits until each is let go, before it says it stopped and the services
             close. From the moment shutdown begins, every hold is refused.
-- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
-      pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
-      Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
+- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, the
+      reasons, and the stop rule (result closed, step limit, model stopped, run ceiling), over
+      `driveHarness`'s steps (section 3's The drive harness), which hold the tools, the pointer
+      and the intents. It creates the OpenRouter client with `timeouts.header` from
       `v2/oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
