@@ -1,5 +1,7 @@
 import type * as ClientRoutes from "@oligarchy/automation-client/routes";
+import * as Http from "@oligarchy/http";
 import * as HttpClient from "@oligarchy/http/client";
+import * as jarl from "jarl";
 
 // The client ends a run at its ceiling, so the wait has none of its own. A timer delay past
 // 2^31 - 1 ms fires at once, so this is the longest a wait can be.
@@ -21,3 +23,8 @@ export const create = (options: HttpClient.Options) =>
   });
 
 export type AutomationClient = ReturnType<typeof create>;
+
+// A run the client ended at a ceiling is answered 504, its body naming which. It stays a failure,
+// not a word, so its reason reaches the close.
+export const timedOut = (failure: Http.HttpFailure): boolean =>
+  jarl.error.is(failure, Http.HttpServerError) && failure.status === 504;

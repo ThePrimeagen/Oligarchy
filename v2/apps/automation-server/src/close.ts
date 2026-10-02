@@ -5,6 +5,7 @@ import type * as Http from "@oligarchy/http";
 import type * as Logger from "@oligarchy/logger";
 import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
+import * as AutomationClient from "./automation-client.ts";
 
 const LOCATION = "automation-server";
 
@@ -140,6 +141,23 @@ const fail = async (
   return jarl.is_err(errored) ? errored : jarl.ok(undefined);
 };
 
+// The run reached its ceiling: the job and its test run are timed out with why, nothing is
+// queued, and the run's suite closes once none of its runs is open.
+const timeOut = async (services: Services, job: Stores.Tests.JobRow, failure: Error): Closed => {
+  const { tests, logger } = services;
+  const timedOut = await tests.timeoutJob(job.id, failure.message);
+  if (jarl.is_err(timedOut)) {
+    return timedOut;
+  }
+  logger.warning(`${job.action} timed out: ${failure.message}`, at(job));
+  const closedRun = await tests.timeoutRun(job.runId, failure.message);
+  if (jarl.is_err(closedRun)) {
+    return closedRun;
+  }
+  const { suiteId } = jarl.value(closedRun);
+  return suiteId === null ? jarl.ok(undefined) : closeSuite(services, suiteId);
+};
+
 // Closes the job by how its /run answered. A write that fails stops the close where it is.
 export const close = async (
   services: Services,
@@ -150,7 +168,9 @@ export const close = async (
   const { job, judgedJobId } = running;
   let closed: Awaited<Closed>;
   if (jarl.is_err(ran)) {
-    closed = await fail(services, job, ran.error);
+    closed = AutomationClient.timedOut(ran.error)
+      ? await timeOut(services, job, ran.error)
+      : await fail(services, job, ran.error);
   } else if (jarl.value(ran) === "aborted") {
     closed = await abort(services, options, job);
   } else if (judgedJobId === undefined) {
