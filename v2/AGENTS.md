@@ -45,3 +45,5 @@
 16. Never define your own services object, use App.Needs instead
 17. Naming should represent what the function is doing.  If its a main executing loop, it should
     probably contain "loop".  Be sensible
+18. Before you search the code, open `field-guide/index.md` and read the guide for what you are
+    working on. If you had to learn a pattern the guide does not have, add it there.
