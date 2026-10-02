@@ -515,17 +515,26 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
 V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
 
 - [x] **The diagnosing agent's evidence** (`v2/packages/ctrl`). V1: `ctrl session --all` and
-      `./session image`. The `ctrl` service, over `tests`, `actions`, `logs`, `debugLogs`,
-      `vmStatus` and `diagnosis`, is what the diagnosing agent reads a drive or setup back
-      through, keyed by its job id where V1 keyed by session. `getEvidence(jobId)` answers the
-      job, its test run, suite (null for a run on its own) and pinned definition, and, each oldest
-      first, its VM's changes, its turn's log lines, its actions and its screenshots (`{ id,
-      actionId, createdAt }`), with its debug log and diagnosis, each null until written. A job
-      that does not exist is `NotFound`, and a diagnose job `InvalidState`: it has no guest, and
-      the evidence is of the drive or setup it judges. `getImage(imageId)` answers a
-      screenshot's PNG bytes, and an id no image has is `NotFound`. A job's turn is
-      `logs.listJobLogs`, the lines `saveDebugLog` keeps, from when the job was queued until its
-      run's next job was queued. The CLI, the diagnosing prompt and `diagnose` build on it.
+      `./session image`. The diagnosing agent walks a drive or setup back one screenshot at a
+      time. The `logs` store reads it by offset:
+      - `logs.getFrame(jobId, frame)` answers frame `frame` of `frames`. Frame 0 is the newest
+        screenshot (its PNG, action id and when it was asked for) and runs to the end of the
+        job's turn. Each frame after is one screenshot further back, holding everything from it
+        until the next. The last frame, `frames - 1`, is everything before the first screenshot
+        and has no screenshot. Each frame holds, oldest first, the moves the model made, the QMP
+        actions they became, the turn's log lines and the VM's changes, plus the intent open
+        when its screenshot was taken. A job's turn runs from when it was queued until its run's
+        next job was queued. One repeatable-read snapshot answers the whole frame. A job that
+        does not exist is `NotFound`. A frame it does not have is `NoFrame`, naming how many it
+        has.
+      - `logs.getDebugLog(jobId)` answers what the qemu server saved: serial console, journal,
+        proxy and the rest. A job with none saved is `NotFound`.
+      The `ctrl` service is the per-job state over them, made with `create({ logs }, { jobId })`.
+      `moreData()` answers the next frame back, starting at 0. It advances only when the store
+      answered, so a failed read is asked again; past the oldest frame it stays at `NoFrame`.
+      `debugLogs()` answers the job's debug log. These replace the first cut's `getEvidence`,
+      `getImage`, `logs.listJobLogs` and `debugLogs.getDebugLog`. The verdict tool (`diagnose`
+      below), the CLI and the diagnosing prompt build on it.
 - [ ] **ctrl** (`apps/ctrl`), cut down from V1's.
       - `test run --name <definition> --iso <url>`: one test run on its own, with no suite, for
         trying something out; prints its test run and job ids.

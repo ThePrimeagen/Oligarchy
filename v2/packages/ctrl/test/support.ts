@@ -1,77 +1,60 @@
-import { readFileSync } from "node:fs";
 import * as App from "@oligarchy/app";
-import * as Db from "@oligarchy/db";
-import * as Env from "@oligarchy/env";
-import * as FakePostgres from "@oligarchy/fake-postgres";
-import * as Stores from "@oligarchy/stores";
+import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import { afterEach } from "vitest";
 import * as Ctrl from "../src/main.ts";
 
-const cleanups: Array<() => Promise<unknown>> = [];
+export const JOB = "00000000-0000-4000-8000-000000000001";
 
-afterEach(async () => {
-  for (let cleanup = cleanups.pop(); cleanup !== undefined; cleanup = cleanups.pop()) {
-    await cleanup();
-  }
-});
-
-const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
-
-const stores = (db: App.Made<Db.Database>) => ({
-  tests: Stores.Tests.create({ db }),
-  actions: Stores.Actions.create({ db }),
-  logs: Stores.Logs.create({ db }),
-  debugLogs: Stores.DebugLogs.create({ db }),
-  vmStatus: Stores.VmStatus.create({ db }),
-  diagnosis: Stores.Diagnosis.create({ db }),
-});
-
-// A migrated database of the test's own, the stores that write the evidence, and ctrl over them.
-export const database = async () => {
-  const fake = jarl.unwrap(await FakePostgres.start());
-  cleanups.push(() => fake.stop());
-  const env = jarl.unwrap(
-    await Env.create(
-      Env.cli({ name: "ctrl-test", description: "" }).needs("databaseUrl").done(),
-      Env.fakeIo({ env: { DATABASE_URL: fake.url }, files: { [Env.CONFIG_PATH]: CONFIG } }),
-    ),
-  );
-  const db = Db.create({}, { url: env.vars.databaseUrl });
-  cleanups.push(() => db.close());
-  const services = stores(db);
-  return { db, ...services, ctrl: Ctrl.create(services) };
+const unused = (): never => {
+  throw new Error("unexpected call");
 };
 
-// ctrl over a database whose every query fails with `error`.
-export const failing = (error: Db.DatabaseError) => {
-  const db = App.createService<never, App.NoOptions, Db.Database>(() => ({
-    service: "db",
-    run: async () => jarl.err(error),
-    close: async () => jarl.ok(undefined),
-    onPoolError: () => () => undefined,
+// A frame as the logs store hands it back; only its number differs.
+export const frame = (number: number): Stores.Logs.Frame => ({
+  frame: number,
+  frames: 3,
+  screenshot: null,
+  openIntent: null,
+  moves: [],
+  actions: [],
+  logs: [],
+  vmStatus: [],
+});
+
+export const DEBUG_LOG: Stores.Logs.DebugLogRow = {
+  jobId: JOB,
+  sources: { serial: "omarchy login:", proxy: "", qemu: "", actions: "" },
+  createdAt: new Date(0),
+};
+
+// Every read ctrl asked of the logs store, in order, as [name, ...arguments].
+export type Asked = readonly [string, ...ReadonlyArray<unknown>];
+
+// ctrl for JOB over a logs store that answers what `script` says: each frame asked for, and
+// DEBUG_LOG, unless told otherwise.
+export const world = (
+  script: {
+    readonly getFrame?: Stores.Logs.Logs["getFrame"];
+    readonly getDebugLog?: Stores.Logs.Logs["getDebugLog"];
+  } = {},
+) => {
+  const asked: Array<Asked> = [];
+  const logs = App.createService<never, App.NoOptions, Stores.Logs.Logs>(() => ({
+    service: "logs",
+    insertLog: unused,
+    listLogs: unused,
+    listRecent: unused,
+    listIntents: unused,
+    getFrame: async (jobId, number) => {
+      asked.push(["getFrame", jobId, number]);
+      return script.getFrame === undefined
+        ? jarl.ok(frame(number))
+        : script.getFrame(jobId, number);
+    },
+    getDebugLog: async (jobId) => {
+      asked.push(["getDebugLog", jobId]);
+      return script.getDebugLog === undefined ? jarl.ok(DEBUG_LOG) : script.getDebugLog(jobId);
+    },
   }))({});
-  return Ctrl.create(stores(db));
+  return { asked, ctrl: Ctrl.create({ logs }, { jobId: JOB }) };
 };
-
-// A drive filed on a test run of its own.
-export const newDrive = async (tests: Stores.Tests.Tests) => {
-  const definition = jarl.unwrap(
-    await tests.defineTestDefinition({
-      name: "lock-screen",
-      description: "Lock the screen",
-      instruction: "1. Press Super+L",
-      proof: "The lock screen shows the clock",
-      resume: true,
-    }),
-  );
-  return jarl.unwrap(
-    await tests.createTestRun({
-      definitionId: definition.id,
-      iso: "https://iso.omarchy.org/omarchy-4.0.4.iso",
-      serverUrl: "http://qemu-proxy",
-    }),
-  );
-};
-
-export const MISSING = "00000000-0000-4000-8000-000000000000";

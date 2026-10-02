@@ -15,7 +15,7 @@ const stamp = (seconds: number) => at(seconds).toISOString();
 
 describe("a job's debug log", () => {
   it("each job of a test run keeps the guest's output, its own actions, and the log lines of its turn (happy)", async () => {
-    const { db, tests, actions, debugLogs } = await database();
+    const { db, tests, actions, debugLogs, logs } = await database();
     const first = await newJob(tests);
     jarl.unwrap(await tests.abortJob(first.id, "the guest never booted"));
     const second = jarl.unwrap(await tests.createJob(first.runId, "drive"));
@@ -81,9 +81,9 @@ describe("a job's debug log", () => {
       jarl.unwrap(await actions.listActions(second.id)).map((row) => [row.id, row.createdAt]),
     );
     const madeAt = (id: number) => taken.get(id)?.toISOString();
-    const saved = jarl.unwrap(await debugLogs.getDebugLog(second.id));
-    expect(saved?.jobId).toBe(second.id);
-    expect(saved?.sources).toEqual({
+    const saved = jarl.unwrap(await logs.getDebugLog(second.id));
+    expect(saved.jobId).toBe(second.id);
+    expect(saved.sources).toEqual({
       serial: "journalctl\nfailed unit",
       qemu: "kvm: not available\n",
       proxy: [
@@ -95,11 +95,11 @@ describe("a job's debug log", () => {
         `${madeAt(keys)} ${String(keys)} open {"execute":"send-key"}`,
       ].join("\n"),
     });
-    expect(jarl.unwrap(await debugLogs.getDebugLog(first.id))?.sources).toMatchObject({
+    expect(jarl.unwrap(await logs.getDebugLog(first.id)).sources).toMatchObject({
       proxy: `${stamp(5)} info qemu-server downloading omarchy.iso`,
       actions: "",
     });
-    expect(jarl.unwrap(await debugLogs.getDebugLog(third.id))?.sources.proxy).toBe(
+    expect(jarl.unwrap(await logs.getDebugLog(third.id)).sources.proxy).toBe(
       [
         `${stamp(20)} info qemu-reverse-proxy reserved on qemu-2`,
         `${stamp(25)} info qemu-server running; started in 12ms`,
@@ -108,7 +108,7 @@ describe("a job's debug log", () => {
   });
 
   it("a debug log for a job that does not exist is refused with NotFound, and nothing is stored (unhappy)", async () => {
-    const { debugLogs } = await database();
+    const { debugLogs, logs } = await database();
 
     const saved = await debugLogs.saveDebugLog(MISSING, { serial: "orphan", qemu: "" });
 
@@ -116,41 +116,46 @@ describe("a job's debug log", () => {
       throw new Error("expected NotFound");
     }
     expect(saved.error.message).toBe(`saveDebugLog: no job ${MISSING}`);
-    expect(jarl.unwrap(await debugLogs.getDebugLog(MISSING))).toBeUndefined();
+    expect(jarl.error.is(await logs.getDebugLog(MISSING), Tests.NotFound)).toBe(true);
   });
 
   it("a second debug log for a job is a database error, and the first stands (unhappy)", async () => {
-    const { tests, debugLogs } = await database();
+    const { tests, debugLogs, logs } = await database();
     const drive = await newJob(tests);
     jarl.unwrap(await debugLogs.saveDebugLog(drive.id, { serial: "first", qemu: "" }));
 
     const again = await debugLogs.saveDebugLog(drive.id, { serial: "second", qemu: "" });
 
     expect(jarl.error.is(again, Db.DatabaseError)).toBe(true);
-    expect(jarl.unwrap(await debugLogs.getDebugLog(drive.id))?.sources.serial).toBe("first");
+    expect(jarl.unwrap(await logs.getDebugLog(drive.id)).sources.serial).toBe("first");
   });
 
-  it("a job that never saved one has no debug log (unhappy)", async () => {
-    const { tests, debugLogs } = await database();
+  it("a job that never saved one has no debug log: NotFound (unhappy)", async () => {
+    const { tests, logs } = await database();
     const drive = await newJob(tests);
 
-    expect(jarl.unwrap(await debugLogs.getDebugLog(drive.id))).toBeUndefined();
+    const got = await logs.getDebugLog(drive.id);
+
+    if (!jarl.error.is(got, Tests.NotFound)) {
+      throw new Error("expected NotFound");
+    }
+    expect(got.error.message).toBe(`getDebugLog: no debug log for job ${drive.id}`);
   });
 
   it("a source over a megabyte keeps its last megabyte, marked truncated (unhappy)", async () => {
-    const { tests, debugLogs } = await database();
+    const { tests, debugLogs, logs } = await database();
     const drive = await newJob(tests);
     const serial = `head-noise\n${"z".repeat(1_048_576)}crash-tail`;
 
     jarl.unwrap(await debugLogs.saveDebugLog(drive.id, { serial, qemu: "kvm: not available\n" }));
 
-    const sources = jarl.unwrap(await debugLogs.getDebugLog(drive.id))?.sources;
-    expect(sources?.serial.length).toBe(1_048_576);
-    expect(sources?.serial.startsWith("[truncated]\n")).toBe(true);
-    expect(sources?.serial.endsWith("zzcrash-tail")).toBe(true);
-    expect(sources?.serial.includes("head-noise")).toBe(false);
-    expect(sources?.qemu).toBe("kvm: not available\n");
-    expect(sources?.proxy).toBe("");
-    expect(sources?.actions).toBe("");
+    const sources = jarl.unwrap(await logs.getDebugLog(drive.id)).sources;
+    expect(sources.serial.length).toBe(1_048_576);
+    expect(sources.serial.startsWith("[truncated]\n")).toBe(true);
+    expect(sources.serial.endsWith("zzcrash-tail")).toBe(true);
+    expect(sources.serial.includes("head-noise")).toBe(false);
+    expect(sources.qemu).toBe("kvm: not available\n");
+    expect(sources.proxy).toBe("");
+    expect(sources.actions).toBe("");
   });
 });

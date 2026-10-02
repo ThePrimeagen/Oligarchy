@@ -16,8 +16,6 @@
     "jarl": "catalog:"
   },
   "devDependencies": {
-    "@oligarchy/env": "workspace:*",
-    "@oligarchy/fake-postgres": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

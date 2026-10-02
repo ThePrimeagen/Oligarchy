@@ -3,11 +3,9 @@ import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { asc, eq } from "drizzle-orm";
 import * as jarl from "jarl";
-import { type Answer, settle } from "./answer.ts";
+import { settle } from "./answer.ts";
 import { turnOf } from "./logs.ts";
 import type { NotFound } from "./tests.ts";
-
-export type DebugLogRow = typeof DbSchema.debugLogs.$inferSelect;
 
 // What only the qemu server that held the guest has: the guest's serial console and QEMU's stderr.
 export type Captured = { readonly serial: string; readonly qemu: string };
@@ -18,7 +16,6 @@ export type DebugLogs = {
     jobId: string,
     captured: Captured,
   ) => Promise<jarl.Result<void, Db.DatabaseError | NotFound>>;
-  readonly getDebugLog: (jobId: string) => Answer<DebugLogRow | undefined>;
 };
 
 declare module "@oligarchy/app" {
@@ -92,13 +89,4 @@ export const create = App.createService<Db.Database, App.NoOptions, DebugLogs>((
         return jarl.ok(undefined);
       })
       .then(settle),
-
-  getDebugLog: (jobId) =>
-    db.run(async (d) => {
-      const [row] = await d
-        .select()
-        .from(DbSchema.debugLogs)
-        .where(eq(DbSchema.debugLogs.jobId, jobId));
-      return row;
-    }),
 }));

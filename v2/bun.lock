@@ -101,8 +101,6 @@
         "jarl": "catalog:",
       },
       "devDependencies": {
-        "@oligarchy/env": "workspace:*",
-        "@oligarchy/fake-postgres": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -130,6 +128,7 @@
       "name": "@oligarchy/drive-harness",
       "dependencies": {
         "@oligarchy/app": "workspace:*",
+        "@oligarchy/db": "workspace:*",
         "@oligarchy/http": "workspace:*",
         "@oligarchy/openrouter": "workspace:*",
         "@oligarchy/qemu-http-tools": "workspace:*",
@@ -138,7 +137,6 @@
         "zod": "catalog:",
       },
       "devDependencies": {
-        "@oligarchy/db": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -742,17 +740,11 @@
 
     "@oligarchy/automation-server/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
-    "@oligarchy/drive-harness/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+    "@oligarchy/ctrl/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "@oligarchy/fleet/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
-    "@oligarchy/http/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
-
     "@oligarchy/logger/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
-
-    "@oligarchy/openrouter/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
-
-    "@oligarchy/qemu-http-tools/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "@oligarchy/sentry/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
