@@ -268,9 +268,11 @@ record, and the automation server acts on it directly.
 - [x] **Close a drive or setup** (the automation server's `src/close.ts`). `completeJob` when the
       driver ran to its end, then queue a diagnose job on the same test run; `errorJob` with the
       reason when the system failed it, which queues no diagnose and leaves its test run running
-      for Try again. A run its client answers `aborted` is `abortJob`ed, unless an operator's
-      abort closed the job first, which stands. A write that fails stops the close where it is,
-      with one error line.
+      for Try again. A run its client answers timed out (504), a drive, setup or diagnose, is
+      `timeoutJob`ed with the reason, its test run `timeoutRun`s, nothing is queued, and its
+      suite closes once none of its runs is open; a warning under the job says so. A run its
+      client answers `aborted` is `abortJob`ed, unless an operator's abort closed the job first,
+      which stands. A write that fails stops the close where it is, with one error line.
 - [x] **Diagnose.** A diagnose judges the newest completed drive or setup on its test run; one
       with none to judge can never run, so dispatch `abortJob`s it saying so. Its `/run` carries
       the diagnosing prompt (`src/diagnose-prompt.ts`), which names that job and its model and
@@ -281,7 +283,8 @@ record, and the automation server acts on it directly.
       `completeSuite`s once none of its runs is pending or running: passed when every run
       passed. Two runs closing at once can each find the suite done; the second completion is
       refused and says nothing. A diagnose whose agent recorded no verdict is `errorJob`ed, and
-      the job it judged and its run stay open for Try again.
+      the job it judged and its run stay open for Try again. A diagnose that timed out times its
+      run out, as any job does, and the job it judged stays completed.
 - [x] **Abort.** By job id or by suite id, through the automation server's `/abort`
       (`src/abort.ts`); ctrl does not abort, and who calls it (the dashboard, a V2 tool) is
       open. Every write says `aborted by an operator`. A pending job is `abortJob`ed. A running
@@ -450,8 +453,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             - `/abort`: `{ jobId }`.
 
             Handed its function, a route answers what it says: a reserve `reserved` is 200,
-            `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409 and a
-            `RunFailed` 500 naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
+            `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409, a
+            `RunTimedOut` 504 and a `RunFailed` 500, each naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
             fakes `Sessions`. The tasks below write the functions.
       - [x] **Announce.** A required `--name` and a required `--url`: a client the automation
             server cannot reach is no client, so one with no `--url` refuses to start (V1's was
@@ -485,19 +488,21 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             client expires it.
       - [x] **Run** (`src/run.ts`, over `src/child.ts`). Takes the job's reservation with `take`
             and spawns `v2/driver --job-id <id> --server-url <its --server-url>` for a drive or
-            setup (section 4's driver; exit 0 is ran to its end, 1 failed) or `opencode run
+            setup (section 4's driver; exit 0 is ran to its end, 124 timed out, 1 failed) or
+            `opencode run
             --auto --model openrouter/<models.diagnose> --variant <reasoning.diagnose> --
             <prompt>` in `v2` for a diagnose, and answers once it has ended: 200 when it ran to
-            its end, 409 when an abort ended it, 500 when it failed, naming the tail of its
-            stderr or its exit. `main` therefore also needs `OPENROUTER_API_KEY`, and hands
+            its end, 409 when an abort ended it, 504 when it timed out, 500 when it failed,
+            naming the tail of its stderr or its exit. `main` therefore also needs `OPENROUTER_API_KEY`, and hands
             `DATABASE_URL`, `OLIGARCHY_TOKEN` and `OPENROUTER_API_KEY` to every child, since one
             read from an `--env-file` is not in the child's environment. A job with no
             reservation, a diagnose with no prompt and a child that cannot be spawned are 500s.
             When the held signal aborts, the child is sent SIGTERM, and SIGKILL after 5 seconds.
             Only a child that kill reached answers 409; one that had already exited answers as it
             ended. A diagnose has `runCeiling`, and the driver, which stops itself at that
-            ceiling, five minutes more to stop its guest; past it the child is killed and the run
-            is a 500. The run calls `release` once the child is reaped, whatever it answers.
+            ceiling and exits 124, five minutes more to stop its guest; past it the child is
+            killed. Either is a `RunTimedOut` (504); opencode exiting 124 is only a 500. The run
+            calls `release` once the child is reaped, whatever it answers.
       - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
             each job it has reserved or is running, in memory only, by an `AbortController`;
             `main` creates it and hands `jobs.abort` to the routes as their `Sessions` abort.
@@ -518,8 +523,11 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       until the model is done, the step limit or the run ceiling (the deadline of every ask;
       `OpenRouterOutOfTime` is that ceiling reached), or three replies in a row that were not a
       move it could make. A setup whose guest is off is done and saved; a drive's is failed. On
-      SIGINT or SIGTERM the guest is stopped aborted. It exits 0 when the drive ran to its end,
-      passed or failed, and 1 when the system failed it: the job would not load or start, or the
+      SIGINT or SIGTERM the guest is stopped aborted. At the run ceiling the drive ends
+      `timed_out`, its guest is stopped failed with the reason (a guest's stop has no timed
+      out), and it exits 124 (`src/exits.ts`, as timeout(1) exits), which its automation client
+      answers as timed out. It exits 0 when the drive ran to its end, passed or failed, and 1
+      when the system failed it: the job would not load or start, or the
       proxy or the model could not be reached. That failure is the failing step's own error,
       returned as it came, logged with itself as the cause so Sentry gets its stack, printed with
       its stack, and the reason the guest is stopped with. The OpenRouter client has `timeouts.header` as its
