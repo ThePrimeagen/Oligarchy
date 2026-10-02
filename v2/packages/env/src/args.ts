@@ -2,9 +2,9 @@ import { homedir } from "node:os";
 import * as z from "zod";
 
 // Every flag any oligarchy program takes, declared once. A flag's export is named for its key and
-// its key is its spelling: `sessionId` is `--session-id`. Where one spelling means different things
+// its key is its spelling: `maxJobs` is `--max-jobs`. Where one spelling means different things
 // in different commands, each meaning has an export of its own and the command keys it by the
-// spelling: `name: machineName()`, `status: resultStatus()`.
+// spelling: `name: machineName()`. ctrl is a service apps use, not a program, so it has none.
 
 export type Flag<S extends z.ZodType = z.ZodType, R extends boolean = boolean> = {
   // Decodes the text. A bare `--flag` is "true" and must decode to a boolean.
@@ -38,9 +38,6 @@ const httpUrl = z.url({ protocol: /^https?$/, error: "must be an http or https u
 const number = z.coerce.number({ error: "must be a number" });
 const atLeastOne = number.int("must be a whole number").min(1, "must be at least 1");
 const toggle = z.stringbool({ error: "must be true or false" }).default(false);
-const errorTypeKey = z
-  .string()
-  .regex(/^[a-z][a-z0-9_]*$/, "must be snake_case: a-z, 0-9 and _, starting with a letter");
 
 // ---------------------------------------------------------------------------
 // Every program
@@ -57,23 +54,6 @@ export const serverUrl = flag({
   schema: httpUrl,
   description: "The qemu reverse proxy the calls go to; SERVER_URL when omitted",
   env: "SERVER_URL",
-});
-
-export const agentId = flag({
-  schema: words,
-  description: "The calling agent's id",
-});
-
-// A shell exports the id once: `SESSION_ID=$(./ctrl session --search ...)`.
-export const sessionId = flag({
-  schema: words,
-  description: "Session id; SESSION_ID when omitted",
-  env: "SESSION_ID",
-});
-
-export const testResultId = flag({
-  schema: words,
-  description: "Test result id",
 });
 
 // ---------------------------------------------------------------------------
@@ -149,153 +129,4 @@ export const prompt = flag({ schema: words, description: "The user prompt" });
 export const debugLog = flag({
   schema: words,
   description: "File that receives one JSON line per step",
-});
-
-// ---------------------------------------------------------------------------
-// session
-// ---------------------------------------------------------------------------
-
-export const output = flag({
-  schema: words,
-  description: "Write it to this file instead of stdout",
-});
-
-export const imageId = flag({
-  schema: words,
-  description: "Image id, as ctrl session --images prints it",
-});
-
-// ---------------------------------------------------------------------------
-// ctrl
-// ---------------------------------------------------------------------------
-
-export const list = flag({ schema: toggle, description: "List what this command keeps" });
-
-export const details = flag({ schema: toggle, description: "Print every field as JSON" });
-
-export const history = flag({
-  schema: toggle,
-  description: "Print every wording of each definition, oldest first",
-});
-
-// ctrl test's --name.
-export const definitionName = flag({ schema: words, description: "Test definition name" });
-
-// ctrl test define's --description.
-export const testDescription = flag({ schema: words, description: "What the test is about" });
-
-export const instruction = flag({ schema: words, description: "What the driver does" });
-
-export const proof = flag({
-  schema: words,
-  description: "What must be on screen for the test to pass",
-});
-
-// Every server downloads it, so it is an https url and never a path.
-export const iso = flag({
-  schema: z.url({ protocol: /^https$/, error: "must be an https url" }),
-  description: "HTTPS URL of the ISO",
-});
-
-export const setupOnly = flag({
-  schema: toggle,
-  description:
-    "Set up only on the live qemu servers that do not hold the ISO's setup disk, asking the reverse proxy at --server-url; needs OLIGARCHY_TOKEN",
-});
-
-export const model = flag({ schema: words, description: "Cursor model id doing the work" });
-
-export const id = flag({ schema: words, description: "Test result id" });
-
-// ctrl test-results' --status, recorded as passed or failed.
-export const resultStatus = flag({
-  schema: z
-    .enum(["success", "failed"])
-    .transform((status): "passed" | "failed" => (status === "success" ? "passed" : "failed")),
-  description: "Whether the test succeeded",
-});
-
-export const reason = flag({ schema: words, description: "Why the test passed or failed" });
-
-export const count = flag({
-  schema: atLeastOne.default(10),
-  description: "How many of the most recent to print",
-});
-
-export const active = flag({
-  schema: toggle,
-  description: "Print only active sessions, running before downloads",
-});
-
-export const json = flag({ schema: toggle, description: "Print as a JSON array" });
-
-export const search = flag({
-  schema: toggle,
-  description: "Print the id of the session that ran --test-result-id",
-});
-
-// ctrl session's --status.
-export const sessionStatus = flag({
-  schema: toggle,
-  description: "Print the session row: how it ended, why, and what it booted",
-});
-
-export const logs = flag({ schema: toggle, description: "Print session logs" });
-
-export const testDef = flag({ schema: toggle, description: "Print the session's test definition" });
-
-export const testResults = flag({ schema: toggle, description: "Print the session's test result" });
-
-export const testRun = flag({
-  schema: toggle,
-  description: "Print the test run the session's result belongs to",
-});
-
-export const actions = flag({ schema: toggle, description: "Print session actions" });
-
-export const images = flag({
-  schema: toggle,
-  description: "Print the session's screenshots: id, action, url, when",
-});
-
-export const debugLogs = flag({
-  schema: toggle,
-  description: "Print the session's debug log (serial, proxy, qemu, actions), saved when it ended",
-});
-
-export const diagnosis = flag({
-  schema: toggle,
-  description: "Print the session's post-run diagnosis, written by diagnose",
-});
-
-export const all = flag({
-  schema: toggle,
-  description:
-    "Print the session, logs, test result, definition and run, actions, images, debug log, and diagnosis",
-});
-
-export const key = flag({
-  schema: errorTypeKey,
-  description: "snake_case key the diagnoses of this type carry",
-});
-
-// ctrl error-type new's --description.
-export const errorTypeDescription = flag({
-  schema: words,
-  description: "What a failure of this type looks like",
-});
-
-export const verdict = flag({
-  schema: z.enum(["passed", "failed"]),
-  description: "Whether the proof landed, as the evidence shows it",
-});
-
-export const type = flag({
-  schema: errorTypeKey,
-  description: "Error type key of a failed verdict; error-type list prints them",
-});
-
-export const summary = flag({
-  schema: words,
-  description: "What happened, read from the evidence",
 });

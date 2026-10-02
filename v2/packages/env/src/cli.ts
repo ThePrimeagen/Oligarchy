@@ -4,10 +4,10 @@ import type * as Args from "./args.ts";
 import * as Errors from "./errors.ts";
 import type * as Vars from "./vars.ts";
 
-// A command line is words, then flags: `ctrl test run one --name lock-screen`. The words name one
+// A command line is words, then flags: `fleet guest hold --max-jobs 2`. The words name one
 // command in the environment's tree; after the first flag there is nothing but flags.
 
-// Flags by camelCase key: `sessionId` is `--session-id` on the command line.
+// Flags by camelCase key: `maxJobs` is `--max-jobs` on the command line.
 export type Spec = Readonly<Record<string, Args.Flag>>;
 
 // zod's own test for "may this be absent": `.optional()` and `.default()` pass it.
