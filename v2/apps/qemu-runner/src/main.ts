@@ -2,7 +2,7 @@ import * as App from "@oligarchy/app";
 import * as Env from "@oligarchy/env";
 import { listen } from "@oligarchy/http/serve";
 import * as jarl from "jarl";
-import * as Application from "./application.js";
+import * as Application from "./application.ts";
 import { environment } from "./environment.ts";
 import { closeServices, createServices } from "./services.ts";
 

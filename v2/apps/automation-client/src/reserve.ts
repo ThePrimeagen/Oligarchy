@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import * as Http from "@oligarchy/http";
 import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
@@ -31,14 +32,14 @@ export type Options = {
   readonly reservationTimeoutMs: number;
   readonly jobs: Jobs.Jobs;
   readonly proxy: Proxy.Proxy;
-  readonly logger: Logger.Logger;
 };
 
 // A reserve holds its job against maxJobs, and a drive or setup a guest at the proxy first. One
 // reserve asks the proxy at a time; another meanwhile is AtCapacity, and the automation server
 // asks again. A reservation lives in memory only, so a restarted client holds nothing.
-export const create = (options: Options): Reservations => {
-  const { maxJobs, jobs, proxy, logger } = options;
+export const create = (services: App.Needs<Logger.Logger>, options: Options): Reservations => {
+  const { maxJobs, jobs, proxy } = options;
+  const { logger } = services;
   const reservations = new Map<string, Reservation>();
   let reserving = false;
 

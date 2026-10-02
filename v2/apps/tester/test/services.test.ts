@@ -4,7 +4,9 @@ import * as FakePostgres from "@oligarchy/fake-postgres";
 import * as Fake from "@oligarchy/http/testing";
 import * as jarl from "jarl";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { closeServices, createServices, environment, type Services } from "../src/services.ts";
+import { closeServices, createServices, type Services } from "../src/services.ts";
+
+import { environment } from "../src/environment.ts";
 
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
 const ENVELOPES = "https://o4510324148862976.ingest.us.sentry.io/api/4512001067581440/envelope/";

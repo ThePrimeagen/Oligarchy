@@ -30,10 +30,11 @@ type Announcing =
 // the host's cpu sampled in between, until the client is killed; then the row goes. It boots no
 // guests itself; each reading counts the jobs held.
 const announcing = (jobs: Jobs.Jobs) => async (sub: App.App<Environment.Run, Announcing>) => {
-  const { host, usage, servers, processStats, logger } = sub.services;
   const { name, url } = sub.environment.flags;
   await Promise.all([
-    Fleet.Host.sampling(host, sub.signal),
+    Fleet.Host.sampling(sub.services, sub.signal, {
+      every: sub.environment.config.fleet.sampleInterval,
+    }),
     Fleet.announce(
       {
         type: "automation-client",
@@ -42,7 +43,7 @@ const announcing = (jobs: Jobs.Jobs) => async (sub: App.App<Environment.Run, Ann
         attribution: { location: LOCATION },
         report: async () => jarl.ok({ qemus: 0, jobs: jobs.count() }),
       },
-      { host, usage, servers, processStats, logger },
+      sub.services,
       sub.signal,
       { every: sub.environment.config.fleet.heartbeatInterval },
     ),
@@ -65,7 +66,7 @@ export const main =
     const { logger, http } = app.services;
     const { flags, vars, config } = app.environment;
     const jobs = Jobs.create();
-    const reservations = Reserve.create({
+    const reservations = Reserve.create(app.services, {
       maxJobs: flags.maxJobs,
       reservationTimeoutMs: config.automationClient.reservationTimeout,
       jobs,
@@ -76,16 +77,14 @@ export const main =
         reserveTimeoutMs: config.automationClient.reserveTimeout,
         releaseTimeoutMs: config.qemuServer.releaseTimeout,
       }),
-      logger,
     });
-    const run = Run.create({
+    const run = Run.create(app.services, {
       reservations,
       spawn: options.spawn,
       env: options.env,
       serverUrl: flags.serverUrl,
       config,
       vars,
-      logger,
     });
     const listened = await options.listen(
       routes({

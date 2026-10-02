@@ -236,7 +236,7 @@ describe("running ps", () => {
 
   it("gives what the command printed and its pid (happy)", async () => {
     const child = fakeProcess();
-    const ran = Usage.listProcesses({ spawn: child.spawn });
+    const ran = Usage.listProcesses({ timeoutMs: 10_000, killGraceMs: 700, spawn: child.spawn });
     child.write(" 1 0");
     child.write(" 5\n");
     child.close();
@@ -256,7 +256,12 @@ describe("running ps", () => {
 
   it("a command that cannot start is unreadable, with the platform's reason (error)", async () => {
     const child = fakeProcess();
-    const pending = Usage.listProcesses({ command: "/nonexistent/ps", spawn: child.spawn });
+    const pending = Usage.listProcesses({
+      timeoutMs: 10_000,
+      killGraceMs: 700,
+      command: "/nonexistent/ps",
+      spawn: child.spawn,
+    });
     child.fail(new Error("spawn /nonexistent/ps ENOENT"));
     child.close();
     const ran = await pending;
@@ -276,6 +281,7 @@ describe("running ps", () => {
       const child = fakeProcess();
       let settled = false;
       const pending = Usage.listProcesses({
+        killGraceMs: 700,
         spawn: child.spawn,
         timeoutMs: 200,
       }).then((result) => {
@@ -294,7 +300,7 @@ describe("running ps", () => {
       if (exits) {
         child.close();
       }
-      await vi.advanceTimersByTimeAsync(999);
+      await vi.advanceTimersByTimeAsync(699);
       expect(child.signals).toEqual(["SIGTERM"]);
       await vi.advanceTimersByTimeAsync(1);
       expect(child.signals).toEqual(exits ? ["SIGTERM"] : ["SIGTERM", "SIGKILL"]);

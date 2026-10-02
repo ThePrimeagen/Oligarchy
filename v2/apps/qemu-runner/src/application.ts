@@ -1,14 +1,12 @@
+import type * as Serve from "@oligarchy/http/serve";
 import * as App from "@oligarchy/app";
 import * as jarl from "jarl";
 import * as Guests from "./guests.ts";
 import * as Loops from "./loops.ts";
 import { routes } from "./routes.ts";
 
-/** @param {{ listen: typeof import('@oligarchy/http/serve').listen }} options */
 export const main =
-  (options) =>
-  /** @param {Loops.Application} app */
-  async (app) => {
+  (options: { readonly listen: typeof Serve.listen }) => async (app: Loops.Application) => {
     const { flags, vars, config } = app.environment;
     const { qemu, setupRequests, vmStatus, logger } = app.services;
     const guests = Guests.create(app.services, {

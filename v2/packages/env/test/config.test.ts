@@ -14,7 +14,13 @@ const valid = {
   reasoning: { drive: "minimal", diagnose: "xhigh", setup: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   httpTimeout: "10 seconds",
-  fleet: { heartbeatInterval: "15 seconds" },
+  fleet: {
+    heartbeatInterval: "15 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "1.5 hours",
     stepLimit: 200,
@@ -93,7 +99,7 @@ describe("load", () => {
     expect(
       await refusal({
         ...valid,
-        fleet: { heartbeatInterval: valid.qemuServer.forgetAfter },
+        fleet: { ...valid.fleet, heartbeatInterval: valid.qemuServer.forgetAfter },
       }),
     ).toContain("fleet.heartbeatInterval");
   });

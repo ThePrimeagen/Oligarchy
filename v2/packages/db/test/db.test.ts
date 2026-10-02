@@ -9,7 +9,6 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import * as Db from "../src/main.ts";
 
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
-const UNREACHABLE = "postgres://postgres@127.0.0.1:1/postgres";
 
 const cleanups: Array<() => Promise<unknown>> = [];
 
@@ -110,7 +109,9 @@ describe("the database", () => {
   });
 
   it("is built even when nothing can reach it, and fails at its first query as a DatabaseError (unhappy)", async () => {
-    const db = await created(UNREACHABLE);
+    const fake = jarl.unwrap(await FakePostgres.start());
+    await fake.stop();
+    const db = await created(fake.url);
 
     const answered = await selectOne(db);
 
@@ -121,7 +122,7 @@ describe("the database", () => {
   });
 
   it("a query that throws is a DatabaseError carrying what it threw (unhappy)", async () => {
-    const db = await created(UNREACHABLE);
+    const db = await created("postgres://unused/unused");
     const thrown = new Error("not a row");
 
     const answered = await db.run(() => Promise.reject(thrown));

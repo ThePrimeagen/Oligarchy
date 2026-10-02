@@ -41,14 +41,17 @@ export type World = App.Needs<App.Made<Http.Http> | App.Made<Fleet.Usage.Usage>>
   readonly host: Fleet.Host.Source;
 };
 
-const live = (config: Pick<Env.Config, "httpTimeout">): World => ({
+const live = (config: Pick<Env.Config, "httpTimeout" | "fleet">): World => ({
   terminal: {
     write: (line) => process.stdout.write(`${line}\n`),
     colors: process.stdout.isTTY,
   },
   http: Http.create({}, { timeoutMs: config.httpTimeout }),
   host: Fleet.Host.osSource,
-  usage: Fleet.Usage.forThisProcess(),
+  usage: Fleet.Usage.forThisProcess({
+    timeoutMs: config.fleet.processTimeout,
+    killGraceMs: config.fleet.processKillGrace,
+  }),
 });
 
 // Every line is printed and stored in the logs table; an error or fatal line, and a line that
@@ -60,7 +63,12 @@ export const createServices = (env: Run, world: World = live(env.config)) => {
   const logger = Logger.create({ sentry, db }, { write: terminal.write, colors: terminal.colors });
   const host = Fleet.Host.create(
     { logger },
-    { source: world.host, attribution: { location: "qemu-runner" } },
+    {
+      source: world.host,
+      sampleInterval: env.config.fleet.sampleInterval,
+      sampleLimit: env.config.fleet.sampleLimit,
+      attribution: { location: "qemu-runner" },
+    },
   );
   const servers = Stores.Servers.create({ db });
   const processStats = Stores.ProcessStats.create(

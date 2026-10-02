@@ -1,21 +1,9 @@
 import * as App from "@oligarchy/app";
-import type * as Db from "@oligarchy/db";
-import * as DbSchema from "@oligarchy/db/schema";
 import * as Env from "@oligarchy/env";
-import type * as Logger from "@oligarchy/logger";
-import { eq } from "drizzle-orm";
 import * as jarl from "jarl";
-import { report } from "./report.ts";
-import { closeServices, createServices, environment } from "./services.ts";
-
-const main = async (app: App.App<unknown, Db.Database | Logger.Logger>) => {
-  const counted = await app.services.db.run(async (db) => ({
-    running: await db.$count(DbSchema.testSuites, eq(DbSchema.testSuites.status, "running")),
-    passing: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "passed")),
-    failing: await db.$count(DbSchema.testRuns, eq(DbSchema.testRuns.status, "failed")),
-  }));
-  return report(app.services.logger, counted);
-};
+import { environment } from "./environment.ts";
+import * as Application from "./application.ts";
+import { closeServices, createServices } from "./services.ts";
 
 const created = await Env.create(environment);
 if (jarl.error.is(created, Env.HelpRequested)) {
@@ -36,7 +24,7 @@ const env = jarl.value(created);
 
 const services = createServices(env);
 
-const app = new App.App(env).main(main);
+const app = new App.App(env).main(Application.main);
 app.onExit(() => closeServices(services));
 await app.run(services, (errors) => {
   for (const error of errors) {

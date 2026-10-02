@@ -13,6 +13,7 @@
     "@oligarchy/app": "workspace:*",
     "@oligarchy/http": "workspace:*",
     "@oligarchy/openrouter": "workspace:*",
+    "@oligarchy/qemu-server": "workspace:*",
     "jarl": "catalog:",
     "zod": "catalog:"
   },

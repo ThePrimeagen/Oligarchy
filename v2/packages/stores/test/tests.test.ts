@@ -3,7 +3,7 @@ import * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
 import { eq, sql } from "drizzle-orm";
 import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Tests from "../src/tests.ts";
 import { database } from "./support.ts";
 
@@ -357,6 +357,7 @@ describe("a test, start to finish", () => {
     await step("startRun", tests.startRun(run.id, MODEL));
     await step("runJob drive", tests.runJob(drive.id, SERVER));
     await step("completeJob drive", tests.completeJob(drive.id));
+    vi.setSystemTime(Date.now() + 1);
     const diagnose = await step("createJob diagnose", tests.createJob(run.id, "diagnose"));
     await step("runJob diagnose", tests.runJob(diagnose.id, SERVER));
     await step("finalizeJob drive", tests.finalizeJob(drive.id, "succeeded", null));
@@ -420,7 +421,10 @@ describe("a suite, written whole", () => {
         jobs: ["drive pending"],
       })),
     );
-    expect(jarl.unwrap(await tests.getTestSuiteDetails(filed.suite.id))).toEqual(filed);
+    const readBack = jarl.unwrap(await tests.getTestSuiteDetails(filed.suite.id));
+    // Equal creation times may return the runs in a different order.
+    expect(readBack).toEqual({ ...filed, runs: expect.arrayContaining([...filed.runs]) });
+    expect(readBack.runs).toHaveLength(filed.runs.length);
   });
 
   it("naming a definition that does not exist is refused, and nothing is written or queued (unhappy)", async () => {
@@ -547,8 +551,11 @@ describe("a setup definition is filed with a setup job", () => {
     expect(jarl.unwrap(await setupRequests.inspect(SUITE.iso, QEMU_B))?.jobId).toBe(
       second?.jobs[0]?.id,
     );
-    expect(queued?.id).toBe(first?.jobs[0]?.id);
-    expect(jarl.unwrap(await tests.getTestSuiteDetails(filed.suite.id))).toEqual(filed);
+    expect([first?.jobs[0]?.id, second?.jobs[0]?.id]).toContain(queued?.id);
+    const readBack = jarl.unwrap(await tests.getTestSuiteDetails(filed.suite.id));
+    // Equal creation times may return the runs in a different order.
+    expect(readBack).toEqual({ ...filed, runs: expect.arrayContaining([...filed.runs]) });
+    expect(readBack.runs).toHaveLength(filed.runs.length);
   });
 
   it("a setup run with no server is refused, and nothing is written (unhappy)", async () => {

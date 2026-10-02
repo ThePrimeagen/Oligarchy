@@ -12,7 +12,11 @@
   "openRouterBaseUrl": "https://openrouter.ai/api/v1",
   "httpTimeout": "10 seconds",
   "fleet": {
-    "heartbeatInterval": "15 seconds"
+    "heartbeatInterval": "15 seconds",
+    "sampleInterval": "5 seconds",
+    "sampleLimit": 60,
+    "processTimeout": "10 seconds",
+    "processKillGrace": "1 second"
   },
   "driver": {
     "runCeiling": "1.5 hours",

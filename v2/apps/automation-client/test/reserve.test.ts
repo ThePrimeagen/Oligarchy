@@ -65,13 +65,15 @@ const reserving = (options: {
     reserveTimeoutMs: 60_000,
     releaseTimeoutMs: 10_000,
   });
-  const reservations = Reserve.create({
-    reservationTimeoutMs: 120_000,
-    maxJobs: options.maxJobs ?? 2,
-    jobs,
-    proxy,
-    logger: log.logger,
-  });
+  const reservations = Reserve.create(
+    { logger: log.logger },
+    {
+      reservationTimeoutMs: 120_000,
+      maxJobs: options.maxJobs ?? 2,
+      jobs,
+      proxy,
+    },
+  );
   const asked = () => fake.asked.map((one) => [new URL(one.url).pathname, one.body]);
   return { jobs, reservations, asked, said: log.said };
 };

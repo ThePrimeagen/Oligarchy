@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import type * as ClientRoutes from "@oligarchy/automation-client/routes";
 import type * as Db from "@oligarchy/db";
@@ -30,14 +31,16 @@ type NoClientsAvailable = InstanceType<typeof NoClientsAvailable>;
 
 type LiveClient = Stores.Servers.LiveServer;
 
+type Wants =
+  | Http.Http
+  | Stores.Tests.Tests
+  | Stores.Servers.Servers
+  | Stores.SetupRequests.SetupRequests
+  | Stores.Diagnosis.Diagnosis
+  | Logger.Logger;
+
 export type Options = {
-  readonly http: Http.Http;
   readonly token: { readonly reveal: () => string };
-  readonly tests: Stores.Tests.Tests;
-  readonly servers: Stores.Servers.Servers;
-  readonly setupRequests: Stores.SetupRequests.SetupRequests;
-  readonly diagnosis: Stores.Diagnosis.Diagnosis;
-  readonly logger: Logger.Logger;
   readonly models: Env.Config["models"];
   readonly abortTimeoutMs: number;
   readonly reserveTimeoutMs?: number;
@@ -63,9 +66,9 @@ type Requests = {
   readonly judgedJobId: string | undefined;
 };
 
-export const create = (options: Options): Dispatcher => {
-  const { http, token, tests, servers, setupRequests, logger, models, abortTimeoutMs, signal } =
-    options;
+export const create = (services: App.Needs<Wants>, options: Options): Dispatcher => {
+  const { http, tests, servers, setupRequests, logger } = services;
+  const { token, models, abortTimeoutMs, signal } = options;
   // The client the next job is offered to first: the one after the client that took the last.
   let nextClientUrl: string | undefined;
   const runs = new Set<Promise<void>>();
@@ -256,7 +259,7 @@ export const create = (options: Options): Dispatcher => {
       if (jarl.error.is(ran, Async.Aborted)) {
         return;
       }
-      await Close.close(options, options, { job, judgedJobId: requests.judgedJobId }, ran);
+      await Close.close(services, options, { job, judgedJobId: requests.judgedJobId }, ran);
     })();
     runs.add(running);
     void running.finally(() => runs.delete(running));

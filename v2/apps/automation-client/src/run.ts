@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import * as Exits from "@oligarchy/driver/exits";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
@@ -40,7 +41,6 @@ export type Options = {
     readonly oligarchyToken: Env.Secret;
     readonly openRouterToken: Env.Secret;
   };
-  readonly logger: Logger.Logger;
 };
 
 type Command = {
@@ -58,8 +58,12 @@ const failed = (message: string) => jarl.err(new Routes.RunFailed(message));
 
 // A run spawns the driver for a drive or setup, which renders its own prompt, and opencode for a
 // diagnose, and answers once the child has ended; only then is the job let go.
-export const create = (options: Options): Routes.Sessions["run"] => {
-  const { reservations, spawn, env, serverUrl, config, vars, logger } = options;
+export const create = (
+  services: App.Needs<Logger.Logger>,
+  options: Options,
+): Routes.Sessions["run"] => {
+  const { reservations, spawn, env, serverUrl, config, vars } = options;
+  const { logger } = services;
 
   // The variables may have come from an --env-file, which a child does not read.
   const secrets = () => ({

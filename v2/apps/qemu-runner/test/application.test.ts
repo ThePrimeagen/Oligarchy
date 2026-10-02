@@ -6,7 +6,7 @@ import * as Q from "@oligarchy/qemu";
 import * as Serve from "@oligarchy/http/serve";
 import * as jarl from "jarl";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import * as Application from "../src/application.js";
+import * as Application from "../src/application.ts";
 import { environment } from "../src/environment.ts";
 import * as Db from "@oligarchy/db";
 import * as Fleet from "@oligarchy/fleet";

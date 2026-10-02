@@ -57,7 +57,13 @@ const CONFIG = JSON.stringify({
   reasoning: { drive: "high", diagnose: "high", setup: "high" },
   openRouterBaseUrl: "https://openrouter.test",
   httpTimeout: "10 seconds",
-  fleet: { heartbeatInterval: "15 seconds" },
+  fleet: {
+    heartbeatInterval: "15 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "1 minute",
     stepLimit: 10,

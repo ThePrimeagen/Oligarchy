@@ -34,8 +34,7 @@ const dispatch =
   (aborting: Abort.Aborting, done: () => void) => async (sub: App.App<Run, DispatchWants>) => {
     const { config, vars } = sub.environment;
     const { dispatchInterval } = config.automationServer;
-    const dispatcher = Dispatch.create({
-      ...sub.services,
+    const dispatcher = Dispatch.create(sub.services, {
       token: vars.oligarchyToken,
       models: config.models,
       abortTimeoutMs: config.automationServer.abortTimeout,
@@ -64,14 +63,12 @@ const dispatch =
 // clients silent for longer than forgetAfter, so dispatch never reserves on a dead one, then waits
 // the interval, and the kill ends the wait at once.
 const forgetClients = async (sub: App.App<Run, Stores.Servers.Servers | Logger.Logger>) => {
-  const { servers, logger } = sub.services;
   const { forgetInterval, forgetAfter } = sub.environment.config.automationServer;
   while (!sub.signal.aborted) {
-    await Fleet.forget(
-      "automation-client",
-      { servers, logger, attribution: { location: LOCATION } },
-      { silentFor: forgetAfter },
-    );
+    await Fleet.forget("automation-client", sub.services, {
+      silentFor: forgetAfter,
+      attribution: { location: LOCATION },
+    });
     await Async.sleep(forgetInterval, sub.signal);
   }
   return jarl.ok(undefined);

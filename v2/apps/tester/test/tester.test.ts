@@ -1,11 +1,16 @@
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import * as App from "@oligarchy/app";
+import * as Env from "@oligarchy/env";
+import * as FakeHttp from "@oligarchy/http/testing";
+import * as Application from "../src/application.ts";
+import { environment } from "../src/environment.ts";
+import { createServices, closeServices } from "../src/services.ts";
 import * as FakePostgres from "@oligarchy/fake-postgres";
 import * as jarl from "jarl";
 import { Client } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
 
-const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
 
 const running: Array<FakePostgres.FakePostgres> = [];
 
@@ -29,31 +34,34 @@ const query = async (url: string, sql: string, params: ReadonlyArray<unknown> = 
   }
 };
 
-// The tester as its own process, the way `bun run tester` starts it. A proxy nobody listens on
-// refuses its requests to Sentry, so an error line it sends never reaches the real project.
-const tester = (url: string) =>
-  new Promise<{ readonly code: number | null; readonly lines: ReadonlyArray<string> }>(
-    (resolve, reject) => {
-      const child = spawn(process.execPath, ["--no-env-file", MAIN], {
-        env: {
-          ...process.env,
-          DATABASE_URL: url,
-          https_proxy: "http://127.0.0.1:1",
-          http_proxy: "http://127.0.0.1:1",
-          no_proxy: "",
-        },
-      });
-      let stdout = "";
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
-      child.on("error", reject);
-      child.on("close", (code) => {
-        resolve({ code, lines: stdout.split("\n").filter((line) => line !== "") });
-      });
-    },
+// Run the same application lifecycle with fake HTTP and process IO.
+const tester = async (url: string) => {
+  const env = jarl.unwrap(
+    await Env.create(
+      environment,
+      Env.fakeIo({
+        env: { DATABASE_URL: url },
+        files: { [Env.CONFIG_PATH]: CONFIG },
+      }),
+    ),
   );
+  const lines: string[] = [];
+  const services = createServices(env, {
+    http: FakeHttp.http({ replies: FakeHttp.status(200) }).http,
+    terminal: { write: (line) => lines.push(line), colors: false },
+  });
+  const app = new App.App(env).main(Application.main);
+  app.onExit(() => closeServices(services));
+  let code: number | undefined;
+  await app.run(services, () => undefined, {
+    onSignal: () => () => undefined,
+    stderr: () => undefined,
+    exit: (value) => {
+      code = value;
+    },
+  });
+  return { code, lines };
+};
 
 describe("the tester against a fake postgres", () => {
   it("prints its counts and stores each line in the logs table, failing tests as a warning (happy)", async () => {

@@ -6,7 +6,7 @@ Every timeout, grace, interval and limit an app runs on lives in `v2/oligarchy.j
 | Section | Holds |
 | --- | --- |
 | `httpTimeout` | any HTTP call that names no deadline of its own |
-| `fleet` | `heartbeatInterval`: announcements and process-stat sampling (15 seconds) |
+| `fleet` | `heartbeatInterval`: announcements and process-stat sampling; `sampleInterval` and `sampleLimit`: host CPU history; `processTimeout` and `processKillGrace`: process listing deadlines |
 | `qemuServer` | `forgetAfter`: runner expiry (45 seconds); `forgetInterval`: expiry checks (30 seconds) |
 | `driver` | `runCeiling`, `stepLimit`, `askTimeout`; `harness` (`defaultRetry`, `recentActions`); `guest` (`startTimeout`, `saveTimeout`, `sendKeysTimeout`) |
 | `diagnose` | opencode's `runCeiling`, and its stream's `headerTimeout` and `chunkTimeout` |

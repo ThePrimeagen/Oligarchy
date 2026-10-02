@@ -114,7 +114,7 @@ const running = app.run(services, (failed) => errors.push(...failed), io);
 
 | Problem | Fact |
 | --- | --- |
-| the services type | `App.Needs<Http.Http \| Logger.Logger \| ...>`. Never a hand-written object type (AGENTS.md rule 16). `automation-server` and `tester` still hand-write theirs. |
+| the services type | `App.Needs<Http.Http \| Logger.Logger \| ...>`. Never a hand-written object type (AGENTS.md rule 16). |
 | building them | `createServices(env, world = live())`. `env` is narrowed to the fields it reads. |
 | what `World` holds | terminal, `http`, host source, usage: everything outside the process but the database |
 | the database | named by env (`DATABASE_URL`). A test points it at `@oligarchy/fake-postgres`. |
@@ -135,16 +135,7 @@ export const createServices = (
 ) => { /* ... */ return { http, sentry, db, logger, host, usage, servers, processStats } satisfies Services; };
 ```
 
-## Where each app stands
-
-| Workspace | `main` in | Split |
-| --- | --- | --- |
-| `apps/automation-client` | `src/application.ts` | yes |
-| `apps/automation-server` | `src/application.ts` | yes |
-| `apps/driver` | `src/main.ts`. Its logic is `Drive.drive(services, ...)` in `src/drive.ts`, tested directly. | no |
-| `apps/ctrl` | not an `App`: a one-shot CLI. `Commands.run(services, env, out)` in `src/commands.ts`. | yes: `main.ts` hands it real `stdout` / `stderr` / `writeFile` |
-| `apps/qemu-server` | none yet. `src/routes.ts` only, no `test/` or `vitest.config.ts`. | no |
-| `packages/tester` | `src/main.ts`. A runnable under `packages/`, from before `apps/`. | no |
+## Application lifecycle
 
 - A new long-running app is split from its first commit: `main.ts`, `application.ts`, `environment.ts`, `services.ts`.
 - Splitting one that is not: move `main` to `application.ts`, make what it takes from the process an option, and leave `main.ts` choosing the real ones.

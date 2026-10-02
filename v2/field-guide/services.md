@@ -26,6 +26,10 @@ Its `request(method, path, input, init)` checks the method, path, JSON and query
 callee's routes. It returns an open HTTP response: consume its body or close it. Use
 `Http.body(response)` to forward the stream; cancellation closes the upstream response.
 The configured timeout covers reading the body, including a stalled stream.
+For a decoded response, use the same client's `prepare(method, path, input, init)` and pass
+its `[url, init]` tuple to `http.fetch` with the decoder and status handlers. Preparation checks
+the request against the callee's routes and adds authentication; callers do not rebuild URLs
+or JSON bodies.
 
 ## Write
 

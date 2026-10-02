@@ -33,9 +33,12 @@ const scripted = (busy: ReadonlyArray<number | Error>, cores = 2) => {
   return source;
 };
 
-const sampled = (source: Host.Source, times: number) => {
+const sampled = (source: Host.Source, times: number, sampleInterval = 5000, sampleLimit = 60) => {
   const { lines, logger } = logging();
-  const host = Host.create({ logger }, { source, attribution: { location: "qemu-server" } });
+  const host = Host.create(
+    { logger },
+    { source, sampleInterval, sampleLimit, attribution: { location: "qemu-server" } },
+  );
   for (let i = 0; i < times; i += 1) {
     host.sample();
   }
@@ -43,14 +46,14 @@ const sampled = (source: Host.Source, times: number) => {
 };
 
 describe("the host sampler", () => {
-  it("reports the memory split and the cpu over its last 60 samples: mean, the newest 1, 2 and 3 minutes, and percentiles (happy)", () => {
-    // 10 samples the window drops, then 48 idle and 12 half-busy.
+  it("reports the memory split and the cpu over its configured sample window: mean, the newest 1, 2 and 3 minutes, and percentiles (happy)", () => {
+    // At ten-second intervals: drop 10 samples, then keep 24 idle and 6 half-busy.
     const busy = [
       ...Array<number>(10).fill(100),
-      ...Array<number>(48).fill(0),
-      ...Array<number>(12).fill(50),
+      ...Array<number>(24).fill(0),
+      ...Array<number>(6).fill(50),
     ];
-    const { host, lines } = sampled(scripted(busy), busy.length);
+    const { host, lines } = sampled(scripted(busy), busy.length, 10_000, 30);
 
     expect(host.collect()).toEqual({
       memory: { totalBytes: 1000, usedBytes: 750, freeBytes: 250 },

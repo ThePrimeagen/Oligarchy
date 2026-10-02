@@ -1,3 +1,4 @@
+import type * as ProcessStats from "./process-stats.ts";
 import * as App from "@oligarchy/app";
 import type * as Tests from "./tests.ts";
 import type * as Servers from "./servers.ts";
@@ -109,5 +110,13 @@ export const debugLogs = (methods: Partial<Omit<DebugLogs.DebugLogs, "service">>
     service: "debugLogs",
     saveDebugLog: unexpected,
     getDebugLog: unexpected,
+    ...methods,
+  }))({});
+
+export const processStats = (methods: Partial<Omit<ProcessStats.ProcessStats, "service">>) =>
+  App.createService<never, App.NoOptions, ProcessStats.ProcessStats>(() => ({
+    service: "processStats",
+    report: unexpected,
+    listSeries: unexpected,
     ...methods,
   }))({});

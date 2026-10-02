@@ -63,7 +63,13 @@ const File = z
     openRouterBaseUrl: z.string().refine(isHttpUrl, "must be an http or https url"),
     // Any HTTP call that names no deadline of its own.
     httpTimeout: Duration,
-    fleet: z.strictObject({ heartbeatInterval: Duration }),
+    fleet: z.strictObject({
+      heartbeatInterval: Duration,
+      sampleInterval: Duration,
+      sampleLimit: z.int().positive(),
+      processTimeout: Duration,
+      processKillGrace: Duration,
+    }),
     // A drive's or setup's driver. askTimeout bounds each OpenRouter ask; recentActions is the
     // lines of a step the driving prompt shows, its intent among them. A guest's first start
     // downloads its ISO before it answers, and a save gives it time to power off.

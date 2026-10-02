@@ -29,11 +29,10 @@ export const setups = async (app: Application) => {
 };
 export const forget = async (app: Application) => {
   while (!app.signal.aborted) {
-    await Fleet.forget(
-      "qemu",
-      { ...app.services, attribution: { location: "qemu-server" } },
-      { silentFor: app.environment.config.qemuServer.forgetAfter },
-    );
+    await Fleet.forget("qemu", app.services, {
+      silentFor: app.environment.config.qemuServer.forgetAfter,
+      attribution: { location: "qemu-server" },
+    });
     await Async.sleep(app.environment.config.qemuServer.forgetInterval, app.signal);
   }
   return jarl.ok(undefined);

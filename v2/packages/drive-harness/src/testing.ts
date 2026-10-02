@@ -86,7 +86,9 @@ const callOf = (asked: Fake.Asked): Call => {
   return Object.keys(fields).length === 0 ? [path] : [path, fields];
 };
 
-export type Services = App.Needs<Stores.Tests.Tests | OpenRouter.OpenRouter | Http.Http>;
+export type Services = App.Needs<
+  App.Made<Stores.Tests.Tests> | App.Made<OpenRouter.OpenRouter> | App.Made<Http.Http>
+>;
 
 export type World = {
   readonly calls: ReadonlyArray<Call>;

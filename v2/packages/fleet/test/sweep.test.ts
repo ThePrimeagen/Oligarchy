@@ -1,3 +1,4 @@
+import * as StoreTesting from "@oligarchy/stores/testing";
 import * as Db from "@oligarchy/db";
 import { sql } from "drizzle-orm";
 import * as jarl from "jarl";
@@ -24,8 +25,8 @@ describe("forgetting silent servers", () => {
 
     await forget(
       "qemu",
-      { servers, logger, attribution: ATTRIBUTION },
-      { silentFor: THREE_MINUTES },
+      { servers, logger },
+      { silentFor: THREE_MINUTES, attribution: ATTRIBUTION },
     );
 
     expect(lines).toEqual([
@@ -43,11 +44,10 @@ describe("forgetting silent servers", () => {
     await forget(
       "qemu",
       {
-        servers: { removeStaleServers: async () => jarl.err(refused) },
+        servers: StoreTesting.servers({ removeStaleServers: async () => jarl.err(refused) }),
         logger,
-        attribution: ATTRIBUTION,
       },
-      { silentFor: THREE_MINUTES },
+      { silentFor: THREE_MINUTES, attribution: ATTRIBUTION },
     );
 
     expect(lines).toEqual([

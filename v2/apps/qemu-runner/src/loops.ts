@@ -17,7 +17,9 @@ export type Application = App.App<
 export const announce = (guests: Guests) => async (app: Application) => {
   const { name, url } = app.environment.flags;
   await Promise.all([
-    Fleet.Host.sampling(app.services.host, app.signal),
+    Fleet.Host.sampling(app.services, app.signal, {
+      every: app.environment.config.fleet.sampleInterval,
+    }),
     Fleet.announce(
       {
         name,

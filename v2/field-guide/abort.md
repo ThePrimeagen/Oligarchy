@@ -84,7 +84,7 @@ const ended = await Drive.drive(app.services, app.signal, {
 | signal for every call | optional `signal?` in the create options: `HttpClient.create({ http, url, token, signal })` |
 | a class that reacts to aborts | signal is the required second argument: `Qemu.create({ http }, signal, { job, baseUrl, token })`, `DriveHarness.create(services, signal, options)` |
 | no signal given | use a signal that never aborts: `const NEVER = new AbortController().signal` |
-| a long-running helper | signal is a required positional, last before options: `Async.sleep(ms, signal)`, `Async.tick(fn, ms, signal)`, `Fleet.announce(member, needs, signal, options)`, `Fleet.Host.sampling(host, signal)` |
+| a long-running helper | signal is a required positional, last before options: `Async.sleep(ms, signal)`, `Async.tick(fn, ms, signal)`, `Fleet.announce(member, needs, signal, options)`, `Fleet.Host.sampling(services, signal, options)` |
 | failure union | put `Async.Aborted` in it (`Http.HttpFailure`, `OpenRouter.Failure`) |
 | mapping errors | return `Aborted` unchanged: `if (jarl.error.is(error, Async.Aborted)) return error;` |
 | retrying | never retry `Aborted`. `Http.retryable` leaves it out. `Async.repeat` stops once its `signal` aborts. |
@@ -273,7 +273,7 @@ setTimeout(() => {
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
   }
-}, PS_FORCE_KILL_MS).unref();
+}, options.killGraceMs).unref();
 ```
 
 ## Status abort (database)
@@ -342,3 +342,10 @@ await vi.advanceTimersByTimeAsync(0);
 expect(result.value).toEqual(jarl.err(reason));
 expect(vi.getTimerCount()).toBe(0);
 ```
+
+### Test clocks
+
+Every workspace loads `v2/vitest.setup.ts`, which fakes the wall clock and restores it after
+each test. Tests that exercise delays, intervals, deadlines or cancellation enable timer APIs
+with `vi.useFakeTimers()` and advance them explicitly. Database transport tests keep I/O
+scheduling real while their application clock stays controlled.

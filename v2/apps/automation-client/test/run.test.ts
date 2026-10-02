@@ -32,7 +32,13 @@ const CONFIG = JSON.stringify({
   reasoning: { drive: "high", diagnose: "medium", setup: "low" },
   openRouterBaseUrl: "https://openrouter.test",
   httpTimeout: "10 seconds",
-  fleet: { heartbeatInterval: "15 seconds" },
+  fleet: {
+    heartbeatInterval: "15 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "2 minutes",
     stepLimit: 10,
@@ -211,29 +217,33 @@ const running = async (refusal?: Error) => {
   const proxy = Fake.http({ replies: () => Fake.json({}) });
   const jobs = Jobs.create();
   const log = FakeLogger.logger();
-  const reservations = Reserve.create({
-    reservationTimeoutMs: 120_000,
-    maxJobs: 2,
-    jobs,
-    proxy: Proxy.create({
-      http: proxy.http,
-      url: PROXY,
-      token: { reveal: () => TOKEN },
-      reserveTimeoutMs: 60_000,
-      releaseTimeoutMs: 10_000,
-    }),
-    logger: log.logger,
-  });
+  const reservations = Reserve.create(
+    { logger: log.logger },
+    {
+      reservationTimeoutMs: 120_000,
+      maxJobs: 2,
+      jobs,
+      proxy: Proxy.create({
+        http: proxy.http,
+        url: PROXY,
+        token: { reveal: () => TOKEN },
+        reserveTimeoutMs: 60_000,
+        releaseTimeoutMs: 10_000,
+      }),
+    },
+  );
   const spawned = fakeSpawn(refusal);
-  const run = Run.create({
-    reservations,
-    spawn: spawned.spawn,
-    env: PARENT,
-    serverUrl: PROXY,
-    config: env.config,
-    vars: env.vars,
-    logger: log.logger,
-  });
+  const run = Run.create(
+    { logger: log.logger },
+    {
+      reservations,
+      spawn: spawned.spawn,
+      env: PARENT,
+      serverUrl: PROXY,
+      config: env.config,
+      vars: env.vars,
+    },
+  );
   return { jobs, reservations, run, spawned, lines: log.lines };
 };
 

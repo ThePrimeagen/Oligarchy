@@ -1,34 +1,12 @@
 import * as App from "@oligarchy/app";
 import * as Env from "@oligarchy/env";
-import type * as Http from "@oligarchy/http";
-import type * as Logger from "@oligarchy/logger";
-import type * as OpenRouter from "@oligarchy/openrouter";
-import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import * as Drive from "./drive.ts";
-import { environment, type Run } from "./environment.ts";
+import * as Application from "./application.ts";
+import { environment } from "./environment.ts";
 import { TIMED_OUT } from "./exits.ts";
 import { closeServices, createServices } from "./services.ts";
 
 let timedOut = false;
-
-// The guest's calls stop with the app: on a signal, or once main returns.
-const main = async (
-  app: App.App<Run, Logger.Logger | Stores.Tests.Tests | OpenRouter.OpenRouter | Http.Http>,
-) => {
-  const { flags, vars, config } = app.environment;
-  const ended = await Drive.drive(app.services, app.signal, {
-    jobId: flags.jobId,
-    serverUrl: flags.serverUrl,
-    token: vars.oligarchyToken,
-    config,
-  });
-  if (jarl.is_err(ended)) {
-    return ended;
-  }
-  timedOut = jarl.value(ended).status === "timed_out";
-  return jarl.ok(undefined);
-};
 
 const created = await Env.create(environment);
 if (jarl.error.is(created, Env.HelpRequested)) {
@@ -49,7 +27,13 @@ const env = jarl.value(created);
 
 const services = createServices(env);
 
-const app = new App.App(env).main(main);
+const app = new App.App(env).main(
+  Application.main({
+    timedOut: () => {
+      timedOut = true;
+    },
+  }),
+);
 app.onExit(() => closeServices(services));
 // The failure in full: its stack names where it was made.
 await app.run(
