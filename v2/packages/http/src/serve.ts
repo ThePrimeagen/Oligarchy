@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type RequestListener } from "node:http";
 import { getRequestListener } from "@hono/node-server";
 import * as jarl from "jarl";
 
@@ -8,6 +8,14 @@ export type ListenFailed = InstanceType<typeof ListenFailed>;
 export type Listening = {
   // Stops taking connections, ends the open ones, and settles once the listener is closed.
   readonly close: () => Promise<void>;
+};
+
+export type CreateServer = (listener: RequestListener) => {
+  readonly once: (event: "error", handler: (cause: unknown) => void) => void;
+  readonly off: (event: "error", handler: (cause: unknown) => void) => void;
+  readonly listen: (port: number, hostname: string, listening: () => void) => void;
+  readonly close: (closed: () => void) => void;
+  readonly closeAllConnections: () => void;
 };
 
 const reasonOf = (cause: unknown): string => {
@@ -24,11 +32,16 @@ const reasonOf = (cause: unknown): string => {
 // and the reason.
 export const listen = (
   fetch: (request: Request) => Response | Promise<Response>,
-  options: { readonly hostname: string; readonly port: number },
+  options: {
+    readonly hostname: string;
+    readonly port: number;
+    readonly createServer?: CreateServer;
+  },
 ): Promise<jarl.Result<Listening, ListenFailed>> =>
   new Promise((resolve) => {
     const { hostname, port } = options;
-    const server = createServer(getRequestListener(fetch));
+    const start: CreateServer = options.createServer ?? createServer;
+    const server = start(getRequestListener(fetch));
     const failed = (cause: unknown) => {
       resolve(
         jarl.err(

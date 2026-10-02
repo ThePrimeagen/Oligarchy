@@ -1,58 +1,107 @@
-import { createServer, type Server } from "node:net";
+import { EventEmitter } from "node:events";
 import * as jarl from "jarl";
-import { afterEach, describe, expect, it } from "vitest";
-import { ListenFailed, listen } from "../src/serve.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type CreateServer, ListenFailed, listen } from "../src/serve.ts";
 
-const cleanups: Array<() => Promise<unknown>> = [];
-
-afterEach(async () => {
-  for (let cleanup = cleanups.pop(); cleanup !== undefined; cleanup = cleanups.pop()) {
-    await cleanup();
-  }
-});
-
-// A port held open on 127.0.0.1 until the test ends, or closed early by the test.
-const held = async (): Promise<{ readonly port: number; readonly server: Server }> => {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  cleanups.push(() => new Promise((resolve) => server.close(resolve)));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("no port");
-  }
-  return { port: address.port, server };
+const fakeServer = () => {
+  const events = new EventEmitter();
+  const addresses: Array<{ readonly port: number; readonly hostname: string }> = [];
+  const shutdown: Array<string> = [];
+  const createServer: CreateServer = () => ({
+    once: events.once.bind(events),
+    off: events.off.bind(events),
+    listen: (port, hostname, listening) => {
+      addresses.push({ port, hostname });
+      events.once("listening", listening);
+    },
+    close: (closed) => {
+      shutdown.push("close");
+      events.once("closed", closed);
+    },
+    closeAllConnections: () => {
+      shutdown.push("closeAllConnections");
+    },
+  });
+  return {
+    createServer,
+    addresses,
+    shutdown,
+    ready: () => events.emit("listening"),
+    closed: () => events.emit("closed"),
+    fail: (cause: unknown) => events.emit("error", cause),
+  };
 };
 
 describe("listen", () => {
-  it("serves fetch on the address, and close frees the port (happy)", async () => {
-    const { port, server } = await held();
-    await new Promise((resolve) => server.close(resolve));
-
-    const listening = jarl.unwrap(
-      await listen(
-        (request) => new Response(`${request.method} ${new URL(request.url).pathname}`),
-        { hostname: "127.0.0.1", port },
-      ),
-    );
-    const answer = await fetch(`http://127.0.0.1:${String(port)}/abort`, { method: "POST" });
-    expect(await answer.text()).toBe("POST /abort");
-    await listening.close();
-
-    await expect(fetch(`http://127.0.0.1:${String(port)}/abort`)).rejects.toThrow();
-    const again = jarl.unwrap(
-      await listen(() => new Response("again"), { hostname: "127.0.0.1", port }),
-    );
-    await again.close();
+  beforeEach(() => {
+    vi.useFakeTimers();
   });
 
-  it("a port already taken is ListenFailed, naming the address and the reason (unhappy)", async () => {
-    const { port } = await held();
-
-    const listened = await listen(() => new Response("never"), { hostname: "127.0.0.1", port });
-
-    expect(jarl.error.is(listened, ListenFailed)).toBe(true);
-    expect(jarl.is_err(listened) && listened.error.message).toMatch(
-      new RegExp(`^could not listen on 127\\.0\\.0\\.1:${String(port)}: .*EADDRINUSE`),
-    );
+  afterEach(() => {
+    vi.useRealTimers();
   });
+
+  it("waits for listening, then closes connections and waits for shutdown (happy)", async () => {
+    const server = fakeServer();
+    let ready = false;
+    const starting = listen(() => new Response("ok"), {
+      hostname: "127.0.0.1",
+      port: 8123,
+      createServer: server.createServer,
+    }).then((result) => {
+      ready = true;
+      return result;
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.addresses).toEqual([{ hostname: "127.0.0.1", port: 8123 }]);
+    expect(ready).toBe(false);
+    server.ready();
+    const listening = jarl.unwrap(await starting);
+
+    let closed = false;
+    const closing = listening.close().then(() => {
+      closed = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.shutdown).toEqual(["close", "closeAllConnections"]);
+    expect(closed).toBe(false);
+    server.closed();
+    await closing;
+    expect(closed).toBe(true);
+  });
+
+  it.each([
+    {
+      cause: Object.assign(new Error("address already in use"), { code: "EADDRINUSE" }),
+      reason: "EADDRINUSE: address already in use",
+    },
+    {
+      cause: Object.assign(new Error("listen EADDRINUSE: address already in use"), {
+        code: "EADDRINUSE",
+      }),
+      reason: "listen EADDRINUSE: address already in use",
+    },
+    { cause: new Error("listen failed"), reason: "listen failed" },
+    { cause: "listen failed", reason: "listen failed" },
+  ])(
+    "returns ListenFailed with the address and reason: $reason (unhappy)",
+    async ({ cause, reason }) => {
+      const server = fakeServer();
+      const starting = listen(() => new Response("never"), {
+        hostname: "127.0.0.1",
+        port: 8123,
+        createServer: server.createServer,
+      });
+
+      server.fail(cause);
+      const listened = await starting;
+
+      expect(jarl.error.is(listened, ListenFailed)).toBe(true);
+      expect(jarl.is_err(listened) && listened.error.message).toBe(
+        `could not listen on 127.0.0.1:8123: ${reason}`,
+      );
+    },
+  );
 });
