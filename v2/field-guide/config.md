@@ -8,7 +8,7 @@ Every timeout, grace, interval and limit an app runs on lives in `v2/oligarchy.j
 | `httpTimeout` | any HTTP call that names no deadline of its own |
 | `driver` | `runCeiling`, `stepLimit`, `askTimeout`; `harness` (`defaultRetry`, `recentActions`); `guest` (`startTimeout`, `saveTimeout`) |
 | `diagnose` | opencode's `runCeiling`, and its stream's `headerTimeout` and `chunkTimeout` |
-| `automationClient` | `driverGrace` past `driver.runCeiling`, `killGrace`, `stderrGrace`, `reserveTimeout` |
+| `automationClient` | `driverGrace` past `driver.runCeiling`, `killGrace`, `stderrGrace`, `reserveTimeout`, `reservationTimeout` |
 | `automationServer` | `dispatchInterval`, `forgetInterval`, `forgetAfter`, `abortTimeout` |
 
 - A duration is a string, `"3 minutes"`. The program sees milliseconds.
@@ -37,3 +37,7 @@ Proxy.create({
   reserveTimeoutMs: config.automationClient.reserveTimeout,
 }),
 ```
+
+QEMU app configuration lives in `qemuServer` (placement, forwarding, setup/fleet intervals) and
+`qemuRunner` (guest lifecycle, cache, QMP, process and input limits). The schema checks nested
+operation deadlines. Setup code passes the chosen values into service options.

@@ -127,14 +127,15 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     const ended = await child.ended;
     clearTimeout(ceiling);
     taken.signal.removeEventListener("abort", onAbort);
-    taken.release();
     if (jarl.is_err(ended)) {
       logger.info(`${command.name} could not start`, report);
+      await taken.release();
       return failed(`could not start ${command.name}: ${ended.error.message}`);
     }
     const exit = jarl.value(ended);
     const exited = `${command.name} exited ${String(exit.code ?? exit.signal)}`;
     logger.info(exited, report);
+    await taken.release();
     if (stopped === "aborted") {
       return jarl.ok("aborted");
     }
@@ -167,7 +168,7 @@ export const create = (options: Options): Routes.Sessions["run"] => {
       return runChild(jobId, taken, driver(jobId));
     }
     if (prompt === undefined) {
-      taken.release();
+      await taken.release();
       return failed(`job ${jobId} is a diagnose, which needs its prompt`);
     }
     return runChild(jobId, taken, opencode(prompt));

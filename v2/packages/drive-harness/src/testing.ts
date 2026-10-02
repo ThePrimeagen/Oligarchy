@@ -134,6 +134,9 @@ export const world = (
 
   const tests = App.createService<never, App.NoOptions, Stores.Tests.Tests>(() => ({
     service: "tests",
+    ensureSetup: () => {
+      throw new Error("unexpected ensureSetup");
+    },
     getJobDetails: script.getJobDetails ?? (async () => jarl.ok(details("drive", true))),
     listTestDefinitions: unused,
     findTestDefinition: unused,

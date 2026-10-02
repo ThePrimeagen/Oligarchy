@@ -34,6 +34,8 @@
     "driver": "bun --no-env-file apps/driver/src/main.ts",
     "ctrl": "bun --no-env-file apps/ctrl/src/main.ts",
     "check:types": "bun run --workspaces check:types",
-    "test:unit": "bun run --workspaces --if-present test:unit"
+    "test:unit": "bun run --workspaces --if-present test:unit",
+    "qemu-server": "bun --no-env-file apps/qemu-server/src/main.ts",
+    "qemu-runner": "bun --no-env-file apps/qemu-runner/src/main.ts"
   }
 }

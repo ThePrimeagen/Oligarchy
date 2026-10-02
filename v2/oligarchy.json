@@ -33,12 +33,53 @@
     "driverGrace": "5 minutes",
     "killGrace": "5 seconds",
     "stderrGrace": "2 seconds",
-    "reserveTimeout": "1 minute"
+    "reserveTimeout": "1 minute",
+    "reservationTimeout": "2 minutes"
   },
   "automationServer": {
     "dispatchInterval": "30 seconds",
     "forgetInterval": "30 seconds",
     "forgetAfter": "10 minutes",
-    "abortTimeout": "15 seconds"
+    "abortTimeout": "45 seconds"
+  },
+  "qemuServer": {
+    "probeTimeout": "3 seconds",
+    "reserveTimeout": "45 seconds",
+    "releaseTimeout": "30 seconds",
+    "setupInterval": "10 seconds",
+    "forgetInterval": "30 seconds",
+    "forgetAfter": "10 minutes",
+    "followTimeout": "1 hour"
+  },
+  "qemuRunner": {
+    "reservationTimeout": "2 minutes",
+    "idleTimeout": "10 minutes",
+    "sweepInterval": "10 seconds",
+    "poweroffTimeout": "2 minutes",
+    "killGrace": "5 seconds",
+    "stderrGrace": "2 seconds",
+    "downloadTimeout": "40 minutes",
+    "cachePoll": "1 second",
+    "cacheStale": "2 minutes",
+    "cacheHeartbeat": "10 seconds",
+    "cacheProgress": "30 seconds",
+    "handshakeTimeout": "30 seconds",
+    "commandTimeout": "15 seconds",
+    "keyGap": "100 millis",
+    "clickGap": "100 millis",
+    "dragGap": "20 millis",
+    "dragSteps": 20,
+    "maxKeys": 10000,
+    "maxTicks": 100,
+    "followBacklog": 256,
+    "maxFrame": 1048576,
+    "stderrLimit": 1048576,
+    "cpus": 2,
+    "diskSize": "40G",
+    "memory": "4G",
+    "firmwareCode": "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    "firmwareVars": "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+    "binary": "qemu-system-x86_64",
+    "imageBinary": "qemu-img"
   }
 }

@@ -323,45 +323,24 @@ logger and waited for on exit, as the tester's are), serves Hono behind the `OLI
 bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecycle in
 `src/application.ts`; `src/main.ts` supplies the real listener and closes services on exit.
 
-- [ ] **qemu-server** (`apps/qemu-server`). Services: `Qemu` (starts a guest; keys, mouse,
-      screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `SetupDisks`
-      (finds and saves setup disks), `QmpListen` (the QMP socket) and `Sessions` (slots against
-      `--max-jobs`, each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`,
-      `/stop`, `/save`, `/image`, `/serial`, `/follow`, `/stats`, `/setup-disks`, `/send-keys`,
-      `/mouse/*`, `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`.
-      Saves a failed guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but
-      nothing calls it.
-      Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
-      and a session; `/image` and `/serial` answer bytes; and a 409 is a guest that is off on
-      `/image`, `/send-keys` and `/mouse/*`, an intent already open on `/intent/start` (V1
-      answered that one 400) and a guest that did not power off on `/save`. A call naming a job it
-      holds no guest for is a 404, job not found: a restarted server holds none, so its lost
-      guests' drivers fail, their automation clients answer `/run` with the failure, and the
-      automation server errors the jobs. Nothing errors them at startup, as V1's
-      `failRoutedSessions` did. At boot it calls `vmStatus.clearPastRunningVms` on its url, and
-      kills any QEMU its last process left running, which V1 never did. Starts
-      QEMU with a pvpanic device and without `-no-reboot`, since a setup's installer reboots. Writes
-      each VM's `vmStatus` as it changes, and reads how one ended from QEMU's `SHUTDOWN` reason
-      over QMP, which V1 ignored: `guest-shutdown` is `shutdown`, `host-signal` and
-      `host-qmp-quit` are `stopped`, `guest-panic` is `panicked`, and QEMU exiting with no
-      `SHUTDOWN` is `crashed`, with its exit code or signal and the end of its stderr. pvpanic
-      carries no detail: a panic's trace reaches the serial only once the installed system's
-      kernel writes its console to `ttyS0`, which the setup does not set yet.
-- [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
-      qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
-      `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
-      `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
-      `/stats`. Forgets silent servers with `fleet.forget`, in a loop of its own as the
-      automation server does. Its `/reserve` and `/relinquish` answer as the automation
-      client's `src/proxy.ts` reads them: `/reserve` takes `{ job, resume? }` for a drive or
-      `{ job, setupServer }` for a setup, and answers 200 reserved, 503 at capacity, 409 setup
-      needed, and a 4xx only when it reserved nothing; `/relinquish` takes `{ job }`, and 404 is
-      a job it holds no guest for. Once it serves `Routes`, the client's calls move onto
-      `@oligarchy/http/client`. A resume reserve that no server can
-      take, because those with room hold no setup disk for its ISO, takes each such server's setup
-      lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
-      setup needed. One setup per ISO and server: a reserve while that setup is in flight files
-      none, and one that ended without passing releases the lock (V1: `setup.ts`).
+- [x] **QemuRunner** (`v2/apps/qemu-runner`, formerly V1 qemu-server). `main.ts`
+      loads the environment and services; `application.js` recovers old guests before binding
+      or announcing. The four services in `@oligarchy/qemu` are `qemu`, `iso`, `setupDisks`,
+      and `qmpListen`. Guest ownership, controls, evidence, expiry, save and shutdown are
+      application logic. QMP protocol state lives in a class; the guest map is a plain module.
+      Every guest operation names its job. Shutdown and panic events are preserved across
+      process cleanup. Setup publication uses immutable version directories and an atomic
+      pointer; legacy V1 disk pairs remain readable. Both successful and failed guest stops
+      capture evidence before disposal. V1 already captured debug logs and omitted `-no-reboot`.
+- [x] **QemuServer** (`v2/apps/qemu-server`, formerly V1 qemu-reverse-proxy). Serves
+      authenticated guest routes and GET/POST/DELETE `/servers`. Routes through a typed
+      QemuRunner client, forwarding streams, content type, image metadata and operation
+      deadlines. Placement, setup scheduling and setup watching are ordinary modules.
+      The existing job-to-runner assignment stays fixed; no ownership token, started flag,
+      or reservation table was added. A retry uses that assignment. An unavailable assigned
+      runner needs job failure/retry handling rather than silent reassignment of the same job.
+      `tests.ensureSetup` files the existing setup lock and job in one transaction, including
+      recovery of an old null-job lock. Required setup and fleet loops run as sub-apps.
 - [ ] **automation-server** (`v2/apps/automation-server`). Section 3's dispatch, close, abort,
       restart and shutdown, and `/abort`. `/linear`, the board watch (`backlog.ts`) and the
       webhook signature (`signature.ts`) go. Done when every task below is ticked, roughly in
@@ -372,8 +351,9 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             stopped, and closes its services. The dispatch sub-app's main is a loop that runs
             until the server is killed, waiting `automationServer.dispatchInterval` when no job
             starts; the kill ends the wait at once. A database that cannot be reached does not
-            stop it. The loop reserves jobs as described below; `restart` and `shutdown` still
-            do nothing.
+            stop it. The loop reserves jobs as described below. Restart stops inherited running
+            jobs and marks missing outcomes errored; shutdown stops and aborts remaining running
+            jobs after dispatch has settled.
       - [x] **Forget silent clients.** A sub-app beside dispatch forgets the automation clients
             silent for longer than `automationServer.forgetAfter` (10 minutes), as V1's
             `Sweep.forget` did, so dispatch never reserves on a client that died without deleting

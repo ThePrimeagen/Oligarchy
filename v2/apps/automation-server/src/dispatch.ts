@@ -39,6 +39,7 @@ export type Options = {
   readonly logger: Logger.Logger;
   readonly models: Env.Config["models"];
   readonly abortTimeoutMs: number;
+  readonly reserveTimeoutMs?: number;
   readonly aborting: Close.Options["aborting"];
   // Ends a reserve or a run in flight, so a shutdown does not wait on a client.
   readonly signal: AbortSignal;
@@ -152,6 +153,9 @@ export const create = (options: Options): Dispatcher => {
         token,
         signal,
         abortTimeoutMs,
+        ...(options.reserveTimeoutMs === undefined
+          ? {}
+          : { reserveTimeoutMs: options.reserveTimeoutMs }),
       }).post("/reserve", request);
       if (jarl.is_err(reserved)) {
         if (signal.aborted) {

@@ -138,7 +138,7 @@ if (jarl.is_err(reserved)) {
 | --- | --- | --- |
 | automation-client | `z.strictObject({ jobId: z.uuid() })` | 200 `stopped`, 404 `not-held`, 400 bad body, 501 not written |
 | automation-server | `{ jobId }` or `{ suiteId }`, never both | 200 `{}` aborted, 404 unknown, 409 `NothingToAbort` (already ended), 502 `NotStopped` (its client could not stop it), 500 database, 400 `name a jobId or a suiteId` |
-| qemu-server | `z.strictObject({ job: z.uuid() })` | 501 not written |
+| qemu-server / qemu-runner | `z.strictObject({ job: z.uuid() })` | 200 cleaned up, 404 not held; failures retain ownership |
 
 - The route hands off to `Sessions["abort"]` (client) or `Aborter["abort"]` (server). The route holds no logic; it maps each error to its status.
 - `abort` answers only once the job's holder has let it go.
@@ -291,9 +291,9 @@ setTimeout(() => {
 | one call | caller | `Async.timeout(fn, { ms, signal })`, or `signal` / `timeoutMs` on the call | yes |
 | one job at a client | automation server | `AutomationClient.create(...).post("/abort", { jobId })`, then `jobs.abort` | yes |
 | one job, one suite (operator) | an operator; not ctrl. The caller is open. | automation server `/abort` `{ jobId }` or `{ suiteId }` | yes |
-| one job at a qemu server | | qemu-server `/abort` `{ job }` | no: 501 |
+| one guest job | QemuServer routes to QemuRunner | `/abort` `{ job }`, including startup and save | yes |
 | every job at a client | the client on stop | `jobs.shutdown()` after closing the listener | yes |
-| every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | no: no-op |
+| every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | yes |
 | one host, server or location | | none exists. Abort each job on it. | no |
 | one app and its sub-apps | process signal, or main returning | `app.signal` | yes |
 | a driver run | `app.signal`, handed to `drive` and its harness | `drive` ends `{ status: "aborted" }`, exit 0 | yes |

@@ -9,7 +9,12 @@ import * as Render from "./render.ts";
 export type Level = "info" | "warning" | "error" | "fatal";
 
 // location is a text bucket: a session id, or the process's own name.
-export type Attribution = { readonly location?: string; readonly agentId?: string };
+export type Attribution = {
+  readonly location?: string;
+  readonly agentId?: string;
+  readonly jobId?: string;
+  readonly runId?: string;
+};
 
 // What an error or fatal line hands Sentry besides its text: the cause Sentry is sent in the
 // text's place, or skipSentry to send nothing.
@@ -37,12 +42,17 @@ const sentryReport = (
   level: "error" | "fatal",
   text: string,
   attribution: Attribution,
-): Sentry.Report => {
+): Sentry.JobReport => {
   const tags = {
     ...(attribution.location === undefined ? {} : { location: attribution.location }),
     ...(attribution.agentId === undefined ? {} : { agent_id: attribution.agentId }),
   };
-  return { level, tags, extra: { log: text, ...tags } };
+  return {
+    level,
+    tags,
+    extra: { log: text, ...tags },
+    ...(attribution.jobId === undefined ? {} : { jobId: attribution.jobId }),
+  };
 };
 
 export type Options = {
@@ -66,9 +76,11 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
       write(Render.renderLine(line, colors));
     };
 
-    const keep = async (line: Render.Line, location: string | null) => {
+    const keep = async (line: Render.Line, location: string | null, runId: string | null) => {
       const stored = await db.run(async (d) => {
-        await d.insert(DbSchema.logs).values({ text: line.text, level: line.level, location });
+        await d
+          .insert(DbSchema.logs)
+          .values({ text: line.text, level: line.level, location, runId });
       });
       print(line);
       if (jarl.is_err(stored)) {
@@ -98,7 +110,7 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
           ...(location === undefined ? {} : { location }),
           ...(color === undefined ? {} : { color }),
         };
-        landed = landed.then(() => keep(line, location ?? null));
+        landed = landed.then(() => keep(line, location ?? null, report.runId ?? null));
       };
 
     const error = emit("error");

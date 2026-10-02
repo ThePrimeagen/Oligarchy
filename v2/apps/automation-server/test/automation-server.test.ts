@@ -70,12 +70,53 @@ const CONFIG = JSON.stringify({
     killGrace: "5 seconds",
     stderrGrace: "2 seconds",
     reserveTimeout: "1 minute",
+    reservationTimeout: "2 minutes",
+  },
+  qemuServer: {
+    probeTimeout: "3 seconds",
+    reserveTimeout: "45 seconds",
+    releaseTimeout: "30 seconds",
+    setupInterval: "10 seconds",
+    forgetInterval: "30 seconds",
+    forgetAfter: "10 minutes",
+    followTimeout: "1 hour",
+  },
+  qemuRunner: {
+    reservationTimeout: "2 minutes",
+    idleTimeout: "10 minutes",
+    sweepInterval: "10 seconds",
+    poweroffTimeout: "10 seconds",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    downloadTimeout: "10 seconds",
+    cachePoll: "1 second",
+    cacheStale: "2 minutes",
+    cacheHeartbeat: "10 seconds",
+    cacheProgress: "30 seconds",
+    handshakeTimeout: "1 second",
+    commandTimeout: "15 seconds",
+    keyGap: "100 millis",
+    clickGap: "100 millis",
+    dragGap: "20 millis",
+    dragSteps: 20,
+    maxKeys: 10000,
+    maxTicks: 100,
+    followBacklog: 256,
+    maxFrame: 1048576,
+    stderrLimit: 1048576,
+    cpus: 4,
+    diskSize: "64G",
+    memory: "4G",
+    firmwareCode: "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    firmwareVars: "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+    binary: "qemu-system-x86_64",
+    imageBinary: "qemu-img",
   },
   automationServer: {
     dispatchInterval: "10 seconds",
     forgetInterval: "30 seconds",
     forgetAfter: "10 minutes",
-    abortTimeout: "15 seconds",
+    abortTimeout: "45 seconds",
   },
 });
 
@@ -149,6 +190,7 @@ const started = async (
   }))({});
   const tests = App.createService<never, App.NoOptions, Stores.Tests.Tests>(() => ({
     service: "tests",
+    ensureSetup: unexpected,
     listTestDefinitions: unexpected,
     findTestDefinition: unexpected,
     listTestDefinitionHistory: unexpected,
@@ -190,7 +232,7 @@ const started = async (
           createdAt: AT,
         },
       }),
-    listJobs: unexpected,
+    listJobs: async () => jarl.ok({ running: [], pending: [] }),
     latestJob: unexpected,
     nextPendingJob: async () => {
       const [next] = pending;
@@ -415,7 +457,7 @@ describe("the automation server lifecycle", () => {
         "drive completed",
         "exit handler",
       ]);
-      expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED, STOPPED, QUEUED]);
+      expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED, QUEUED, STOPPED]);
       expect(at.codes).toEqual([0]);
       expect(at.errors).toEqual([]);
     } finally {

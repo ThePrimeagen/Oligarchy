@@ -21,6 +21,12 @@
 - V2 names: the qemu reverse proxy is QemuServer; the qemu server is QemuRunner.
 - A service is where a test decides the outcome: one fake gives the failing case, another the passing one.
 
+For a route that returns bytes, headers, or a stream, use `HttpClient.connect<Routes>()`.
+Its `request(method, path, input, init)` checks the method, path, JSON and query against the
+callee's routes. It returns an open HTTP response: consume its body or close it. Use
+`Http.body(response)` to forward the stream; cancellation closes the upstream response.
+The configured timeout covers reading the body, including a stalled stream.
+
 ## Write
 
 ```ts

@@ -149,6 +149,11 @@ export type Tests = {
   ) => Moved<SuiteRow>;
   readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
 
+  readonly ensureSetup: (input: {
+    readonly iso: string;
+    readonly serverUrl: string;
+    readonly setupServer: string;
+  }) => Found<NewTestRun | undefined>;
   readonly createTestRun: (input: RunInput) => Moved<NewTestRun>;
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
@@ -496,6 +501,61 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
 
   return {
     service: "tests",
+
+    // Insert the lock and job in one transaction. The unique pair serializes different proxies;
+    // an old null lock can be completed without guessing whether another creator is alive.
+    ensureSetup: ({ iso, serverUrl, setupServer }) =>
+      db
+        .run(async (d) => {
+          try {
+            return await d.transaction(async (tx) => {
+              const pair = and(
+                eq(DbSchema.setupRequests.iso, iso),
+                eq(DbSchema.setupRequests.serverUrl, setupServer),
+              );
+              await tx
+                .insert(DbSchema.setupRequests)
+                .values({ iso, serverUrl: setupServer })
+                .onConflictDoNothing();
+              const [lock] = await tx
+                .select()
+                .from(DbSchema.setupRequests)
+                .where(pair)
+                .for("update");
+              if (lock === undefined) throw new Error("setup lock disappeared");
+              if (lock.jobId !== null) {
+                const [previousJob] = await tx
+                  .select()
+                  .from(DbSchema.jobs)
+                  .where(eq(DbSchema.jobs.id, lock.jobId));
+                if (
+                  previousJob === undefined ||
+                  !["failed", "errored", "aborted", "timed_out"].includes(previousJob.status)
+                )
+                  return jarl.ok(undefined);
+              }
+              const [definition] = await tx
+                .select()
+                .from(DbSchema.testDefinitions)
+                .where(eq(DbSchema.testDefinitions.name, SETUP))
+                .orderBy(desc(DbSchema.testDefinitions.id))
+                .limit(1);
+              if (definition === undefined) throw new NotFound("no setup definition");
+              const filed = await fileRun(
+                tx,
+                "ensureSetup",
+                { suiteId: null, iso, serverUrl, definitionId: definition.id },
+                "setup",
+              );
+              await tx.update(DbSchema.setupRequests).set({ jobId: filed.job.id }).where(pair);
+              return jarl.ok(filed);
+            });
+          } catch (error) {
+            if (error instanceof NotFound) return jarl.err(error);
+            throw error;
+          }
+        })
+        .then(settle),
 
     listTestDefinitions: () =>
       db.run((d) =>

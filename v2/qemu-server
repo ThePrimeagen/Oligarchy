@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec bun --no-env-file "$(dirname -- "$0")/apps/qemu-server/src/main.ts" "$@"

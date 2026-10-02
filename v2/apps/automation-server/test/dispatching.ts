@@ -253,6 +253,8 @@ export const dispatching = async (
       .map((one) => [new URL(one.url).origin, one.body]);
 
   return {
+    services: { http: http.http, tests, servers, logger: log.logger },
+    lifecycleOptions: { token: { reveal: () => TOKEN }, aborting, abortTimeoutMs },
     fake,
     tests,
     setupRequests,

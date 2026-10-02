@@ -30,26 +30,35 @@ type DispatchWants =
   | Stores.Diagnosis.Diagnosis
   | Logger.Logger;
 
-const dispatch = (aborting: Abort.Aborting) => async (sub: App.App<Run, DispatchWants>) => {
-  const { config, vars } = sub.environment;
-  const { dispatchInterval } = config.automationServer;
-  const dispatcher = Dispatch.create({
-    ...sub.services,
-    token: vars.oligarchyToken,
-    models: config.models,
-    abortTimeoutMs: config.automationServer.abortTimeout,
-    aborting,
-    signal: sub.signal,
-  });
-  while (!sub.signal.aborted) {
-    const started = await dispatcher.startNextJob();
-    if (!started) {
-      await Async.sleep(dispatchInterval, sub.signal);
+const dispatch =
+  (aborting: Abort.Aborting, done: () => void) => async (sub: App.App<Run, DispatchWants>) => {
+    const { config, vars } = sub.environment;
+    const { dispatchInterval } = config.automationServer;
+    const dispatcher = Dispatch.create({
+      ...sub.services,
+      token: vars.oligarchyToken,
+      models: config.models,
+      abortTimeoutMs: config.automationServer.abortTimeout,
+      reserveTimeoutMs:
+        config.automationClient.reserveTimeout +
+        config.qemuServer.releaseTimeout +
+        config.httpTimeout,
+      aborting,
+      signal: sub.signal,
+    });
+    try {
+      while (!sub.signal.aborted) {
+        const started = await dispatcher.startNextJob();
+        if (!started) {
+          await Async.sleep(dispatchInterval, sub.signal);
+        }
+      }
+      await dispatcher.waitForRuns();
+      return jarl.ok(undefined);
+    } finally {
+      done();
     }
-  }
-  await dispatcher.waitForRuns();
-  return jarl.ok(undefined);
-};
+  };
 
 // The forget sub-app's main. It runs until the server is killed: each pass forgets the automation
 // clients silent for longer than forgetAfter, so dispatch never reserves on a dead one, then waits
@@ -97,13 +106,28 @@ export const main =
       `started on ${HOST}:${String(flags.port)}; drive ${models.drive}; diagnose ${models.diagnose}; setup ${models.setup}`,
       { location: LOCATION },
     );
-    await restart();
+    const cleanup = {
+      token: vars.oligarchyToken,
+      aborting,
+      abortTimeoutMs: config.automationServer.abortTimeout,
+    };
+    const restarted = await restart(app.services, cleanup);
+    if (jarl.is_err(restarted)) {
+      await listening.close();
+      return restarted;
+    }
     app.sub(new App.App(app.environment).main(forgetClients));
-    app.sub(new App.App(app.environment).main(dispatch(aborting)));
+    let dispatchDone = () => {};
+    const dispatchFinished = new Promise<void>((resolve) => {
+      dispatchDone = resolve;
+    });
+    app.sub(new App.App(app.environment).main(dispatch(aborting, dispatchDone)));
     await App.waitForAbort(app.signal);
     await listening.close();
     await aborter.settled();
-    await shutdown();
+    await dispatchFinished;
+    const stopped = await shutdown(app.services, cleanup);
+    if (jarl.is_err(stopped)) return stopped;
     logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
     return jarl.ok(undefined);
   };

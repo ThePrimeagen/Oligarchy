@@ -19,6 +19,7 @@ const proxied = (replies: Fake.Options["replies"]) => {
     url: PROXY,
     token: { reveal: () => TOKEN },
     reserveTimeoutMs: 60_000,
+    releaseTimeoutMs: 10_000,
   });
   return { proxy, asked: fake.asked };
 };

@@ -8,7 +8,10 @@ import * as Routes from "./routes.ts";
 const LOCATION = "automation-client";
 
 // What a run takes from its job's reservation: what the job was reserved as, and its hold.
-export type Taken = Jobs.Held & { readonly action: Routes.ReserveRequest["action"] };
+export type Taken = Omit<Jobs.Held, "release"> & {
+  readonly release: () => void | Promise<void>;
+  readonly action: Routes.ReserveRequest["action"];
+};
 
 export type Reservations = {
   readonly reserve: Routes.Sessions["reserve"];
@@ -18,10 +21,14 @@ export type Reservations = {
   readonly take: (jobId: string) => Taken | undefined;
 };
 
-type Reservation = Taken & { readonly onAbort: () => void };
+type Reservation = Taken & {
+  readonly onAbort: () => void;
+  readonly expiry: ReturnType<typeof setTimeout>;
+};
 
 export type Options = {
   readonly maxJobs: number;
+  readonly reservationTimeoutMs: number;
   readonly jobs: Jobs.Jobs;
   readonly proxy: Proxy.Proxy;
   readonly logger: Logger.Logger;
@@ -51,7 +58,7 @@ export const create = (options: Options): Reservations => {
     if (taken.action !== "diagnose") {
       await giveBack(jobId);
     }
-    taken.release();
+    await taken.release();
   };
 
   // Until a run takes the job, its abort is answered here: a guest goes back to the proxy before
@@ -59,10 +66,14 @@ export const create = (options: Options): Reservations => {
   const keep = (jobId: string, action: Taken["action"], held: Jobs.Held): void => {
     const taken: Taken = { action, signal: held.signal, release: held.release };
     const onAbort = () => {
+      clearTimeout(expiry);
       reservations.delete(jobId);
       jarl.forget(letGo, taken, jobId);
     };
-    reservations.set(jobId, { ...taken, onAbort });
+    const expiry = setTimeout(() => {
+      jarl.forget(jobs.abort, { jobId });
+    }, options.reservationTimeoutMs);
+    reservations.set(jobId, { ...taken, onAbort, expiry });
     if (held.signal.aborted) {
       onAbort();
       return;
@@ -124,10 +135,21 @@ export const create = (options: Options): Reservations => {
       if (reservation === undefined) {
         return undefined;
       }
+      clearTimeout(reservation.expiry);
       reservations.delete(jobId);
       reservation.signal.removeEventListener("abort", reservation.onAbort);
       const { action, signal, release } = reservation;
-      return { action, signal, release };
+      return {
+        action,
+        signal,
+        release: async () => {
+          try {
+            if (action !== "diagnose") await giveBack(jobId);
+          } finally {
+            await release();
+          }
+        },
+      };
     },
   };
 };

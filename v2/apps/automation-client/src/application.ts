@@ -66,12 +66,14 @@ export const main =
     const jobs = Jobs.create();
     const reservations = Reserve.create({
       maxJobs: flags.maxJobs,
+      reservationTimeoutMs: config.automationClient.reservationTimeout,
       jobs,
       proxy: Proxy.create({
         http,
         url: flags.serverUrl,
         token: vars.oligarchyToken,
         reserveTimeoutMs: config.automationClient.reserveTimeout,
+        releaseTimeoutMs: config.qemuServer.releaseTimeout,
       }),
       logger,
     });
