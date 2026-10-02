@@ -16,7 +16,9 @@ const TEMPLATE = `<role>You drive one guest, one native tool call at a time. You
   <proof>{{TEST_PROOF}}</proof>
 </mission>
 
-<progress>Past steps: {{REASONS}}</progress>
+<progress>
+{{PROGRESS}}
+</progress>
 
 <last-response>Your last response was: {{RESPONSE}}</last-response>
 
@@ -58,7 +60,21 @@ const TEMPLATE = `<role>You drive one guest, one native tool call at a time. You
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
 
-// One replacement pass: placeholders in instructions, past reasons and model replies are data.
+const line = (action: Types.Action): string =>
+  action.kind === "move"
+    ? `- ${action.name} ${JSON.stringify(action.arguments)}: ${action.outcome}`
+    : `- refused: ${action.outcome}`;
+
+// The open step's intent, then its newest actions, newest first: `lines` lines in all.
+export const progress = (step: Types.Step | undefined, lines: number): string => {
+  if (step === undefined) {
+    return "No step has started yet.";
+  }
+  const shown = step.actions.slice(Math.max(0, step.actions.length - (lines - 1)));
+  return [`Step ${String(step.step)}: ${step.intent}`, ...shown.reverse().map(line)].join("\n");
+};
+
+// One replacement pass: placeholders in instructions, past steps and model replies are data.
 export const render = (
   data: Types.JobHarnessData,
   turn: Types.Turn,
@@ -80,7 +96,7 @@ export const render = (
     TEST_DEFINITION: data.instruction,
     TEST_PROOF: data.proof,
     TOOLS: JSON.stringify(tools),
-    REASONS: turn.reasons,
+    PROGRESS: turn.progress,
     RESPONSE: turn.response ?? "",
     PREVIOUS_ACTION: turn.previous?.name ?? "",
     PREVIOUS_VALUES: turn.previous === undefined ? "" : JSON.stringify(turn.previous.arguments),

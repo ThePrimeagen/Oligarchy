@@ -6,48 +6,43 @@ import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as DriveHarness from "../src/main.ts";
-import { details, JOB, RUN, said, shown, world } from "./support.ts";
+import { details, INSTRUCTION, JOB, RUN, SCREEN, said, shown, turn, world } from "./support.ts";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 const ASK = { model: "test-model", reasoning: "low", deadline: 60_000 } as const;
-const SCREEN = new Uint8Array([1, 2]);
 const PLACEHOLDER = /\{\{[A-Z_]+\}\}/;
+const IMAGE = [
+  { type: "text", text: expect.any(String) },
+  { type: "image_url", image_url: { url: "data:image/png;base64,AQI=" } },
+];
 
 const asked = { asked: { method: "POST", url: "http://proxy:42069/start" } };
 
-const guestMove = (move: DriveHarness.Move): DriveHarness.GuestMove => {
-  if (move.kind !== "guest") {
-    throw new Error("expected a guest move");
-  }
-  return move;
-};
+const ran = async (name: string) =>
+  jarl.ok(
+    name === "get_image" ? { text: "took a screenshot", image: SCREEN } : { text: "sent the keys" },
+  );
 
-it("drives a job from its harness data to its end, keeping what the model is shown", async () => {
+it("drives a job step by step, keeping each step's actions and what the model is shown", async () => {
   const { harness, calls, requests } = world({
-    guest: {
-      run: async (name) =>
-        jarl.ok(
-          name === "get_image"
-            ? { text: "took a screenshot", image: SCREEN }
-            : { text: "sent the keys" },
-        ),
-    },
+    guest: { run: ran },
     turns: [
       said(
         "send_keys",
         { step: 1, reason: "Type the password", keys: "prime<ENTER>" },
-        "{{REASONS}}",
+        "{{PROGRESS}}",
       ),
-      said("get_image", { step: 1, reason: "Type the password" }),
+      said("get_image", { step: 2, reason: "Look at the desktop" }),
       said("Done", {}),
     ],
   });
 
   expect(jarl.unwrap(await harness.loadJobHarnessData(JOB))).toBe(true);
   jarl.unwrap(await harness.start());
-  const typed = guestMove(jarl.unwrap(await harness.ask(ASK)));
+  jarl.unwrap(await harness.getImage());
+  const typed = jarl.unwrap(await harness.act(jarl.unwrap(await harness.ask(ASK))));
   expect(typed).toEqual({
     kind: "guest",
     step: 1,
@@ -55,17 +50,50 @@ it("drives a job from its harness data to its end, keeping what the model is sho
     name: "send_keys",
     arguments: { keys: "prime<ENTER>" },
   });
-  expect(jarl.unwrap(await harness.act(typed))).toEqual({ text: "sent the keys" });
-  const looked = guestMove(jarl.unwrap(await harness.ask(ASK)));
-  jarl.unwrap(await harness.act(looked));
-  expect(jarl.unwrap(await harness.ask(ASK))).toEqual({ kind: "done" });
+  jarl.unwrap(await harness.act(jarl.unwrap(await harness.ask(ASK))));
+  expect(jarl.unwrap(await harness.act(jarl.unwrap(await harness.ask(ASK))))).toEqual({
+    kind: "done",
+  });
   jarl.unwrap(await harness.finish({ status: "succeeded" }));
 
+  // A move for a step that is not open ends the open intent and starts that step's.
   expect(calls).toEqual([
     ["start", { iso: "https://iso.example/test.iso", resume: true }],
+    ["image"],
+    ["intentStart", "Type {{MODEL}}"],
     ["run", "send_keys", { keys: "prime<ENTER>" }],
+    ["intentEnd"],
+    ["intentStart", "Look at the desktop"],
     ["run", "get_image", {}],
     ["stop", { status: "succeeded" }],
+  ]);
+  expect(harness.steps).toEqual([
+    {
+      step: 1,
+      intent: "Type {{MODEL}}",
+      actions: [
+        {
+          kind: "move",
+          name: "send_keys",
+          reason: "Type the password",
+          arguments: { keys: "prime<ENTER>" },
+          outcome: "sent the keys",
+        },
+      ],
+    },
+    {
+      step: 2,
+      intent: "Look at the desktop",
+      actions: [
+        {
+          kind: "move",
+          name: "get_image",
+          reason: "Look at the desktop",
+          arguments: {},
+          outcome: "took a screenshot",
+        },
+      ],
+    },
   ]);
 
   // Every guest tool asks for its step and reason beside its own arguments, and Done ends the loop.
@@ -91,35 +119,232 @@ it("drives a job from its harness data to its end, keeping what the model is sho
   for (const { prompt } of [first, second, third]) {
     expect(prompt).toContain(JOB);
     expect(prompt).toContain(RUN);
-    expect(prompt).toContain("Type {{MODEL}}");
+    expect(prompt).toContain(INSTRUCTION);
     expect(prompt).toContain("The desktop is visible");
     expect(JSON.parse(/<tools>([\s\S]*)<\/tools>/.exec(prompt)?.[1] ?? "")).toEqual(tools);
   }
   // The first turn has no past: every placeholder has its value, and only inserted text reads as one.
-  expect(first.prompt).toContain("Past steps: none");
+  expect(first.prompt).toContain("No step has started yet.");
   expect(first.prompt).not.toContain("<last-response>");
   expect(first.prompt).not.toContain("<previous-move>");
-  expect(first.prompt.replace("Type {{MODEL}}", "")).not.toMatch(PLACEHOLDER);
-  // Then each step's outcome, the model's last words as written, and the last move it made.
-  expect(second.prompt).toContain("step 1: Type the password: sent the keys");
-  expect(second.prompt).toContain("Your last response was: {{REASONS}}");
-  expect(second.prompt).toContain('send_keys with values {"keys":"prime<ENTER>"}');
-  expect(third.prompt).toContain(
-    "step 1: Type the password: sent the keys\nstep 1: Type the password: took a screenshot",
+  expect(first.prompt.replaceAll("{{MODEL}}", "")).not.toMatch(PLACEHOLDER);
+  // Then the open step's intent and its actions, the model's last words as written, and its last
+  // move.
+  expect(second.prompt).toContain(
+    'Step 1: Type {{MODEL}}\n- send_keys {"keys":"prime<ENTER>"}: sent the keys',
   );
+  expect(second.prompt).toContain("Your last response was: {{PROGRESS}}");
+  expect(second.prompt).toContain('send_keys with values {"keys":"prime<ENTER>"}');
+  // A new step shows only its own actions; the earlier step's stay in the harness.
+  expect(third.prompt).toContain("Step 2: Look at the desktop\n- get_image {}: took a screenshot");
+  expect(third.prompt).not.toContain("sent the keys");
   expect(third.prompt).not.toContain("<last-response>");
   // A screenshot shows the result of the move before it, so that move stays the previous one.
   expect(third.prompt).toContain('send_keys with values {"keys":"prime<ENTER>"}');
-  // Only the turn after a screenshot carries it.
-  expect(first.user).toEqual(expect.any(String));
+  // The screen goes with the next ask until a move that may have changed it.
+  expect(first.user).toEqual(IMAGE);
   expect(second.user).toEqual(expect.any(String));
-  expect(third.user).toEqual([
-    { type: "text", text: expect.any(String) },
-    { type: "image_url", image_url: { url: "data:image/png;base64,AQI=" } },
+  expect(third.user).toEqual(IMAGE);
+});
+
+it("shows the open step's intent and only its newest actions, newest first", async () => {
+  const keys = ["a", "b", "c", "d"];
+  const { harness, requests } = world({
+    recentActions: 3,
+    turns: [
+      ...keys.map((key) => said("send_keys", { step: 1, reason: "Type", keys: key })),
+      said("Done", {}),
+    ],
+  });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  for (const _ of keys) {
+    jarl.unwrap(await harness.act(jarl.unwrap(await harness.ask(ASK))));
+  }
+  jarl.unwrap(await harness.ask(ASK));
+  const { prompt } = shown(requests[4]);
+  expect(prompt).toContain(
+    [
+      "Step 1: Type {{MODEL}}",
+      '- send_keys {"keys":"d"}: sent the keys',
+      '- send_keys {"keys":"c"}: sent the keys',
+      "</progress>",
+    ].join("\n"),
+  );
+  expect(prompt).not.toContain('{"keys":"b"}');
+  expect(harness.steps[0]?.actions).toHaveLength(4);
+});
+
+it("names each step after its ActionList line, and a step past the list by its number", async () => {
+  const { harness, calls } = world();
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.nextStep(2));
+  jarl.unwrap(await harness.nextStep(3));
+  expect(calls).toEqual([
+    ["intentStart", "Look at the desktop"],
+    ["intentEnd"],
+    ["intentStart", "step 3"],
+  ]);
+  expect(harness.steps.map(({ step, intent }) => ({ step, intent }))).toEqual([
+    { step: 2, intent: "Look at the desktop" },
+    { step: 3, intent: "step 3" },
   ]);
 });
 
-it("derives the boot mode from the job's action and definition", async () => {
+it("returns a step whose intent would not start, and runs nothing outside it", async () => {
+  const down = new Http.HttpInvalid("intent/start: down", asked);
+  const { harness, calls } = world({ guest: { intentStart: async () => jarl.err(down) } });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  const result = await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" }));
+  expect(jarl.is_err(result)).toBe(true);
+  if (jarl.is_err(result)) {
+    expect(result.error).toBe(down);
+  }
+  expect(calls).toEqual([["intentStart", "Type {{MODEL}}"]]);
+  expect(harness.steps).toEqual([]);
+});
+
+it("starts a step again after its intent would not start, without ending a closed one", async () => {
+  const down = new Http.HttpInvalid("intent/start: down", asked);
+  const starts = [jarl.ok(undefined), jarl.err(down), jarl.ok(undefined)];
+  const { harness, calls } = world({
+    guest: { intentStart: async () => starts.shift() ?? jarl.ok(undefined) },
+  });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.nextStep(1));
+  expect(jarl.is_err(await harness.nextStep(2))).toBe(true);
+  jarl.unwrap(await harness.nextStep(2));
+  expect(calls).toEqual([
+    ["intentStart", "Type {{MODEL}}"],
+    ["intentEnd"],
+    ["intentStart", "Look at the desktop"],
+    ["intentStart", "Look at the desktop"],
+  ]);
+  expect(harness.steps.map(({ step }) => step)).toEqual([1, 2]);
+});
+
+it("returns an intent that would not end, and keeps the step open", async () => {
+  const down = new Http.HttpInvalid("intent/end: down", asked);
+  const { harness, calls } = world({ guest: { intentEnd: async () => jarl.err(down) } });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.nextStep(1));
+  const result = await harness.nextStep(2);
+  expect(jarl.is_err(result)).toBe(true);
+  if (jarl.is_err(result)) {
+    expect(result.error).toBe(down);
+  }
+  expect(calls).toEqual([["intentStart", "Type {{MODEL}}"], ["intentEnd"]]);
+  expect(harness.steps.map(({ step }) => step)).toEqual([1]);
+});
+
+it("returns an image the guest refused, and asks without the old screenshot", async () => {
+  const off = new Qemu.GuestOff("image: 409");
+  const images = [jarl.ok(SCREEN), jarl.err(off)];
+  const { harness, requests } = world({
+    guest: { image: async () => images.shift() ?? jarl.err(off) },
+    turns: [said("Done", {})],
+  });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.getImage());
+  const result = await harness.getImage();
+  expect(jarl.error.is(result, Qemu.GuestOff)).toBe(true);
+  if (jarl.is_err(result)) {
+    expect(result.error).toBe(off);
+  }
+  jarl.unwrap(await harness.ask(ASK));
+  expect(shown(requests[0]).user).toEqual(expect.any(String));
+});
+
+it.each([
+  [
+    "no tool call",
+    { content: "I am finished", toolCalls: [] },
+    "reply: expected one tool call, got 0",
+  ],
+  [
+    "two tool calls",
+    {
+      content: null,
+      toolCalls: [
+        { id: "a", name: "Done", arguments: "{}" },
+        { id: "b", name: "Done", arguments: "{}" },
+      ],
+    },
+    "reply: expected one tool call, got 2",
+  ],
+  [
+    "arguments that are not JSON",
+    turn("send_keys", "{"),
+    "reply: send_keys: arguments are not a JSON object",
+  ],
+  [
+    "no step",
+    turn("send_keys", { reason: "Type", keys: "x" }),
+    "reply: send_keys: step is the ActionList line, a whole number from 1",
+  ],
+  [
+    "a step of 0",
+    turn("send_keys", { step: 0, reason: "Type", keys: "x" }),
+    "reply: send_keys: step is the ActionList line, a whole number from 1",
+  ],
+  [
+    "an empty reason",
+    turn("send_keys", { step: 1, reason: " ", keys: "x" }),
+    "reply: send_keys: reason is that ActionList line",
+  ],
+  ["Done with arguments", turn("Done", { step: 1 }), "reply: Done takes no arguments"],
+] as const)("refuses a reply with %s", async (_, reply, message) => {
+  const { harness, calls } = world();
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  const result = await harness.act(reply);
+  expect(jarl.error.is(result, DriveHarness.ReplyInvalid)).toBe(true);
+  if (jarl.is_err(result)) {
+    expect(result.error.message).toBe(message);
+  }
+  expect(calls).toEqual([]);
+});
+
+it("keeps a refused reply under the open step, and reads no arguments as an empty object", async () => {
+  const { harness, requests } = world({
+    turns: [jarl.ok({ content: "I am finished", toolCalls: [] }), said("Done", "")],
+  });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" })));
+  const refused = await harness.act(jarl.unwrap(await harness.ask(ASK)));
+  expect(jarl.error.is(refused, DriveHarness.ReplyInvalid)).toBe(true);
+  expect(jarl.unwrap(await harness.act(jarl.unwrap(await harness.ask(ASK))))).toEqual({
+    kind: "done",
+  });
+  const { prompt } = shown(requests[1]);
+  expect(prompt).toContain(
+    [
+      "Step 1: Type {{MODEL}}",
+      "- refused: reply: expected one tool call, got 0",
+      '- send_keys {"keys":"x"}: sent the keys',
+    ].join("\n"),
+  );
+  expect(prompt).toContain("Your last response was: I am finished");
+});
+
+it("returns a move the guest refused, keeps why under its step, and drops the screenshot", async () => {
+  const off = new Qemu.GuestOff("send-keys: 409");
+  const { harness, requests } = world({
+    guest: { run: async () => jarl.err(off) },
+    turns: [said("Done", {})],
+  });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.getImage());
+  const result = await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" }));
+  expect(jarl.error.is(result, Qemu.GuestOff)).toBe(true);
+  if (jarl.is_err(result)) {
+    expect(result.error).toBe(off);
+  }
+  jarl.unwrap(await harness.ask(ASK));
+  const { prompt, user } = shown(requests[0]);
+  expect(prompt).toContain('Step 1: Type {{MODEL}}\n- send_keys {"keys":"x"}: send-keys: 409');
+  expect(user).toEqual(expect.any(String));
+});
+
+it("loads the job's harness data and derives its boot mode from its action and definition", async () => {
   for (const [action, resumes, expected] of [
     ["drive", true, true],
     ["drive", false, false],
@@ -134,7 +359,7 @@ it("derives the boot mode from the job's action and definition", async () => {
       action,
       name: "install",
       description: "Install and boot",
-      instruction: "Type {{MODEL}}",
+      instruction: INSTRUCTION,
       proof: "The desktop is visible",
       iso: "https://iso.example/test.iso",
       serverUrl: "http://proxy:42069",
@@ -155,100 +380,6 @@ it.each([
     expect(result.error).toBe(error);
   }
   expect(harness.data).toBeUndefined();
-});
-
-it.each([
-  [
-    "no tool call",
-    jarl.ok({ content: "I am finished", toolCalls: [] }),
-    "reply: expected one tool call, got 0",
-  ],
-  [
-    "two tool calls",
-    jarl.ok({
-      content: null,
-      toolCalls: [
-        { id: "a", name: "Done", arguments: "{}" },
-        { id: "b", name: "Done", arguments: "{}" },
-      ],
-    }),
-    "reply: expected one tool call, got 2",
-  ],
-  [
-    "arguments that are not JSON",
-    said("send_keys", "{"),
-    "reply: send_keys: arguments are not a JSON object",
-  ],
-  [
-    "no step",
-    said("send_keys", { reason: "Type", keys: "x" }),
-    "reply: send_keys: step is the ActionList line, a whole number from 1",
-  ],
-  [
-    "a step of 0",
-    said("send_keys", { step: 0, reason: "Type", keys: "x" }),
-    "reply: send_keys: step is the ActionList line, a whole number from 1",
-  ],
-  [
-    "an empty reason",
-    said("send_keys", { step: 1, reason: " ", keys: "x" }),
-    "reply: send_keys: reason is that ActionList line",
-  ],
-  ["Done with arguments", said("Done", { step: 1 }), "reply: Done takes no arguments"],
-] as const)("refuses a reply with %s", async (_, turn, message) => {
-  const { harness, calls } = world({ turns: [turn] });
-  jarl.unwrap(await harness.loadJobHarnessData(JOB));
-  const result = await harness.ask(ASK);
-  expect(jarl.error.is(result, DriveHarness.ReplyInvalid)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error.message).toBe(message);
-  }
-  expect(calls).toEqual([]);
-});
-
-it("shows the model its refused reply on the next turn", async () => {
-  const { harness, requests } = world({
-    turns: [jarl.ok({ content: "I am finished", toolCalls: [] }), said("Done", "")],
-  });
-  jarl.unwrap(await harness.loadJobHarnessData(JOB));
-  expect(jarl.error.is(await harness.ask(ASK), DriveHarness.ReplyInvalid)).toBe(true);
-  // A call with no arguments at all reads as an empty object.
-  expect(jarl.unwrap(await harness.ask(ASK))).toEqual({ kind: "done" });
-  const { prompt } = shown(requests[1]);
-  expect(prompt).toContain("Past steps: reply: expected one tool call, got 0");
-  expect(prompt).toContain("Your last response was: I am finished");
-});
-
-it("returns a move the guest refused, and shows the model why without the old screenshot", async () => {
-  const off = new Qemu.GuestOff("send-keys: 409");
-  const { harness, requests } = world({
-    guest: {
-      run: async (name) =>
-        name === "get_image"
-          ? jarl.ok({ text: "took a screenshot", image: SCREEN })
-          : jarl.err(off),
-    },
-    turns: [said("Done", {})],
-  });
-  jarl.unwrap(await harness.loadJobHarnessData(JOB));
-  jarl.unwrap(
-    await harness.act({ kind: "guest", step: 1, reason: "Look", name: "get_image", arguments: {} }),
-  );
-  const result = await harness.act({
-    kind: "guest",
-    step: 2,
-    reason: "Type",
-    name: "send_keys",
-    arguments: { keys: "x" },
-  });
-  expect(jarl.is_err(result)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error).toBe(off);
-  }
-  jarl.unwrap(await harness.ask(ASK));
-  const { prompt, user } = shown(requests[0]);
-  expect(prompt).toContain("step 1: Look: took a screenshot\nstep 2: Type: send-keys: 409");
-  expect(user).toEqual(expect.any(String));
 });
 
 it.each([

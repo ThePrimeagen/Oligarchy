@@ -27,9 +27,32 @@ export type Previous = {
 
 // What the model is told of the run so far.
 export type Turn = {
-  readonly reasons: string;
+  readonly progress: string;
   readonly response?: string;
   readonly previous?: Previous;
+};
+
+// One thing done under a step: a guest move and what came of it, or a reply the harness refused.
+export type Action =
+  | {
+      readonly kind: "move";
+      readonly name: string;
+      readonly reason: string;
+      readonly arguments: Readonly<Record<string, unknown>>;
+      readonly outcome: string;
+    }
+  | { readonly kind: "refused"; readonly outcome: string };
+
+// One ActionList line, its intent and everything done under it, oldest first.
+export type Step = {
+  readonly step: number;
+  readonly intent: string;
+  readonly actions: Array<Action>;
+};
+
+export type Options = {
+  // The lines of the open step the prompt shows: its intent, then its newest actions.
+  readonly recentActions: number;
 };
 
 // A guest move carries only its tool's own arguments; step and reason are taken out.

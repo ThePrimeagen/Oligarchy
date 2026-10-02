@@ -6,6 +6,15 @@ import * as jarl from "jarl";
 import * as DriveHarness from "../src/main.ts";
 
 export const JOB = "00000000-0000-4000-8000-000000000001";
+// Two steps; the trailing crash line holds for the whole run and is not one.
+export const INSTRUCTION = [
+  "Lock the screen and unlock it.",
+  "<ActionList>",
+  "* Type {{MODEL}}",
+  "*   Look at the desktop  ",
+  "* any crashes or erroneous behavior must be reported",
+  "</ActionList>",
+].join("\n");
 export const RUN = "00000000-0000-4000-8000-000000000002";
 
 export const details = (
@@ -39,13 +48,15 @@ export const details = (
     id: 1,
     name: "install",
     description: "Install and boot",
-    instruction: "Type {{MODEL}}",
+    instruction: INSTRUCTION,
     proof: "The desktop is visible",
     resume,
     createdAt: new Date(),
   },
   suite: null,
 });
+
+export const SCREEN = new Uint8Array([1, 2]);
 
 const unused = (): never => {
   throw new Error("unexpected call");
@@ -65,7 +76,10 @@ export const SEND_KEYS: OpenRouter.Tool = {
   },
 };
 
-type Guest = Pick<Qemu.QemuHttpTools, "start" | "stop" | "save" | "run">;
+type Guest = Pick<
+  Qemu.QemuHttpTools,
+  "start" | "image" | "intentStart" | "intentEnd" | "stop" | "save" | "run"
+>;
 
 const ok = async () => jarl.ok(undefined);
 
@@ -85,6 +99,7 @@ export const world = (
     readonly getJobDetails?: Stores.Tests.Tests["getJobDetails"];
     readonly guest?: Partial<Guest>;
     readonly turns?: ReadonlyArray<jarl.Result<OpenRouter.Turn, OpenRouter.Failure>>;
+    readonly recentActions?: number;
   } = {},
 ): World => {
   const calls: Array<Call> = [];
@@ -137,7 +152,7 @@ export const world = (
   const qemuHttpTools = App.createService<never, App.NoOptions, Qemu.QemuHttpTools>(() => ({
     service: "qemuHttpTools",
     start: recorded("start", guest.start ?? ok),
-    image: unused,
+    image: recorded("image", guest.image ?? (async () => jarl.ok(SCREEN))),
     serial: unused,
     sendKeys: unused,
     mouse: {
@@ -151,8 +166,8 @@ export const world = (
       hold: unused,
       release: unused,
     },
-    intentStart: unused,
-    intentEnd: unused,
+    intentStart: recorded("intentStart", guest.intentStart ?? ok),
+    intentEnd: recorded("intentEnd", guest.intentEnd ?? ok),
     stop: recorded("stop", guest.stop ?? ok),
     save: recorded("save", guest.save ?? ok),
     tools: [SEND_KEYS],
@@ -171,22 +186,28 @@ export const world = (
     },
   }))({});
 
-  const harness = new DriveHarness.DriveHarness({ tests, qemuHttpTools, openRouter });
+  const harness = new DriveHarness.DriveHarness(
+    { tests, qemuHttpTools, openRouter },
+    { recentActions: script.recentActions ?? 10 },
+  );
   return { calls, requests, harness };
 };
 
 // One tool call, with the model's text beside it.
-export const said = (
+export const turn = (
   name: string,
   args: Readonly<Record<string, unknown>> | string,
   content: string | null = null,
-): jarl.Result<OpenRouter.Turn, never> =>
-  jarl.ok({
-    content,
-    toolCalls: [
-      { id: "call-1", name, arguments: typeof args === "string" ? args : JSON.stringify(args) },
-    ],
-  });
+): OpenRouter.Turn => ({
+  content,
+  toolCalls: [
+    { id: "call-1", name, arguments: typeof args === "string" ? args : JSON.stringify(args) },
+  ],
+});
+
+// The model answering that one tool call.
+export const said = (...args: Parameters<typeof turn>): jarl.Result<OpenRouter.Turn, never> =>
+  jarl.ok(turn(...args));
 
 // The system prompt and the user turn of each request, as the model read them.
 export const shown = (request: OpenRouter.Request | undefined) => {
