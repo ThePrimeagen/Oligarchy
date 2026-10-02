@@ -84,6 +84,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     servers,
     setupRequests,
     logger: log.logger,
+    signal: new AbortController().signal,
   });
 
   const live = async (...urls: ReadonlyArray<string>) => {
@@ -283,7 +284,7 @@ describe("a dispatch pass", () => {
     expect((await at.job(job.id)).status).toBe("aborted");
   });
 
-  it("a setup whose lock is gone can never be reserved: it is errored saying so, nothing is asked, and the pass asks again (unhappy)", async () => {
+  it("a setup whose lock is gone can never be reserved: it is aborted saying so, nothing is asked, and the pass asks again (unhappy)", async () => {
     const at = await dispatching({ [FIRST]: {} });
     await at.live(FIRST);
     const setup = await at.setup();
@@ -293,9 +294,10 @@ describe("a dispatch pass", () => {
 
     const { status, reason } = await at.job(setup.id);
     expect({ status, reason }).toEqual({
-      status: "errored",
+      status: "aborted",
       reason: "no setup lock names this setup's server",
     });
+    expect(errors(at.said)).toEqual(["setup aborted: no setup lock names this setup's server"]);
     expect(at.asked()).toEqual([]);
   });
 
@@ -309,7 +311,7 @@ describe("a dispatch pass", () => {
 
     const failed = errors(at.said);
     expect(failed).toHaveLength(1);
-    expect(failed[0]).toMatch(/^dispatch failed: .*ECONNREFUSED/);
+    expect(failed[0]).toMatch(/^dispatch failed: Failed query: /);
     expect(at.asked()).toEqual([]);
   });
 });

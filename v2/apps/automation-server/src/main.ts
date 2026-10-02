@@ -2,10 +2,12 @@ import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import * as Env from "@oligarchy/env";
 import * as Fleet from "@oligarchy/fleet";
+import type * as Http from "@oligarchy/http";
 import { listen } from "@oligarchy/http/serve";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
+import * as Dispatch from "./dispatch.ts";
 import { environment, type Run } from "./environment.ts";
 import { restart } from "./restart.ts";
 import { routes } from "./routes.ts";
@@ -18,12 +20,26 @@ const HOST = "127.0.0.1";
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
-// The dispatch sub-app's main. It runs until the server is killed: each pass waits the interval,
-// and the kill ends the wait at once. It dispatches nothing yet.
-const dispatch = async (sub: App.App<Run>) => {
+// The dispatch sub-app's main. It runs until the server is killed: a pass that moved a job to
+// running asks for the next at once, and any other waits the interval, which the kill ends at once.
+type DispatchWants =
+  | Http.Http
+  | Stores.Tests.Tests
+  | Stores.Servers.Servers
+  | Stores.SetupRequests.SetupRequests
+  | Logger.Logger;
+
+const dispatch = async (sub: App.App<Run, DispatchWants>) => {
   const { dispatchInterval } = sub.environment.config.automationServer;
+  const dispatcher = Dispatch.create({
+    ...sub.services,
+    token: sub.environment.vars.oligarchyToken,
+    signal: sub.signal,
+  });
   while (!sub.signal.aborted) {
-    await Async.sleep(dispatchInterval, sub.signal);
+    if (!(await dispatcher.pass())) {
+      await Async.sleep(dispatchInterval, sub.signal);
+    }
   }
   return jarl.ok(undefined);
 };
@@ -48,7 +64,7 @@ const forgetClients = async (sub: App.App<Run, Stores.Servers.Servers | Logger.L
 // Nothing starts unless the port is bound. On a signal the listener closes first, so no request
 // lands during shutdown, and shutdown runs before main returns, so it finishes before any exit
 // handler closes the services under it.
-const main = async (app: App.App<Run, Stores.Servers.Servers | Logger.Logger>) => {
+const main = async (app: App.App<Run, DispatchWants>) => {
   const { logger } = app.services;
   const { config, flags, vars } = app.environment;
   const { models } = config;
