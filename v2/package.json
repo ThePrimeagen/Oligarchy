@@ -32,6 +32,7 @@
     "automation-server": "bun --no-env-file apps/automation-server/src/main.ts",
     "automation-client": "bun --no-env-file apps/automation-client/src/main.ts",
     "driver": "bun --no-env-file apps/driver/src/main.ts",
+    "ctrl": "bun --no-env-file apps/ctrl/src/main.ts",
     "check:types": "bun run --workspaces check:types",
     "test:unit": "bun run --workspaces --if-present test:unit"
   }

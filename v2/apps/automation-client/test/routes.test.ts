@@ -60,14 +60,14 @@ describe("the automation client's routes", () => {
     }
   });
 
-  it("/run without a prompt is 400, and the typed client refuses it (unhappy)", async () => {
+  it("/run without a jobId is 400, and the typed client refuses it (unhappy)", async () => {
     const response = await client(TOKEN).run.$post({
-      // @ts-expect-error: a run carries its prompt.
-      json: { jobId: JOB_ID },
+      // @ts-expect-error: a run names its job.
+      json: { prompt: "diagnose the job" },
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "name a jobId and a prompt" });
+    expect(await response.json()).toEqual({ error: "name a jobId; a diagnose names its prompt" });
   });
 
   it("/abort without a jobId is 400, and the typed client refuses it (unhappy)", async () => {
@@ -118,8 +118,8 @@ describe("the automation client's routes", () => {
 
     const answers = [
       await without.reserve.$post({ json: RESERVE }),
-      // @ts-expect-error: a run carries its prompt.
-      await handedTo(made).run.$post({ json: { jobId: JOB_ID } }),
+      // @ts-expect-error: a run names its job.
+      await handedTo(made).run.$post({ json: { prompt: "diagnose the job" } }),
     ];
 
     expect(answers.map((answer) => answer.status)).toEqual([401, 400]);

@@ -69,7 +69,11 @@ const started = async (
           "--server-url",
           PROXY_URL,
         ],
-        env: { DATABASE_URL: "postgres://unused.test/db", OLIGARCHY_TOKEN: TOKEN },
+        env: {
+          DATABASE_URL: "postgres://unused.test/db",
+          OLIGARCHY_TOKEN: TOKEN,
+          OPENROUTER_API_KEY: "openrouter-token",
+        },
         files: { [Env.CONFIG_PATH]: CONFIG },
       }),
     ),
@@ -170,7 +174,7 @@ const started = async (
       stderr.push(text);
     },
   };
-  const app = new App.App(env).main(Application.main({ listen }));
+  const app = new App.App(env).main(Application.main({ listen, spawn: unexpected, env: {} }));
   const running = app.run(
     { http: http.http, logger: log.logger, host, usage, servers, processStats },
     (failed) => {

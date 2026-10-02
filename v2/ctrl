@@ -1,0 +1,6 @@
+#!/bin/sh
+# V2's ctrl, the diagnosing agent's tool: ./ctrl logs --job-id <id>, ./ctrl image --image-id <id>
+# --output <file>, ./ctrl diagnose --job-id <id> --verdict passed|failed ... Needs DATABASE_URL.
+# Exits 0 when the command worked, and 1 with its reason on stderr when it did not.
+root=$(CDPATH= cd "$(dirname "$0")" && pwd)
+exec bun --no-env-file "$root/apps/ctrl/src/main.ts" "$@"

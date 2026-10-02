@@ -1,9 +1,7 @@
-import { spawn } from "node:child_process";
-import * as App from "@oligarchy/app";
+import { writeFile } from "node:fs/promises";
 import * as Env from "@oligarchy/env";
-import { listen } from "@oligarchy/http/serve";
 import * as jarl from "jarl";
-import * as Application from "./application.ts";
+import * as Commands from "./commands.ts";
 import { environment } from "./environment.ts";
 import { closeServices, createServices } from "./services.ts";
 
@@ -23,13 +21,19 @@ if (jarl.is_err(created)) {
 }
 
 const env = jarl.value(created);
-
 const services = createServices(env);
-
-const app = new App.App(env).main(Application.main({ listen, spawn, env: process.env }));
-app.onExit(() => closeServices(services));
-await app.run(services, (errors) => {
-  for (const error of errors) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  }
+const code = await Commands.run(services, env, {
+  stdout: (text) => {
+    process.stdout.write(text);
+  },
+  stderr: (text) => {
+    process.stderr.write(text);
+  },
+  writeFile: (path, data) => writeFile(path, data),
 });
+const closed = await closeServices(services);
+if (jarl.is_err(closed)) {
+  process.stderr.write(`${closed.error.message}\n`);
+}
+// Not process.exit: stdout may still be draining a long logs into a pipe.
+process.exitCode = jarl.is_err(closed) ? 1 : code;

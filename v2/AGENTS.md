@@ -1,5 +1,7 @@
 1. No private members.
 2. No classes, except `App`.
+   - A class may be used when it holds state that changes between calls (`App`, `DriveHarness`,
+     `QemuHttpTools`).
 3. Tests test business logic only, never that a third-party interface works. Never test again
    what is already tested, or what the types already promise. A unit does not re-test the
    packages it calls: an app does not test env's refusal of a missing variable or an unknown
@@ -32,7 +34,8 @@
 11. Services should only be created when:
     - they manipulate the database
     - they are required by multiple apps and depend nothing or other services (sentry, logger, db)
-    - they make external calls
+    - they reach something outside our system: what we use but do not own (the database, Sentry,
+      OpenRouter, the OS). A call inside our system goes through the callee's routes.
     - they are the contract line for this application and the rest of the system
 12. create functions for long running should take in services and options and return the object of
     functions.  Do not create one mega object.  create(services, {...}) allows type checking at the
