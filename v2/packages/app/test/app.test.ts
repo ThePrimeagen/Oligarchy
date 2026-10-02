@@ -1,6 +1,6 @@
 import * as Async from "@oligarchy/async";
 import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as App from "../src/main.ts";
 import * as Counter from "./counter.ts";
 import * as Greeter from "./greeter.ts";
@@ -187,28 +187,6 @@ describe("App", () => {
     expect(codes).toEqual([1]);
   });
 
-  it("on a signal aborts app.signal, waits for main to return, then runs the handlers (happy)", async () => {
-    const order: Array<string> = [];
-    const app = new App.App(environment).main(async (started) => {
-      await aborted(started.signal);
-      order.push("main saw the abort");
-      return jarl.ok(undefined);
-    });
-    app.onExit((reason) => {
-      order.push(`close services on ${kindOf(reason)}`);
-    });
-    const { io, codes, signal, listening } = fakeIo();
-    const { closes, onClose } = closer();
-    const running = app.run({}, onClose, io);
-    expect(app.signal.aborted).toBe(false);
-    signal("SIGTERM");
-    await running;
-    expect(order).toEqual(["main saw the abort", "close services on SIGTERM"]);
-    expect(closes).toEqual([[]]);
-    expect(codes).toEqual([0]);
-    expect(listening()).toBe(0);
-  });
-
   it("on the first C-c tells stderr that pressing again kills the application right away (happy)", async () => {
     const { io, codes, stderr, signal } = fakeIo();
     const { onClose } = closer();
@@ -237,25 +215,6 @@ describe("App", () => {
     signal("SIGINT");
     expect(stderr).toEqual([PRESS_AGAIN]);
     expect(codes).toEqual([1]);
-  });
-
-  it("on SIGHUP aborts, waits for main, then runs the handlers with the hangup as the reason (happy)", async () => {
-    const order: Array<string> = [];
-    const app = new App.App(environment).main(async (started) => {
-      await aborted(started.signal);
-      order.push("main saw the abort");
-      return jarl.ok(undefined);
-    });
-    app.onExit((reason) => {
-      order.push(`close services on ${kindOf(reason)}`);
-    });
-    const { io, codes, signal } = fakeIo();
-    const { onClose } = closer();
-    const running = app.run({}, onClose, io);
-    signal("SIGHUP");
-    await running;
-    expect(order).toEqual(["main saw the abort", "close services on SIGHUP"]);
-    expect(codes).toEqual([0]);
   });
 
   it("takes a SIGTERM after a SIGHUP as the second signal, and exits 1 at once (unhappy)", () => {
@@ -430,6 +389,81 @@ describe("App", () => {
     await app.run({}, async () => jarl.err("sentry is down"), io);
     expect(stderr).toEqual(["onClose failed: sentry is down\n"]);
     expect(codes).toEqual([1]);
+  });
+});
+
+describe("App process signals", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["SIGINT", [PRESS_AGAIN]],
+    ["SIGTERM", []],
+    ["SIGHUP", []],
+  ] as const)(
+    "on %s waits for main, runs the handlers, and exits 0 (happy)",
+    async (name, printed) => {
+      const order: Array<string> = [];
+      const app = new App.App(environment).main(async (started) => {
+        await aborted(started.signal);
+        order.push("main saw the abort");
+        return jarl.ok(undefined);
+      });
+      app.onExit((reason) => {
+        order.push(`close services on ${kindOf(reason)}`);
+      });
+      const { io, codes, stderr, signal, listening } = fakeIo();
+      const { closes, onClose } = closer();
+      const running = app.run({}, onClose, io);
+      expect(app.signal.aborted).toBe(false);
+      signal(name);
+      await running;
+      expect(order).toEqual(["main saw the abort", `close services on ${name}`]);
+      expect(stderr).toEqual(printed);
+      expect(closes).toEqual([[]]);
+      expect(codes).toEqual([0]);
+      expect(listening()).toBe(0);
+    },
+  );
+
+  it("exits 1 immediately on a second SIGHUP while an exit handler is still running (unhappy)", async () => {
+    let enter: () => void = () => undefined;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const app = waits();
+    app.onExit(async () => {
+      enter();
+      await held;
+    });
+    const { io, codes, stderr, signal, listening } = fakeIo();
+    const { closes, onClose } = closer();
+    const running = app.run({}, onClose, io);
+    try {
+      signal("SIGHUP");
+      await entered;
+      expect(codes).toEqual([]);
+      expect(closes).toEqual([]);
+      signal("SIGHUP");
+      expect(codes).toEqual([1]);
+      expect(closes).toEqual([]);
+      expect(stderr).toEqual([]);
+    } finally {
+      release();
+      await running;
+    }
+    expect(codes).toEqual([1]);
+    expect(closes).toEqual([[]]);
+    expect(listening()).toBe(0);
   });
 });
 
