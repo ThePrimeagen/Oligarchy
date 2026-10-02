@@ -52,7 +52,7 @@ const reasonOf = (signal: AbortSignal): string =>
 
 // Each turn: the screen, the model's turn, its move. Ends when the model is done, at a limit, when
 // the guest is off, or on the signal.
-const turns = async (
+const mainLoop = async (
   services: Services,
   action: "drive" | "setup",
   options: Options,
@@ -181,7 +181,7 @@ export const drive = async (
   }
   logger.info(`${action} ${name}: started ${iso}${resume ? ", resumed" : ""}`, at);
 
-  const looped = await turns(services, action, options);
+  const looped = await mainLoop(services, action, options);
   if (jarl.is_err(looped)) {
     report(looped.error);
     const stopped = await harness.finish({ status: "failed", reason: looped.error.message });
