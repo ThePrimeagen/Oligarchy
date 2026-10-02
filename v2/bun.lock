@@ -144,6 +144,7 @@
         "zod": "catalog:",
       },
       "devDependencies": {
+        "@oligarchy/async": "workspace:*",
         "@oligarchy/db": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
@@ -250,14 +251,14 @@
       "name": "@oligarchy/qemu-http-tools",
       "dependencies": {
         "@oligarchy/app": "workspace:*",
-        "@oligarchy/async": "workspace:*",
-        "@oligarchy/env": "workspace:*",
         "@oligarchy/http": "workspace:*",
         "@oligarchy/openrouter": "workspace:*",
         "jarl": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
+        "@oligarchy/async": "workspace:*",
+        "@oligarchy/env": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -748,11 +749,21 @@
 
     "@oligarchy/automation-server/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
+    "@oligarchy/db/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
+    "@oligarchy/drive-harness/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
+    "@oligarchy/driver/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
+    "@oligarchy/fake-postgres/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
     "@oligarchy/fleet/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "@oligarchy/logger/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "@oligarchy/sentry/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
+    "@oligarchy/stores/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "@oligarchy/tester/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 

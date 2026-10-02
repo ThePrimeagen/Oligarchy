@@ -1,6 +1,6 @@
-import * as App from "@oligarchy/app";
-import type * as Env from "@oligarchy/env";
+import type * as App from "@oligarchy/app";
 import * as Http from "@oligarchy/http";
+import type * as OpenRouter from "@oligarchy/openrouter";
 import * as jarl from "jarl";
 import * as Errors from "./errors.ts";
 import * as Tools from "./tools.ts";
@@ -13,17 +13,10 @@ export type {
   Modifier,
   Mouse,
   Point,
-  QemuHttpTools,
   Ran,
   RunFailure,
   StopStatus,
 } from "./types.ts";
-
-declare module "@oligarchy/app" {
-  interface Services {
-    qemuHttpTools: App.Register<"qemuHttpTools", Types.QemuHttpTools>;
-  }
-}
 
 // A first start downloads its ISO before it answers.
 export const START_TIMEOUT_MS = 45 * 60_000;
@@ -61,109 +54,55 @@ const conflict =
 const held = (modifiers: ReadonlyArray<Types.Modifier> | undefined) =>
   modifiers === undefined || modifiers.length === 0 ? {} : { modifiers };
 
+const noPointer = (what: string) =>
+  jarl.err(new Errors.NoPointer(`${what}: no mouse move yet; move the pointer first`));
+
 export type Options = {
   readonly job: string;
   readonly baseUrl: string;
-  readonly token: Env.Secret;
-  readonly signal?: AbortSignal;
+  readonly token: { readonly reveal: () => string };
 };
 
-// Every call names job and carries token as the bearer. signal aborts every call but stop.
-export const create = App.createService<Http.Http, Options, Types.QemuHttpTools>(
-  ({ http }, options) => {
-    const { job, token } = options;
-    const base = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
+// One job's guest, over the qemu reverse proxy: the harness's calls, the guest's screen, keys and
+// mouse, and the model's tools over them. Every call names the job and carries the token as the
+// bearer; the signal aborts every call but stop. It keeps where the pointer is between calls.
+class QemuHttpTools {
+  readonly services: App.Needs<Http.Http>;
+  readonly signal: AbortSignal;
+  readonly options: Options;
+  readonly base: string;
+  readonly tools: ReadonlyArray<OpenRouter.Tool> = Tools.definitions;
+  readonly mouse: Types.Mouse;
+  pointer: Types.Point | undefined = undefined;
 
-    const where = (path: string): string => new URL(path, base).toString();
-
-    const asking = (path: string): string => {
-      const url = new URL(path, base);
-      url.searchParams.set("job", job);
-      return url.toString();
-    };
-
-    const signalled = (aborts: boolean): { readonly signal?: AbortSignal } =>
-      aborts && options.signal !== undefined ? { signal: options.signal } : {};
-
-    const getting = (): Http.Init => ({
-      method: "GET",
-      headers: { Authorization: `Bearer ${token.reveal()}` },
-      ...signalled(true),
-    });
-
-    const posting = (
-      fields: Readonly<Record<string, unknown>>,
-      extra: { readonly timeoutMs?: number; readonly aborts?: false } = {},
-    ): Http.Init => ({
-      method: "POST",
-      headers: { Authorization: `Bearer ${token.reveal()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ job, ...fields }),
-      ...(extra.timeoutMs === undefined ? {} : { timeoutMs: extra.timeoutMs }),
-      ...signalled(extra.aborts ?? true),
-    });
-
-    // A call on the guest's keys or mouse: a 409 is a guest that is off.
-    const acting = (path: string, fields: Readonly<Record<string, unknown>>) =>
-      http.fetch(where(path), posting(fields), {
-        decode: ignored,
-        status: { 409: conflict(path, Errors.GuestOff) },
-      });
-
-    let pointer: Types.Point | undefined;
-
-    const noPointer = (what: string) =>
-      jarl.err(new Errors.NoPointer(`${what}: no mouse move yet; move the pointer first`));
-
-    // A call that names its point leaves the pointer there once it succeeds.
-    const pointed = async (
-      path: string,
-      at: Types.Point,
-      fields: Readonly<Record<string, unknown>>,
-    ): Types.Answer<Types.Point, Types.Guest> => {
-      const acted = await acting(path, { x: at.x, y: at.y, ...fields });
-      if (jarl.is_err(acted)) {
-        return acted;
-      }
-      pointer = { x: at.x, y: at.y };
-      return jarl.ok(pointer);
-    };
-
-    const pressing =
-      (path: string, what: string): Types.Mouse["click"] =>
-      async (button, modifiers) => {
-        const at = pointer;
-        if (at === undefined) {
-          return noPointer(what);
-        }
-        const pressed = await acting(path, { x: at.x, y: at.y, button, ...held(modifiers) });
-        if (jarl.is_err(pressed)) {
-          return pressed;
-        }
-        return jarl.ok(at);
-      };
-
-    const mouse: Types.Mouse = {
-      at: () => pointer,
-      move: (to) => pointed("mouse/move", to, {}),
+  constructor(services: App.Needs<Http.Http>, signal: AbortSignal, options: Options) {
+    this.services = services;
+    this.signal = signal;
+    this.options = options;
+    this.base = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
+    this.mouse = {
+      at: () => this.pointer,
+      move: (to) => this.pointed("mouse/move", to, {}),
       nudge: async (direction) => {
-        if (pointer === undefined) {
+        if (this.pointer === undefined) {
           return noPointer("nudge");
         }
         const by = NUDGES[direction];
-        return pointed(
+        return this.pointed(
           "mouse/move",
-          { x: nudged(pointer.x, by.x), y: nudged(pointer.y, by.y) },
+          { x: nudged(this.pointer.x, by.x), y: nudged(this.pointer.y, by.y) },
           {},
         );
       },
-      click: pressing("mouse/click", "click"),
-      doubleClick: pressing("mouse/double-click", "double-click"),
+      click: (button, modifiers) => this.press("mouse/click", "click", button, modifiers),
+      doubleClick: (button, modifiers) =>
+        this.press("mouse/double-click", "double-click", button, modifiers),
       drag: async (to, button, modifiers) => {
-        const from = pointer;
+        const from = this.pointer;
         if (from === undefined) {
           return noPointer("drag");
         }
-        const dragged = await acting("mouse/drag", {
+        const dragged = await this.acting("mouse/drag", {
           from: { x: from.x, y: from.y },
           to: { x: to.x, y: to.y },
           button,
@@ -172,69 +111,182 @@ export const create = App.createService<Http.Http, Options, Types.QemuHttpTools>
         if (jarl.is_err(dragged)) {
           return dragged;
         }
-        pointer = { x: to.x, y: to.y };
-        return jarl.ok(pointer);
+        this.pointer = { x: to.x, y: to.y };
+        return jarl.ok(this.pointer);
       },
       scroll: async (at, direction, ticks) => {
-        const scrolled = await pointed("mouse/scroll", at, { direction, ticks });
+        const scrolled = await this.pointed("mouse/scroll", at, { direction, ticks });
         return jarl.is_err(scrolled) ? scrolled : jarl.ok(undefined);
       },
       hold: async (at, button) => {
-        const pressed = await pointed("mouse/hold", at, { button });
+        const pressed = await this.pointed("mouse/hold", at, { button });
         return jarl.is_err(pressed) ? pressed : jarl.ok(undefined);
       },
       release: async (at, button) => {
-        const released = await pointed("mouse/release", at, { button });
+        const released = await this.pointed("mouse/release", at, { button });
         return jarl.is_err(released) ? released : jarl.ok(undefined);
       },
     };
+  }
 
-    const image = () =>
-      http.fetch(asking("image"), getting(), {
-        read: "bytes",
-        decode: picture,
-        status: { 409: conflict("image", Errors.GuestOff) },
-      });
-    const serial = () => http.fetch(asking("serial"), getting(), { read: "bytes", decode: text });
-    const sendKeys = (keys: string) => acting("send-keys", { keys });
+  where(path: string): string {
+    return new URL(path, this.base).toString();
+  }
 
+  asking(path: string): string {
+    const url = new URL(path, this.base);
+    url.searchParams.set("job", this.options.job);
+    return url.toString();
+  }
+
+  signalled(aborts: boolean): { readonly signal?: AbortSignal } {
+    return aborts ? { signal: this.signal } : {};
+  }
+
+  getting(): Http.Init {
     return {
-      service: "qemuHttpTools",
-      start: (boot) =>
-        http.fetch(
-          where("start"),
-          posting(
-            { iso: boot.iso, mode: boot.resume ? "resume" : "fresh" },
-            { timeoutMs: START_TIMEOUT_MS },
-          ),
-          { decode: ignored },
-        ),
-      image,
-      serial,
-      sendKeys,
-      mouse,
-      intentStart: (message) =>
-        http.fetch(where("intent/start"), posting({ message }), {
-          decode: ignored,
-          status: { 409: conflict("intent/start", Errors.IntentOpen) },
-        }),
-      intentEnd: () => http.fetch(where("intent/end"), posting({}), { decode: ignored }),
-      stop: (end) =>
-        http.fetch(
-          where("stop"),
-          posting(
-            { status: end.status, ...(end.reason === undefined ? {} : { reason: end.reason }) },
-            { aborts: false },
-          ),
-          { decode: ignored },
-        ),
-      save: () =>
-        http.fetch(where("save"), posting({}, { timeoutMs: SAVE_TIMEOUT_MS }), {
-          decode: ignored,
-          status: { 409: conflict("save", Errors.NotPoweredOff) },
-        }),
-      tools: Tools.definitions,
-      run: (name, args) => Tools.run({ image, serial, sendKeys, mouse }, name, args),
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.options.token.reveal()}` },
+      ...this.signalled(true),
     };
-  },
-);
+  }
+
+  posting(
+    fields: Readonly<Record<string, unknown>>,
+    extra: { readonly timeoutMs?: number; readonly aborts?: false } = {},
+  ): Http.Init {
+    return {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.options.token.reveal()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ job: this.options.job, ...fields }),
+      ...(extra.timeoutMs === undefined ? {} : { timeoutMs: extra.timeoutMs }),
+      ...this.signalled(extra.aborts ?? true),
+    };
+  }
+
+  // A call on the guest's keys or mouse: a 409 is a guest that is off.
+  acting(path: string, fields: Readonly<Record<string, unknown>>): Types.Answer<void, Types.Guest> {
+    return this.services.http.fetch(this.where(path), this.posting(fields), {
+      decode: ignored,
+      status: { 409: conflict(path, Errors.GuestOff) },
+    });
+  }
+
+  // A call that names its point leaves the pointer there once it succeeds.
+  async pointed(
+    path: string,
+    at: Types.Point,
+    fields: Readonly<Record<string, unknown>>,
+  ): Types.Answer<Types.Point, Types.Guest> {
+    const acted = await this.acting(path, { x: at.x, y: at.y, ...fields });
+    if (jarl.is_err(acted)) {
+      return acted;
+    }
+    this.pointer = { x: at.x, y: at.y };
+    return jarl.ok(this.pointer);
+  }
+
+  // A press acts where the pointer is, and leaves it there.
+  async press(
+    path: string,
+    what: string,
+    button: Types.Button,
+    modifiers: ReadonlyArray<Types.Modifier> | undefined,
+  ): Types.Answer<Types.Point, Types.Guest | Errors.NoPointer> {
+    const at = this.pointer;
+    if (at === undefined) {
+      return noPointer(what);
+    }
+    const pressed = await this.acting(path, { x: at.x, y: at.y, button, ...held(modifiers) });
+    if (jarl.is_err(pressed)) {
+      return pressed;
+    }
+    return jarl.ok(at);
+  }
+
+  start(boot: {
+    readonly iso: string;
+    readonly resume: boolean;
+  }): Types.Answer<void, Http.HttpFailure> {
+    return this.services.http.fetch(
+      this.where("start"),
+      this.posting(
+        { iso: boot.iso, mode: boot.resume ? "resume" : "fresh" },
+        { timeoutMs: START_TIMEOUT_MS },
+      ),
+      { decode: ignored },
+    );
+  }
+
+  image(): Types.Answer<Uint8Array, Types.Guest> {
+    return this.services.http.fetch(this.asking("image"), this.getting(), {
+      read: "bytes",
+      decode: picture,
+      status: { 409: conflict("image", Errors.GuestOff) },
+    });
+  }
+
+  serial(): Types.Answer<string, Http.HttpFailure> {
+    return this.services.http.fetch(this.asking("serial"), this.getting(), {
+      read: "bytes",
+      decode: text,
+    });
+  }
+
+  sendKeys(keys: string): Types.Answer<void, Types.Guest> {
+    return this.acting("send-keys", { keys });
+  }
+
+  intentStart(message: string): Types.Answer<void, Http.HttpFailure | Errors.IntentOpen> {
+    return this.services.http.fetch(this.where("intent/start"), this.posting({ message }), {
+      decode: ignored,
+      status: { 409: conflict("intent/start", Errors.IntentOpen) },
+    });
+  }
+
+  intentEnd(): Types.Answer<void, Http.HttpFailure> {
+    return this.services.http.fetch(this.where("intent/end"), this.posting({}), {
+      decode: ignored,
+    });
+  }
+
+  // Not aborted by the signal: an aborted run still ends its guest.
+  stop(end: {
+    readonly status: Types.StopStatus;
+    readonly reason?: string;
+  }): Types.Answer<void, Http.HttpFailure> {
+    return this.services.http.fetch(
+      this.where("stop"),
+      this.posting(
+        { status: end.status, ...(end.reason === undefined ? {} : { reason: end.reason }) },
+        { aborts: false },
+      ),
+      { decode: ignored },
+    );
+  }
+
+  save(): Types.Answer<void, Http.HttpFailure | Errors.NotPoweredOff> {
+    return this.services.http.fetch(
+      this.where("save"),
+      this.posting({}, { timeoutMs: SAVE_TIMEOUT_MS }),
+      { decode: ignored, status: { 409: conflict("save", Errors.NotPoweredOff) } },
+    );
+  }
+
+  // A tool call's own arguments, parsed; the caller's fields beside them are the caller's to take
+  // out first.
+  run(name: string, args: unknown): Types.Answer<Types.Ran, Types.RunFailure> {
+    return Tools.run(this, name, args);
+  }
+}
+
+export type { QemuHttpTools };
+
+export const create = (
+  services: App.Needs<Http.Http>,
+  signal: AbortSignal,
+  options: Options,
+): QemuHttpTools => new QemuHttpTools(services, signal, options);
