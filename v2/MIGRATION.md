@@ -231,20 +231,21 @@ record, and the automation server acts on it directly.
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
       `v2/prompts/driving-agent.html` and `v2/prompts/diagnosing-agent.html` take the job id where
-      V1 takes `{{LINEAR_TICKET}}`. `v2/prompts/custom-harness-driving-agent.html`, the driver's system
-      prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
-      tool, and `v2/prompts/driving-agent.html` names them where V1 names `./client`.
+      V1 takes `{{LINEAR_TICKET}}`. V2 has one driving prompt: `v2/prompts/driving-agent.html` is
+      the driver's system prompt and replaces both V1's `prompts/driving-agent.html` and
+      `prompts/custom-harness-driving-agent.html`. It lists qemu-http-tools' tools where V1 pastes
+      in `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
       The V2 implementation is `@oligarchy/missions`: `load(services, { jobId })` reads
       `tests.getJobDetails` and returns the job and run IDs, action, pinned definition, ISO,
       proxy URL and boot mode. Only a resuming drive resumes; setup always boots fresh.
       `@oligarchy/missions/prompts` provides `create({ readFile })` (real file IO by default),
-      with `agent(mission, { model })` for dispatch and
-      `harness(mission, { reasons, response?, previous? })` for each model turn. Previous
+      with `driving(mission, { reasons, response?, previous? })` for each model turn and
+      `diagnosing(mission, { model })` for dispatching a diagnosis. Previous
       actions are native tool names and argument objects. All replacements happen once, so
       a definition or model reply containing `{{MODEL}}` stays literal text.
-      Its templates live in `v2/prompts/`. The driving and harness templates list the exported
-      `qemu-http-tools.tools` catalogue; the harness appends its own Done tool. Step and reason
+      Its templates live in `v2/prompts/`. The driving template lists the exported
+      `qemu-http-tools.tools` catalogue followed by the driver's own Done tool. Step and reason
       belong to the driver; it must add them to the native tools it exposes and remove them
       before `qemu-http-tools.run`.
       Dispatch: run and the driver port wire these entrypoints into their execution paths.

@@ -46,8 +46,6 @@ const values = (mission: Mission) => ({
   TEST_DESCRIPTION: mission.description,
   TEST_DEFINITION: mission.instruction,
   TEST_PROOF: mission.proof,
-  // The very same definitions the guest tool runner accepts, without a second catalogue.
-  QEMU_TOOLS: JSON.stringify(Qemu.tools),
 });
 
 export type Turn = {
@@ -59,7 +57,8 @@ export type Turn = {
   };
 };
 
-const HARNESS = "custom-harness-driving-agent.html";
+const DRIVING = "driving-agent.html";
+const DIAGNOSING = "diagnosing-agent.html";
 
 // A module, not a long-lived service. Apps can provide their file IO; importing it reads nothing.
 export const create = (
@@ -75,16 +74,15 @@ export const create = (
   );
   const template = (name: string) => read(new URL(`../../../prompts/${name}`, import.meta.url));
   return {
-    agent: async (mission: Mission, options: { readonly model: string }): Promise<Answer> => {
-      const name = mission.action === "diagnose" ? "diagnosing-agent.html" : "driving-agent.html";
-      const source = await template(name);
+    diagnosing: async (mission: Mission, options: { readonly model: string }): Promise<Answer> => {
+      const source = await template(DIAGNOSING);
       if (jarl.is_err(source)) {
         return source;
       }
-      return fill(name, jarl.value(source), { ...values(mission), MODEL: options.model });
+      return fill(DIAGNOSING, jarl.value(source), { ...values(mission), MODEL: options.model });
     },
-    harness: async (mission: Mission, turn: Turn): Promise<Answer> => {
-      const source = await template(HARNESS);
+    driving: async (mission: Mission, turn: Turn): Promise<Answer> => {
+      const source = await template(DRIVING);
       if (jarl.is_err(source)) {
         return source;
       }
@@ -96,8 +94,9 @@ export const create = (
         text = text.replace(/\n*<previous-move>[\s\S]*?<\/previous-move>/, "");
       }
       // A stripped section gets no value, so a section the strip missed fails fill.
-      return fill(HARNESS, text, {
+      return fill(DRIVING, text, {
         ...values(mission),
+        // The very same definitions the guest tool runner accepts, without a second catalogue.
         TOOLS: JSON.stringify([...Qemu.tools, DONE]),
         REASONS: turn.reasons,
         ...(turn.response === undefined ? {} : { RESPONSE: turn.response }),

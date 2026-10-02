@@ -23,9 +23,10 @@ const mission: Mission = {
 
 // Checked-in prompts are fixtures; runtime file IO is supplied by each test.
 const contents = Object.fromEntries(
-  ["driving-agent.html", "diagnosing-agent.html", "custom-harness-driving-agent.html"].map(
-    (name) => [name, readFileSync(new URL(`../../../prompts/${name}`, import.meta.url), "utf8")],
-  ),
+  ["driving-agent.html", "diagnosing-agent.html"].map((name) => [
+    name,
+    readFileSync(new URL(`../../../prompts/${name}`, import.meta.url), "utf8"),
+  ]),
 );
 
 const tools = (prompt: string): unknown =>
@@ -34,24 +35,22 @@ const tools = (prompt: string): unknown =>
 it("renders each mission and the native tool catalogue without reinterpreting inserted text", async () => {
   const readFile = vi.fn(async (url: URL) => contents[url.pathname.split("/").pop() ?? ""] ?? "");
   const prompts = Prompts.create({ readFile });
-  for (const action of ["drive", "setup", "diagnose"] as const) {
-    const prompt = jarl.unwrap(
-      await prompts.agent({ ...mission, action }, { model: "test-model" }),
-    );
-    expect(prompt).toContain("job-1");
-    expect(prompt).toContain("run-1");
-    expect(prompt).toContain("Type {{MODEL}}");
-    expect(prompt).toContain("Desktop visible");
-    expect(prompt).toContain("test-model");
-    expect(prompt).not.toMatch(/LINEAR_TICKET|RESULT_ID|session_id|\.\/client/);
-    if (action === "diagnose") {
-      expect(prompt).toContain("./ctrl diagnose");
-    } else {
-      expect(prompt).toContain("send_keys");
-    }
-  }
-  const first = jarl.unwrap(await prompts.harness(mission, { reasons: "No actions yet" }));
+  const diagnosis = jarl.unwrap(
+    await prompts.diagnosing({ ...mission, action: "diagnose" }, { model: "test-model" }),
+  );
+  expect(diagnosis).toContain("job-1");
+  expect(diagnosis).toContain("run-1");
+  expect(diagnosis).toContain("Type {{MODEL}}");
+  expect(diagnosis).toContain("Desktop visible");
+  expect(diagnosis).toContain("test-model");
+  expect(diagnosis).toContain("./ctrl diagnose");
+  expect(diagnosis).not.toMatch(/LINEAR_TICKET|RESULT_ID|session_id|\.\/client/);
+  const first = jarl.unwrap(await prompts.driving(mission, { reasons: "No actions yet" }));
+  expect(first).toContain("job-1");
+  expect(first).toContain("run-1");
   expect(first).toContain("Type {{MODEL}}");
+  expect(first).toContain("Desktop visible");
+  expect(first).not.toMatch(/LINEAR_TICKET|RESULT_ID|session_id|\.\/client/);
   expect(first).not.toContain("<last-response>");
   expect(first).not.toContain("<previous-move>");
   expect(tools(first)).toEqual([
@@ -65,7 +64,7 @@ it("renders each mission and the native tool catalogue without reinterpreting in
     },
   ]);
   const next = jarl.unwrap(
-    await prompts.harness(mission, {
+    await prompts.driving(mission, {
       reasons: "1. Unlock",
       response: "{{REASONS}}",
       previous: { name: "send_keys", arguments: { keys: "prime<ENTER>" } },
@@ -78,7 +77,7 @@ it("renders each mission and the native tool catalogue without reinterpreting in
 
 it("refuses an unknown placeholder in the template", async () => {
   const prompts = Prompts.create({ readFile: async () => "{{JOB_ID}} {{TYPO}}" });
-  const result = await prompts.agent(mission, { model: "test-model" });
+  const result = await prompts.driving(mission, { reasons: "No actions yet" });
   expect(jarl.error.is(result, Prompts.PromptError)).toBe(true);
   if (jarl.is_err(result)) {
     expect(result.error.message).toBe(
@@ -94,7 +93,7 @@ it("returns a PromptError naming the template it could not read", async () => {
       throw cause;
     },
   });
-  const result = await prompts.agent(mission, { model: "test-model" });
+  const result = await prompts.driving(mission, { reasons: "No actions yet" });
   expect(jarl.error.is(result, Prompts.PromptError)).toBe(true);
   if (jarl.is_err(result)) {
     const path = new URL("../../../prompts/driving-agent.html", import.meta.url).pathname;
