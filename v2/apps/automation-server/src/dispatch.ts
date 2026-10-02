@@ -161,7 +161,7 @@ export const create = (options: Options): Dispatcher => {
         return false;
       }
 
-      const next = await tests.nextPendingJob([]);
+      const next = await tests.nextPendingJob();
       if (jarl.is_err(next)) {
         return logFailure(next.error);
       }
