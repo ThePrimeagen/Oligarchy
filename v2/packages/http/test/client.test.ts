@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import * as Async from "@oligarchy/async";
 import { Hono } from "hono";
 import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import * as HttpClient from "../src/client.ts";
 import * as Http from "../src/main.ts";
@@ -61,6 +61,14 @@ const later = (ms: number, reply: Response): Promise<Response> =>
   new Promise((resolve) => setTimeout(() => resolve(reply), ms));
 
 describe("a client typed by an app's routes", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("posts the body as it is to the client's url joined with the route's path, with the bearer, and answers the route's ok word (happy)", async () => {
     const { client, asked } = make(Fake.json({}));
 
@@ -111,22 +119,40 @@ describe("a client typed by an app's routes", () => {
     const patient = make(slow, { timeoutMs: DEFAULT_TIMEOUT_MS * 100 });
     const impatient = make(slow);
 
-    const waited = await patient.client.post("/jobs/wait", { job: "j-1" });
-    const timedOut = await impatient.client.post("/jobs/wait", { job: "j-1" });
+    let settled = false;
+    const waited = patient.client.post("/jobs/wait", { job: "j-1" }).then((result) => {
+      settled = true;
+      return result;
+    });
+    const timedOut = impatient.client.post("/jobs/wait", { job: "j-1" });
 
-    expect(waited).toEqual(jarl.ok("waited"));
-    Fake.failure(timedOut, Http.HttpTimedOut);
+    await vi.advanceTimersByTimeAsync(DEFAULT_TIMEOUT_MS);
+    Fake.failure(await timedOut, Http.HttpTimedOut);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_TIMEOUT_MS * 9);
+    expect(await waited).toEqual(jarl.ok("waited"));
   });
 
   it("ends a call in flight as Aborted when the client's signal aborts (unhappy)", async () => {
     const shutdown = new AbortController();
-    const { client, asked } = make("hang", {
-      signal: shutdown.signal,
-      timeoutMs: DEFAULT_TIMEOUT_MS * 100,
+    let enter: () => void = () => undefined;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
     });
+    const { client, asked } = make(
+      () => {
+        enter();
+        return "hang";
+      },
+      {
+        signal: shutdown.signal,
+        timeoutMs: DEFAULT_TIMEOUT_MS * 100,
+      },
+    );
 
     const waiting = client.post("/jobs/wait", { job: "j-1" });
-    await later(DEFAULT_TIMEOUT_MS * 4, Fake.json({}));
+    await entered;
     shutdown.abort(new Async.Aborted("shutting down"));
 
     Fake.failure(await waiting, Async.Aborted);
