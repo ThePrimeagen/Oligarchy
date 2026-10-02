@@ -7,6 +7,7 @@ import * as Tools from "./tools.ts";
 import type * as Types from "./types.ts";
 
 export { GuestOff, IntentOpen, NoPointer, NotPoweredOff, ToolInvalid } from "./errors.ts";
+export { definitions } from "./tools.ts";
 export type {
   Button,
   Direction,
