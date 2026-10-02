@@ -1,5 +1,7 @@
+import * as Async from "@oligarchy/async";
 import * as Db from "@oligarchy/db";
 import * as Http from "@oligarchy/http";
+import * as Fake from "@oligarchy/http/testing";
 import * as OpenRouter from "@oligarchy/openrouter";
 import * as Qemu from "@oligarchy/qemu-http-tools";
 import * as Stores from "@oligarchy/stores";
@@ -11,8 +13,10 @@ import {
   INSTRUCTION,
   JOB,
   RUN,
-  SCREEN,
+  SERVER_URL,
+  TOKEN,
   said,
+  screen,
   shown,
   turn,
   world,
@@ -28,12 +32,7 @@ const IMAGE = [
   { type: "image_url", image_url: { url: "data:image/png;base64,AQI=" } },
 ];
 
-const asked = { asked: { method: "POST", url: "http://proxy:42069/start" } };
-
-const ran = async (name: string) =>
-  jarl.ok(
-    name === "get_image" ? { text: "took a screenshot", image: SCREEN } : { text: "sent the keys" },
-  );
+const down = () => Fake.status(500, "down");
 
 it("drives a job step by step, keeping each step's actions and what the model is shown", async () => {
   const {
@@ -41,7 +40,6 @@ it("drives a job step by step, keeping each step's actions and what the model is
     calls,
     requests,
   } = world({
-    guest: { run: ran },
     turns: [
       said(
         "send_keys",
@@ -72,13 +70,13 @@ it("drives a job step by step, keeping each step's actions and what the model is
 
   // A move for a step that is not open ends the open intent and starts that step's.
   expect(calls).toEqual([
-    ["start", { iso: "https://iso.example/test.iso", resume: true }],
+    ["start", { iso: "https://iso.example/test.iso", mode: "resume" }],
     ["image"],
-    ["intentStart", "Type {{MODEL}}"],
-    ["run", "send_keys", { keys: "prime<ENTER>" }],
-    ["intentEnd"],
-    ["intentStart", "Look at the desktop"],
-    ["run", "get_image", {}],
+    ["intent/start", { message: "Type {{MODEL}}" }],
+    ["send-keys", { keys: "prime<ENTER>" }],
+    ["intent/end"],
+    ["intent/start", { message: "Look at the desktop" }],
+    ["image"],
     ["stop", { status: "succeeded" }],
   ]);
   expect(harness.steps).toEqual([
@@ -112,15 +110,15 @@ it("drives a job step by step, keeping each step's actions and what the model is
 
   // Every guest tool asks for its step and reason beside its own arguments, and Done ends the loop.
   const tools = requests[0]?.tools ?? [];
-  expect(tools.map((tool) => tool.function.name)).toEqual(["send_keys", "Done"]);
-  expect(tools[0]?.function.parameters).toMatchObject({
+  expect(tools.at(-1)?.function).toMatchObject({
+    name: "Done",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  });
+  expect(
+    tools.find((tool) => tool.function.name === "send_keys")?.function.parameters,
+  ).toMatchObject({
     properties: { keys: { type: "string", minLength: 1 }, step: {}, reason: {} },
     required: ["keys", "step", "reason"],
-  });
-  expect(tools[1]?.function.parameters).toEqual({
-    type: "object",
-    properties: {},
-    additionalProperties: false,
   });
   expect(
     requests.map(({ model, reasoning, deadline }) => ({ model, reasoning, deadline })),
@@ -161,6 +159,49 @@ it("drives a job step by step, keeping each step's actions and what the model is
   expect(third.user).toEqual(IMAGE);
 });
 
+it("sends every guest call to the server url, naming the job and carrying the token", async () => {
+  const { driveHarness: harness, asked } = world();
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  jarl.unwrap(await harness.start());
+  jarl.unwrap(await harness.getImage());
+  expect(asked).toEqual([
+    {
+      url: `${SERVER_URL}/start`,
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: { job: JOB, iso: "https://iso.example/test.iso", mode: "resume" },
+    },
+    {
+      url: `${SERVER_URL}/image?job=${JOB}`,
+      method: "GET",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      body: undefined,
+    },
+  ]);
+});
+
+it("ends every guest call and the ask on its signal, and still stops the guest", async () => {
+  const aborter = new AbortController();
+  const {
+    driveHarness: harness,
+    calls,
+    requests,
+  } = world({
+    signal: aborter.signal,
+    turns: [said("Done", {})],
+  });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+  aborter.abort(new Async.Aborted("SIGTERM received"));
+
+  const image = await harness.getImage();
+  expect(Fake.failure(image, Async.Aborted).message).toBe("SIGTERM received");
+  jarl.unwrap(await harness.ask(ASK));
+  expect(requests[0]?.signal).toBe(aborter.signal);
+  jarl.unwrap(await harness.finish({ status: "aborted", reason: "SIGTERM received" }));
+
+  expect(calls).toEqual([["stop", { status: "aborted", reason: "SIGTERM received" }]]);
+});
+
 it("shows the open step's intent and only its newest actions, newest first", async () => {
   const keys = ["a", "b", "c", "d"];
   const { driveHarness: harness, requests } = world({
@@ -194,9 +235,9 @@ it("names each step after its ActionList line, and a step past the list by its n
   jarl.unwrap(await harness.nextStep(2));
   jarl.unwrap(await harness.nextStep(3));
   expect(calls).toEqual([
-    ["intentStart", "Look at the desktop"],
-    ["intentEnd"],
-    ["intentStart", "step 3"],
+    ["intent/start", { message: "Look at the desktop" }],
+    ["intent/end"],
+    ["intent/start", { message: "step 3" }],
   ]);
   expect(harness.steps.map(({ step, intent }) => ({ step, intent }))).toEqual([
     { step: 2, intent: "Look at the desktop" },
@@ -205,69 +246,50 @@ it("names each step after its ActionList line, and a step past the list by its n
 });
 
 it("returns a step whose intent would not start, and runs nothing outside it", async () => {
-  const down = new Http.HttpInvalid("intent/start: down", asked);
-  const { driveHarness: harness, calls } = world({
-    guest: { intentStart: async () => jarl.err(down) },
-  });
+  const { driveHarness: harness, calls } = world({ guest: { "intent/start": down() } });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   const result = await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" }));
-  expect(jarl.is_err(result)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error).toBe(down);
-  }
-  expect(calls).toEqual([["intentStart", "Type {{MODEL}}"]]);
+  expect(Fake.failure(result, Http.HttpServerError).status).toBe(500);
+  expect(calls).toEqual([["intent/start", { message: "Type {{MODEL}}" }]]);
   expect(harness.steps).toEqual([]);
 });
 
 it("starts a step again after its intent would not start, without ending a closed one", async () => {
-  const down = new Http.HttpInvalid("intent/start: down", asked);
-  const starts = [jarl.ok(undefined), jarl.err(down), jarl.ok(undefined)];
   const { driveHarness: harness, calls } = world({
-    guest: { intentStart: async () => starts.shift() ?? jarl.ok(undefined) },
+    guest: { "intent/start": [Fake.json({}), down(), Fake.json({})] },
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.nextStep(1));
   expect(jarl.is_err(await harness.nextStep(2))).toBe(true);
   jarl.unwrap(await harness.nextStep(2));
   expect(calls).toEqual([
-    ["intentStart", "Type {{MODEL}}"],
-    ["intentEnd"],
-    ["intentStart", "Look at the desktop"],
-    ["intentStart", "Look at the desktop"],
+    ["intent/start", { message: "Type {{MODEL}}" }],
+    ["intent/end"],
+    ["intent/start", { message: "Look at the desktop" }],
+    ["intent/start", { message: "Look at the desktop" }],
   ]);
   expect(harness.steps.map(({ step }) => step)).toEqual([1, 2]);
 });
 
 it("returns an intent that would not end, and keeps the step open", async () => {
-  const down = new Http.HttpInvalid("intent/end: down", asked);
-  const { driveHarness: harness, calls } = world({
-    guest: { intentEnd: async () => jarl.err(down) },
-  });
+  const { driveHarness: harness, calls } = world({ guest: { "intent/end": down() } });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.nextStep(1));
   const result = await harness.nextStep(2);
-  expect(jarl.is_err(result)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error).toBe(down);
-  }
-  expect(calls).toEqual([["intentStart", "Type {{MODEL}}"], ["intentEnd"]]);
+  expect(Fake.failure(result, Http.HttpServerError).status).toBe(500);
+  expect(calls).toEqual([["intent/start", { message: "Type {{MODEL}}" }], ["intent/end"]]);
   expect(harness.steps.map(({ step }) => step)).toEqual([1]);
 });
 
 it("returns an image the guest refused, and asks without the old screenshot", async () => {
-  const off = new Qemu.GuestOff("image: 409");
-  const images = [jarl.ok(SCREEN), jarl.err(off)];
   const { driveHarness: harness, requests } = world({
-    guest: { image: async () => images.shift() ?? jarl.err(off) },
+    guest: { image: [screen(), Fake.status(409)] },
     turns: [said("Done", {})],
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.getImage());
   const result = await harness.getImage();
-  expect(jarl.error.is(result, Qemu.GuestOff)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error).toBe(off);
-  }
+  expect(Fake.failure(result, Qemu.GuestOff).message).toBe("image: 409");
   jarl.unwrap(await harness.ask(ASK));
   expect(shown(requests[0]).user).toEqual(expect.any(String));
 });
@@ -314,10 +336,7 @@ it.each([
   const { driveHarness: harness, calls } = world();
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   const result = await harness.act(reply);
-  expect(jarl.error.is(result, DriveHarness.ReplyInvalid)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error.message).toBe(message);
-  }
+  expect(Fake.failure(result, DriveHarness.ReplyInvalid).message).toBe(message);
   expect(calls).toEqual([]);
 });
 
@@ -344,18 +363,14 @@ it("keeps a refused reply under the open step, and reads no arguments as an empt
 });
 
 it("returns a move the guest refused, keeps why under its step, and drops the screenshot", async () => {
-  const off = new Qemu.GuestOff("send-keys: 409");
   const { driveHarness: harness, requests } = world({
-    guest: { run: async () => jarl.err(off) },
+    guest: { "send-keys": Fake.status(409) },
     turns: [said("Done", {})],
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.getImage());
   const result = await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" }));
-  expect(jarl.error.is(result, Qemu.GuestOff)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error).toBe(off);
-  }
+  expect(Fake.failure(result, Qemu.GuestOff).message).toBe("send-keys: 409");
   jarl.unwrap(await harness.ask(ASK));
   const { prompt, user } = shown(requests[0]);
   expect(prompt).toContain('Step 1: Type {{MODEL}}\n- send_keys {"keys":"x"}: send-keys: 409');
@@ -380,7 +395,7 @@ it("loads the job's harness data and derives its boot mode from its action and d
       instruction: INSTRUCTION,
       proof: "The desktop is visible",
       iso: "https://iso.example/test.iso",
-      serverUrl: "http://proxy:42069",
+      serverUrl: SERVER_URL,
       resume: expected,
     });
     expect(getJobDetails).toHaveBeenCalledExactlyOnceWith(JOB);
@@ -424,34 +439,26 @@ it.each([
 });
 
 it("returns a setup's save that the guest refused by staying up", async () => {
-  const refused = new Qemu.NotPoweredOff("save: 409");
   const { driveHarness: harness } = world({
     getJobDetails: async () => jarl.ok(details("setup", true)),
-    guest: { save: async () => jarl.err(refused) },
+    guest: { save: Fake.status(409) },
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   const result = await harness.finish({ status: "succeeded" });
-  expect(jarl.error.is(result, Qemu.NotPoweredOff)).toBe(true);
-  if (jarl.is_err(result)) {
-    expect(result.error).toBe(refused);
-  }
+  expect(Fake.failure(result, Qemu.NotPoweredOff).message).toBe("save: 409");
 });
 
 it("returns a failed start or ask as it came", async () => {
-  const down = new Http.HttpInvalid("proxy: down", asked);
   const unreachable = new OpenRouter.OpenRouterUnreachable("openrouter: down");
   const { driveHarness: harness } = world({
-    guest: { start: async () => jarl.err(down) },
+    guest: { start: down() },
     turns: [jarl.err(unreachable)],
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
-  for (const [result, error] of [
-    [await harness.start(), down],
-    [await harness.ask(ASK), unreachable],
-  ] as const) {
-    expect(jarl.is_err(result)).toBe(true);
-    if (jarl.is_err(result)) {
-      expect(result.error).toBe(error);
-    }
+  expect(Fake.failure(await harness.start(), Http.HttpServerError).status).toBe(500);
+  const asked = await harness.ask(ASK);
+  expect(jarl.is_err(asked)).toBe(true);
+  if (jarl.is_err(asked)) {
+    expect(asked.error).toBe(unreachable);
   }
 });

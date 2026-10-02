@@ -1,7 +1,7 @@
-import * as App from "@oligarchy/app";
+import type * as App from "@oligarchy/app";
 import type * as Http from "@oligarchy/http";
 import type * as OpenRouter from "@oligarchy/openrouter";
-import type * as Qemu from "@oligarchy/qemu-http-tools";
+import * as Qemu from "@oligarchy/qemu-http-tools";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import * as Moves from "./move.ts";
@@ -25,22 +25,17 @@ export type {
 // The user turn beside the system prompt; the screenshot, when there is one, goes with it.
 const ASKING = "Reply with your next tool call.";
 
-type Wants = Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter;
-
-declare module "@oligarchy/app" {
-  interface Services {
-    driveHarness: App.Register<"driveHarness", DriveHarness>;
-  }
-}
+type Wants = Stores.Tests.Tests | OpenRouter.OpenRouter | Http.Http;
 
 // One drive or setup job's guest and model, and what the model has been shown so far. The driver
 // runs the loop and its limits: load and start, then each turn getImage, ask and act until the
 // model is done, and finish. The driver loads the job before anything else; nothing here checks
-// that it did. A service made by create, over that job's qemuHttpTools.
-export class DriveHarness {
-  readonly service = "driveHarness";
+// that it did. The signal ends every guest call but the stop, and every ask.
+class DriveHarness {
   readonly services: App.Needs<Wants>;
+  readonly signal: AbortSignal;
   readonly options: Types.Options;
+  readonly qemuHttpTools: Qemu.QemuHttpTools;
   // The guest's tools with step and reason added, and Done.
   readonly tools: ReadonlyArray<OpenRouter.Tool>;
   data!: Types.JobHarnessData;
@@ -57,10 +52,12 @@ export class DriveHarness {
   // The screen the next ask shows. Any move that took none may have changed it, so it drops it.
   screen: Uint8Array | undefined = undefined;
 
-  constructor(services: App.Needs<Wants>, options: Types.Options) {
+  constructor(services: App.Needs<Wants>, signal: AbortSignal, options: Types.Options) {
     this.services = services;
+    this.signal = signal;
     this.options = options;
-    this.tools = Moves.tools(services.qemuHttpTools.tools);
+    this.qemuHttpTools = Qemu.create(services, signal, options);
+    this.tools = Moves.tools(this.qemuHttpTools.tools);
   }
 
   async loadJobHarnessData(jobId: string): Stores.Tests.Found<true> {
@@ -88,12 +85,12 @@ export class DriveHarness {
 
   start(): Types.Answer<void, Http.HttpFailure> {
     const { iso, resume } = this.data;
-    return this.services.qemuHttpTools.start({ iso, resume });
+    return this.qemuHttpTools.start({ iso, resume });
   }
 
   // 1. The guest's screen, for the next ask.
   async getImage(): Types.Answer<void, Http.HttpFailure | Qemu.GuestOff> {
-    const image = await this.services.qemuHttpTools.image();
+    const image = await this.qemuHttpTools.image();
     if (jarl.is_err(image)) {
       this.screen = undefined;
       return image;
@@ -136,7 +133,7 @@ export class DriveHarness {
       tools: this.tools,
       reasoning: request.reasoning,
       deadline: request.deadline,
-      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      signal: this.signal,
     });
     if (jarl.is_err(answered)) {
       return answered;
@@ -170,7 +167,7 @@ export class DriveHarness {
         return opened;
       }
     }
-    const ran = await this.services.qemuHttpTools.run(parsed.name, parsed.arguments);
+    const ran = await this.qemuHttpTools.run(parsed.name, parsed.arguments);
     const done = {
       kind: "move",
       name: parsed.name,
@@ -195,14 +192,14 @@ export class DriveHarness {
   // whose intent did not start is not opened.
   async nextStep(step: number): Types.Answer<void, Http.HttpFailure | Qemu.IntentOpen> {
     if (this.intentOpen) {
-      const ended = await this.services.qemuHttpTools.intentEnd();
+      const ended = await this.qemuHttpTools.intentEnd();
       if (jarl.is_err(ended)) {
         return ended;
       }
       this.intentOpen = false;
     }
     const intent = this.lines[step - 1] ?? `step ${String(step)}`;
-    const started = await this.services.qemuHttpTools.intentStart(intent);
+    const started = await this.qemuHttpTools.intentStart(intent);
     if (jarl.is_err(started)) {
       return started;
     }
@@ -214,11 +211,15 @@ export class DriveHarness {
   // A setup that succeeded keeps its disk; anything else stops the guest with its status.
   finish(end: Types.End): Types.Answer<void, Http.HttpFailure | Qemu.NotPoweredOff> {
     return this.data.action === "setup" && end.status === "succeeded"
-      ? this.services.qemuHttpTools.save()
-      : this.services.qemuHttpTools.stop(end);
+      ? this.qemuHttpTools.save()
+      : this.qemuHttpTools.stop(end);
   }
 }
 
-export const create = App.createService<Wants, Types.Options, DriveHarness>(
-  (services, options) => new DriveHarness(services, options),
-);
+export type { DriveHarness };
+
+export const create = (
+  services: App.Needs<Wants>,
+  signal: AbortSignal,
+  options: Types.Options,
+): DriveHarness => new DriveHarness(services, signal, options);

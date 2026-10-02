@@ -37,7 +37,7 @@
 | second process signal | `exit(1)` at once. Exit handlers are skipped. |
 | main returns or throws | `app.signal` aborts, every sub-app stops, and the process exits 1 if errors were reported |
 | `onExit` handler | runs after `app.signal` aborted. Never hand `app.signal` to its calls. Give them their own deadline. |
-| work that must stop with the app but is built before it | own controller, forwarded from the app signal (driver) |
+| work that must stop with the app | build it in main and hand it `app.signal` (driver) |
 
 ```ts
 // apps/automation-client/src/application.ts
@@ -61,19 +61,22 @@ return jarl.ok(undefined);
 ```
 
 ```ts
-// apps/driver/src/main.ts: services built before the app
-const guest = new AbortController();
-const services = createServices(env, guest.signal);
-const app = new App.App(env).main(main);
-app.signal.addEventListener("abort", () => guest.abort(app.signal.reason), { once: true });
+// apps/driver/src/main.ts: the run's harness is built in main, on the app's signal
+const ended = await Drive.drive(app.services, app.signal, {
+  jobId: flags.jobId,
+  serverUrl: flags.serverUrl,
+  token: vars.oligarchyToken,
+  config,
+});
 ```
 
 ## Service
 
 | Problem | Fact |
 | --- | --- |
-| signal for one call | optional `signal?: AbortSignal` field on the request: `http.fetch(url, { signal })`, `openRouter.complete({ signal })`, `driveHarness.ask({ signal })` |
-| signal for every call | optional `signal?` in the create options: `Qemu.create({ http }, { job, baseUrl, token, signal })`, `HttpClient.create({ http, url, token, signal })` |
+| signal for one call | optional `signal?: AbortSignal` field on the request: `http.fetch(url, { signal })`, `openRouter.complete({ signal })` |
+| signal for every call | optional `signal?` in the create options: `HttpClient.create({ http, url, token, signal })` |
+| a class that reacts to aborts | signal is the required second argument: `Qemu.create({ http }, signal, { job, baseUrl, token })`, `DriveHarness.create(services, signal, options)` |
 | no signal given | use a signal that never aborts: `const NEVER = new AbortController().signal` |
 | a long-running helper | signal is a required positional, last before options: `Async.sleep(ms, signal)`, `Async.tick(fn, ms, signal)`, `Fleet.announce(member, needs, signal, options)`, `Fleet.Host.sampling(host, signal)` |
 | failure union | put `Async.Aborted` in it (`Http.HttpFailure`, `OpenRouter.Failure`) |
@@ -293,7 +296,7 @@ setTimeout(() => {
 | every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | no: no-op |
 | one host, server or location | | none exists. Abort each job on it. | no |
 | one app and its sub-apps | process signal, or main returning | `app.signal` | yes |
-| a driver run | `app.signal`, forwarded to the guest controller | `drive` ends `{ status: "aborted" }`, exit 0 | yes |
+| a driver run | `app.signal`, handed to `drive` and its harness | `drive` ends `{ status: "aborted" }`, exit 0 | yes |
 
 ## Tests
 

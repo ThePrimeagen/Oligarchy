@@ -50,8 +50,9 @@ export type Step = {
   readonly actions: Array<Action>;
 };
 
-export type Options = {
-  // The lines of the open step the prompt shows: its intent, then its newest actions.
+// The job's guest, and the lines of the open step the prompt shows: its intent, then its newest
+// actions.
+export type Options = Qemu.Options & {
   readonly recentActions: number;
 };
 
@@ -70,7 +71,6 @@ export type Ask = {
   readonly model: string;
   readonly reasoning: OpenRouter.Effort;
   readonly deadline: number;
-  readonly signal?: AbortSignal;
 };
 
 export type End = { readonly status: Qemu.StopStatus; readonly reason?: string };

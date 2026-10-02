@@ -59,13 +59,13 @@ export const tools = async (
   const fake = Fake.http({ replies, timeoutMs: DEFAULT_TIMEOUT_MS });
   const qemu = QemuHttpTools.create(
     { http: fake.http },
+    options.signal ?? new AbortController().signal,
     {
       job: JOB,
       baseUrl: BASE_URL,
       token: await token(),
       startTimeoutMs: START_TIMEOUT_MS,
       saveTimeoutMs: SAVE_TIMEOUT_MS,
-      ...options,
     },
   );
   return { qemu, asked: fake.asked };
