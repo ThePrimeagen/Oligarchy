@@ -118,7 +118,9 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
       arguments before `run`. Nothing is asked again: every error comes back in the result,
       `@oligarchy/http`'s own and `GuestOff` (a 409 from the screen, keys or mouse), `IntentOpen`
       (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
-      waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
+      waits `driver.guest.startTimeout` and `save` `driver.guest.saveTimeout` from
+      `v2/oligarchy.json`, and every other call `httpTimeout`; the run's signal aborts every
+      call but `stop`. The proxy's
       other calls go with the apps that make them: the automation client's reserve and
       relinquish, `ctrl setup`'s setup disks and viz's follow.
 
@@ -237,7 +239,8 @@ record, and the automation server acts on it directly.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
       `@oligarchy/drive-harness` is the `driveHarness` service: its `create({ tests,
       qemuHttpTools, openRouter }, { recentActions })` builds a `DriveHarness`, the class, over
-      the job's `qemuHttpTools`, with `harness.recentActions` from `v2/oligarchy.json` (10).
+      the job's `qemuHttpTools`, with `driver.harness.recentActions` from `v2/oligarchy.json`
+      (10).
       `@oligarchy/drive-harness/testing` makes one over a fake tests store, guest and model. It holds one
       drive or setup's state: the loaded job, every step opened with all its actions, the
       model's last response, the previous move and the screen. Its methods are the points the
@@ -288,7 +291,9 @@ record, and the automation server acts on it directly.
 - [x] **Abort.** By job id or by suite id, through the automation server's `/abort`
       (`src/abort.ts`); ctrl does not abort, and who calls it (the dashboard, a V2 tool) is
       open. Every write says `aborted by an operator`. A pending job is `abortJob`ed. A running
-      one is stopped at its automation client first, with `/abort` and a 15-second deadline,
+      one is stopped at its automation client first, with `/abort` and
+      `automationServer.abortTimeout` as its deadline (longer than the client's kill and
+      stderr graces together, and than `httpTimeout`; the config refuses a shorter one),
       then `abortJob`ed: a client that cannot be reached leaves it running and the abort fails;
       one that is forgotten, or answers `not-held`, had nothing to stop, which is a warning
       under the job. While its client stops it, the job's run answers `aborted`, and that close
@@ -468,7 +473,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             and for a drive or setup a guest reserved first at the qemu reverse proxy at a
             required `--server-url` (or `SERVER_URL`), which has no default; a diagnose asks the
             proxy for nothing. At `--max-jobs`, or while another reserve is still asking the
-            proxy, it is `AtCapacity` (503) and the proxy is not asked. The reservation is
+            proxy, it is `AtCapacity` (503) and the proxy is not asked. A reserve waits
+            `automationClient.reserveTimeout` for the proxy. The reservation is
             `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
             shutdown has begun is `ShuttingDown` (503). The proxy's own refusals are
             `AtCapacity` (503) and `SetupNeeded` (409), errors naming what it said, each letting
@@ -497,12 +503,17 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             `DATABASE_URL`, `OLIGARCHY_TOKEN` and `OPENROUTER_API_KEY` to every child, since one
             read from an `--env-file` is not in the child's environment. A job with no
             reservation, a diagnose with no prompt and a child that cannot be spawned are 500s.
-            When the held signal aborts, the child is sent SIGTERM, and SIGKILL after 5 seconds.
+            When the held signal aborts, the child is sent SIGTERM, and SIGKILL after
+            `automationClient.killGrace`; its stderr is drained for at most
+            `automationClient.stderrGrace` once it has exited.
             Only a child that kill reached answers 409; one that had already exited answers as it
-            ended. A diagnose has `runCeiling`, and the driver, which stops itself at that
-            ceiling and exits 124, five minutes more to stop its guest; past it the child is
-            killed. Either is a `RunTimedOut` (504); opencode exiting 124 is only a 500. The run
-            calls `release` once the child is reaped, whatever it answers.
+            ended. A diagnose has `diagnose.runCeiling`, and the driver, which stops itself at
+            `driver.runCeiling` and exits 124, `automationClient.driverGrace` more to stop its
+            guest; past it the child is killed. Either is a `RunTimedOut` (504); opencode exiting
+            124 is only a 500. opencode's OpenRouter stream waits `diagnose.headerTimeout` for its
+            headers and `diagnose.chunkTimeout` between chunks, handed to it as
+            `OPENCODE_CONFIG_CONTENT`. The run calls `release` once the child is reaped, whatever
+            it answers.
       - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
             each job it has reserved or is running, in memory only, by an `AbortController`;
             `main` creates it and hands `jobs.abort` to the routes as their `Sessions` abort.
@@ -530,8 +541,10 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       when the system failed it: the job would not load or start, or the
       proxy or the model could not be reached. That failure is the failing step's own error,
       returned as it came, logged with itself as the cause so Sentry gets its stack, printed with
-      its stack, and the reason the guest is stopped with. The OpenRouter client has `timeouts.header` as its
-      timeout (`timeouts.chunk` means nothing without a stream) and three attempts. V1's
+      its stack, and the reason the guest is stopped with. The OpenRouter client has
+      `driver.askTimeout` as its timeout and three attempts, waiting
+      `driver.harness.defaultRetry` between them when OpenRouter names no wait. The step limit is
+      `driver.stepLimit`. V1's
       `--prompt` and `--debug-log` do not come over: the harness renders its own prompt, and
       every line goes to the logs table under the job id.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2

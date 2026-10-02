@@ -104,7 +104,7 @@ posting({ status: end.status }, { aborts: false });
 
 | Problem | Fact |
 | --- | --- |
-| every call | has a deadline. Default 10 000 ms. Set `timeoutMs` in the init, or in a client spec. |
+| every call | has a deadline: `httpTimeout` from `oligarchy.json`, handed to `Http.create`. Set `timeoutMs` in the init, or in a client spec. |
 | deadline passes | `Http.HttpTimedOut` |
 | caller's signal aborts | `Async.Aborted`, with the signal's reason |
 | a call only an abort may end | `timeoutMs: 2 ** 31 - 1` (the automation client's `/run`) |
@@ -229,7 +229,7 @@ while (true) {
 | Problem | Fact |
 | --- | --- |
 | a pending job | `abortJob`. Refused because dispatch ran it meanwhile: read it again and abort it as it is now. |
-| a running job | add it to `aborting`, `/abort` it at its client (15 s deadline), `abortJob`, then delete it from `aborting` in `finally` |
+| a running job | add it to `aborting`, `/abort` it at its client (`automationServer.abortTimeout` deadline), `abortJob`, then delete it from `aborting` in `finally` |
 | its run answers `aborted` meanwhile | `Close` skips a job in `aborting`. The operator's abort writes it. |
 | its run ended meanwhile | `abortJob` is refused. Read the job: `aborted` stands; anything else is `NothingToAbort`, closed as it would have been. |
 | client unreachable | `NotStopped`. The job stays running. |
@@ -254,7 +254,7 @@ if (aborting.has(job.id)) {
 | grace timer | `.unref()` it |
 | missing binary | arrives as an `error` event, not a throw |
 | settle once | a `settled` flag. The first of deadline, `error` or `close` wins. |
-| job run (automation client) | not built. Spec (`MIGRATION.md` Run): spawn on the held signal, SIGTERM on abort, SIGKILL after a grace (V1: 5 s), answer 409 only when the kill reached the child, `release()` once it is reaped |
+| job run (automation client) | `src/run.ts` over `src/child.ts`: spawn on the held signal, SIGTERM on abort, SIGKILL after `automationClient.killGrace`, answer 409 only when the kill reached the child, `release()` once it is reaped |
 | tests | fake child, as in `packages/fleet/test/usage.test.ts` |
 
 ```ts
