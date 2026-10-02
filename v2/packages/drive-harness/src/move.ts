@@ -1,5 +1,6 @@
 import type * as OpenRouter from "@oligarchy/openrouter";
 import * as jarl from "jarl";
+import * as z from "zod";
 import type * as Types from "./types.ts";
 
 // The model's turn is not one move the harness can take. Nothing was sent to the guest.
@@ -26,21 +27,26 @@ const DONE: OpenRouter.Tool = {
   },
 };
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const Fields = z.record(z.string(), z.unknown());
+const Names = z.array(z.string());
 
 // Every guest tool also takes step and reason, which the harness takes out before it runs one.
 export const tools = (guest: ReadonlyArray<OpenRouter.Tool>): ReadonlyArray<OpenRouter.Tool> => [
   ...guest.map((tool) => {
-    const { properties, required } = tool.function.parameters;
+    const properties = Fields.safeParse(tool.function.parameters["properties"]);
+    const required = Names.safeParse(tool.function.parameters["required"]);
     return {
       ...tool,
       function: {
         ...tool.function,
         parameters: {
           ...tool.function.parameters,
-          properties: { ...(isRecord(properties) ? properties : {}), step: STEP, reason: REASON },
-          required: [...(Array.isArray(required) ? required : []), "step", "reason"],
+          properties: {
+            ...(properties.success ? properties.data : {}),
+            step: STEP,
+            reason: REASON,
+          },
+          required: [...(required.success ? required.data : []), "step", "reason"],
         },
       },
     };
@@ -60,9 +66,9 @@ const parseJson = (text: string): unknown => {
 
 // Some providers send a call with no arguments as an empty string.
 const argumentsOf = (call: OpenRouter.ToolCall) => {
-  const parsed = call.arguments.trim() === "" ? {} : parseJson(call.arguments);
-  return isRecord(parsed)
-    ? jarl.ok(parsed)
+  const fields = Fields.safeParse(call.arguments.trim() === "" ? {} : parseJson(call.arguments));
+  return fields.success
+    ? jarl.ok(fields.data)
     : invalid(`${call.name}: arguments are not a JSON object`);
 };
 

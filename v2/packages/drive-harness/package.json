@@ -15,7 +15,8 @@
     "@oligarchy/openrouter": "workspace:*",
     "@oligarchy/qemu-http-tools": "workspace:*",
     "@oligarchy/stores": "workspace:*",
-    "jarl": "catalog:"
+    "jarl": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@oligarchy/db": "workspace:*",

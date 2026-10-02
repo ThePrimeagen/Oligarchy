@@ -11,10 +11,6 @@ import type * as Types from "./types.ts";
 export { ReplyInvalid } from "./move.ts";
 export type { Ask, End, GuestMove, JobHarnessData, Move, Previous } from "./types.ts";
 
-// start, ask or finish before loadJobHarnessData has loaded the job. Nothing was sent.
-export const NotLoaded = jarl.error.define("NotLoaded");
-export type NotLoaded = InstanceType<typeof NotLoaded>;
-
 // The user turn beside the system prompt; the screenshot, when there is one, goes with it.
 const ASKING = "Reply with your next tool call.";
 
@@ -22,12 +18,12 @@ export type Services = App.Needs<Stores.Tests.Tests | Qemu.QemuHttpTools | OpenR
 
 // One drive or setup job's guest and model, and what the model has been shown so far. The driver
 // runs the loop and its limits: load, start, then ask and act until the model is done, and
-// finish.
+// finish. The driver loads the job before anything else; nothing here checks that it did.
 export class DriveHarness {
   readonly services: Services;
   // The guest's tools with step and reason added, and Done.
   readonly tools: ReadonlyArray<OpenRouter.Tool>;
-  data: Types.JobHarnessData | undefined = undefined;
+  data!: Types.JobHarnessData;
   // Each move's outcome and each refused reply, in order: the model's past steps.
   readonly reasons: Array<string> = [];
   // What the model last wrote beside its tool call.
@@ -42,13 +38,7 @@ export class DriveHarness {
     this.tools = Moves.tools(services.qemuHttpTools.tools);
   }
 
-  loaded(): jarl.Result<Types.JobHarnessData, NotLoaded> {
-    return this.data === undefined
-      ? jarl.err(new NotLoaded("drive harness: no job loaded"))
-      : jarl.ok(this.data);
-  }
-
-  async loadJobHarnessData(jobId: string): Stores.Tests.Found<Types.JobHarnessData> {
+  async loadJobHarnessData(jobId: string): Stores.Tests.Found<true> {
     const found = await this.services.tests.getJobDetails(jobId);
     if (jarl.is_err(found)) {
       return found;
@@ -67,28 +57,18 @@ export class DriveHarness {
       // Only a resuming drive resumes; a setup always boots fresh.
       resume: job.action === "drive" && definition.resume,
     };
-    return jarl.ok(this.data);
+    return jarl.ok(true);
   }
 
-  async start(): Types.Answer<void, Http.HttpFailure | NotLoaded> {
-    const data = this.loaded();
-    if (jarl.is_err(data)) {
-      return data;
-    }
-    const { iso, resume } = jarl.value(data);
+  start(): Types.Answer<void, Http.HttpFailure> {
+    const { iso, resume } = this.data;
     return this.services.qemuHttpTools.start({ iso, resume });
   }
 
   // A refused reply is the model's next past step, so it sees why.
-  async ask(
-    request: Types.Ask,
-  ): Types.Answer<Types.Move, OpenRouter.Failure | Moves.ReplyInvalid | NotLoaded> {
-    const data = this.loaded();
-    if (jarl.is_err(data)) {
-      return data;
-    }
+  async ask(request: Types.Ask): Types.Answer<Types.Move, OpenRouter.Failure | Moves.ReplyInvalid> {
     const prompt = Prompt.render(
-      jarl.value(data),
+      this.data,
       {
         reasons: this.reasons.length === 0 ? "none" : this.reasons.join("\n"),
         ...(this.response === undefined ? {} : { response: this.response }),
@@ -152,14 +132,8 @@ export class DriveHarness {
   }
 
   // A setup that succeeded keeps its disk; anything else stops the guest with its status.
-  async finish(
-    end: Types.End,
-  ): Types.Answer<void, Http.HttpFailure | Qemu.NotPoweredOff | NotLoaded> {
-    const data = this.loaded();
-    if (jarl.is_err(data)) {
-      return data;
-    }
-    return jarl.value(data).action === "setup" && end.status === "succeeded"
+  finish(end: Types.End): Types.Answer<void, Http.HttpFailure | Qemu.NotPoweredOff> {
+    return this.data.action === "setup" && end.status === "succeeded"
       ? this.services.qemuHttpTools.save()
       : this.services.qemuHttpTools.stop(end);
   }

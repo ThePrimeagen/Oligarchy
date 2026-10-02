@@ -119,6 +119,7 @@
         "@oligarchy/qemu-http-tools": "workspace:*",
         "@oligarchy/stores": "workspace:*",
         "jarl": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@oligarchy/db": "workspace:*",

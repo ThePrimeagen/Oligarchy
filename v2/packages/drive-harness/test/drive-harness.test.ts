@@ -45,8 +45,7 @@ it("drives a job from its harness data to its end, keeping what the model is sho
     ],
   });
 
-  const job = jarl.unwrap(await harness.loadJobHarnessData(JOB));
-  expect(job.resume).toBe(true);
+  expect(jarl.unwrap(await harness.loadJobHarnessData(JOB))).toBe(true);
   jarl.unwrap(await harness.start());
   const typed = guestMove(jarl.unwrap(await harness.ask(ASK)));
   expect(typed).toEqual({
@@ -128,9 +127,19 @@ it("derives the boot mode from the job's action and definition", async () => {
   ] as const) {
     const getJobDetails = vi.fn(async () => jarl.ok(details(action, resumes)));
     const { harness } = world({ getJobDetails });
-    const data = jarl.unwrap(await harness.loadJobHarnessData(JOB));
-    expect(data).toMatchObject({ action, resume: expected });
-    expect(harness.data).toBe(data);
+    expect(jarl.unwrap(await harness.loadJobHarnessData(JOB))).toBe(true);
+    expect(harness.data).toEqual({
+      jobId: JOB,
+      runId: RUN,
+      action,
+      name: "install",
+      description: "Install and boot",
+      instruction: "Type {{MODEL}}",
+      proof: "The desktop is visible",
+      iso: "https://iso.example/test.iso",
+      serverUrl: "http://proxy:42069",
+      resume: expected,
+    });
     expect(getJobDetails).toHaveBeenCalledExactlyOnceWith(JOB);
   }
 });
@@ -146,19 +155,6 @@ it.each([
     expect(result.error).toBe(error);
   }
   expect(harness.data).toBeUndefined();
-});
-
-it("refuses to start, ask or finish before a job is loaded", async () => {
-  const { harness, calls, requests } = world();
-  for (const result of [
-    await harness.start(),
-    await harness.ask(ASK),
-    await harness.finish({ status: "failed" }),
-  ]) {
-    expect(jarl.error.is(result, DriveHarness.NotLoaded)).toBe(true);
-  }
-  expect(calls).toEqual([]);
-  expect(requests).toEqual([]);
 });
 
 it.each([
