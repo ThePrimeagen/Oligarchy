@@ -156,6 +156,7 @@ const started = async (
     startRun: unexpected,
     completeRun: unexpected,
     errorRun: unexpected,
+    timeoutRun: unexpected,
     abortRun: async () => {
       order.push("run aborted");
       return jarl.ok({ ...RUN_ROW, status: "aborted" });
