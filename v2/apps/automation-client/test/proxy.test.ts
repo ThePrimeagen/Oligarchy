@@ -3,6 +3,7 @@ import * as Fake from "@oligarchy/http/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as Proxy from "../src/proxy.ts";
+import { AtCapacity, SetupNeeded } from "../src/routes.ts";
 
 const TOKEN = "oligarchy-token";
 const PROXY = "http://127.0.0.1:42069";
@@ -26,7 +27,7 @@ const posted = (path: string, body: unknown) => ({
 
 describe("the qemu reverse proxy, as the automation client calls it", () => {
   describe("reserve", () => {
-    it("posts the job with the bearer, naming the ISO a drive resumes or the server a setup is locked to, and a 200 is reserved (happy)", async () => {
+    it("posts the job with the bearer, naming the ISO a drive resumes or the server a setup is locked to, and a 200 reserved the guest (happy)", async () => {
       const { proxy, asked } = proxied(Fake.json({}));
 
       const answers = [
@@ -35,7 +36,7 @@ describe("the qemu reverse proxy, as the automation client calls it", () => {
         await proxy.reserve({ jobId: JOB, action: "setup", setupServer: QEMU }, NEVER),
       ];
 
-      expect(answers).toEqual([jarl.ok("reserved"), jarl.ok("reserved"), jarl.ok("reserved")]);
+      expect(answers).toEqual([jarl.ok(undefined), jarl.ok(undefined), jarl.ok(undefined)]);
       expect(asked).toEqual([
         posted("reserve", { job: JOB, resume: ISO }),
         posted("reserve", { job: JOB }),
@@ -43,7 +44,7 @@ describe("the qemu reverse proxy, as the automation client calls it", () => {
       ]);
     });
 
-    it("a 503 is at-capacity and a 409 is setup-needed: refusals, not failures (unhappy)", async () => {
+    it("a 503 is AtCapacity and a 409 is SetupNeeded, each naming what the proxy said (unhappy)", async () => {
       const { proxy } = proxied([
         Fake.json({ error: "at capacity" }, 503),
         Fake.json({ error: "setup needed" }, 409),
@@ -52,8 +53,14 @@ describe("the qemu reverse proxy, as the automation client calls it", () => {
       const full = await proxy.reserve({ jobId: JOB, action: "drive", resume: ISO }, NEVER);
       const unset = await proxy.reserve({ jobId: JOB, action: "drive", resume: ISO }, NEVER);
 
-      expect(full).toEqual(jarl.ok("at-capacity"));
-      expect(unset).toEqual(jarl.ok("setup-needed"));
+      expect(jarl.error.is(full, AtCapacity)).toBe(true);
+      expect(jarl.is_err(full) && full.error.message).toBe(
+        `POST ${PROXY}/reserve: 503: {"error":"at capacity"}`,
+      );
+      expect(jarl.error.is(unset, SetupNeeded)).toBe(true);
+      expect(jarl.is_err(unset) && unset.error.message).toBe(
+        `POST ${PROXY}/reserve: 409: {"error":"setup needed"}`,
+      );
     });
 
     it("any other answer is the failure it came as (unhappy)", async () => {

@@ -85,7 +85,9 @@ describe("the automation server's calls to an automation client", () => {
     });
 
     it("of a client at its --max-jobs answers at-capacity: no failure (unhappy)", async () => {
-      const { client } = await served({ reserve: async () => jarl.ok("at-capacity") });
+      const { client } = await served({
+        reserve: async () => jarl.err(new ClientRoutes.AtCapacity("at capacity: max-jobs is 1")),
+      });
 
       const reserved = await client.post("/reserve", { jobId: JOB, action: "diagnose" });
 
@@ -93,7 +95,9 @@ describe("the automation server's calls to an automation client", () => {
     });
 
     it("of a resume no qemu server holds a setup disk for yet answers setup-needed: no failure (unhappy)", async () => {
-      const { client } = await served({ reserve: async () => jarl.ok("setup-needed") });
+      const { client } = await served({
+        reserve: async () => jarl.err(new ClientRoutes.SetupNeeded("setup needed: 4.0.4")),
+      });
 
       const reserved = await client.post("/reserve", { jobId: JOB, action: "drive", resume: ISO });
 

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import * as Jobs from "../src/jobs.ts";
 import * as Proxy from "../src/proxy.ts";
 import * as Reserve from "../src/reserve.ts";
-import { ReserveFailed } from "../src/routes.ts";
+import { AtCapacity, ReserveFailed, SetupNeeded } from "../src/routes.ts";
 
 const TOKEN = "oligarchy-token";
 const PROXY = "http://127.0.0.1:42069";
@@ -77,7 +77,7 @@ describe("an automation client's reserve", () => {
 
     const answers = [await reservations.reserve(DRIVE), await reservations.reserve(DIAGNOSE)];
 
-    expect(answers).toEqual([jarl.ok("reserved"), jarl.ok("reserved")]);
+    expect(answers).toEqual([jarl.ok(undefined), jarl.ok(undefined)]);
     expect(jobs.count()).toBe(2);
     expect(asked()).toEqual([["/reserve", { job: JOB, resume: ISO }]]);
     expect(await jobs.abort({ jobId: OTHER })).toBe("stopped");
@@ -92,19 +92,20 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(0);
   });
 
-  it("at --max-jobs is at-capacity: the proxy is not asked and the job is not held (unhappy)", async () => {
+  it("at --max-jobs is AtCapacity naming it: the proxy is not asked and the job is not held (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({ maxJobs: 1 });
     jarl.unwrap(await reservations.reserve(DIAGNOSE));
 
     const full = await reservations.reserve(DRIVE);
 
-    expect(full).toEqual(jarl.ok("at-capacity"));
+    expect(jarl.error.is(full, AtCapacity)).toBe(true);
+    expect(jarl.is_err(full) && full.error.message).toBe("at capacity: max-jobs is 1");
     expect(asked()).toEqual([]);
     expect(jobs.count()).toBe(1);
     expect(await jobs.abort({ jobId: JOB })).toBe("not-held");
   });
 
-  it("a reserve while another is in flight is at-capacity, and the next once it has answered is heard (unhappy)", async () => {
+  it("a reserve while another is in flight is AtCapacity naming it, and the next once it has answered is heard (unhappy)", async () => {
     const first = later();
     const { jobs, reservations, asked } = reserving({ reserve: [first.reply] });
     const inFlight = reservations.reserve(DRIVE);
@@ -112,11 +113,14 @@ describe("an automation client's reserve", () => {
 
     const meanwhile = await reservations.reserve(DIAGNOSE);
 
-    expect(meanwhile).toEqual(jarl.ok("at-capacity"));
+    expect(jarl.error.is(meanwhile, AtCapacity)).toBe(true);
+    expect(jarl.is_err(meanwhile) && meanwhile.error.message).toBe(
+      "at capacity: a reserve is already in flight",
+    );
     expect(await jobs.abort({ jobId: OTHER })).toBe("not-held");
     first.answer(Fake.json({}));
-    expect(await inFlight).toEqual(jarl.ok("reserved"));
-    expect(await reservations.reserve(DIAGNOSE)).toEqual(jarl.ok("reserved"));
+    expect(await inFlight).toEqual(jarl.ok(undefined));
+    expect(await reservations.reserve(DIAGNOSE)).toEqual(jarl.ok(undefined));
     expect(asked()).toEqual([["/reserve", { job: JOB, resume: ISO }]]);
   });
 
@@ -142,7 +146,7 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(0);
   });
 
-  it("a proxy at capacity, or with no setup disk for the ISO, is that refusal: the job is let go and nothing is given back (unhappy)", async () => {
+  it("a proxy at capacity, or with no setup disk for the ISO, is AtCapacity or SetupNeeded: the job is let go and nothing is given back (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({
       reserve: [
         Fake.json({ error: "at capacity" }, 503),
@@ -153,8 +157,8 @@ describe("an automation client's reserve", () => {
     const full = await reservations.reserve(DRIVE);
     const unset = await reservations.reserve(DRIVE);
 
-    expect(full).toEqual(jarl.ok("at-capacity"));
-    expect(unset).toEqual(jarl.ok("setup-needed"));
+    expect(jarl.error.is(full, AtCapacity)).toBe(true);
+    expect(jarl.error.is(unset, SetupNeeded)).toBe(true);
     expect(jobs.count()).toBe(0);
     expect(asked().map(([path]) => path)).toEqual(["/reserve", "/reserve"]);
   });
