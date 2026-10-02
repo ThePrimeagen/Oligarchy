@@ -64,7 +64,11 @@ const File = z
     timeouts: z.strictObject({ header: Duration, chunk: Duration }),
     runCeiling: Duration,
     stepLimit: z.int().min(1, "stepLimit must be at least 1"),
-    harness: z.strictObject({ defaultRetry: Duration }),
+    // recentActions: the lines of a step the driving prompt shows, its intent among them.
+    harness: z.strictObject({
+      defaultRetry: Duration,
+      recentActions: z.int().min(1, "recentActions must be at least 1"),
+    }),
     automationServer: z.strictObject({
       dispatchInterval: Duration,
       forgetInterval: Duration,

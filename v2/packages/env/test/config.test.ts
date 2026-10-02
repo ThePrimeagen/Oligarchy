@@ -16,7 +16,7 @@ const valid = {
   timeouts: { header: "3 minutes", chunk: "3 minutes" },
   runCeiling: "1.5 hours",
   stepLimit: 200,
-  harness: { defaultRetry: "1 second" },
+  harness: { defaultRetry: "1 second", recentActions: 10 },
   automationServer: {
     dispatchInterval: "30 seconds",
     forgetInterval: "30 seconds",

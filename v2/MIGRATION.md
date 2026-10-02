@@ -227,14 +227,43 @@ record, and the automation server acts on it directly.
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
       releases its lock, so the drive's next reserve sets up again; decide when a drive whose ISO
       keeps failing to set up is errored instead. V1: `dispatch` in `worker.ts`.
-- [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
-      mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
-      the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
-      `prompts/driving-agent.html` and `prompts/diagnosing-agent.html` take the job id where they
-      take `{{LINEAR_TICKET}}`. `prompts/custom-harness-driving-agent.html`, the driver's system
-      prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
-      tool, and `prompts/driving-agent.html` names them where it names `./client`.
-      `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go.
+- [ ] **The drive harness.** V1's driving prompt names only the agent's Linear ticket; the task
+      was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2 the
+      agent is its job id, and the driving prompt takes the job id where V1 takes
+      `{{LINEAR_TICKET}}`. V2 has one driving prompt, the driver's system prompt, embedded in
+      `@oligarchy/drive-harness`; it replaces both V1's `prompts/driving-agent.html` and
+      `prompts/custom-harness-driving-agent.html`, and lists the model's tools where V1 pastes in
+      `client.md` and describes its `client` tool.
+      V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
+      `@oligarchy/drive-harness` exports `class DriveHarness`, made with
+      `new DriveHarness(services, { recentActions })` over `tests`, the job's `qemuHttpTools`
+      and `openRouter`, with `harness.recentActions` from `v2/oligarchy.json` (10). It holds one
+      drive or setup's state: the loaded job, every step opened with all its actions, the
+      model's last response, the previous move and the screen. Its methods are the points the
+      driver's loop calls:
+      - `loadJobHarnessData(jobId)` reads `tests.getJobDetails`: the job and run IDs, action,
+        pinned definition, ISO, proxy URL and boot mode. Only a resuming drive resumes; a setup
+        always boots fresh. It keeps them as `data`, splits the ActionList into its step lines
+        (without the trailing crash and screenshot lines), and answers `true`; the driver loads
+        the job before it calls anything else, and nothing in the harness checks that it did.
+      - `start()` boots that ISO.
+      - `getImage()` takes the guest's screen for the next ask.
+      - `ask({ model, reasoning, deadline, signal? })` renders the driving prompt and answers
+        the model's turn. The prompt shows the open step's intent and its newest actions,
+        newest first, `recentActions` lines in all; earlier steps stay in the harness. The
+        model gets the guest's tools, each taking `step` and `reason` beside its own arguments,
+        and `Done`; the prompt lists the same tools. All replacements happen once, so a
+        definition or model reply containing `{{MODEL}}` stays literal text.
+      - `act(turn)` reads the turn as one move, a guest call or done; any other turn is
+        `ReplyInvalid`, kept under the open step. A guest call for a step that is not open goes
+        through `nextStep` first and runs nothing if it cannot open; then it runs with only its
+        own arguments, and its outcome, or the guest's refusal, is kept under its step.
+      - `nextStep(step)` ends the open intent and starts the step's, named after its ActionList
+        line (`step N` past the list). An end that fails leaves the step open; a start that
+        fails opens nothing, and the next `nextStep` starts it again.
+      - `finish(end)` saves a setup that succeeded and stops the guest otherwise.
+      The loop and its limits are the driver's (section 4). V1's root templates and ticket
+      bodies remain until V1 is retired.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
@@ -353,7 +382,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             head the queue, so a setup no client can take holds back every drive behind it until
             it is placed.
       - [ ] **Dispatch: run.** Once the job is running, `/run` sends the prompt, without holding
-            the next pass. Needs the prompt from section 3's The mission.
+            the next pass. A drive or setup's driver renders its own prompt (section 3's The
+            drive harness).
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
             answers.
       - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
@@ -441,9 +471,11 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             connections but not a `/run` still under way, then `jobs.shutdown()` aborts every
             held job and waits until each is let go, before it says it stopped and the services
             close. From the moment shutdown begins, every hold is refused.
-- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, tools, the
-      pointer, intents, and the stop rule (result closed, step limit, model stopped, run ceiling).
-      Needs qemu-http-tools. It creates the OpenRouter client with `timeouts.header` from
+- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop and its stop rule
+      (result closed, step limit, model stopped, run ceiling, bad replies in a row), over a
+      `DriveHarness` (section 3's The drive harness), which holds the tools, the pointer and
+      what the model has been shown, and each step's intent. It creates the OpenRouter client
+      with `timeouts.header` from
       `v2/oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
