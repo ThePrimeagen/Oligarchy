@@ -60,7 +60,7 @@ const paths = (calls: ReadonlyArray<Testing.Call>) => calls.map(([path]) => path
 it("drives the job turn by turn until the model is done, then stops its guest succeeded", async () => {
   const signal = new AbortController().signal;
   const world = Testing.world({ turns: [move(), done()] });
-  const { result } = drive(world, { signal });
+  const { result, said } = drive(world, { signal });
   expect(jarl.unwrap(await result)).toEqual({ status: "succeeded" });
   expect(paths(world.calls)).toEqual([
     "start",
@@ -71,6 +71,10 @@ it("drives the job turn by turn until the model is done, then stops its guest su
     "stop",
   ]);
   expect(world.calls.at(-1)).toEqual(["stop", { status: "succeeded" }]);
+  expect(said.length).toBeGreaterThan(0);
+  for (const line of said) {
+    expect(line.report).toMatchObject({ jobId: JOB, runId: Testing.RUN });
+  }
   // The action's model and reasoning, with the run's ceiling as the deadline of every ask.
   expect(world.requests).toHaveLength(2);
   for (const request of world.requests) {
@@ -158,11 +162,15 @@ it("fails the drive after three replies in a row that were not a move it could m
 });
 
 // What the logger hands Sentry: the error itself, stack and all, as the line's cause.
-const reported = (error: Error) =>
+const reported = (error: Error, loaded = true) =>
   expect.objectContaining({
     level: "error",
     text: error.message,
-    report: expect.objectContaining({ cause: error }),
+    report: expect.objectContaining({
+      cause: error,
+      jobId: JOB,
+      ...(loaded ? { runId: Testing.RUN } : {}),
+    }),
   });
 
 it("returns a job it cannot load as it came, and starts nothing", async () => {
@@ -175,7 +183,8 @@ it("returns a job it cannot load as it came, and starts nothing", async () => {
     expect(failed.error).toBe(notFound);
   }
   expect(world.calls).toEqual([]);
-  expect(said).toContainEqual(reported(notFound));
+  expect(said).toContainEqual(reported(notFound, false));
+  expect(said[0]?.report.runId).toBeUndefined();
 });
 
 it("returns a guest that would not start, and stops nothing", async () => {

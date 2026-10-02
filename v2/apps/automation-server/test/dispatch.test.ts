@@ -111,7 +111,7 @@ describe("starting the next job", () => {
     expect(failed.map((one) => one.text)).toEqual([
       `reserve failed; ${FIRST}: POST ${FIRST}/reserve: 500: {"error":"reserving a guest failed"}`,
     ]);
-    expect(failed[0]?.report.agentId).toBe(job.id);
+    expect(failed[0]?.report).toMatchObject({ jobId: job.id, runId: job.runId });
     const { status, serverId } = jarl.unwrap(await at.tests.getJob(job.id));
     expect({ status, serverId }).toEqual({
       status: "running",
@@ -200,7 +200,7 @@ describe("starting the next job", () => {
     expect(await at.job(diagnose.id)).toEqual({ status: "aborted", reason });
     const failed = at.said.filter((one) => one.level === "error");
     expect(failed.map((one) => one.text)).toEqual([`diagnose aborted: ${reason}`]);
-    expect(failed[0]?.report.agentId).toBe(diagnose.id);
+    expect(failed[0]?.report).toMatchObject({ jobId: diagnose.id, runId: diagnose.runId });
     expect(at.asked()).toEqual([]);
   });
 
@@ -226,7 +226,7 @@ describe("starting the next job", () => {
     expect(failed.map((one) => one.text)).toEqual([
       `test run start failed: startRun: test run ${closed.run.id} is failed; needs pending`,
     ]);
-    expect(failed[0]?.report.agentId).toBe(closed.job.id);
+    expect(failed[0]?.report).toMatchObject({ jobId: closed.job.id, runId: closed.job.runId });
     expect((await at.job(retried.job.id)).status).toBe("running");
     expect((await at.job(closed.job.id)).status).toBe("running");
     expect(at.posted("/run")).toEqual([

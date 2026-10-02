@@ -29,10 +29,10 @@ export const logger = (
     (level: Logger.Level) =>
     (text: string, report: Logger.Report = {}) => {
       said.push({ level, text, report });
-      const { agentId, location } = report;
+      const { jobId, location } = report;
       let color: string | undefined;
-      if (colors && agentId !== undefined) {
-        const touched = Palette.touch(palette, agentId, now());
+      if (colors && jobId !== undefined) {
+        const touched = Palette.touch(palette, jobId, now());
         palette = touched.palette;
         color = touched.color;
       }
@@ -41,7 +41,7 @@ export const logger = (
           {
             text,
             level,
-            ...(agentId === undefined ? {} : { agentId }),
+            ...(jobId === undefined ? {} : { jobId }),
             ...(location === undefined ? {} : { location }),
             ...(color === undefined ? {} : { color }),
           },

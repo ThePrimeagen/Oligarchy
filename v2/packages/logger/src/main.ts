@@ -8,10 +8,10 @@ import * as Render from "./render.ts";
 
 export type Level = "info" | "warning" | "error" | "fatal";
 
-// location is a text bucket: a session id, or the process's own name.
+// jobId identifies the job in terminal output and Sentry; runId associates database logs
+// with its parent test run. location names the process or another text bucket.
 export type Attribution = {
   readonly location?: string;
-  readonly agentId?: string;
   readonly jobId?: string;
   readonly runId?: string;
 };
@@ -45,7 +45,7 @@ const sentryReport = (
 ): Sentry.JobReport => {
   const tags = {
     ...(attribution.location === undefined ? {} : { location: attribution.location }),
-    ...(attribution.agentId === undefined ? {} : { agent_id: attribution.agentId }),
+    ...(attribution.jobId === undefined ? {} : { job_id: attribution.jobId }),
   };
   return {
     level,
@@ -93,10 +93,10 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
     const emit =
       (level: Level): Reported =>
       (text, report = {}) => {
-        const { agentId, location } = report;
+        const { jobId, location } = report;
         let color: string | undefined;
-        if (colors && agentId !== undefined) {
-          const touched = Palette.touch(palette, agentId, now());
+        if (colors && jobId !== undefined) {
+          const touched = Palette.touch(palette, jobId, now());
           palette = touched.palette;
           color = touched.color;
         }
@@ -106,7 +106,7 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
         const line: Render.Line = {
           text,
           level,
-          ...(agentId === undefined ? {} : { agentId }),
+          ...(jobId === undefined ? {} : { jobId }),
           ...(location === undefined ? {} : { location }),
           ...(color === undefined ? {} : { color }),
         };

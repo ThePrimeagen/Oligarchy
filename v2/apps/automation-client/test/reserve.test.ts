@@ -240,13 +240,11 @@ describe("an automation client's reserve", () => {
 
     expect(aborted).toBe("stopped");
     expect(jobs.count()).toBe(0);
-    expect(
-      said.map(({ level, text, report }) => ({ level, text, agentId: report.agentId })),
-    ).toEqual([
+    expect(said.map(({ level, text, report }) => ({ level, text, jobId: report.jobId }))).toEqual([
       {
         level: "error",
         text: `relinquish failed: POST ${PROXY}/relinquish: 502: {"error":"server down"}`,
-        agentId: JOB,
+        jobId: JOB,
       },
     ]);
   });

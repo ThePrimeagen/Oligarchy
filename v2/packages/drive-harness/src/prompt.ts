@@ -5,7 +5,7 @@ import type * as Types from "./types.ts";
 // neither.
 const TEMPLATE = `<role>You drive one guest, one native tool call at a time. You are not a developing agent.</role>
 
-<agent-id>{{JOB_ID}}</agent-id>
+<job-id>{{JOB_ID}}</job-id>
 <test-run>{{RUN_ID}}</test-run>
 <action>{{ACTION}}</action>
 

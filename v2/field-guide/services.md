@@ -115,3 +115,12 @@ export const createServices = (env: Env) => {
 app.onExit(() => closeServices(services));
 await app.run(services, onClose);
 ```
+
+## Log attribution
+
+- `jobId` identifies the job in terminal output, color grouping, and Sentry reports.
+- `runId` identifies its parent test run for stored logs. Supply both when both are known;
+  a drive or setup and its diagnosis have separate job IDs within the same run.
+- Pass known IDs through helpers. Before a job loads, report its known job ID without
+  inventing a run ID or doing a second database lookup just to log an error.
+- Process-wide messages may omit both IDs. `location` names the component emitting the line.

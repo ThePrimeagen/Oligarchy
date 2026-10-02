@@ -54,7 +54,11 @@ export const create = (services: Services, options: Options): Aborter => {
   const reason = options.reason ?? REASON;
   const inFlight = new Set<Promise<unknown>>();
 
-  const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, agentId: job.id });
+  const at = (job: Stores.Tests.JobRow) => ({
+    location: LOCATION,
+    jobId: job.id,
+    runId: job.runId,
+  });
 
   // A client that holds the job is asked to stop it. One that is forgotten, or holds nothing for
   // it, has nothing to stop, which is said under the job once it is aborted.

@@ -10,7 +10,7 @@ describe("the logger", () => {
     const { lines, logger, rows } = await logging();
     await logger.flush();
 
-    logger.info("booted", { agentId: "OLI-1", location: "s-1" });
+    logger.info("booted", { jobId: "OLI-1", location: "s-1" });
     logger.warning("slow");
     logger.error("qemu exited", { location: "s-1" });
     logger.fatal("config unreadable");
@@ -34,23 +34,23 @@ describe("the logger", () => {
     ]);
   });
 
-  it("an agent keeps its colour across lines, and a second agent takes the next (happy)", async () => {
+  it("a job keeps its colour across lines, and a second job takes the next (happy)", async () => {
     const { lines, logger } = await logging({ colors: true, now: () => 0 });
 
-    logger.info("x", { agentId: "A" });
-    logger.info("x", { agentId: "B" });
-    logger.info("x", { agentId: "A" });
+    logger.info("x", { jobId: "A" });
+    logger.info("x", { jobId: "B" });
+    logger.info("x", { jobId: "A" });
     await logger.flush();
 
-    const painted = (agentId: string, color: string | undefined) =>
+    const painted = (jobId: string, color: string | undefined) =>
       Render.renderLine(
-        { text: "x", level: "info", agentId, ...(color === undefined ? {} : { color }) },
+        { text: "x", level: "info", jobId, ...(color === undefined ? {} : { color }) },
         true,
       );
     expect(lines).toEqual([
-      painted("A", Render.AGENT_COLORS[0]),
-      painted("B", Render.AGENT_COLORS[1]),
-      painted("A", Render.AGENT_COLORS[0]),
+      painted("A", Render.JOB_COLORS[0]),
+      painted("B", Render.JOB_COLORS[1]),
+      painted("A", Render.JOB_COLORS[0]),
     ]);
   });
 });
@@ -62,7 +62,7 @@ describe("the logger's Sentry", () => {
 
     logger.error("stop cleanup failed: connect ECONNREFUSED", {
       location: "s-1",
-      agentId: "OLI-1",
+      jobId: "OLI-1",
       cause,
     });
     logger.fatal("config unreadable");
@@ -75,14 +75,14 @@ describe("the logger's Sentry", () => {
     expect(sent).toEqual([
       {
         error: cause,
-        jobId: undefined,
+        jobId: "OLI-1",
         report: {
           level: "error",
-          tags: { location: "s-1", agent_id: "OLI-1" },
+          tags: { location: "s-1", job_id: "OLI-1" },
           extra: {
             log: "stop cleanup failed: connect ECONNREFUSED",
             location: "s-1",
-            agent_id: "OLI-1",
+            job_id: "OLI-1",
           },
         },
       },

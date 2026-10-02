@@ -29,7 +29,7 @@ type Closed = Promise<
   jarl.Result<void, Db.DatabaseError | Stores.Tests.InvalidState | Stores.Tests.NotFound>
 >;
 
-const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, agentId: job.id });
+const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, jobId: job.id, runId: job.runId });
 
 // The driver ran to its end; its diagnose judges it.
 const queueDiagnose = async ({ tests, logger }: Services, job: Stores.Tests.JobRow): Closed => {

@@ -48,7 +48,7 @@ export const create = (options: Options): Reservations => {
     if (jarl.is_err(relinquished)) {
       logger.error(`relinquish failed: ${relinquished.error.message}`, {
         location: LOCATION,
-        agentId: jobId,
+        jobId,
         cause: relinquished.error,
       });
     }

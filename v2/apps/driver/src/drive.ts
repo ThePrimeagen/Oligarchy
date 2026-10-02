@@ -66,7 +66,7 @@ const mainLoop = async (
 ): Promise<jarl.Result<Ended, Failure>> => {
   const { logger } = services;
   const { config } = options;
-  const at = { location: LOCATION, agentId: options.jobId };
+  const at = { location: LOCATION, jobId: options.jobId, runId: harness.data.runId };
   const { runCeiling, stepLimit } = config.driver;
   const deadline = Date.now() + runCeiling;
   const request = {
@@ -176,15 +176,15 @@ export const drive = async (
     startTimeoutMs: guest.startTimeout,
     saveTimeoutMs: guest.saveTimeout,
   });
-  const at = { location: LOCATION, agentId: options.jobId };
-  const report = (error: Failure) => logger.error(error.message, { ...at, cause: error });
-
+  const at = { location: LOCATION, jobId: options.jobId };
   const loaded = await harness.loadJobHarnessData(options.jobId);
   if (jarl.is_err(loaded)) {
-    report(loaded.error);
+    logger.error(loaded.error.message, { ...at, cause: loaded.error });
     return loaded;
   }
-  const { action, name, iso, resume } = harness.data;
+  const { action, name, iso, resume, runId } = harness.data;
+  const attributed = { ...at, runId };
+  const report = (error: Failure) => logger.error(error.message, { ...attributed, cause: error });
   if (action === "diagnose") {
     const refused = new NotDrivable(
       `job ${options.jobId} is a diagnose; the driver runs a drive or a setup`,
@@ -197,7 +197,7 @@ export const drive = async (
     report(started.error);
     return started;
   }
-  logger.info(`${action} ${name}: started ${iso}${resume ? ", resumed" : ""}`, at);
+  logger.info(`${action} ${name}: started ${iso}${resume ? ", resumed" : ""}`, attributed);
 
   const looped = await mainLoop(services, harness, signal, action, options);
   if (jarl.is_err(looped)) {
@@ -222,13 +222,16 @@ export const drive = async (
     if (jarl.is_err(stopped)) {
       report(stopped.error);
     }
-    logger.info(`ended failed: ${finished.error.message}`, at);
+    logger.info(`ended failed: ${finished.error.message}`, attributed);
     return jarl.ok(unfinished);
   }
   if (jarl.is_err(finished)) {
     report(finished.error);
     return finished;
   }
-  logger.info(`ended ${ended.status}${ended.reason === undefined ? "" : `: ${ended.reason}`}`, at);
+  logger.info(
+    `ended ${ended.status}${ended.reason === undefined ? "" : `: ${ended.reason}`}`,
+    attributed,
+  );
   return looped;
 };

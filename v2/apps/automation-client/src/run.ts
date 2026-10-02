@@ -104,7 +104,7 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     taken: Reserve.Taken,
     command: Command,
   ): ReturnType<Routes.Sessions["run"]> => {
-    const report = { location: LOCATION, agentId: jobId };
+    const report = { location: LOCATION, jobId };
     logger.info(`starting ${command.name} for a ${taken.action}`, report);
     const child = Child.start(spawn, command.command, command.args, {
       env: { ...env, ...command.env },

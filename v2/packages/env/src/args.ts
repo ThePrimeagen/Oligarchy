@@ -59,11 +59,6 @@ export const serverUrl = flag({
   env: "SERVER_URL",
 });
 
-export const agentId = flag({
-  schema: words,
-  description: "The calling agent's id",
-});
-
 // A shell exports the id once: `SESSION_ID=$(./ctrl session --search ...)`.
 export const sessionId = flag({
   schema: words,
