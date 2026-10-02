@@ -15,6 +15,7 @@ export type Services = {
   readonly tests: App.Made<Stores.Tests.Tests>;
   readonly servers: App.Made<Stores.Servers.Servers>;
   readonly setupRequests: App.Made<Stores.SetupRequests.SetupRequests>;
+  readonly diagnosis: App.Made<Stores.Diagnosis.Diagnosis>;
 };
 
 export type Terminal = {
@@ -49,7 +50,8 @@ export const createServices = (
   const tests = Stores.Tests.create({ db });
   const servers = Stores.Servers.create({ db });
   const setupRequests = Stores.SetupRequests.create({ db });
-  return { http, sentry, db, logger, tests, servers, setupRequests };
+  const diagnosis = Stores.Diagnosis.create({ db });
+  return { http, sentry, db, logger, tests, servers, setupRequests, diagnosis };
 };
 
 // Every line waits on its insert, so the pool stays open until the last one lands; a line the

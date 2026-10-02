@@ -19,6 +19,37 @@ const STARTED =
   "[INFO] [global] automation-server: started on 127.0.0.1:4100; drive test/drive; diagnose test/diagnose; setup test/setup";
 const STOPPED = "[INFO] [global] automation-server: stopped; SIGTERM received";
 const FORGOTTEN = `[INFO] [global] automation-server: server forgotten; ${SILENT} silent for 600 seconds`;
+const CLIENT = "http://10.0.0.7:4100";
+const CLIENT_ID = "11111111-1111-4111-8111-111111111111";
+const RUN = "22222222-2222-4222-8222-222222222222";
+const DRIVE = "33333333-3333-4333-8333-333333333333";
+const DIAGNOSE = "44444444-4444-4444-8444-444444444444";
+const RESERVED = `[INFO] [${DRIVE}] automation-server: reserved drive; ${CLIENT}`;
+const QUEUED = `[INFO] [${DRIVE}] automation-server: drive completed; diagnose ${DIAGNOSE} queued`;
+const AT = new Date(0);
+const RUN_ROW: Stores.Tests.RunRow = {
+  id: RUN,
+  suiteId: null,
+  definitionId: 1,
+  iso: "https://iso.omarchy.org/omarchy-4.0.4.iso",
+  serverUrl: "http://127.0.0.1:42069",
+  model: "test/drive",
+  status: "running",
+  reason: null,
+  createdAt: AT,
+  finishedAt: null,
+};
+const job = (id: string, action: Stores.Tests.JobAction): Stores.Tests.JobRow => ({
+  id,
+  runId: RUN,
+  action,
+  status: "pending",
+  reason: null,
+  serverId: null,
+  createdAt: AT,
+  startedAt: null,
+  finishedAt: null,
+});
 
 const CONFIG = JSON.stringify({
   models: { drive: "test/drive", diagnose: "test/diagnose", setup: "test/setup" },
@@ -52,8 +83,14 @@ const started = async (
     readonly listenError?: Serve.ListenFailed;
     readonly databaseError?: Db.DatabaseError;
     readonly close?: Promise<void>;
+    // One live client and one pending drive, whose run ends at once and whose completion is
+    // written only once this settles.
+    readonly completing?: Promise<void>;
   } = {},
 ) => {
+  const { completing } = options;
+  const order: Array<string> = [];
+  let pending: Array<Stores.Tests.JobRow> = completing === undefined ? [] : [job(DRIVE, "drive")];
   const env = jarl.unwrap(
     await Env.create(
       environment,
@@ -65,7 +102,9 @@ const started = async (
     ),
   );
   const log = FakeLogger.logger();
-  const http = FakeHttp.http({ replies: unexpected });
+  const http = FakeHttp.http({
+    replies: completing === undefined ? unexpected : () => FakeHttp.json({}),
+  });
   const dispatches: Array<Stores.Servers.ServerType> = [];
   const sweeps: Array<Parameters<Stores.Servers.Servers["removeStaleServers"]>> = [];
   const stale = [SILENT];
@@ -73,7 +112,10 @@ const started = async (
     service: "servers",
     listLiveServers: async (type) => {
       dispatches.push(type);
-      return options.databaseError === undefined ? jarl.ok([]) : jarl.err(options.databaseError);
+      if (options.databaseError !== undefined) {
+        return jarl.err(options.databaseError);
+      }
+      return jarl.ok(completing === undefined ? [] : [{ id: CLIENT_ID, url: CLIENT }]);
     },
     removeStaleServers: async (...args) => {
       sweeps.push(args);
@@ -105,21 +147,43 @@ const started = async (
     completeSuite: unexpected,
     abortSuite: unexpected,
     createTestRun: unexpected,
-    getTestRun: unexpected,
+    getTestRun: async () => jarl.ok({ ...RUN_ROW, test: "lock-screen", suite: null }),
     getTestRunDetails: unexpected,
     listTestRuns: unexpected,
     startRun: unexpected,
     completeRun: unexpected,
     errorRun: unexpected,
     abortRun: unexpected,
-    createJob: unexpected,
+    createJob: async (_runId, action) => jarl.ok(job(DIAGNOSE, action)),
     getJob: unexpected,
-    getJobDetails: unexpected,
+    getJobDetails: async () =>
+      jarl.ok({
+        job: job(DRIVE, "drive"),
+        run: RUN_ROW,
+        suite: null,
+        definition: {
+          id: 1,
+          name: "first-boot",
+          description: "",
+          instruction: "",
+          proof: "",
+          resume: false,
+          createdAt: AT,
+        },
+      }),
     listJobs: unexpected,
     latestJob: unexpected,
-    nextPendingJob: unexpected,
-    runJob: unexpected,
-    completeJob: unexpected,
+    nextPendingJob: async () => {
+      const [next] = pending;
+      pending = [];
+      return jarl.ok(next);
+    },
+    runJob: async (jobId) => jarl.ok({ ...job(jobId, "drive"), status: "running" }),
+    completeJob: async (jobId) => {
+      await completing;
+      order.push("drive completed");
+      return jarl.ok({ ...job(jobId, "drive"), status: "completed" });
+    },
     finalizeJob: unexpected,
     errorJob: unexpected,
     timeoutJob: unexpected,
@@ -138,21 +202,30 @@ const started = async (
       inspect: unexpected,
     }),
   )({});
+  const diagnosis = App.createService<never, App.NoOptions, Stores.Diagnosis.Diagnosis>(() => ({
+    service: "diagnosis",
+    createErrorType: unexpected,
+    listErrorTypes: unexpected,
+    findErrorType: unexpected,
+    saveDiagnosis: unexpected,
+    getDiagnosis: unexpected,
+  }))({});
   const services = {
     http: http.http,
     logger: log.logger,
     servers,
     tests,
     setupRequests,
+    diagnosis,
   } satisfies App.Needs<
     | Http.Http
     | Logger.Logger
     | Stores.Servers.Servers
     | Stores.Tests.Tests
     | Stores.SetupRequests.SetupRequests
+    | Stores.Diagnosis.Diagnosis
   >;
   const addresses: Array<Parameters<typeof Serve.listen>[1]> = [];
-  const order: Array<string> = [];
   const listen: typeof Serve.listen = async (_handler, address) => {
     addresses.push(address);
     if (options.listenError !== undefined) {
@@ -284,5 +357,36 @@ describe("the automation server lifecycle", () => {
     expect(at.codes).toEqual([0]);
     expect(at.errors).toEqual([]);
     expect(at.stderr).toEqual([]);
+  });
+
+  it("a SIGTERM while a run's close is writing waits for the close before any exit handler (unhappy)", async () => {
+    let release: () => void = () => undefined;
+    const completing = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const at = await started({ completing });
+    try {
+      expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED]);
+
+      const stopped = at.stop();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(at.order).toEqual(["close listener", "listener closed"]);
+      expect(at.codes).toEqual([]);
+
+      release();
+      await stopped;
+      expect(at.order).toEqual([
+        "close listener",
+        "listener closed",
+        "drive completed",
+        "exit handler",
+      ]);
+      expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED, STOPPED, QUEUED]);
+      expect(at.codes).toEqual([0]);
+      expect(at.errors).toEqual([]);
+    } finally {
+      release();
+      await at.stop();
+    }
   });
 });
