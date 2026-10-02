@@ -55,7 +55,8 @@ export const tools = async (
   const fake = Fake.http({ replies, timeoutMs: DEFAULT_TIMEOUT_MS });
   const qemu = QemuHttpTools.create(
     { http: fake.http },
-    { job: JOB, baseUrl: BASE_URL, token: await token(), ...options },
+    options.signal ?? new AbortController().signal,
+    { job: JOB, baseUrl: BASE_URL, token: await token() },
   );
   return { qemu, asked: fake.asked };
 };
