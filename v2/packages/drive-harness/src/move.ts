@@ -50,17 +50,20 @@ export const tools = (guest: ReadonlyArray<OpenRouter.Tool>): ReadonlyArray<Open
 
 const invalid = (message: string) => jarl.err(new ReplyInvalid(`reply: ${message}`));
 
-// Some providers send a call with no arguments as an empty string.
-const argumentsOf = (text: string): Readonly<Record<string, unknown>> | undefined => {
-  if (text.trim() === "") {
-    return {};
-  }
+const parseJson = (text: string): unknown => {
   try {
-    const parsed: unknown = JSON.parse(text);
-    return isRecord(parsed) ? parsed : undefined;
+    return JSON.parse(text);
   } catch {
     return undefined;
   }
+};
+
+// Some providers send a call with no arguments as an empty string.
+const argumentsOf = (call: OpenRouter.ToolCall) => {
+  const parsed = call.arguments.trim() === "" ? {} : parseJson(call.arguments);
+  return isRecord(parsed)
+    ? jarl.ok(parsed)
+    : invalid(`${call.name}: arguments are not a JSON object`);
 };
 
 export const parse = (turn: OpenRouter.Turn): jarl.Result<Types.Move, ReplyInvalid> => {
@@ -68,10 +71,11 @@ export const parse = (turn: OpenRouter.Turn): jarl.Result<Types.Move, ReplyInval
   if (call === undefined || more.length > 0) {
     return invalid(`expected one tool call, got ${String(turn.toolCalls.length)}`);
   }
-  const args = argumentsOf(call.arguments);
-  if (args === undefined) {
-    return invalid(`${call.name}: arguments are not a JSON object`);
+  const parsedArgs = argumentsOf(call);
+  if (jarl.is_err(parsedArgs)) {
+    return parsedArgs;
   }
+  const args = jarl.value(parsedArgs);
   if (call.name === DONE.function.name) {
     return Object.keys(args).length === 0
       ? jarl.ok({ kind: "done" })

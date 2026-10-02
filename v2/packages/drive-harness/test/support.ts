@@ -47,22 +47,6 @@ export const details = (
   suite: null,
 });
 
-export const data = (
-  action: Stores.Tests.JobAction = "drive",
-  resume = true,
-): DriveHarness.JobHarnessData => ({
-  jobId: JOB,
-  runId: RUN,
-  action,
-  name: "install",
-  description: "Install and boot",
-  instruction: "Type {{MODEL}}",
-  proof: "The desktop is visible",
-  iso: "https://iso.example/test.iso",
-  serverUrl: "http://proxy:42069",
-  resume: action === "drive" && resume,
-});
-
 const unused = (): never => {
   throw new Error("unexpected call");
 };
@@ -187,17 +171,28 @@ export const world = (
     },
   }))({});
 
-  const harness = DriveHarness.create({ tests, qemuHttpTools, openRouter });
+  const harness = new DriveHarness.DriveHarness({ tests, qemuHttpTools, openRouter });
   return { calls, requests, harness };
 };
 
+// One tool call, with the model's text beside it.
 export const said = (
   name: string,
   args: Readonly<Record<string, unknown>> | string,
+  content: string | null = null,
 ): jarl.Result<OpenRouter.Turn, never> =>
   jarl.ok({
-    content: null,
+    content,
     toolCalls: [
       { id: "call-1", name, arguments: typeof args === "string" ? args : JSON.stringify(args) },
     ],
   });
+
+// The system prompt and the user turn of each request, as the model read them.
+export const shown = (request: OpenRouter.Request | undefined) => {
+  const [system, user] = request?.messages ?? [];
+  return {
+    prompt: system?.role === "system" ? system.content : "",
+    user: user?.role === "user" ? user.content : "",
+  };
+};
