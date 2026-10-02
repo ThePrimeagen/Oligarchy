@@ -304,7 +304,9 @@ describe("announcing a member", () => {
   });
 
   it("an abort during a write lets the write finish before the row is deleted (error)", async () => {
+    vi.useFakeTimers();
     const { calls, needs } = faked();
+    const entered = held<void>();
     const writing = held<jarl.Result<void, Db.DatabaseError>>();
     const stop = new AbortController();
     let settled = false;
@@ -316,6 +318,7 @@ describe("announcing a member", () => {
           ...needs.servers,
           heartbeat: () => {
             calls.push("heartbeat");
+            entered.release();
             return writing.promise;
           },
         },
@@ -325,17 +328,21 @@ describe("announcing a member", () => {
     ).then(() => {
       settled = true;
     });
-    await vi.waitFor(() => {
+    try {
+      await entered.promise;
+
+      stop.abort();
+      await vi.advanceTimersByTimeAsync(20);
       expect(calls).toEqual(["heartbeat"]);
-    });
+      expect(settled).toBe(false);
 
-    stop.abort();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(calls).toEqual(["heartbeat"]);
-    expect(settled).toBe(false);
-
-    writing.release(jarl.ok(undefined));
-    await announced;
-    expect(calls).toEqual(["heartbeat", "process stats", "remove"]);
+      writing.release(jarl.ok(undefined));
+      await announced;
+      expect(calls).toEqual(["heartbeat", "process stats", "remove"]);
+    } finally {
+      stop.abort();
+      writing.release(jarl.ok(undefined));
+      vi.useRealTimers();
+    }
   });
 });
