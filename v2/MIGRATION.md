@@ -282,9 +282,18 @@ record, and the automation server acts on it directly.
       passed. Two runs closing at once can each find the suite done; the second completion is
       refused and says nothing. A diagnose whose agent recorded no verdict is `errorJob`ed, and
       the job it judged and its run stay open for Try again.
-- [ ] **Abort.** By job id or by suite id, from `ctrl`, the dashboard and the automation server's
-      `/abort`. A pending job is `abortJob`ed; a running one is stopped at its automation client
-      first.
+- [x] **Abort.** By job id or by suite id, through the automation server's `/abort`
+      (`src/abort.ts`); ctrl does not abort, and who calls it (the dashboard, a V2 tool) is
+      open. Every write says `aborted by an operator`. A pending job is `abortJob`ed. A running
+      one is stopped at its automation client first, with `/abort` and a 15-second deadline,
+      then `abortJob`ed: a client that cannot be reached leaves it running and the abort fails;
+      one that is forgotten, or answers `not-held`, had nothing to stop, which is a warning
+      under the job. While its client stops it, the job's run answers `aborted`, and that close
+      leaves the job to the abort. A job that ended while it was being stopped has nothing to
+      abort and closes as it would have. A job's run is aborted with it, and the run's suite
+      closes once none of its runs is open. A suite has each open run's job aborted, and each
+      run with it, all at once; when one fails, the rest still go, the first failure is the
+      answer, and the suite stays open. Otherwise the suite is aborted.
 - [ ] **Restart and shutdown.** At startup, each job the last automation server left running is
       stopped at its client and errored, except a drive or setup whose driver had already finished,
       which is closed as it would have been. At shutdown, each running job is stopped at its client
@@ -415,11 +424,13 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             required `--port` through `@hono/node-server`. `main` listens before anything else starts: the started line names
             the address, and a port that cannot be bound is a fatal line and exit 1. On a signal
             the listener closes before `shutdown`.
-      - [ ] **`/abort`** (section 3's Abort), by job id or by suite id. The route and its contract
-            are in: a body of `{ jobId }` or `{ suiteId }`, each a uuid, never both, since a job
-            filed on its own has no suite; anything else is 400 `name a jobId or a suiteId`, and
-            the typed client refuses it too. Until this task it answers 501 `abort is not written
-            yet`.
+      - [x] **`/abort`** (section 3's Abort), by job id or by suite id. A body of `{ jobId }` or
+            `{ suiteId }`, each a uuid, never both, since a job filed on its own has no suite;
+            anything else is 400 `name a jobId or a suiteId`, and the typed client refuses it
+            too. It answers 200 `{}` once the abort is written, 404 for a job or suite it does not
+            know, 409 for one already ended, 502 when a running job's client could not stop it,
+            and 500 for a database error; each refusal is `{ error }` naming why. On a signal,
+            the aborts it has taken finish writing before `shutdown`.
 - [ ] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
       shutdown against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a
       diagnose (`run.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
@@ -526,9 +537,11 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
 
 ## 5. Cutover
 
-- [ ] **CI for V2.** CI lints and formats `v2/` but never runs its type checks or unit tests, and
-      the migration checks guard only `packages/db/drizzle`. Add V2's `check:types`, `test:unit`
-      and `db:check`, and the append-only and in-sync checks for `v2/packages/db/drizzle`.
+- [x] **CI for V2.** `.github/workflows/v2.yml` runs V2's `check:types` and `test:unit` from
+      `v2/` on every pull request and every push to master, and guards `v2/packages/db/drizzle`:
+      on a pull request, no migration already in master is modified or deleted, and `db:check`
+      passes and `db:generate` writes nothing new. Each package carries the types it builds
+      against, since a clean `v2/` install has no root `@types/node`.
 - [ ] **Docs and skills.** The root `AGENTS.md`, `client.md`, `ctrl.md`, `ctrl-linear.md`,
       `ctrl-diagnose.md`, `minted-disks.md`, `SUPER_RUN.md` and the skills in `.cursor/skills`
       describe V1 and its Linear board: a driving agent takes its task from a ticket, and a run is
