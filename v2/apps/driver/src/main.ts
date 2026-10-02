@@ -1,26 +1,15 @@
 import * as App from "@oligarchy/app";
-import * as DriveHarness from "@oligarchy/drive-harness";
+import type * as DriveHarness from "@oligarchy/drive-harness";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
-import type * as OpenRouter from "@oligarchy/openrouter";
-import type * as Qemu from "@oligarchy/qemu-http-tools";
-import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import * as Drive from "./drive.ts";
 import { environment, type Run } from "./environment.ts";
 import { closeServices, createServices } from "./services.ts";
 
-const main = async (
-  app: App.App<
-    Run,
-    Logger.Logger | Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter
-  >,
-) => {
+const main = async (app: App.App<Run, Logger.Logger | DriveHarness.DriveHarness>) => {
   const { flags, config } = app.environment;
-  const harness = new DriveHarness.DriveHarness(app.services, {
-    recentActions: config.harness.recentActions,
-  });
-  const ended = await Drive.drive(app.services, harness, {
+  const ended = await Drive.drive(app.services, {
     jobId: flags.jobId,
     config,
     signal: app.signal,

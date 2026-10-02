@@ -17,10 +17,7 @@ const BAD_REPLY_LIMIT = 3;
 export const DriverFailed = jarl.error.define("DriverFailed");
 export type DriverFailed = InstanceType<typeof DriverFailed>;
 
-export type Harness = Pick<
-  DriveHarness.DriveHarness,
-  "data" | "loadJobHarnessData" | "start" | "getImage" | "ask" | "act" | "finish"
->;
+export type Services = App.Needs<Logger.Logger | DriveHarness.DriveHarness>;
 
 export type Limits = Pick<Env.Config, "models" | "reasoning" | "stepLimit" | "runCeiling">;
 
@@ -45,12 +42,11 @@ const failed = (message: string) => jarl.err(new DriverFailed(message));
 // Each turn: the screen, the model's turn, its move. Ends when the model is done, at a limit, when
 // the guest is off, or on the signal.
 const turns = async (
-  services: App.Needs<Logger.Logger>,
-  harness: Harness,
+  services: Services,
   action: "drive" | "setup",
   options: Options,
 ): Promise<jarl.Result<Ended, DriverFailed>> => {
-  const { logger } = services;
+  const { logger, driveHarness: harness } = services;
   const { config, signal } = options;
   const at = { location: LOCATION, agentId: options.jobId };
   const deadline = Date.now() + config.runCeiling;
@@ -146,11 +142,10 @@ const turns = async (
 // One drive or setup job, from its load to its guest's stop. A test that failed is still a drive
 // that ran to its end; only the system failing it is DriverFailed.
 export const drive = async (
-  services: App.Needs<Logger.Logger>,
-  harness: Harness,
+  services: Services,
   options: Options,
 ): Promise<jarl.Result<Ended, DriverFailed>> => {
-  const { logger } = services;
+  const { logger, driveHarness: harness } = services;
   const at = { location: LOCATION, agentId: options.jobId };
   const refuse = (message: string) => {
     logger.error(message, at);
@@ -171,7 +166,7 @@ export const drive = async (
   }
   logger.info(`${action} ${name}: started ${iso}${resume ? ", resumed" : ""}`, at);
 
-  const looped = await turns(services, harness, action, options);
+  const looped = await turns(services, action, options);
   if (jarl.is_err(looped)) {
     logger.error(looped.error.message, at);
     const stopped = await harness.finish({ status: "failed", reason: looped.error.message });

@@ -1,5 +1,6 @@
 import type * as App from "@oligarchy/app";
 import * as Db from "@oligarchy/db";
+import * as DriveHarness from "@oligarchy/drive-harness";
 import type * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
 import * as Logger from "@oligarchy/logger";
@@ -20,6 +21,7 @@ export type Services = App.Needs<
   | Stores.Tests.Tests
   | Qemu.QemuHttpTools
   | OpenRouter.OpenRouter
+  | DriveHarness.DriveHarness
 >;
 
 // Every line is printed and stored in the logs table; an error or fatal line, and a line that
@@ -60,7 +62,20 @@ export const createServices = (
       attempts: ATTEMPTS,
     },
   );
-  return { http, sentry, db, logger, tests, qemuHttpTools, openRouter } satisfies Services;
+  const driveHarness = DriveHarness.create(
+    { tests, qemuHttpTools, openRouter },
+    { recentActions: config.harness.recentActions },
+  );
+  return {
+    http,
+    sentry,
+    db,
+    logger,
+    tests,
+    qemuHttpTools,
+    openRouter,
+    driveHarness,
+  } satisfies Services;
 };
 
 // Every line waits on its insert, so the pool stays open until the last one lands; a line the
