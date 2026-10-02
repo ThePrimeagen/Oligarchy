@@ -37,6 +37,10 @@ meet plus one happy path, and every service is faked except the database.
   a route that changes stops its callers compiling. An app exports its routes, and a fake of
   what they are handed as `./testing`, for its callers and their tests; there is still no
   shared API package.
+- **The reverse proxy is the qemu server.** V1's `apps/qemu-reverse-proxy` is V2's qemu server,
+  `v2/apps/qemu-server`, beside the automation server; an automation client reaches it at
+  `--server-url`. What V1 calls a qemu server, the machine that boots the guests, is a qemu host
+  until its V2 app has a name of its own.
 - **No sessions.** What V1 kept on a session (actions, images, logs, routing, debug logs,
   diagnoses) is keyed by job or by test run.
 - **Modern terminals only.** Output is coloured when stdout is a TTY, and the terminal is assumed
@@ -217,7 +221,8 @@ under `v2/apps/`: its `main` reads its environment with
 logger and waited for on exit, as the tester's are), serves Hono behind the `OLIGARCHY_TOKEN`
 bearer, and runs under `@oligarchy/app`.
 
-- [ ] **qemu-server** (`apps/qemu-server`). Services: `Qemu` (starts a guest; keys, mouse,
+- [ ] **qemu host** (V1's `apps/qemu-server`; its V2 app's name is open, since `qemu-server` is
+      now V1's reverse proxy). Services: `Qemu` (starts a guest; keys, mouse,
       screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `SetupDisks`
       (finds and saves setup disks), `QmpListen` (the QMP socket) and `Sessions` (slots against
       `--max-jobs`, each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`,
@@ -241,21 +246,32 @@ bearer, and runs under `@oligarchy/app`.
       `SHUTDOWN` is `crashed`, with its exit code or signal and the end of its stderr. pvpanic
       carries no detail: a panic's trace reaches the serial only once the installed system's
       kernel writes its console to `ttyS0`, which the setup does not set yet.
-- [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
-      qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
-      `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
-      `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
-      `/stats`. Forgets silent servers with `fleet.forget`, in a loop of its own as the
-      automation server does. Its `/reserve` and `/relinquish` answer as the automation
-      client's `src/proxy.ts` reads them: `/reserve` takes `{ job, resume? }` for a drive or
-      `{ job, setupServer }` for a setup, and answers 200 reserved, 503 at capacity, 409 setup
-      needed, and a 4xx only when it reserved nothing; `/relinquish` takes `{ job }`, and 404 is
-      a job it holds no guest for. Once it serves `Routes`, the client's calls move onto
-      `@oligarchy/http/client`. A resume reserve that no server can
-      take, because those with room hold no setup disk for its ISO, takes each such server's setup
+- [ ] **qemu-server** (`v2/apps/qemu-server`, V1's `apps/qemu-reverse-proxy`). Services: `Router`
+      (registers and lists qemu hosts, reserves and starts a job's guest on one, and forwards each
+      later call to it by `servers.serverForJob`) and `Setup` (the setup lock watcher on
+      `setup_requests`). Serves `/servers`, `/setup-disks` (asking every qemu host) and the qemu
+      host's calls except `/stats`. Forgets silent hosts with `fleet.forget`, in a loop of its own
+      as the automation server does. A resume reserve that no host can
+      take, because those with room hold no setup disk for its ISO, takes each such host's setup
       lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
-      setup needed. One setup per ISO and server: a reserve while that setup is in flight files
-      none, and one that ended without passing releases the lock (V1: `setup.ts`).
+      setup needed. One setup per ISO and host: a reserve while that setup is in flight files
+      none, and one that ended without passing releases the lock (V1: `setup.ts`). Done when
+      every task below is ticked.
+      - [x] **Routes.** `routes.ts` alone, with no `main` and no services yet: one chained Hono
+            app behind the `OLIGARCHY_TOKEN` bearer, exported as `Routes`
+            (`@oligarchy/qemu-server/routes`), and `./testing` fakes the `Router` functions they
+            are handed. Each answers 501 until its task hands `routes({ token, router })` its
+            function. The automation client's calls (`src/qemu-server.ts`) are an
+            `@oligarchy/http/client` typed by them.
+            - `/reserve`: `{ job, resume? }` for a drive or `{ job, setupServer }` for a setup,
+              never both. `reserved` is 200, `at-capacity` 503 and `setup-needed` 409;
+              `ReserveRefused` (it placed no guest) is 400 and `ReserveFailed` (it may have
+              placed one, so the caller gives it back) 500, each naming why.
+            - `/relinquish`: `{ job }`. `relinquished` is 200, `not-held` (no guest for the job)
+              404, and `RelinquishFailed` 500 naming why.
+
+            The qemu host's other calls (`/start`, `/image` and the rest, which
+            `@oligarchy/qemu-http-tools` makes by hand) join the routes as their tasks land.
 - [ ] **automation-server** (`v2/apps/automation-server`). Section 3's dispatch, close, abort,
       restart and shutdown, and `/abort`. `/linear`, the board watch (`backlog.ts`) and the
       webhook signature (`signature.ts`) go. Done when every task below is ticked, roughly in
@@ -339,22 +355,22 @@ bearer, and runs under `@oligarchy/app`.
             port it cannot bind announces nothing. It reports no guests, and no jobs until Reserve
             counts them.
       - [x] **Reserve** (`src/reserve.ts`) against a required `--max-jobs`: a slot for the job,
-            and for a drive or setup a guest reserved first at the qemu reverse proxy at a
-            required `--server-url` (or `SERVER_URL`), which has no default; a diagnose asks the
-            proxy for nothing. At `--max-jobs`, or while another reserve is still asking the
-            proxy, it is 503 at capacity and the proxy is not asked. The reservation is
-            `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
-            shutdown has begun is `ShuttingDown` (503). The proxy's own answers are 503 at
+            and for a drive or setup a guest reserved first at the qemu server at a required
+            `--server-url` (or `SERVER_URL`), which has no default; a diagnose asks the qemu
+            server for nothing. At `--max-jobs`, or while another reserve is still asking the
+            qemu server, it is 503 at capacity and the qemu server is not asked. The reservation
+            is `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
+            shutdown has begun is `ShuttingDown` (503). The qemu server's own answers are 503 at
             capacity and 409 setup needed, each letting the job go; any other is a
             `ReserveFailed` (500) naming why, and lets the job go too. One that may have landed
             first, anything but a 4xx (an abort or a timeout among them), gives its guest back
             before that. When the held signal aborts before a run takes the job, the reservation
-            gives its guest back at the proxy and then calls `release`; a relinquish that fails
-            is an error line under the job, and the job is let go all the same. `take(jobId)`
-            hands the reservation, its action and its hold to the run, and from then on nothing
-            is given back for it. The announce's report counts the jobs held. Calls to the proxy
-            are `src/proxy.ts` over `@oligarchy/http`, not `@oligarchy/http/client`, until the
-            proxy has `Routes` of its own (see qemu-reverse-proxy).
+            gives its guest back at the qemu server and then calls `release`; a relinquish that
+            fails is an error line under the job, and the job is let go all the same.
+            `take(jobId)` hands the reservation, its action and its hold to the run, and from then
+            on nothing is given back for it. The announce's report counts the jobs held. Calls to
+            the qemu server are `src/qemu-server.ts`, an `@oligarchy/http/client` typed by its
+            `Routes` (see qemu-server's Routes).
             Open: a reservation no run takes, because the automation server died between its
             reserve and its run, is held until it is aborted or the client restarts. V1 gave one
             back after ten minutes unused; decide whether Restart aborts it at the client, or the
