@@ -1,4 +1,5 @@
 import type * as App from "@oligarchy/app";
+import type * as Db from "@oligarchy/db";
 import type * as Http from "@oligarchy/http";
 import type * as OpenRouter from "@oligarchy/openrouter";
 import type * as Qemu from "@oligarchy/qemu-http-tools";
@@ -25,7 +26,9 @@ export type {
 // The user turn beside the system prompt; the screenshot, when there is one, goes with it.
 const ASKING = "Reply with your next tool call.";
 
-export type Services = App.Needs<Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter>;
+export type Services = App.Needs<
+  Stores.Tests.Tests | Stores.Moves.Moves | Qemu.QemuHttpTools | OpenRouter.OpenRouter
+>;
 
 // One drive or setup job's guest and model, and what the model has been shown so far. The driver
 // runs the loop and its limits: load and start, then each turn getImage, ask and act until the
@@ -141,17 +144,24 @@ export class DriveHarness {
 
   // 3. The turn's one tool call, run under its step. A move for a step that is not open opens it
   // first, and runs nothing when it cannot. What came of the move, or of a refused reply, is kept
-  // under the open step.
+  // under the open step and recorded for the job; a record that failed is returned in its place.
   async act(
     turn: OpenRouter.Turn,
   ): Types.Answer<
     Types.Move,
-    Moves.ReplyInvalid | Qemu.RunFailure | Http.HttpFailure | Qemu.IntentOpen
+    Moves.ReplyInvalid | Qemu.RunFailure | Http.HttpFailure | Qemu.IntentOpen | Db.DatabaseError
   > {
     const move = Moves.parse(turn);
     if (jarl.is_err(move)) {
-      this.steps.at(-1)?.actions.push({ kind: "refused", outcome: move.error.message });
-      return move;
+      const open = this.steps.at(-1);
+      open?.actions.push({ kind: "refused", outcome: move.error.message });
+      const recorded = await this.services.moves.recordMove({
+        jobId: this.data.jobId,
+        kind: "refused",
+        step: open?.step ?? null,
+        outcome: move.error.message,
+      });
+      return jarl.is_err(recorded) ? recorded : move;
     }
     const parsed = jarl.value(move);
     if (parsed.kind === "done") {
@@ -170,18 +180,24 @@ export class DriveHarness {
       reason: parsed.reason,
       arguments: parsed.arguments,
     } as const;
-    if (jarl.is_err(ran)) {
-      this.steps.at(-1)?.actions.push({ ...done, outcome: ran.error.message });
-      this.screen = undefined;
-      return ran;
-    }
-    const { text, image } = jarl.value(ran);
-    this.steps.at(-1)?.actions.push({ ...done, outcome: text });
+    const { text: outcome, image } = jarl.is_err(ran)
+      ? { text: ran.error.message, image: undefined }
+      : jarl.value(ran);
     this.screen = image;
-    if (image === undefined) {
+    if (jarl.is_ok(ran) && image === undefined) {
       this.previous = { name: parsed.name, arguments: parsed.arguments };
     }
-    return move;
+    this.steps.at(-1)?.actions.push({ ...done, outcome });
+    const recorded = await this.services.moves.recordMove({
+      jobId: this.data.jobId,
+      step: parsed.step,
+      ...done,
+      outcome,
+    });
+    if (jarl.is_err(recorded)) {
+      return recorded;
+    }
+    return jarl.is_err(ran) ? ran : move;
   }
 
   // 4. Ends the open step's intent and starts this one's, named after its ActionList line. A step

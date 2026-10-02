@@ -2,6 +2,7 @@ export * as Actions from "./actions.ts";
 export * as DebugLogs from "./debug-logs.ts";
 export * as Diagnosis from "./diagnosis.ts";
 export * as Logs from "./logs.ts";
+export * as Moves from "./moves.ts";
 export * as ProcessStats from "./process-stats.ts";
 export * as Servers from "./servers.ts";
 export * as SetupRequests from "./setup-requests.ts";

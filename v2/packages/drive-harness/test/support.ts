@@ -89,6 +89,8 @@ export type Call = readonly [string, ...ReadonlyArray<unknown>];
 export type World = {
   readonly calls: Array<Call>;
   readonly requests: Array<OpenRouter.Request>;
+  // Every move the harness asked to record, in order, whether or not the record landed.
+  readonly moved: Array<Stores.Moves.MoveInput>;
   readonly harness: DriveHarness.DriveHarness;
 };
 
@@ -100,10 +102,12 @@ export const world = (
     readonly guest?: Partial<Guest>;
     readonly turns?: ReadonlyArray<jarl.Result<OpenRouter.Turn, OpenRouter.Failure>>;
     readonly recentActions?: number;
+    readonly recordMove?: Stores.Moves.Moves["recordMove"];
   } = {},
 ): World => {
   const calls: Array<Call> = [];
   const requests: Array<OpenRouter.Request> = [];
+  const moved: Array<Stores.Moves.MoveInput> = [];
   const turns = [...(script.turns ?? [])];
   const guest = script.guest ?? {};
   const recorded =
@@ -186,11 +190,19 @@ export const world = (
     },
   }))({});
 
+  const moves = App.createService<never, App.NoOptions, Stores.Moves.Moves>(() => ({
+    service: "moves",
+    recordMove: async (input) => {
+      moved.push(input);
+      return script.recordMove === undefined ? jarl.ok(undefined) : script.recordMove(input);
+    },
+  }))({});
+
   const harness = new DriveHarness.DriveHarness(
-    { tests, qemuHttpTools, openRouter },
+    { tests, qemuHttpTools, openRouter, moves },
     { recentActions: script.recentActions ?? 10 },
   );
-  return { calls, requests, harness };
+  return { calls, requests, moved, harness };
 };
 
 // One tool call, with the model's text beside it.

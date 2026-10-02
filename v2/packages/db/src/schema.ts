@@ -42,6 +42,8 @@ export const testRunStatus = pgEnum("test_run_status", [
 // "WHERE level >= 'error'" reads the scary lines.
 export const logLevel = pgEnum("log_level", ["info", "warning", "error", "fatal"]);
 export const actionState = pgEnum("action_state", ["completed", "failed"]);
+// A driver's turn: a guest move it ran, or a reply it refused and ran nothing for.
+export const moveKind = pgEnum("move_kind", ["move", "refused"]);
 // The reviewer's own answer to "did the proof land": the test's vocabulary, not the job's.
 export const diagnosisVerdict = pgEnum("diagnosis_verdict", ["passed", "failed"]);
 
@@ -75,6 +77,34 @@ export const actions = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [index("actions_job_id_idx").on(table.jobId)],
+);
+
+// What the model did, as the driver saw it: one row per turn, written once the turn's outcome is
+// known. The actions are the QMP exchanges a move became; a move is the tool call that made them,
+// with the ActionList step it worked on and the model's reason. A refused reply names no tool,
+// and its step is the one open then, null before any opened.
+export const moves = pgTable(
+  "moves",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    kind: moveKind("kind").notNull(),
+    step: integer("step"),
+    name: text("name"),
+    reason: text("reason"),
+    arguments: jsonb("arguments"),
+    outcome: text("outcome").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("moves_job_id_idx").on(table.jobId),
+    check(
+      "moves_kind_check",
+      sql`(${table.kind} = 'move') = (${table.step} IS NOT NULL AND ${table.name} IS NOT NULL AND ${table.reason} IS NOT NULL AND ${table.arguments} IS NOT NULL)`,
+    ),
+  ],
 );
 
 export const images = pgTable(

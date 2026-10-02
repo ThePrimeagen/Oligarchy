@@ -25,8 +25,8 @@ const ran = async (name: string) =>
     name === "get_image" ? { text: "took a screenshot", image: SCREEN } : { text: "sent the keys" },
   );
 
-it("drives a job step by step, keeping each step's actions and what the model is shown", async () => {
-  const { harness, calls, requests } = world({
+it("drives a job step by step, keeping and recording each step's actions and what the model is shown", async () => {
+  const { harness, calls, requests, moved } = world({
     guest: { run: ran },
     turns: [
       said(
@@ -93,6 +93,27 @@ it("drives a job step by step, keeping each step's actions and what the model is
           outcome: "took a screenshot",
         },
       ],
+    },
+  ]);
+  // Each move is recorded whole, under its job and step; Done is no move.
+  expect(moved).toEqual([
+    {
+      jobId: JOB,
+      kind: "move",
+      step: 1,
+      name: "send_keys",
+      reason: "Type the password",
+      arguments: { keys: "prime<ENTER>" },
+      outcome: "sent the keys",
+    },
+    {
+      jobId: JOB,
+      kind: "move",
+      step: 2,
+      name: "get_image",
+      reason: "Look at the desktop",
+      arguments: {},
+      outcome: "took a screenshot",
     },
   ]);
 
@@ -303,8 +324,8 @@ it.each([
   expect(calls).toEqual([]);
 });
 
-it("keeps a refused reply under the open step, and reads no arguments as an empty object", async () => {
-  const { harness, requests } = world({
+it("keeps and records a refused reply under the open step, and reads no arguments as an empty object", async () => {
+  const { harness, requests, moved } = world({
     turns: [jarl.ok({ content: "I am finished", toolCalls: [] }), said("Done", "")],
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
@@ -323,11 +344,17 @@ it("keeps a refused reply under the open step, and reads no arguments as an empt
     ].join("\n"),
   );
   expect(prompt).toContain("Your last response was: I am finished");
+  expect(moved[1]).toEqual({
+    jobId: JOB,
+    kind: "refused",
+    step: 1,
+    outcome: "reply: expected one tool call, got 0",
+  });
 });
 
-it("returns a move the guest refused, keeps why under its step, and drops the screenshot", async () => {
+it("returns a move the guest refused, keeps and records why under its step, and drops the screenshot", async () => {
   const off = new Qemu.GuestOff("send-keys: 409");
-  const { harness, requests } = world({
+  const { harness, requests, moved } = world({
     guest: { run: async () => jarl.err(off) },
     turns: [said("Done", {})],
   });
@@ -342,6 +369,57 @@ it("returns a move the guest refused, keeps why under its step, and drops the sc
   const { prompt, user } = shown(requests[0]);
   expect(prompt).toContain('Step 1: Type {{MODEL}}\n- send_keys {"keys":"x"}: send-keys: 409');
   expect(user).toEqual(expect.any(String));
+  expect(moved).toEqual([
+    {
+      jobId: JOB,
+      kind: "move",
+      step: 1,
+      name: "send_keys",
+      reason: "Type",
+      arguments: { keys: "x" },
+      outcome: "send-keys: 409",
+    },
+  ]);
+});
+
+it("returns a move whose record failed as the database's error, after the move ran and is kept under its step", async () => {
+  const error = new Db.DatabaseError("connection refused");
+  const { harness, calls } = world({ recordMove: async () => jarl.err(error) });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+
+  const result = await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" }));
+
+  if (!jarl.error.is(result, Db.DatabaseError)) {
+    throw new Error("expected DatabaseError");
+  }
+  expect(result.error).toBe(error);
+  expect(calls).toContainEqual(["run", "send_keys", { keys: "x" }]);
+  expect(harness.steps[0]?.actions).toEqual([
+    {
+      kind: "move",
+      name: "send_keys",
+      reason: "Type",
+      arguments: { keys: "x" },
+      outcome: "sent the keys",
+    },
+  ]);
+});
+
+it("returns a refused reply whose record failed as the database's error, recorded under no step when none is open", async () => {
+  const error = new Db.DatabaseError("connection refused");
+  const { harness, calls, moved } = world({ recordMove: async () => jarl.err(error) });
+  jarl.unwrap(await harness.loadJobHarnessData(JOB));
+
+  const result = await harness.act({ content: "I am finished", toolCalls: [] });
+
+  if (!jarl.error.is(result, Db.DatabaseError)) {
+    throw new Error("expected DatabaseError");
+  }
+  expect(result.error).toBe(error);
+  expect(calls).toEqual([]);
+  expect(moved).toEqual([
+    { jobId: JOB, kind: "refused", step: null, outcome: "reply: expected one tool call, got 0" },
+  ]);
 });
 
 it("loads the job's harness data and derives its boot mode from its action and definition", async () => {
