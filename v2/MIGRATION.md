@@ -238,14 +238,15 @@ record, and the automation server acts on it directly.
       The V2 implementation is `@oligarchy/missions`: `load(services, { jobId })` reads
       `tests.getJobDetails` and returns the job and run IDs, action, pinned definition, ISO,
       proxy URL and boot mode. Only a resuming drive resumes; setup always boots fresh.
-      `@oligarchy/missions/prompts` provides `create({ read })` (real file IO by default),
+      `@oligarchy/missions/prompts` provides `create({ readFile })` (real file IO by default),
       with `agent(mission, { model })` for dispatch and
       `harness(mission, { reasons, response?, previous? })` for each model turn. Previous
       actions are native tool names and argument objects. All replacements happen once, so
       a definition or model reply containing `{{MODEL}}` stays literal text.
-      Its templates live in `v2/prompts/` and list the exported `qemu-http-tools.tools`
-      catalogue. Step, reason and Done belong to the driver; it must expose those alongside
-      the native tools and remove step and reason before `qemu-http-tools.run`.
+      Its templates live in `v2/prompts/`. The driving and harness templates list the exported
+      `qemu-http-tools.tools` catalogue; the harness appends its own Done tool. Step and reason
+      belong to the driver; it must add them to the native tools it exposes and remove them
+      before `qemu-http-tools.run`.
       Dispatch: run and the driver port wire these entrypoints into their execution paths.
       The diagnosis prompt identifies its own job and run and requires a verdict against
       the preceding drive or setup job; exact evidence commands wait for the V2 ctrl port.
