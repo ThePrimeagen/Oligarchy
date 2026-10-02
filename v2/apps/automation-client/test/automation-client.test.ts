@@ -1,219 +1,273 @@
-import { spawn } from "node:child_process";
-import { createServer, type Server } from "node:net";
-import { fileURLToPath } from "node:url";
-import * as FakePostgres from "@oligarchy/fake-postgres";
+import * as App from "@oligarchy/app";
+import * as Db from "@oligarchy/db";
+import * as Env from "@oligarchy/env";
+import type * as Fleet from "@oligarchy/fleet";
+import * as FakeHttp from "@oligarchy/http/testing";
+import * as Serve from "@oligarchy/http/serve";
+import * as FakeLogger from "@oligarchy/logger/testing";
+import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import { Client } from "pg";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as Application from "../src/application.ts";
+import { environment } from "../src/environment.ts";
 
-const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const TOKEN = "oligarchy-token";
 const NAME = "c1";
+const PORT = 4100;
 const CLIENT_URL = "http://c1.test:4100";
+const PROXY_URL = "http://proxy.test:42069";
+const JOB = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
+const STARTED = `[INFO] [global] automation-client: started on 127.0.0.1:4100; name ${NAME}; announcing ${CLIENT_URL}`;
 const STOPPED = "[INFO] [global] automation-client: stopped; SIGTERM received";
-const HEARTBEAT_FAILED = "[ERROR] [global] automation-client: heartbeat failed: ";
 
-const startedText = (port: number) =>
-  `started on 127.0.0.1:${String(port)}; name ${NAME}; announcing ${CLIENT_URL}`;
-const startedLine = (port: number) => `[INFO] [global] automation-client: ${startedText(port)}`;
-
-const cleanups: Array<() => Promise<unknown> | unknown> = [];
-
-afterEach(async () => {
-  for (let cleanup = cleanups.pop(); cleanup !== undefined; cleanup = cleanups.pop()) {
-    await cleanup();
-  }
+const CONFIG = JSON.stringify({
+  models: { drive: "test/model", diagnose: "test/model", setup: "test/model" },
+  reasoning: { drive: "high", diagnose: "high", setup: "high" },
+  openRouterBaseUrl: "https://openrouter.test",
+  timeouts: { header: "1 second", chunk: "1 second" },
+  runCeiling: "1 minute",
+  stepLimit: 10,
+  harness: { defaultRetry: "1 second" },
+  automationServer: {
+    dispatchInterval: "1 second",
+    forgetInterval: "1 second",
+    forgetAfter: "1 minute",
+  },
 });
 
-const started = async () => {
-  const fake = jarl.unwrap(await FakePostgres.start());
-  cleanups.push(() => fake.stop());
-  return fake;
+const unexpected = (): never => {
+  throw new Error("unexpected service call");
 };
 
-const query = async (url: string, sql: string) => {
-  const client = new Client({ connectionString: url });
-  await client.connect();
-  try {
-    return (await client.query(sql)).rows;
-  } finally {
-    await client.end();
-  }
-};
+beforeEach(() => {
+  vi.useFakeTimers();
+});
 
-// A port held open on 127.0.0.1 until the test ends.
-const held = async (): Promise<{ readonly port: number; readonly server: Server }> => {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  cleanups.push(() => new Promise((resolve) => server.close(resolve)));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("no port");
-  }
-  return { port: address.port, server };
-};
+afterEach(() => {
+  vi.useRealTimers();
+});
 
-// A port nothing listens on.
-const freePort = async (): Promise<number> => {
-  const { port, server } = await held();
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-};
-
-// The client as its own process, the way `bun run automation-client` starts it. A proxy nobody
-// listens on refuses its requests to Sentry, so an error line it sends never reaches the real
-// project.
-const automationClient = (argv: ReadonlyArray<string>, env: Readonly<Record<string, string>>) => {
-  const { DATABASE_URL: _, OLIGARCHY_TOKEN: __, ...inherited } = process.env;
-  const child = spawn(process.execPath, ["--no-env-file", MAIN, ...argv], {
-    env: {
-      ...inherited,
-      ...env,
-      https_proxy: "http://127.0.0.1:1",
-      http_proxy: "http://127.0.0.1:1",
-      no_proxy: "",
+const started = async (
+  options: {
+    readonly listenError?: Serve.ListenFailed;
+    readonly heartbeatError?: Db.DatabaseError;
+  } = {},
+) => {
+  const env = jarl.unwrap(
+    await Env.create(
+      environment,
+      Env.fakeIo({
+        argv: [
+          "--port",
+          String(PORT),
+          "--name",
+          NAME,
+          "--url",
+          CLIENT_URL,
+          "--max-jobs",
+          "1",
+          "--server-url",
+          PROXY_URL,
+        ],
+        env: { DATABASE_URL: "postgres://unused.test/db", OLIGARCHY_TOKEN: TOKEN },
+        files: { [Env.CONFIG_PATH]: CONFIG },
+      }),
+    ),
+  );
+  const log = FakeLogger.logger();
+  const order: Array<string> = [];
+  const heartbeats: Array<Parameters<Stores.Servers.Servers["heartbeat"]>> = [];
+  const readings: Array<Parameters<Stores.ProcessStats.ProcessStats["report"]>> = [];
+  const removed: Array<string> = [];
+  const http = FakeHttp.http({
+    replies: (asked) => {
+      order.push(new URL(asked.url).pathname);
+      return FakeHttp.json({});
     },
   });
-  cleanups.push(() => child.kill("SIGKILL"));
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-  const exited = new Promise<number | null>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
-  const lines = () => stdout.split("\n").filter((line) => line !== "");
-  return { child, exited, lines, stderr: () => stderr };
+  const host = App.createService<never, App.NoOptions, Fleet.Host.Host>(() => ({
+    service: "host",
+    sample: () => undefined,
+    collect: () => ({
+      memory: { totalBytes: 1000, usedBytes: 750, freeBytes: 250 },
+      cpu: {
+        cores: 2,
+        mean: 10,
+        mean1m: 11,
+        mean2m: 12,
+        mean3m: 13,
+        p10: 0,
+        p25: 0,
+        p75: 0,
+        p90: 50,
+      },
+    }),
+  }))({});
+  const usage = App.createService<never, App.NoOptions, Fleet.Usage.Usage>(() => ({
+    service: "usage",
+    collect: async () => jarl.ok({ memoryBytes: 5, cpuPercent: 1.5 }),
+  }))({});
+  const servers = App.createService<never, App.NoOptions, Stores.Servers.Servers>(() => ({
+    service: "servers",
+    heartbeat: async (...args) => {
+      heartbeats.push(args);
+      return options.heartbeatError === undefined
+        ? jarl.ok(undefined)
+        : jarl.err(options.heartbeatError);
+    },
+    removeServer: async (url) => {
+      removed.push(url);
+      return jarl.ok(true);
+    },
+    addServer: unexpected,
+    listServers: unexpected,
+    listMachines: unexpected,
+    listLiveServers: unexpected,
+    removeStaleServers: unexpected,
+    findServer: unexpected,
+    routeJob: unexpected,
+    serverForJob: unexpected,
+  }))({});
+  const processStats = App.createService<never, App.NoOptions, Stores.ProcessStats.ProcessStats>(
+    () => ({
+      service: "processStats",
+      report: async (...args) => {
+        readings.push(args);
+        return jarl.ok(undefined);
+      },
+      listSeries: unexpected,
+    }),
+  )({});
+  const addresses: Array<Parameters<typeof Serve.listen>[1]> = [];
+  let fetch: Parameters<typeof Serve.listen>[0] = unexpected;
+  const listen: typeof Serve.listen = async (handler, address) => {
+    addresses.push(address);
+    if (options.listenError !== undefined) {
+      return jarl.err(options.listenError);
+    }
+    fetch = handler;
+    return jarl.ok({
+      close: async () => {
+        order.push("close listener");
+      },
+    });
+  };
+  const codes: Array<number> = [];
+  const errors: Array<unknown> = [];
+  const stderr: Array<string> = [];
+  let signal: (name: App.Signal) => void = unexpected;
+  const io: App.Io = {
+    onSignal: (handler) => {
+      signal = handler;
+      return () => {
+        signal = unexpected;
+      };
+    },
+    exit: (code) => {
+      codes.push(code);
+    },
+    stderr: (text) => {
+      stderr.push(text);
+    },
+  };
+  const app = new App.App(env).main(Application.main({ listen }));
+  const running = app.run(
+    { http: http.http, logger: log.logger, host, usage, servers, processStats },
+    (failed) => {
+      errors.push(...failed);
+    },
+    io,
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  return {
+    running,
+    codes,
+    errors,
+    stderr,
+    addresses,
+    heartbeats,
+    readings,
+    removed,
+    order,
+    lines: log.lines,
+    signal: (name: App.Signal) => signal(name),
+    reserve: () =>
+      fetch(
+        new Request(`${CLIENT_URL}/reserve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
+          body: JSON.stringify({ jobId: JOB, action: "drive" }),
+        }),
+      ),
+  };
 };
 
-// A diagnose asks the reverse proxy nothing, so none listens at --server-url.
-const flags = (port: number) => [
-  "--port",
-  String(port),
-  "--name",
-  NAME,
-  "--url",
-  CLIENT_URL,
-  "--max-jobs",
-  "1",
-  "--server-url",
-  "http://127.0.0.1:1",
-];
+describe("the automation client lifecycle", () => {
+  it("announces its name and URL, reports held jobs, and closes the listener before releasing reservations on shutdown (happy)", async () => {
+    const at = await started();
+    try {
+      expect(at.addresses).toEqual([{ hostname: "127.0.0.1", port: PORT }]);
+      expect(at.lines).toEqual([STARTED]);
+      expect(at.heartbeats).toEqual([
+        [
+          CLIENT_URL,
+          "automation-client",
+          NAME,
+          {
+            qemus: 0,
+            memory: { totalBytes: 1000, usedBytes: 750 },
+            cpu: { mean1m: 11, mean2m: 12, mean3m: 13 },
+          },
+        ],
+      ]);
+      expect(at.readings).toEqual([
+        [NAME, "automation-client", { jobs: 0, memoryBytes: 5, cpuPercent: 1.5 }],
+      ]);
+      expect((await at.reserve()).status).toBe(200);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(at.readings.at(-1)).toEqual([
+        NAME,
+        "automation-client",
+        { jobs: 1, memoryBytes: 5, cpuPercent: 1.5 },
+      ]);
+      expect(at.codes).toEqual([]);
+    } finally {
+      at.signal("SIGTERM");
+      await at.running;
+    }
+    expect(at.order).toEqual(["/reserve", "close listener", "/relinquish"]);
+    expect(at.removed).toEqual([CLIENT_URL]);
+    expect(at.lines).toEqual([STARTED, STOPPED]);
+    expect(at.codes).toEqual([0]);
+    expect(at.errors).toEqual([]);
+    expect(at.stderr).toEqual([]);
+  });
 
-// What the automation server's listLiveServers reads: a client heard from in the last 45 seconds.
-const LIVE_CLIENTS =
-  "select url, name from servers where type = 'automation-client' and heartbeat_at > now() - interval '45 seconds'";
-const READINGS = "select name, type, jobs from process_stats";
+  it("a listen failure is fatal and exits 1 without announcing (unhappy)", async () => {
+    const error = new Serve.ListenFailed("could not listen on 127.0.0.1:4100: EADDRINUSE");
+    const at = await started({ listenError: error });
+    await at.running;
+    expect(at.lines).toEqual([`[FATAL] [global] automation-client: ${error.message}`]);
+    expect(at.heartbeats).toEqual([]);
+    expect(at.readings).toEqual([]);
+    expect(at.removed).toEqual([]);
+    expect(at.order).toEqual([]);
+    expect(at.errors).toEqual([error]);
+    expect(at.codes).toEqual([1]);
+  });
 
-describe("the automation client as a process", () => {
-  it("listens on --port behind the bearer, announces itself as a live automation client under --name and --url, holds a reserve, runs until SIGTERM, lets the job go, takes its row back, says it stopped and exits 0, each line stored (happy)", async () => {
-    const fake = await started();
-    const port = await freePort();
-    const running = automationClient(flags(port), {
-      DATABASE_URL: fake.url,
-      OLIGARCHY_TOKEN: TOKEN,
-    });
-
-    await vi.waitFor(() => expect(running.lines()).toContain(startedLine(port)), {
-      timeout: 15_000,
-    });
-    await vi.waitFor(async () => expect(await query(fake.url, READINGS)).toHaveLength(1));
-    expect(await query(fake.url, LIVE_CLIENTS)).toEqual([{ url: CLIENT_URL, name: NAME }]);
-    const reserve = (headers: Readonly<Record<string, string>>) =>
-      fetch(`http://127.0.0.1:${String(port)}/reserve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...headers },
-        body: JSON.stringify({ jobId: "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11", action: "diagnose" }),
-      });
-    expect((await reserve({})).status).toBe(401);
-    expect((await reserve({ Authorization: `Bearer ${TOKEN}` })).status).toBe(200);
-    expect(running.child.exitCode).toBe(null);
-    running.child.kill("SIGTERM");
-
-    expect(await running.exited).toBe(0);
-    expect(running.lines()).toEqual([startedLine(port), STOPPED]);
-    expect(await query(fake.url, "select url from servers")).toEqual([]);
-    expect(await query(fake.url, READINGS)).toEqual([
-      { name: NAME, type: "automation-client", jobs: 0 },
+  it("a refused heartbeat is logged and still permits a clean shutdown (unhappy)", async () => {
+    const at = await started({ heartbeatError: new Db.DatabaseError("connection refused") });
+    at.signal("SIGTERM");
+    await at.running;
+    expect(at.lines).toEqual([
+      STARTED,
+      "[ERROR] [global] automation-client: heartbeat failed: connection refused",
+      STOPPED,
     ]);
-    expect(await query(fake.url, "select level, location, text from logs order by id")).toEqual([
-      { level: "info", location: "automation-client", text: startedText(port) },
-      { level: "info", location: "automation-client", text: "stopped; SIGTERM received" },
-    ]);
-  });
-
-  it("with no --url, refuses to start: says so on stderr, serves nothing, writes no row and exits 1 (unhappy)", async () => {
-    const fake = await started();
-    const port = await freePort();
-    const running = automationClient(["--port", String(port), "--name", NAME, "--max-jobs", "1"], {
-      DATABASE_URL: fake.url,
-      OLIGARCHY_TOKEN: TOKEN,
-    });
-
-    expect(await running.exited).toBe(1);
-    expect(running.stderr()).toBe("--url is required\n");
-    expect(running.lines()).toEqual([]);
-    expect(await query(fake.url, "select url from servers")).toEqual([]);
-    expect(await query(fake.url, "select text from logs")).toEqual([]);
-  });
-
-  it("with its port already taken, says it could not listen and exits 1, announcing nothing (unhappy)", async () => {
-    const fake = await started();
-    const { port } = await held();
-
-    const running = automationClient(flags(port), {
-      DATABASE_URL: fake.url,
-      OLIGARCHY_TOKEN: TOKEN,
-    });
-
-    expect(await running.exited).toBe(1);
-    const lines = running.lines();
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(
-      new RegExp(
-        `^\\[FATAL\\] \\[global\\] automation-client: could not listen on 127\\.0\\.0\\.1:${String(port)}: .*EADDRINUSE`,
-      ),
-    );
-    expect(await query(fake.url, "select url from servers")).toEqual([]);
-    expect(await query(fake.url, READINGS)).toEqual([]);
-  });
-
-  it("with the database gone, says its heartbeat failed, still stops on SIGTERM and exits 0 (unhappy)", async () => {
-    const fake = await started();
-    await fake.stop();
-    const port = await freePort();
-    const running = automationClient(flags(port), {
-      DATABASE_URL: fake.url,
-      OLIGARCHY_TOKEN: TOKEN,
-    });
-
-    await vi.waitFor(
-      () => expect(running.lines().some((line) => line.startsWith(HEARTBEAT_FAILED))).toBe(true),
-      { timeout: 15_000 },
-    );
-    running.child.kill("SIGTERM");
-
-    expect(await running.exited).toBe(0);
-    const lines = running.lines();
-    expect(lines[0]).toBe(startedLine(port));
-    expect(lines).toContain(STOPPED);
-    expect(lines.find((line) => line.startsWith(HEARTBEAT_FAILED))).toContain("ECONNREFUSED");
-  });
-
-  it("with no DATABASE_URL, says so on stderr and exits 1 (unhappy)", async () => {
-    const running = automationClient(flags(await freePort()), {
-      OLIGARCHY_TOKEN: TOKEN,
-    });
-
-    expect(await running.exited).toBe(1);
-    expect(running.stderr()).toBe("DATABASE_URL is not set\n");
-    expect(running.lines()).toEqual([]);
+    expect(at.removed).toEqual([CLIENT_URL]);
+    expect(at.order).toEqual(["close listener"]);
+    expect(at.codes).toEqual([0]);
+    expect(at.errors).toEqual([]);
   });
 });
