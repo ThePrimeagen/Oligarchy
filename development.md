@@ -1250,8 +1250,10 @@ statement inside with `Client.attempt("endSession", () => tx.update(...))`.
   recording `Tracer` (`apps/qemu-server/test/support/tracer.ts`) and an in-memory Sentry
   transport; never mock it.
 
-The reporter in `packages/observability/src/sentry.ts` (`tag`/`toSentryLevel` are its helpers): one
-`captureException` per reported cause, a `LogLine` unwrapped to the cause it carries.
+The reporter in `packages/observability/src/sentry.ts` (`tag`/`toSentryLevel`/`lineFingerprint` are
+its helpers): one `captureException` per reported cause, a `LogLine` unwrapped to the cause it
+carries. A `LogLine` without a cause is made in one frame for every line, so it carries a fingerprint
+of its first line with ids, tickets and numbers blanked, and each kind of line is its own issue.
 
 ```ts
 export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
@@ -1260,13 +1262,21 @@ export const reporter: ErrorReporter.ErrorReporter = ErrorReporter.make(
     const context = { ...annotations, ...attributes };
     // A log line brings the level and the text (`extra.log`); the exception Sentry groups on is
     // the cause it carries, as it always was. A line without a cause is the exception itself.
-    const exception =
-      error.name === LogErrors.LogLine.identifier && error.cause !== undefined ? error.cause : error;
-    Sentry.captureException(exception, {
-      level: toSentryLevel(severity),
-      tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
-      extra: context,
-    });
+    const line = error.name === LogErrors.LogLine.identifier;
+    const exception = line && error.cause !== undefined ? error.cause : error;
+    Sentry.captureException(
+      exception,
+      Object.assign(
+        {
+          level: toSentryLevel(severity),
+          tags: Object.assign({}, tag(context, "location"), tag(context, "agent_id")),
+          extra: context,
+        },
+        line && error.cause === undefined
+          ? { fingerprint: lineFingerprint(error.message) }
+          : undefined,
+      ),
+    );
   },
 );
 ```

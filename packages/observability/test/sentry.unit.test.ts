@@ -43,6 +43,7 @@ const SpanItem = Schema.Struct({ items: Schema.Array(StreamedSpan) });
 
 const EventItem = Schema.Struct({
   level: Schema.optionalKey(Schema.String),
+  fingerprint: Schema.optionalKey(Schema.Array(Schema.String)),
   tags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   extra: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   exception: Schema.optionalKey(
@@ -376,6 +377,87 @@ describe("reporter", () => {
       // Without a cause the line itself is the exception.
       expect(error?.level).toBe("error");
       expect(error?.exception?.values[0]?.value).toBe("timeout cleanup failed: boom");
+    }).pipe(Effect.provide(Sentry.SentryLive)),
+  );
+
+  describe("a line without a cause", () => {
+    const line = (text: string) =>
+      ErrorReporter.report(Cause.fail(LogErrors.LogLine.make({ text, level: "error" })));
+
+    it.live("is its own issue by its text: one kind shares a fingerprint, another does not", () =>
+      Effect.gen(function* () {
+        const captured = capture();
+        yield* line("diagnose verdict missing; 95b1c38c-278f-41a5-a457-6db323caebe6");
+        yield* line("diagnose verdict missing; 1baaad43-674b-4bdb-88d7-3f18fce50aba");
+        yield* line(
+          "ready label add failed: linear: labeling OLI-6873 ready failed: no answer within 3 seconds",
+        );
+        yield* line(
+          "ready label add failed: linear: labeling OLI-7005 ready failed: no answer within 10 seconds",
+        );
+        yield* line("POST /run failed: opencode run exceeded 1.5 hours");
+        const events = yield* captured.events;
+        const prints = events.map((event) => event.fingerprint);
+        expect(prints[0]).toEqual([
+          "@oligarchy/observability/log/LogLine",
+          "diagnose verdict missing; <id>",
+        ]);
+        expect(prints[1]).toEqual(prints[0]);
+        expect(prints[2]).toEqual([
+          "@oligarchy/observability/log/LogLine",
+          "ready label add failed: linear: labeling <ticket> ready failed: no answer within <n> seconds",
+        ]);
+        expect(prints[3]).toEqual(prints[2]);
+        expect(prints[4]).toEqual([
+          "@oligarchy/observability/log/LogLine",
+          "POST /run failed: opencode run exceeded <n>.<n> hours",
+        ]);
+        // The event still reads as the line it was.
+        expect(events[0]?.exception?.values[0]?.value).toBe(
+          "diagnose verdict missing; 95b1c38c-278f-41a5-a457-6db323caebe6",
+        );
+      }).pipe(Effect.provide(Sentry.SentryLive)),
+    );
+
+    it.live(
+      "is fingerprinted by its first line, so a stack printed after it does not split it",
+      () =>
+        Effect.gen(function* () {
+          const captured = capture();
+          yield* line(
+            "drive errored; automation client: POST http://127.0.0.1:54322/run failed: step limit of 200 reached\n@oligarchy/shared/errors/CommandError: step limit of 200 reached\n    at make (/Users/a/main.js:14753:22)",
+          );
+          yield* line(
+            "drive errored; automation client: POST http://127.0.0.1:54322/run failed: step limit of 200 reached\n@oligarchy/shared/errors/CommandError: step limit of 200 reached\n    at make (/home/b/main.js:99:1)",
+          );
+          const [first, second] = yield* captured.events;
+          expect(first?.fingerprint).toEqual([
+            "@oligarchy/observability/log/LogLine",
+            "drive errored; automation client: POST http://<n>.<n>.<n>.<n>:<n>/run failed: step limit of <n> reached",
+          ]);
+          expect(second?.fingerprint).toEqual(first?.fingerprint);
+        }).pipe(Effect.provide(Sentry.SentryLive)),
+    );
+  });
+
+  it.live("leaves Sentry's grouping to a line with a cause and to any other error (unhappy)", () =>
+    Effect.gen(function* () {
+      const captured = capture();
+      yield* ErrorReporter.report(
+        Cause.fail(
+          LogErrors.LogLine.make({
+            text: "proxy: database unreachable",
+            level: "error",
+            cause: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+          }),
+        ),
+      );
+      yield* ErrorReporter.report(
+        Cause.fail(StartFailed.make({ message: "qemu: handshake timeout" })),
+      );
+      const events = yield* captured.events;
+      expect(events).toHaveLength(2);
+      expect(events.map((event) => event.fingerprint)).toEqual([undefined, undefined]);
     }).pipe(Effect.provide(Sentry.SentryLive)),
   );
 
