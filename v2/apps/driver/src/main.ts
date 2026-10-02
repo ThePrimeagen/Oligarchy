@@ -5,7 +5,10 @@ import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
 import * as Drive from "./drive.ts";
 import { environment, type Run } from "./environment.ts";
+import { TIMED_OUT } from "./exits.ts";
 import { closeServices, createServices } from "./services.ts";
+
+let timedOut = false;
 
 const main = async (app: App.App<Run, Logger.Logger | DriveHarness.DriveHarness>) => {
   const { flags, config } = app.environment;
@@ -14,7 +17,11 @@ const main = async (app: App.App<Run, Logger.Logger | DriveHarness.DriveHarness>
     config,
     signal: app.signal,
   });
-  return jarl.is_err(ended) ? ended : jarl.ok(undefined);
+  if (jarl.is_err(ended)) {
+    return ended;
+  }
+  timedOut = jarl.value(ended).status === "timed_out";
+  return jarl.ok(undefined);
 };
 
 const created = await Env.create(environment);
@@ -42,10 +49,17 @@ const app = new App.App(env).main(main);
 app.signal.addEventListener("abort", () => guest.abort(app.signal.reason), { once: true });
 app.onExit(() => closeServices(services));
 // The failure in full: its stack names where it was made.
-await app.run(services, (errors) => {
-  for (const error of errors) {
-    process.stderr.write(
-      `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
-    );
-  }
-});
+await app.run(
+  services,
+  (errors) => {
+    for (const error of errors) {
+      process.stderr.write(
+        `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+      );
+    }
+  },
+  {
+    ...App.processIo,
+    exit: (code) => App.processIo.exit(code === 0 && timedOut ? TIMED_OUT : code),
+  },
+);

@@ -113,7 +113,7 @@ it("fails the drive at the step limit, counting the moves that reached the guest
   expect(world.calls.at(-1)).toEqual(["stop", ended]);
 });
 
-it("fails the drive once its run ceiling has passed", async () => {
+it("times the drive out once its run ceiling has passed, and stops its guest failed", async () => {
   const world = Testing.world({
     turns: [
       () => {
@@ -122,19 +122,20 @@ it("fails the drive once its run ceiling has passed", async () => {
       },
     ],
   });
-  const { result } = drive(world);
-  const ended = { status: "failed", reason: "run ceiling of 60000 ms passed" };
-  expect(jarl.unwrap(await result)).toEqual(ended);
-  expect(world.calls.at(-1)).toEqual(["stop", ended]);
+  const { result, said } = drive(world);
+  const reason = "run ceiling of 60000 ms passed";
+  expect(jarl.unwrap(await result)).toEqual({ status: "timed_out", reason });
+  expect(world.calls.at(-1)).toEqual(["stop", { status: "failed", reason }]);
+  expect(said.at(-1)).toMatchObject({ level: "info", text: `ended timed_out: ${reason}` });
 });
 
-it("fails the drive when the model runs out of time before it answers", async () => {
+it("times the drive out when the model runs out of time before it answers", async () => {
   const late = new OpenRouter.OpenRouterOutOfTime("openrouter: no time left to ask again");
   const world = Testing.world({ turns: [jarl.err(late)] });
   const { result } = drive(world);
-  const ended = { status: "failed", reason: "openrouter: no time left to ask again" };
-  expect(jarl.unwrap(await result)).toEqual(ended);
-  expect(world.calls.at(-1)).toEqual(["stop", ended]);
+  const reason = "openrouter: no time left to ask again";
+  expect(jarl.unwrap(await result)).toEqual({ status: "timed_out", reason });
+  expect(world.calls.at(-1)).toEqual(["stop", { status: "failed", reason }]);
 });
 
 it("fails the drive after three replies in a row that were not a move it could make", async () => {

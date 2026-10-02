@@ -43,7 +43,7 @@ export type State = {
 // SIGHUP is the terminal closing; left alone it kills the process before any handler runs.
 const SIGNALS: ReadonlyArray<Signal> = ["SIGINT", "SIGTERM", "SIGHUP"];
 
-const processIo: Io = {
+export const processIo: Io = {
   onSignal: (handler) => {
     const listeners = SIGNALS.map((signal) => ({ signal, listener: () => handler(signal) }));
     for (const { signal, listener } of listeners) {

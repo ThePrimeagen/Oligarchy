@@ -32,9 +32,9 @@ export type Failure = Refused | NotDrivable;
 
 export type Limits = Pick<Env.Config, "models" | "reasoning" | "stepLimit" | "runCeiling">;
 
-// How the drive ended, as its guest is stopped with it.
+// How the drive ended. Its guest is stopped with it, a drive that timed out as failed.
 export type Ended = {
-  readonly status: "succeeded" | "failed" | "aborted";
+  readonly status: "succeeded" | "failed" | "aborted" | "timed_out";
   readonly reason?: string;
 };
 
@@ -82,7 +82,7 @@ const mainLoop = async (
     }
     if (Date.now() >= deadline) {
       return jarl.ok({
-        status: "failed",
+        status: "timed_out",
         reason: `run ceiling of ${String(config.runCeiling)} ms passed`,
       });
     }
@@ -103,7 +103,7 @@ const mainLoop = async (
 
     const turn = await harness.ask(request);
     if (jarl.error.is(turn, OpenRouter.OpenRouterOutOfTime)) {
-      return jarl.ok({ status: "failed", reason: turn.error.message });
+      return jarl.ok({ status: "timed_out", reason: turn.error.message });
     }
     if (jarl.is_err(turn)) {
       return signal.aborted ? aborted() : turn;
@@ -190,10 +190,14 @@ export const drive = async (
   }
 
   const ended = jarl.value(looped);
-  const finished = await harness.finish(ended);
+  const { status, reason } = ended;
+  const finished = await harness.finish({
+    status: status === "timed_out" ? "failed" : status,
+    ...(reason === undefined ? {} : { reason }),
+  });
   // The model finished a setup without powering its guest off, so nothing was kept.
   if (jarl.error.is(finished, Qemu.NotPoweredOff)) {
-    const unfinished: Ended = { status: "failed", reason: finished.error.message };
+    const unfinished = { status: "failed", reason: finished.error.message } as const;
     const stopped = await harness.finish(unfinished);
     if (jarl.is_err(stopped)) {
       report(stopped.error);
