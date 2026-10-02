@@ -236,8 +236,8 @@ record, and the automation server acts on it directly.
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
       `@oligarchy/drive-harness` exports `class DriveHarness`, made with
-      `new DriveHarness(services, { recentActions })` over `tests`, the job's `qemuHttpTools`
-      and `openRouter`, with `harness.recentActions` from `v2/oligarchy.json` (10). It holds one
+      `new DriveHarness(services, { recentActions })` over `tests`, `moves`, the job's
+      `qemuHttpTools` and `openRouter`, with `harness.recentActions` from `v2/oligarchy.json` (10). It holds one
       drive or setup's state: the loaded job, every step opened with all its actions, the
       model's last response, the previous move and the screen. Its methods are the points the
       driver's loop calls:
@@ -257,7 +257,12 @@ record, and the automation server acts on it directly.
       - `act(turn)` reads the turn as one move, a guest call or done; any other turn is
         `ReplyInvalid`, kept under the open step. A guest call for a step that is not open goes
         through `nextStep` first and runs nothing if it cannot open; then it runs with only its
-        own arguments, and its outcome, or the guest's refusal, is kept under its step.
+        own arguments, and its outcome, or the guest's refusal, is kept under its step. Each
+        move and refused reply is also recorded whole through `moves.recordMove` (the `moves`
+        table: job, step, tool, reason, arguments and outcome; a refused reply has its outcome
+        and the step open then, or none). Actions are the QMP exchanges; a move is the tool call
+        that made them. A record that fails is returned as the `DatabaseError`, after the move
+        ran.
       - `nextStep(step)` ends the open intent and starts the step's, named after its ActionList
         line (`step N` past the list). An end that fails leaves the step open; a start that
         fails opens nothing, and the next `nextStep` starts it again.
