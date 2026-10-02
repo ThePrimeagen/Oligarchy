@@ -1,3 +1,4 @@
+import * as Async from "@oligarchy/async";
 import type * as ClientRoutes from "@oligarchy/automation-client/routes";
 import type * as Db from "@oligarchy/db";
 import type * as Http from "@oligarchy/http";
@@ -13,6 +14,10 @@ const LOCATION = "automation-server";
 // so left pending it would hold back every job behind it.
 const NoSetupLock = jarl.error.define("NoSetupLock");
 type NoSetupLock = InstanceType<typeof NoSetupLock>;
+
+// Every live client was full, needed a setup first, or failed: the job stays pending.
+const NoClientsAvailable = jarl.error.define("NoClientsAvailable");
+type NoClientsAvailable = InstanceType<typeof NoClientsAvailable>;
 
 type LiveClient = Stores.Servers.LiveServer;
 
@@ -89,11 +94,11 @@ export const create = (options: Options): Dispatcher => {
   // Offers the job to each client in turn. Each client counts its own jobs against its --max-jobs
   // and answers at-capacity when full, as it answers setup-needed when no qemu server holds the
   // setup disk a resume needs; either way the next client is asked. Any other failure is a line,
-  // and the next client is asked too. Undefined when no client reserved it.
+  // and the next client is asked too.
   const reserveOnFirstClientWithRoom = async (
     request: ClientRoutes.ReserveRequest,
     clients: ReadonlyArray<LiveClient>,
-  ): Promise<LiveClient | undefined> => {
+  ): Promise<jarl.Result<LiveClient, Async.Aborted | NoClientsAvailable>> => {
     for (const client of clients) {
       const reserved = await AutomationClient.create({ http, url: client.url, token, signal }).post(
         "/reserve",
@@ -101,7 +106,7 @@ export const create = (options: Options): Dispatcher => {
       );
       if (jarl.is_err(reserved)) {
         if (signal.aborted) {
-          return undefined;
+          return jarl.err(new Async.Aborted(`reserve on ${client.url} ended: shutting down`));
         }
         logger.error(`reserve failed; ${client.url}: ${reserved.error.message}`, {
           location: LOCATION,
@@ -111,10 +116,10 @@ export const create = (options: Options): Dispatcher => {
         continue;
       }
       if (jarl.value(reserved) === "reserved") {
-        return client;
+        return jarl.ok(client);
       }
     }
-    return undefined;
+    return jarl.err(new NoClientsAvailable("no live client took the job"));
   };
 
   // The job is the client's from now on. A job that left pending meanwhile, usually an abort
@@ -182,10 +187,12 @@ export const create = (options: Options): Dispatcher => {
         return logFailure(built.error);
       }
 
-      const client = await reserveOnFirstClientWithRoom(jarl.value(built), clientsInTurn(live));
-      if (client === undefined) {
+      const reserved = await reserveOnFirstClientWithRoom(jarl.value(built), clientsInTurn(live));
+      // Neither is a failure: a shutdown ends the loop, and the job waits for a client with room.
+      if (jarl.error.is(reserved, Async.Aborted) || jarl.error.is(reserved, NoClientsAvailable)) {
         return false;
       }
+      const client = jarl.value(reserved);
       nextClientUrl = live[(live.indexOf(client) + 1) % live.length]?.url;
       return markRunning(job, client);
     },
