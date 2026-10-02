@@ -240,8 +240,8 @@ record, and the automation server acts on it directly.
       - `loadJobHarnessData(jobId)` reads `tests.getJobDetails`: the job and run IDs, action,
         pinned definition, ISO, proxy URL and boot mode. Only a resuming drive resumes; a setup
         always boots fresh.
-      - `start(data)` boots that ISO. `openStep(message)` and `closeStep()` are the step's
-        intent; an open refused because the last intent is still open ends it and opens again.
+      - `start(data)` boots that ISO. Opening and closing each step's intent is not written
+        yet.
       - `prompt(data, turn)` renders the driving prompt for one model turn, with past reasons,
         the last response and the previous move (a native tool name and its arguments). All
         replacements happen once, so a definition or model reply containing `{{MODEL}}` stays
@@ -463,8 +463,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             close. From the moment shutdown begins, every hold is refused.
 - [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, the
       reasons, and the stop rule (result closed, step limit, model stopped, run ceiling), over
-      `driveHarness`'s steps (section 3's The drive harness), which hold the tools, the pointer
-      and the intents. It creates the OpenRouter client with `timeouts.header` from
+      `driveHarness`'s steps (section 3's The drive harness), which hold the tools and the
+      pointer. Each step's intent is still to be placed. It creates the OpenRouter client with `timeouts.header` from
       `v2/oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
