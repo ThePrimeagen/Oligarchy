@@ -20,7 +20,6 @@
     "@oligarchy/fleet": "workspace:*",
     "@oligarchy/http": "workspace:*",
     "@oligarchy/logger": "workspace:*",
-    "@oligarchy/qemu-server": "workspace:*",
     "@oligarchy/sentry": "workspace:*",
     "@oligarchy/stores": "workspace:*",
     "hono": "catalog:",

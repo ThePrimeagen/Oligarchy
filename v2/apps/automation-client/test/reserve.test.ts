@@ -3,15 +3,14 @@ import * as FakeLogger from "@oligarchy/logger/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
 import * as Jobs from "../src/jobs.ts";
-import * as QemuServer from "../src/qemu-server.ts";
+import * as Proxy from "../src/proxy.ts";
 import * as Reserve from "../src/reserve.ts";
 import { ReserveFailed } from "../src/routes.ts";
 
 const TOKEN = "oligarchy-token";
-const QEMU_SERVER = "http://127.0.0.1:42069";
+const PROXY = "http://127.0.0.1:42069";
 const JOB = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
 const OTHER = "0d9f4b1a-5c2e-4f7a-8b3d-1e6a9c2f4b70";
-const HOST = "http://10.0.0.5:4000";
 const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 const DRIVE = { jobId: JOB, action: "drive", resume: ISO } as const;
 const DIAGNOSE = { jobId: OTHER, action: "diagnose" } as const;
@@ -35,7 +34,7 @@ const later = () => {
   return { reply, answer };
 };
 
-// The qemu server answers each path from its own replies, in order.
+// The proxy answers each path from its own replies, in order.
 const reserving = (options: {
   readonly maxJobs?: number;
   readonly reserve?: ReadonlyArray<Fake.Reply | Promise<Response>>;
@@ -50,22 +49,18 @@ const reserving = (options: {
       const path = new URL(asked.url).pathname;
       const reply = path === "/reserve" || path === "/relinquish" ? left[path].shift() : undefined;
       if (reply === undefined) {
-        throw new Error(`fake qemu server: no reply for ${path}`);
+        throw new Error(`fake proxy: no reply for ${path}`);
       }
       return reply;
     },
   });
   const jobs = Jobs.create();
   const log = FakeLogger.logger();
-  const qemuServer = QemuServer.create({
-    http: fake.http,
-    url: QEMU_SERVER,
-    token: { reveal: () => TOKEN },
-  });
+  const proxy = Proxy.create({ http: fake.http, url: PROXY, token: { reveal: () => TOKEN } });
   const reservations = Reserve.create({
     maxJobs: options.maxJobs ?? 2,
     jobs,
-    qemuServer,
+    proxy,
     logger: log.logger,
   });
   const asked = () => fake.asked.map((one) => [new URL(one.url).pathname, one.body]);
@@ -73,7 +68,7 @@ const reserving = (options: {
 };
 
 describe("an automation client's reserve", () => {
-  it("a drive holds the job and a guest at the qemu server, a diagnose the job alone; aborted before a run takes it, a drive's guest is given back and only then is the job let go (happy)", async () => {
+  it("a drive holds the job and a guest at the proxy, a diagnose the job alone; aborted before a run takes it, a drive's guest is given back and only then is the job let go (happy)", async () => {
     const relinquished = later();
     const { jobs, reservations, asked } = reserving({
       reserve: [Fake.json({})],
@@ -97,7 +92,7 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(0);
   });
 
-  it("at --max-jobs is at-capacity: the qemu server is not asked and the job is not held (unhappy)", async () => {
+  it("at --max-jobs is at-capacity: the proxy is not asked and the job is not held (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({ maxJobs: 1 });
     jarl.unwrap(await reservations.reserve(DIAGNOSE));
 
@@ -125,7 +120,7 @@ describe("an automation client's reserve", () => {
     expect(asked()).toEqual([["/reserve", { job: JOB, resume: ISO }]]);
   });
 
-  it("a job already held is AlreadyHeld: the qemu server is not asked and the first reservation stands (unhappy)", async () => {
+  it("a job already held is AlreadyHeld: the proxy is not asked and the first reservation stands (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({});
     jarl.unwrap(await reservations.reserve({ jobId: JOB, action: "diagnose" }));
 
@@ -136,7 +131,7 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(1);
   });
 
-  it("once shutdown has begun a reserve is ShuttingDown, and the qemu server is not asked (unhappy)", async () => {
+  it("once shutdown has begun a reserve is ShuttingDown, and the proxy is not asked (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({});
     await jobs.shutdown();
 
@@ -147,7 +142,7 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(0);
   });
 
-  it("a qemu server at capacity, or with no setup disk for the ISO, is that refusal: the job is let go and nothing is given back (unhappy)", async () => {
+  it("a proxy at capacity, or with no setup disk for the ISO, is that refusal: the job is let go and nothing is given back (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({
       reserve: [
         Fake.json({ error: "at capacity" }, 503),
@@ -164,16 +159,16 @@ describe("an automation client's reserve", () => {
     expect(asked().map(([path]) => path)).toEqual(["/reserve", "/reserve"]);
   });
 
-  it("a qemu server that refused the reserve with a 4xx reserved nothing: ReserveFailed naming why, the job let go and nothing given back (unhappy)", async () => {
+  it("a proxy that refused the reserve with a 4xx reserved nothing: ReserveFailed naming why, the job let go and nothing given back (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({
-      reserve: [Fake.json({ error: `no qemu host ${HOST}` }, 400)],
+      reserve: [Fake.json({ error: `no server ${PROXY}` }, 404)],
     });
 
     const failed = await reservations.reserve(DRIVE);
 
     expect(jarl.error.is(failed, ReserveFailed)).toBe(true);
     expect(jarl.is_err(failed) && failed.error.message).toBe(
-      `reserving a guest failed: POST ${QEMU_SERVER}/reserve: 400: {"error":"no qemu host ${HOST}"}`,
+      `reserving a guest failed: POST ${PROXY}/reserve: 404: {"error":"no server ${PROXY}"}`,
     );
     expect(jobs.count()).toBe(0);
     expect(asked().map(([path]) => path)).toEqual(["/reserve"]);
@@ -189,7 +184,7 @@ describe("an automation client's reserve", () => {
 
     expect(jarl.error.is(failed, ReserveFailed)).toBe(true);
     expect(jarl.is_err(failed) && failed.error.message).toBe(
-      `reserving a guest failed: POST ${QEMU_SERVER}/reserve: 500: {"error":"DATABASE FAILURE"}`,
+      `reserving a guest failed: POST ${PROXY}/reserve: 500: {"error":"DATABASE FAILURE"}`,
     );
     expect(asked()).toEqual([
       ["/reserve", { job: JOB, resume: ISO }],
@@ -198,7 +193,7 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(0);
   });
 
-  it("an abort while the qemu server is still reserving ends that call, gives the guest back, and answers once the job is let go (unhappy)", async () => {
+  it("an abort while the proxy is still reserving ends that call, gives the guest back, and answers once the job is let go (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({
       reserve: ["hang"],
       relinquish: [Fake.json({})],
@@ -221,7 +216,7 @@ describe("an automation client's reserve", () => {
     expect(jobs.count()).toBe(0);
   });
 
-  it("a guest the qemu server will not take back is an error line under the job, and the job is still let go (unhappy)", async () => {
+  it("a guest the proxy will not take back is an error line under the job, and the job is still let go (unhappy)", async () => {
     const { jobs, reservations, said } = reserving({
       reserve: [Fake.json({})],
       relinquish: [Fake.json({ error: "server down" }, 502)],
@@ -237,7 +232,7 @@ describe("an automation client's reserve", () => {
     ).toEqual([
       {
         level: "error",
-        text: `relinquish failed: POST ${QEMU_SERVER}/relinquish: 502: {"error":"server down"}`,
+        text: `relinquish failed: POST ${PROXY}/relinquish: 502: {"error":"server down"}`,
         agentId: JOB,
       },
     ]);

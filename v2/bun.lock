@@ -16,7 +16,6 @@
         "@oligarchy/fleet": "workspace:*",
         "@oligarchy/http": "workspace:*",
         "@oligarchy/logger": "workspace:*",
-        "@oligarchy/qemu-server": "workspace:*",
         "@oligarchy/sentry": "workspace:*",
         "@oligarchy/stores": "workspace:*",
         "hono": "catalog:",
@@ -55,20 +54,6 @@
         "@types/node": "catalog:",
         "@types/pg": "catalog:",
         "pg": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "apps/qemu-server": {
-      "name": "@oligarchy/qemu-server",
-      "dependencies": {
-        "@hono/zod-validator": "catalog:",
-        "hono": "catalog:",
-        "jarl": "catalog:",
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },
@@ -405,8 +390,6 @@
     "@oligarchy/openrouter": ["@oligarchy/openrouter@workspace:packages/openrouter"],
 
     "@oligarchy/qemu-http-tools": ["@oligarchy/qemu-http-tools@workspace:packages/qemu-http-tools"],
-
-    "@oligarchy/qemu-server": ["@oligarchy/qemu-server@workspace:apps/qemu-server"],
 
     "@oligarchy/sentry": ["@oligarchy/sentry@workspace:packages/sentry"],
 

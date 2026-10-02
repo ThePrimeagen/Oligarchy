@@ -2,7 +2,7 @@ import * as Http from "@oligarchy/http";
 import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
 import type * as Jobs from "./jobs.ts";
-import type * as QemuServer from "./qemu-server.ts";
+import type * as Proxy from "./proxy.ts";
 import * as Routes from "./routes.ts";
 
 const LOCATION = "automation-client";
@@ -23,21 +23,21 @@ type Reservation = Taken & { readonly onAbort: () => void };
 export type Options = {
   readonly maxJobs: number;
   readonly jobs: Jobs.Jobs;
-  readonly qemuServer: QemuServer.QemuServer;
+  readonly proxy: Proxy.Proxy;
   readonly logger: Logger.Logger;
 };
 
-// A reserve holds its job against maxJobs, and a drive or setup a guest at the qemu server first.
-// One reserve asks it at a time; another meanwhile is at-capacity, and the automation server
+// A reserve holds its job against maxJobs, and a drive or setup a guest at the proxy first. One
+// reserve asks the proxy at a time; another meanwhile is at-capacity, and the automation server
 // asks again. A reservation lives in memory only, so a restarted client holds nothing.
 export const create = (options: Options): Reservations => {
-  const { maxJobs, jobs, qemuServer, logger } = options;
+  const { maxJobs, jobs, proxy, logger } = options;
   const reservations = new Map<string, Reservation>();
   let reserving = false;
 
-  // A guest the qemu server will not take back is a line; the job is let go all the same.
+  // A guest the proxy will not take back is a line; the job is let go all the same.
   const giveBack = async (jobId: string): Promise<void> => {
-    const relinquished = await qemuServer.relinquish(jobId);
+    const relinquished = await proxy.relinquish(jobId);
     if (jarl.is_err(relinquished)) {
       logger.error(`relinquish failed: ${relinquished.error.message}`, {
         location: LOCATION,
@@ -54,8 +54,8 @@ export const create = (options: Options): Reservations => {
     taken.release();
   };
 
-  // Until a run takes the job, its abort is answered here: a guest goes back to the qemu server
-  // before the job is let go.
+  // Until a run takes the job, its abort is answered here: a guest goes back to the proxy before
+  // the job is let go.
   const keep = (jobId: string, action: Taken["action"], held: Jobs.Held): void => {
     const taken: Taken = { action, signal: held.signal, release: held.release };
     const onAbort = () => {
@@ -71,10 +71,10 @@ export const create = (options: Options): Reservations => {
   };
 
   const reserveGuest = async (
-    request: QemuServer.GuestRequest,
+    request: Proxy.GuestRequest,
     held: Jobs.Held,
   ): ReturnType<Routes.Sessions["reserve"]> => {
-    const asked = await qemuServer.reserve(request, held.signal);
+    const asked = await proxy.reserve(request, held.signal);
     if (jarl.is_err(asked)) {
       // A 4xx reserved nothing. Any other failure, an abort or a timeout among them, may have
       // reserved the guest before its answer was lost.

@@ -51,11 +51,11 @@ export const envFile = flag({
   description: "Also read this env file: the process environment wins, then this file, then .env",
 });
 
-// No default: where the qemu server listens is the operator's knowledge of the fleet. Used exactly
-// as given: it is stored on the test suite.
+// No default: where the qemu reverse proxy listens is the operator's knowledge of the fleet. Used
+// exactly as given: it is stored on the test suite.
 export const serverUrl = flag({
   schema: httpUrl,
-  description: "The qemu server the calls go to; SERVER_URL when omitted",
+  description: "The qemu reverse proxy the calls go to; SERVER_URL when omitted",
   env: "SERVER_URL",
 });
 
