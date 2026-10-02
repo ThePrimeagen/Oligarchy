@@ -18,19 +18,17 @@ export type NotDrivable = InstanceType<typeof NotDrivable>;
 
 export type Services = App.Needs<Logger.Logger | DriveHarness.DriveHarness>;
 
-type Refused<K extends "loadJobHarnessData" | "start" | "getImage" | "ask" | "act" | "finish"> =
-  Extract<Awaited<ReturnType<DriveHarness.DriveHarness[K]>>, { readonly ok: false }>["error"];
+type Steps = "loadJobHarnessData" | "start" | "getImage" | "ask" | "act" | "finish";
+
+// What the harness's steps can fail with, each error once.
+type Refused = Extract<
+  Awaited<ReturnType<DriveHarness.DriveHarness[Steps]>>,
+  { readonly ok: false }
+>["error"];
 
 // The system failed the drive, as the step that failed returned it: the job could not be loaded
 // or started, or the proxy or the model could not be reached. A test that failed is an Ended.
-export type Failure =
-  | Refused<"loadJobHarnessData">
-  | Refused<"start">
-  | Refused<"getImage">
-  | Refused<"ask">
-  | Refused<"act">
-  | Refused<"finish">
-  | NotDrivable;
+export type Failure = Refused | NotDrivable;
 
 export type Limits = Pick<Env.Config, "models" | "reasoning" | "stepLimit" | "runCeiling">;
 

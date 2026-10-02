@@ -27,8 +27,6 @@ const ASKING = "Reply with your next tool call.";
 
 type Wants = Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter;
 
-export type Services = App.Needs<Wants>;
-
 declare module "@oligarchy/app" {
   interface Services {
     driveHarness: App.Register<"driveHarness", DriveHarness>;
@@ -41,7 +39,7 @@ declare module "@oligarchy/app" {
 // that it did. A service made by create, over that job's qemuHttpTools.
 export class DriveHarness {
   readonly service = "driveHarness";
-  readonly services: Services;
+  readonly services: App.Needs<Wants>;
   readonly options: Types.Options;
   // The guest's tools with step and reason added, and Done.
   readonly tools: ReadonlyArray<OpenRouter.Tool>;
@@ -59,7 +57,7 @@ export class DriveHarness {
   // The screen the next ask shows. Any move that took none may have changed it, so it drops it.
   screen: Uint8Array | undefined = undefined;
 
-  constructor(services: Services, options: Types.Options) {
+  constructor(services: App.Needs<Wants>, options: Types.Options) {
     this.services = services;
     this.options = options;
     this.tools = Moves.tools(services.qemuHttpTools.tools);
