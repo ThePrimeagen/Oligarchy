@@ -1,11 +1,5 @@
 {
   "name": "oligarchy",
   "install": "bash .cursor/install.sh",
-  "start": "bash .cursor/start.sh",
-  "terminals": [
-    {
-      "name": "qemu-server",
-      "command": "./qemu-server --port 42069 --automation --max-jobs 2 --name qemu-dev"
-    }
-  ]
+  "start": "bash .cursor/start.sh"
 }
