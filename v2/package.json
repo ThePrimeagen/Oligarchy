@@ -14,7 +14,7 @@
       "@types/pg": "^8.23.1",
       "drizzle-orm": "^0.45.2",
       "hono": "^4.13.12",
-      "jarl": "github:ThePrimeagen/jarl#v1.2.0",
+      "jarl": "https://codeload.github.com/ThePrimeagen/jarl/tar.gz/refs/tags/v1.2.0",
       "pg": "^8.23.0",
       "typescript": "7.0.2",
       "vitest": "^4.1.11",
