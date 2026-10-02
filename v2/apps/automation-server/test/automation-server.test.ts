@@ -27,7 +27,7 @@ const CONFIG = JSON.stringify({
   timeouts: { header: "1 second", chunk: "1 second" },
   runCeiling: "1 minute",
   stepLimit: 10,
-  harness: { defaultRetry: "1 second" },
+  harness: { defaultRetry: "1 second", recentActions: 10 },
   automationServer: {
     dispatchInterval: "10 seconds",
     forgetInterval: "30 seconds",
