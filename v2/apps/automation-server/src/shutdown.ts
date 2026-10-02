@@ -6,14 +6,14 @@ import * as jarl from "jarl";
 import * as Abort from "./abort.ts";
 type Wants = Http.Http | Logger.Logger | Stores.Servers.Servers | Stores.Tests.Tests;
 export const shutdown = async (services: App.Needs<Wants>, options: Abort.Options) => {
-  const queue = await services.tests.listJobs();
+  const queue = await services.tests.listRunningJobs();
   if (jarl.is_err(queue)) return queue;
   const aborter = Abort.create(services, {
     ...options,
     reason: options.reason ?? "automation server shutting down",
   });
   const results = await Promise.all(
-    jarl.value(queue).running.map((job) => aborter.abort({ jobId: job.id })),
+    jarl.value(queue).map((job) => aborter.abort({ jobId: job.id })),
   );
   for (const result of results) {
     if (jarl.is_err(result) && !jarl.error.is(result, Abort.NothingToAbort)) return result;

@@ -86,6 +86,17 @@ export const create = (
 | registered | never in `Services`; no `service` field |
 | test | fake the service it reaches, `http`; prove `act` and `ask` make their calls through it |
 
+## Database transitions
+
+- When several writes represent one state transition, expose one store operation that commits
+  them in one transaction. A completed row must not become visible before the work it queues.
+- Throw a domain refusal inside the transaction when it must roll back earlier writes, then
+  translate that refusal to a result outside the transaction.
+- Lock ancestors before descendants in compound transitions. Lock a shared parent before
+  changing its last children, so concurrent completions cannot both leave the parent open.
+- Lifecycle cleanup must enumerate every applicable row. A bounded query for a queue display
+  is not a complete inventory for shutdown or recovery.
+
 ## Wire
 
 ```ts

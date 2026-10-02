@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import * as ClientRoutes from "@oligarchy/automation-client/routes";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FIRST, MODELS, SECOND, cleanUp, dispatching, errors, gate } from "./dispatching.ts";
 
-afterEach(cleanUp);
+beforeEach(() => vi.useFakeTimers({ toFake: ["Date"] }));
+afterEach(async () => {
+  await cleanUp();
+  vi.useRealTimers();
+});
 
 const ended: ClientRoutes.Sessions["run"] = async () => jarl.ok("ended");
 
@@ -26,13 +30,15 @@ const diagnoseOf = async (at: At, runId: string) => {
 };
 
 const drives = (suite: Stores.Tests.TestSuiteDetails) =>
-  suite.runs.map(({ jobs }) => {
-    const [filed] = jobs;
-    if (filed === undefined) {
-      throw new Error("a test run filed with no job");
-    }
-    return filed;
-  });
+  suite.runs
+    .map(({ jobs }) => {
+      const [filed] = jobs;
+      if (filed === undefined) {
+        throw new Error("a test run filed with no job");
+      }
+      return filed;
+    })
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
 
 const record = async (
   at: At,
@@ -91,21 +97,21 @@ describe("closing a job once its /run answers", () => {
     expect(errors(at.said)).toEqual([]);
   });
 
-  it("the last two runs of a suite closing at once each find nothing open, and the one that completes the suite second is refused with no error line (unhappy)", async () => {
-    // Each close reads its suite only once both have closed their runs.
+  it("the last two diagnoses completing together close their suite without leaving it open", async () => {
+    // Let both diagnoses reach the atomic completion before either proceeds.
     const bothClosed = gate();
     let reads = 0;
     const at = await dispatching(
       { [FIRST]: { run: ended }, [SECOND]: { run: ended } },
       (tests) => ({
         ...tests,
-        getTestSuite: async (suiteId) => {
+        completeDiagnosis: async (...args) => {
           reads += 1;
           if (reads === 2) {
             bothClosed.release();
           }
           await bothClosed.opened;
-          return tests.getTestSuite(suiteId);
+          return tests.completeDiagnosis(...args);
         },
       }),
     );
@@ -226,6 +232,7 @@ describe("closing a job once its /run answers", () => {
     }));
     await at.live(FIRST, SECOND);
     const atClient = await at.drive();
+    vi.setSystemTime(Date.now() + 1);
     const byOperator = await at.drive();
 
     await closeNext(at);

@@ -121,7 +121,11 @@ export const main =
     const dispatchFinished = new Promise<void>((resolve) => {
       dispatchDone = resolve;
     });
-    app.sub(new App.App(app.environment).main(dispatch(aborting, dispatchDone)));
+    if (app.signal.aborted) {
+      dispatchDone();
+    } else {
+      app.sub(new App.App(app.environment).main(dispatch(aborting, dispatchDone)));
+    }
     await App.waitForAbort(app.signal);
     await listening.close();
     await aborter.settled();

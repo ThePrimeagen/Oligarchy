@@ -519,35 +519,68 @@ describe("App sub-apps", () => {
     expect(codes).toEqual([0]);
   });
 
-  it("closes the top app with every sub-app's error in the order they happened, and the rest carry on (unhappy)", async () => {
-    const order: Array<string> = [];
-    const thrown = new Error("child threw");
-    const failing = new App.App(environment).main(async () => jarl.err("child failed"));
-    failing.onExit(() => jarl.err("child could not close"));
-    const throwing = new App.App(environment).main(async () => {
-      throw thrown;
-    });
-    const sibling = new App.App(environment).main(async (started) => {
-      await aborted(started.signal);
-      order.push("sibling carried on");
-      return jarl.ok(undefined);
-    });
-    const top = new App.App(environment)
-      .main(async () => {
-        await later();
-        order.push("top carried on");
-        return jarl.ok(undefined);
-      })
-      .sub(failing)
-      .sub(throwing)
-      .sub(sibling);
-    const { io, codes } = fakeIo();
-    const { closes, onClose } = closer();
-    await top.run({}, onClose, io);
-    expect(order).toEqual(["top carried on", "sibling carried on"]);
-    expect(closes).toEqual([["child failed", thrown, "child could not close"]]);
-    expect(codes).toEqual([1]);
-  });
+  it.each(["returned", "thrown", "unexpected abort"])(
+    "a %s child failure stops ancestors and siblings, awaits cleanup, and exits 1",
+    async (kind) => {
+      vi.useFakeTimers();
+      try {
+        const error =
+          kind === "unexpected abort" ? new Async.Aborted("unexpected") : new Error("child failed");
+        const order: string[] = [];
+        let release!: () => void;
+        const cleanup = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const failing = new App.App(environment).main(async () => {
+          await Promise.resolve();
+          if (kind === "thrown") throw error;
+          return jarl.err(error);
+        });
+        failing.onExit(async () => {
+          order.push("child cleanup");
+          await cleanup;
+        });
+        const sibling = new App.App(environment).main(async (app) => {
+          await App.waitForAbort(app.signal);
+          order.push("sibling stopped");
+          return jarl.err(app.signal.reason);
+        });
+        sibling.onExit(() => {
+          order.push("sibling cleanup");
+        });
+        const parent = waits().sub(failing);
+        parent.onExit(() => {
+          order.push("parent cleanup");
+        });
+        const top = waits().sub(parent).sub(sibling);
+        top.onExit(() => {
+          order.push("top cleanup");
+        });
+        const { io, codes, listening } = fakeIo();
+        const { closes, onClose } = closer();
+        const running = top.run({}, onClose, io);
+        await vi.advanceTimersByTimeAsync(0);
+        expect([top, parent, sibling].every((app) => app.signal.aborted)).toBe(true);
+        expect(order).toEqual(["sibling stopped", "child cleanup"]);
+        expect(codes).toEqual([]);
+        release();
+        await running;
+        expect(order).toEqual([
+          "sibling stopped",
+          "child cleanup",
+          "parent cleanup",
+          "sibling cleanup",
+          "top cleanup",
+        ]);
+        expect(closes).toEqual([[error]]);
+        expect(codes).toEqual([1]);
+        expect(listening()).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("on a signal aborts every sub-app, then exits them before the top app (unhappy)", async () => {
     const order: Array<string> = [];

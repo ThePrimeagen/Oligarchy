@@ -36,8 +36,14 @@
 | main returns `Aborted` with no stop | an error. The process exits 1. |
 | second process signal | `exit(1)` at once. Exit handlers are skipped. |
 | main returns or throws | `app.signal` aborts, every sub-app stops, and the process exits 1 if errors were reported |
+| sub-app main fails | preserve its error once, abort the root and the rest of the tree, await mains and child-first cleanup, then exit 1 |
 | `onExit` handler | runs after `app.signal` aborted. Never hand `app.signal` to its calls. Give them their own deadline. |
 | work that must stop with the app | build it in main and hand it `app.signal` (driver) |
+
+A child that returns an error or throws must not leave its ancestors serving without that child.
+Cancellation errors caused by the resulting stop are not additional failures. A child that
+finishes successfully retains its normal completion behavior. If shutdown arrives during
+startup, do not await a completion callback belonging to a child whose main never started.
 
 ```ts
 // apps/automation-client/src/application.ts

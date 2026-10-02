@@ -33,11 +33,7 @@ const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, agentId: job.id 
 
 // The driver ran to its end; its diagnose judges it.
 const queueDiagnose = async ({ tests, logger }: Services, job: Stores.Tests.JobRow): Closed => {
-  const completed = await tests.completeJob(job.id);
-  if (jarl.is_err(completed)) {
-    return completed;
-  }
-  const queued = await tests.createJob(job.runId, "diagnose");
+  const queued = await tests.completeDrive(job.id);
   if (jarl.is_err(queued)) {
     return queued;
   }
@@ -91,22 +87,13 @@ const finalize = async (
     return jarl.is_err(errored) ? errored : jarl.ok(undefined);
   }
   const { verdict, summary } = recorded;
-  const completed = await tests.completeJob(job.id);
-  if (jarl.is_err(completed)) {
-    return completed;
-  }
   const judged = verdict === "passed" ? "succeeded" : "failed";
-  const finalized = await tests.finalizeJob(judgedJobId, judged, summary);
+  const finalized = await tests.completeDiagnosis(job.id, judgedJobId, verdict, summary);
   if (jarl.is_err(finalized)) {
     return finalized;
   }
-  const closedRun = await tests.completeRun(job.runId, verdict, summary);
-  if (jarl.is_err(closedRun)) {
-    return closedRun;
-  }
   logger.info(`diagnose completed; job ${judgedJobId} ${judged}`, at(job));
-  const { suiteId } = jarl.value(closedRun);
-  return suiteId === null ? jarl.ok(undefined) : closeSuite(services, suiteId);
+  return jarl.ok(undefined);
 };
 
 // An operator's abort may have aborted the job before its client answered; that abort stands.
@@ -145,20 +132,15 @@ const fail = async (
 // queued, and the run's suite closes once none of its runs is open.
 const timeOut = async (services: Services, job: Stores.Tests.JobRow, failure: Error): Closed => {
   const { tests, logger } = services;
-  const timedOut = await tests.timeoutJob(job.id, failure.message);
+  const timedOut = await tests.timeoutJobAndRun(job.id, failure.message);
   if (jarl.is_err(timedOut)) {
     return timedOut;
   }
   logger.warning(`${job.action} timed out: ${failure.message}`, at(job));
-  const closedRun = await tests.timeoutRun(job.runId, failure.message);
-  if (jarl.is_err(closedRun)) {
-    return closedRun;
-  }
-  const { suiteId } = jarl.value(closedRun);
-  return suiteId === null ? jarl.ok(undefined) : closeSuite(services, suiteId);
+  return jarl.ok(undefined);
 };
 
-// Closes the job by how its /run answered. A write that fails stops the close where it is.
+// Closes the job by how its /run answered. Completion and timeout transitions commit together.
 export const close = async (
   services: Services,
   options: Options,

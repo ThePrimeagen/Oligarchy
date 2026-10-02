@@ -8,9 +8,9 @@ import * as Abort from "./abort.ts";
 import * as Close from "./close.ts";
 type Wants = Http.Http | Logger.Logger | Stores.Servers.Servers | Stores.Tests.Tests;
 export const restart = async (services: App.Needs<Wants>, options: Abort.Options) => {
-  const queue = await services.tests.listJobs();
+  const queue = await services.tests.listRunningJobs();
   if (jarl.is_err(queue)) return queue;
-  for (const job of jarl.value(queue).running) {
+  for (const job of jarl.value(queue)) {
     const found =
       job.serverId === null ? jarl.ok(undefined) : await services.servers.findServer(job.serverId);
     if (jarl.is_err(found)) return found;

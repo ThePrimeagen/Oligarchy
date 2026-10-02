@@ -142,6 +142,7 @@ const started = async (
     readonly completing?: Promise<void>;
     // An operator's abort of the pending drive is written only once this settles.
     readonly aborting?: Promise<void>;
+    readonly recovering?: Promise<void>;
   } = {},
 ) => {
   const { completing, aborting } = options;
@@ -233,6 +234,12 @@ const started = async (
         },
       }),
     listJobs: async () => jarl.ok({ running: [], pending: [] }),
+    listRunningJobs: async () => {
+      await options.recovering;
+      return jarl.ok([]);
+    },
+    completeDiagnosis: unexpected,
+    timeoutJobAndRun: unexpected,
     latestJob: unexpected,
     nextPendingJob: async () => {
       const [next] = pending;
@@ -240,10 +247,11 @@ const started = async (
       return jarl.ok(next);
     },
     runJob: async (jobId) => jarl.ok({ ...job(jobId, "drive"), status: "running" }),
-    completeJob: async (jobId) => {
+    completeJob: unexpected,
+    completeDrive: async () => {
       await completing;
       order.push("drive completed");
-      return jarl.ok({ ...job(jobId, "drive"), status: "completed" });
+      return jarl.ok(job(DIAGNOSE, "diagnose"));
     },
     finalizeJob: unexpected,
     errorJob: unexpected,
@@ -366,6 +374,21 @@ const started = async (
 };
 
 describe("the automation server lifecycle", () => {
+  it("finishes shutdown when stopped during recovery before dispatch could start", async () => {
+    let release!: () => void;
+    const recovering = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const at = await started({ recovering });
+    const stopped = at.stop();
+    release();
+    await stopped;
+    expect(at.dispatches).toEqual([]);
+    expect(at.order).toEqual(["close listener", "listener closed", "exit handler"]);
+    expect(at.codes).toEqual([0]);
+    expect(at.errors).toEqual([]);
+  });
+
   it("starts dispatch and cleanup at their intervals, then stops both on SIGTERM and awaits listener closure before exit (happy)", async () => {
     let release: () => void = () => undefined;
     const closed = new Promise<void>((resolve) => {
