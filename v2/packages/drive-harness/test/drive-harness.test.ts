@@ -25,7 +25,6 @@ it("drives a job from its harness data to its end", async () => {
 
   const job = jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.start(job));
-  jarl.unwrap(await harness.openStep("Type the password"));
   const first = harness.prompt(job, { reasons: "none" });
   const move = jarl.unwrap(await harness.ask({ ...ASK, prompt: first }));
   expect(move).toEqual({
@@ -46,14 +45,11 @@ it("drives a job from its harness data to its end", async () => {
   expect(jarl.unwrap(await harness.ask({ ...ASK, prompt: next, screen }))).toEqual({
     kind: "done",
   });
-  jarl.unwrap(await harness.closeStep());
   jarl.unwrap(await harness.finish(job, { status: "succeeded" }));
 
   expect(calls).toEqual([
     ["start", { iso: "https://iso.example/test.iso", resume: true }],
-    ["intentStart", "Type the password"],
     ["run", "send_keys", { keys: "prime<ENTER>" }],
-    ["intentEnd"],
     ["stop", { status: "succeeded" }],
   ]);
 
@@ -184,38 +180,6 @@ it("reads a tool call with no arguments as an empty object", async () => {
   expect(jarl.unwrap(await harness.ask({ ...ASK, prompt: "drive" }))).toEqual({ kind: "done" });
 });
 
-it("ends a stale intent and opens the step again", async () => {
-  const opens = [jarl.err(new Qemu.IntentOpen("intent/start: 409")), jarl.ok(undefined)];
-  const { harness, calls } = world({
-    guest: { intentStart: async () => opens.shift() ?? jarl.ok(undefined) },
-  });
-  jarl.unwrap(await harness.openStep("Unlock"));
-  expect(calls).toEqual([["intentStart", "Unlock"], ["intentEnd"], ["intentStart", "Unlock"]]);
-});
-
-it("returns the step's intent failure when ending the stale one does not free it", async () => {
-  const open = new Qemu.IntentOpen("intent/start: 409");
-  const { harness, calls } = world({ guest: { intentStart: async () => jarl.err(open) } });
-  const result = await harness.openStep("Unlock");
-  expect(jarl.is_err(result)).toBe(true);
-  if (jarl.is_err(result)) expect(result.error).toBe(open);
-  expect(calls).toEqual([["intentStart", "Unlock"], ["intentEnd"], ["intentStart", "Unlock"]]);
-});
-
-it("returns the stale intent's end failure without opening again", async () => {
-  const ended = new Http.HttpInvalid("intent/end: refused", asked);
-  const { harness, calls } = world({
-    guest: {
-      intentStart: async () => jarl.err(new Qemu.IntentOpen("intent/start: 409")),
-      intentEnd: async () => jarl.err(ended),
-    },
-  });
-  const result = await harness.openStep("Unlock");
-  expect(jarl.is_err(result)).toBe(true);
-  if (jarl.is_err(result)) expect(result.error).toBe(ended);
-  expect(calls).toEqual([["intentStart", "Unlock"], ["intentEnd"]]);
-});
-
 it.each([
   ["a setup that succeeded is saved", "setup", { status: "succeeded" }, [["save"]]],
   [
@@ -251,7 +215,6 @@ it("returns each step's own failure as it came", async () => {
   const failing = world({
     guest: {
       start: async () => jarl.err(down),
-      intentEnd: async () => jarl.err(down),
       run: async () => jarl.err(invalid),
     },
     turns: [jarl.err(unreachable)],
@@ -259,7 +222,6 @@ it("returns each step's own failure as it came", async () => {
   const { harness } = failing;
   const results = [
     [await harness.start(data()), down],
-    [await harness.closeStep(), down],
     [
       await harness.act({ kind: "guest", step: 1, reason: "Fly", name: "fly", arguments: {} }),
       invalid,

@@ -81,10 +81,7 @@ export const SEND_KEYS: OpenRouter.Tool = {
   },
 };
 
-type Guest = Pick<
-  Qemu.QemuHttpTools,
-  "start" | "intentStart" | "intentEnd" | "stop" | "save" | "run"
->;
+type Guest = Pick<Qemu.QemuHttpTools, "start" | "stop" | "save" | "run">;
 
 const ok = async () => jarl.ok(undefined);
 
@@ -170,8 +167,8 @@ export const world = (
       hold: unused,
       release: unused,
     },
-    intentStart: recorded("intentStart", guest.intentStart ?? ok),
-    intentEnd: recorded("intentEnd", guest.intentEnd ?? ok),
+    intentStart: unused,
+    intentEnd: unused,
     stop: recorded("stop", guest.stop ?? ok),
     save: recorded("save", guest.save ?? ok),
     tools: [SEND_KEYS],

@@ -1,6 +1,6 @@
 import * as App from "@oligarchy/app";
 import type * as OpenRouter from "@oligarchy/openrouter";
-import * as Qemu from "@oligarchy/qemu-http-tools";
+import type * as Qemu from "@oligarchy/qemu-http-tools";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import * as Moves from "./move.ts";
@@ -51,19 +51,6 @@ export const create = App.createService<
       });
     },
     start: (data) => qemuHttpTools.start({ iso: data.iso, resume: data.resume }),
-    // An end whose request was lost leaves the last step's intent open, and refuses every start.
-    openStep: async (message) => {
-      const opened = await qemuHttpTools.intentStart(message);
-      if (!jarl.error.is(opened, Qemu.IntentOpen)) {
-        return opened;
-      }
-      const ended = await qemuHttpTools.intentEnd();
-      if (jarl.is_err(ended)) {
-        return ended;
-      }
-      return qemuHttpTools.intentStart(message);
-    },
-    closeStep: () => qemuHttpTools.intentEnd(),
     prompt: (data, turn) => Prompt.render(data, turn, tools),
     ask: async (request) => {
       const answered = await openRouter.complete({

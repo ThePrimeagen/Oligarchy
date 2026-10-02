@@ -57,14 +57,11 @@ export type Ask = {
 export type End = { readonly status: Qemu.StopStatus; readonly reason?: string };
 
 // One drive or setup job's steps, in the order a driver takes them: load, start, then per model
-// turn prompt, ask and act inside the step's intent, and finish. The loop's limits are the
-// driver's.
+// turn prompt, ask and act, and finish. The loop's limits are the driver's.
 export type DriveHarness = {
   readonly service: "driveHarness";
   readonly loadJobHarnessData: (jobId: string) => Stores.Tests.Found<JobHarnessData>;
   readonly start: (data: JobHarnessData) => Answer<void, Http.HttpFailure>;
-  readonly openStep: (message: string) => Answer<void, Http.HttpFailure | Qemu.IntentOpen>;
-  readonly closeStep: () => Answer<void, Http.HttpFailure>;
   readonly prompt: (data: JobHarnessData, turn: Turn) => string;
   readonly ask: (request: Ask) => Answer<Move, OpenRouter.Failure | Moves.ReplyInvalid>;
   readonly act: (move: GuestMove) => Answer<Qemu.Ran, Qemu.RunFailure>;
