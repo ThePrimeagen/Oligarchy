@@ -48,8 +48,8 @@ describe("live Cursor jobs pane", function()
       if not agents then
         error(table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n"))
       end
-      assert.is_true(#agents > 0, "No jobs for this project in the latest ten account jobs")
-      assert.is_true(#agents <= 10)
+      assert.is_true(#agents > 0, "No jobs for this project in the latest four account jobs")
+      assert.is_true(#agents <= 4)
       local lines = table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n")
       for _, agent in ipairs(agents) do
         assert.is_string(agent.id)

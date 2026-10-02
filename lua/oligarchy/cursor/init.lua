@@ -226,7 +226,7 @@ function M.new(options)
     end)
   end
 
-  --- Return this project's jobs from the account's latest ten, newest first.
+  --- Return this project's jobs from the account's latest four, newest first.
   --- callback(err, agents) runs on the main loop. Returns a cancel function.
   function client:get_cloud_agents(callback)
     local cancelled, finished = false, false
@@ -289,12 +289,12 @@ function M.new(options)
         end
         local repository = repository_key(output.stdout)
         -- A bounded snapshot: never walk the account's full history on opening.
-        get("/agents?limit=10&includeArchived=false", function(data)
+        get("/agents?limit=4&includeArchived=false", function(data)
           if not data or type(data.items) ~= "table" or not vim.islist(data.items) then
             finish("Cursor returned an invalid agents list")
             return
           end
-          local count = math.min(10, #data.items)
+          local count = math.min(4, #data.items)
           if count == 0 then
             finish(nil, {})
             return

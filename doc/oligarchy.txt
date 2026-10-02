@@ -182,10 +182,10 @@ body containing prompt.text. Abort uses POST /v0/agents/{id}/stop. Archiving use
 POST /v1/agents/{id}/archive. No message is
 sent and no job is archived merely by opening its conversation.
 
-The pane shows this project's jobs from the account's ten most recent
+The pane shows this project's jobs from the account's four most recent
 non-archived agents, including idle/completed jobs. It does not scan older
-pages, so fewer than ten may belong to this project. The client uses Basic
-authentication and GET /v1/agents?limit=10&includeArchived=false. Repository
+pages, so fewer than four may belong to this project. The client uses Basic
+authentication and GET /v1/agents?limit=4&includeArchived=false. Repository
 details in the response are reused; missing details are fetched concurrently.
 SSH and HTTPS GitHub remotes match the same repository. Each HTTP request has
 a ten-second connection timeout and a thirty-second total timeout. Requests
@@ -304,7 +304,7 @@ Run the separate live suite explicitly to use CURSOR_API_TOKEN from .env:
 <
 The live tests open the real pane, refresh it twice, load one existing
 conversation, fetch its branch, and reopen cached history. They never abort
-or archive a live job. Job-list loads must show 1-10 project jobs, make one
+or archive a live job. Job-list loads must show 1-4 project jobs, make one
 HTTP request, and finish in under three seconds. They need network access,
 Git credentials, and recent jobs belonging to this project with a published
 branch. Fetching updates only local remote-tracking refs. Test conversation

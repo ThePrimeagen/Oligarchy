@@ -17,11 +17,11 @@ describe("Cursor cloud agents", function()
     vim.fn.delete(root, "rf")
   end)
 
-  it("fetches only the latest ten, reuses details, and includes idle jobs for this repo", function()
+  it("fetches the latest four, reuses details, and includes idle jobs for this repo", function()
     local result = S.collect(client)
     assert.are.same({
       method = "GET",
-      url = "https://api.cursor.com/v1/agents?limit=10&includeArchived=false",
+      url = "https://api.cursor.com/v1/agents?limit=4&includeArchived=false",
       headers = { Accept = "application/json", Authorization = "Basic dGVzdC1rZXk6" },
       env = { CURSOR_API_TOKEN = "test-key", OLIGARCHY_TEST_VALUE = "literal $HOME # value" },
     }, S.request(http, 1))
@@ -89,19 +89,19 @@ describe("Cursor cloud agents", function()
     assert.same({ S.agent("matched") }, result.agents)
   end)
 
-  it("caps even an oversized response at ten jobs", function()
+  it("caps even an oversized response at four jobs", function()
     local result = S.collect(client)
     S.request(http, 1)
     local items = {}
-    for i = 1, 11 do
+    for i = 1, 5 do
       items[i] = S.agent(tostring(i))
     end
     http:respond(1, { items = items, nextCursor = "ignored" })
     S.wait(function()
       return result.done
     end)
-    assert.equals(10, #result.agents)
-    assert.equals("10", result.agents[10].id)
+    assert.equals(4, #result.agents)
+    assert.equals("4", result.agents[4].id)
     assert.equals(1, #http.requests)
   end)
 
