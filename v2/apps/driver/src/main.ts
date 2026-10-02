@@ -41,8 +41,11 @@ const services = createServices(env, guest.signal);
 const app = new App.App(env).main(main);
 app.signal.addEventListener("abort", () => guest.abort(app.signal.reason), { once: true });
 app.onExit(() => closeServices(services));
+// The failure in full: its stack names where it was made.
 await app.run(services, (errors) => {
   for (const error of errors) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    );
   }
 });

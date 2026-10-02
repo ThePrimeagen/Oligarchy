@@ -12,12 +12,25 @@ const LOCATION = "driver";
 // that reaches the guest, even one the guest refuses, starts the count again.
 const BAD_REPLY_LIMIT = 3;
 
-// The system failed the drive: the job could not be loaded or started, or the proxy or the model
-// could not be reached. A test that failed is an Ended, not this.
-export const DriverFailed = jarl.error.define("DriverFailed");
-export type DriverFailed = InstanceType<typeof DriverFailed>;
+// The job is a diagnose, which is opencode's and not the driver's. Nothing was started.
+export const NotDrivable = jarl.error.define("NotDrivable");
+export type NotDrivable = InstanceType<typeof NotDrivable>;
 
 export type Services = App.Needs<Logger.Logger | DriveHarness.DriveHarness>;
+
+type Refused<K extends "loadJobHarnessData" | "start" | "getImage" | "ask" | "act" | "finish"> =
+  Extract<Awaited<ReturnType<DriveHarness.DriveHarness[K]>>, { readonly ok: false }>["error"];
+
+// The system failed the drive, as the step that failed returned it: the job could not be loaded
+// or started, or the proxy or the model could not be reached. A test that failed is an Ended.
+export type Failure =
+  | Refused<"loadJobHarnessData">
+  | Refused<"start">
+  | Refused<"getImage">
+  | Refused<"ask">
+  | Refused<"act">
+  | Refused<"finish">
+  | NotDrivable;
 
 export type Limits = Pick<Env.Config, "models" | "reasoning" | "stepLimit" | "runCeiling">;
 
@@ -37,15 +50,13 @@ export type Options = {
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
-const failed = (message: string) => jarl.err(new DriverFailed(message));
-
 // Each turn: the screen, the model's turn, its move. Ends when the model is done, at a limit, when
 // the guest is off, or on the signal.
 const turns = async (
   services: Services,
   action: "drive" | "setup",
   options: Options,
-): Promise<jarl.Result<Ended, DriverFailed>> => {
+): Promise<jarl.Result<Ended, Failure>> => {
   const { logger, driveHarness: harness } = services;
   const { config, signal } = options;
   const at = { location: LOCATION, agentId: options.jobId };
@@ -89,7 +100,7 @@ const turns = async (
       );
     }
     if (jarl.is_err(image)) {
-      return signal.aborted ? aborted() : failed(`image: ${image.error.message}`);
+      return signal.aborted ? aborted() : image;
     }
 
     const turn = await harness.ask(request);
@@ -97,7 +108,7 @@ const turns = async (
       return jarl.ok({ status: "failed", reason: turn.error.message });
     }
     if (jarl.is_err(turn)) {
-      return signal.aborted ? aborted() : failed(`model: ${turn.error.message}`);
+      return signal.aborted ? aborted() : turn;
     }
 
     const acted = await harness.act(jarl.value(turn));
@@ -135,43 +146,47 @@ const turns = async (
       logger.warning(acted.error.message, at);
       continue;
     }
-    return signal.aborted ? aborted() : failed(`guest: ${acted.error.message}`);
+    return signal.aborted ? aborted() : acted;
   }
 };
 
 // One drive or setup job, from its load to its guest's stop. A test that failed is still a drive
-// that ran to its end; only the system failing it is DriverFailed.
+// that ran to its end; only the system failing it is a Failure, returned as it came. Each
+// failure is logged with itself as the cause, so Sentry gets the error and its stack.
 export const drive = async (
   services: Services,
   options: Options,
-): Promise<jarl.Result<Ended, DriverFailed>> => {
+): Promise<jarl.Result<Ended, Failure>> => {
   const { logger, driveHarness: harness } = services;
   const at = { location: LOCATION, agentId: options.jobId };
-  const refuse = (message: string) => {
-    logger.error(message, at);
-    return failed(message);
-  };
+  const report = (error: Failure) => logger.error(error.message, { ...at, cause: error });
 
   const loaded = await harness.loadJobHarnessData(options.jobId);
   if (jarl.is_err(loaded)) {
-    return refuse(`load: ${loaded.error.message}`);
+    report(loaded.error);
+    return loaded;
   }
   const { action, name, iso, resume } = harness.data;
   if (action === "diagnose") {
-    return refuse(`job ${options.jobId} is a diagnose; the driver runs a drive or a setup`);
+    const refused = new NotDrivable(
+      `job ${options.jobId} is a diagnose; the driver runs a drive or a setup`,
+    );
+    report(refused);
+    return jarl.err(refused);
   }
   const started = await harness.start();
   if (jarl.is_err(started)) {
-    return refuse(`start: ${started.error.message}`);
+    report(started.error);
+    return started;
   }
   logger.info(`${action} ${name}: started ${iso}${resume ? ", resumed" : ""}`, at);
 
   const looped = await turns(services, action, options);
   if (jarl.is_err(looped)) {
-    logger.error(looped.error.message, at);
+    report(looped.error);
     const stopped = await harness.finish({ status: "failed", reason: looped.error.message });
     if (jarl.is_err(stopped)) {
-      logger.error(`finish: ${stopped.error.message}`, at);
+      report(stopped.error);
     }
     return looped;
   }
@@ -183,13 +198,14 @@ export const drive = async (
     const unfinished: Ended = { status: "failed", reason: finished.error.message };
     const stopped = await harness.finish(unfinished);
     if (jarl.is_err(stopped)) {
-      logger.error(`finish: ${stopped.error.message}`, at);
+      report(stopped.error);
     }
     logger.info(`ended failed: ${finished.error.message}`, at);
     return jarl.ok(unfinished);
   }
   if (jarl.is_err(finished)) {
-    return refuse(`finish: ${finished.error.message}`);
+    report(finished.error);
+    return finished;
   }
   logger.info(`ended ${ended.status}${ended.reason === undefined ? "" : `: ${ended.reason}`}`, at);
   return looped;

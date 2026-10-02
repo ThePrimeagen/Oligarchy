@@ -160,87 +160,114 @@ it("fails the drive after three replies in a row that were not a move it could m
   expect(world.calls.at(-1)).toEqual(["stop", ended]);
 });
 
-it.each([
-  [
-    "a job it cannot load",
-    { getJobDetails: async () => jarl.err(new Stores.Tests.NotFound("getJobDetails: no job")) },
-    "load: getJobDetails: no job",
-    [],
-  ],
-  [
-    "a diagnose job",
-    { getJobDetails: async () => jarl.ok(Testing.details("diagnose", false)) },
-    `job ${JOB} is a diagnose; the driver runs a drive or a setup`,
-    [],
-  ],
-  [
-    "a guest that would not start",
-    { guest: { start: async () => jarl.err(new Http.HttpInvalid("start: refused")) } },
-    "start: start: refused",
-    ["start"],
-  ],
-] as const)("fails on %s, and starts or stops nothing more", async (_, script, message, made) => {
-  const world = Testing.world(script);
-  const { result, said } = drive(world);
-  const failed = await result;
-  expect(jarl.error.is(failed, Drive.DriverFailed)).toBe(true);
-  if (jarl.is_err(failed)) {
-    expect(failed.error.message).toBe(message);
-  }
-  expect(names(world.calls)).toEqual(made);
-  expect(said).toContainEqual(expect.objectContaining({ level: "error", text: message }));
-});
+// What the logger hands Sentry: the error itself, stack and all, as the line's cause.
+const reported = (error: Error) =>
+  expect.objectContaining({
+    level: "error",
+    text: error.message,
+    report: expect.objectContaining({ cause: error }),
+  });
+
+const notFound = new Stores.Tests.NotFound("getJobDetails: no job");
+const refused = new Http.HttpInvalid("start: refused");
 
 it.each([
+  ["a job it cannot load", { getJobDetails: async () => jarl.err(notFound) }, notFound, []],
   [
-    "an image the proxy failed",
-    { guest: { image: async () => jarl.err(new Http.HttpInvalid("image: down")) } },
-    "image: image: down",
+    "a guest that would not start",
+    { guest: { start: async () => jarl.err(refused) } },
+    refused,
+    ["start"],
   ],
-  [
-    "a model that could not be reached",
-    { turns: [jarl.err(new OpenRouter.OpenRouterUnreachable("openrouter: down"))] },
-    "model: openrouter: down",
-  ],
+] as const)(
+  "returns %s as it came, and starts or stops nothing more",
+  async (_, script, error, made) => {
+    const world = Testing.world(script);
+    const { result, said } = drive(world);
+    const failed = await result;
+    expect(jarl.is_err(failed)).toBe(true);
+    if (jarl.is_err(failed)) {
+      expect(failed.error).toBe(error);
+    }
+    expect(names(world.calls)).toEqual(made);
+    expect(said).toContainEqual(reported(error));
+  },
+);
+
+it("refuses a diagnose job, and starts nothing", async () => {
+  const world = Testing.world({
+    getJobDetails: async () => jarl.ok(Testing.details("diagnose", false)),
+  });
+  const { result, said } = drive(world);
+  const failed = await result;
+  expect(jarl.error.is(failed, Drive.NotDrivable)).toBe(true);
+  if (jarl.is_err(failed)) {
+    expect(failed.error.message).toBe(
+      `job ${JOB} is a diagnose; the driver runs a drive or a setup`,
+    );
+    expect(said).toContainEqual(reported(failed.error));
+  }
+  expect(world.calls).toEqual([]);
+});
+
+const imageDown = new Http.HttpInvalid("image: down");
+const unreachable = new OpenRouter.OpenRouterUnreachable("openrouter: down");
+const keysDown = new Http.HttpInvalid("send-keys: down");
+const intentOpen = new Qemu.IntentOpen("intent/start: 409");
+
+it.each([
+  ["an image the proxy failed", { guest: { image: async () => jarl.err(imageDown) } }, imageDown],
+  ["a model that could not be reached", { turns: [jarl.err(unreachable)] }, unreachable],
   [
     "a move the proxy failed",
-    {
-      guest: { run: async () => jarl.err(new Http.HttpInvalid("send-keys: down")) },
-      turns: [move()],
-    },
-    "guest: send-keys: down",
+    { guest: { run: async () => jarl.err(keysDown) }, turns: [move()] },
+    keysDown,
   ],
   [
     "an intent that would not open",
-    {
-      guest: { intentStart: async () => jarl.err(new Qemu.IntentOpen("intent/start: 409")) },
-      turns: [move()],
-    },
-    "guest: intent/start: 409",
+    { guest: { intentStart: async () => jarl.err(intentOpen) }, turns: [move()] },
+    intentOpen,
   ],
-] as const)("fails on %s, and stops the guest failed", async (_, script, message) => {
-  const world = Testing.world(script);
+] as const)(
+  "returns %s as it came, and stops the guest failed with it",
+  async (_, script, error) => {
+    const world = Testing.world(script);
+    const { result, said } = drive(world);
+    const failed = await result;
+    expect(jarl.is_err(failed)).toBe(true);
+    if (jarl.is_err(failed)) {
+      expect(failed.error).toBe(error);
+    }
+    expect(world.calls.at(-1)).toEqual(["stop", { status: "failed", reason: error.message }]);
+    expect(said).toContainEqual(reported(error));
+  },
+);
+
+it("returns a stop that failed at the end as it came", async () => {
+  const down = new Http.HttpInvalid("stop: down");
+  const world = Testing.world({ guest: { stop: async () => jarl.err(down) }, turns: [done()] });
   const { result, said } = drive(world);
   const failed = await result;
-  expect(jarl.error.is(failed, Drive.DriverFailed)).toBe(true);
+  expect(jarl.is_err(failed)).toBe(true);
   if (jarl.is_err(failed)) {
-    expect(failed.error.message).toBe(message);
+    expect(failed.error).toBe(down);
   }
-  expect(world.calls.at(-1)).toEqual(["stop", { status: "failed", reason: message }]);
-  expect(said).toContainEqual(expect.objectContaining({ level: "error", text: message }));
+  expect(said).toContainEqual(reported(down));
 });
 
-it("fails when the guest could not be stopped at the end", async () => {
+it("keeps the drive's own failure when its guest then fails to stop too", async () => {
+  const down = new Http.HttpInvalid("stop: down");
   const world = Testing.world({
-    guest: { stop: async () => jarl.err(new Http.HttpInvalid("stop: down")) },
-    turns: [done()],
+    guest: { image: async () => jarl.err(imageDown), stop: async () => jarl.err(down) },
   });
-  const { result } = drive(world);
+  const { result, said } = drive(world);
   const failed = await result;
-  expect(jarl.error.is(failed, Drive.DriverFailed)).toBe(true);
+  expect(jarl.is_err(failed)).toBe(true);
   if (jarl.is_err(failed)) {
-    expect(failed.error.message).toBe("finish: stop: down");
+    expect(failed.error).toBe(imageDown);
   }
+  expect(said).toContainEqual(reported(imageDown));
+  expect(said).toContainEqual(reported(down));
 });
 
 it("fails a setup whose guest stayed up through the save, and stops it", async () => {
