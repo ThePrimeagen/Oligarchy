@@ -1,10 +1,9 @@
 {
-  "name": "@oligarchy/missions",
+  "name": "@oligarchy/drive-harness",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/mission.ts",
-    "./prompts": "./src/prompts.ts"
+    ".": "./src/main.ts"
   },
   "scripts": {
     "check:types": "tsc --noEmit -p tsconfig.json",
@@ -12,6 +11,8 @@
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
+    "@oligarchy/http": "workspace:*",
+    "@oligarchy/openrouter": "workspace:*",
     "@oligarchy/qemu-http-tools": "workspace:*",
     "@oligarchy/stores": "workspace:*",
     "jarl": "catalog:"

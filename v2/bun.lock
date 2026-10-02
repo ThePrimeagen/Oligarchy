@@ -110,6 +110,23 @@
         "vitest": "catalog:",
       },
     },
+    "packages/drive-harness": {
+      "name": "@oligarchy/drive-harness",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/openrouter": "workspace:*",
+        "@oligarchy/qemu-http-tools": "workspace:*",
+        "@oligarchy/stores": "workspace:*",
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@oligarchy/db": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/env": {
       "name": "@oligarchy/env",
       "dependencies": {
@@ -185,21 +202,6 @@
       "devDependencies": {
         "@oligarchy/env": "workspace:*",
         "@oligarchy/fake-postgres": "workspace:*",
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/missions": {
-      "name": "@oligarchy/missions",
-      "dependencies": {
-        "@oligarchy/app": "workspace:*",
-        "@oligarchy/qemu-http-tools": "workspace:*",
-        "@oligarchy/stores": "workspace:*",
-        "jarl": "catalog:",
-      },
-      "devDependencies": {
-        "@oligarchy/db": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -403,6 +405,8 @@
 
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
+    "@oligarchy/drive-harness": ["@oligarchy/drive-harness@workspace:packages/drive-harness"],
+
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
     "@oligarchy/fake-postgres": ["@oligarchy/fake-postgres@workspace:packages/fake-postgres"],
@@ -412,8 +416,6 @@
     "@oligarchy/http": ["@oligarchy/http@workspace:packages/http"],
 
     "@oligarchy/logger": ["@oligarchy/logger@workspace:packages/logger"],
-
-    "@oligarchy/missions": ["@oligarchy/missions@workspace:packages/missions"],
 
     "@oligarchy/openrouter": ["@oligarchy/openrouter@workspace:packages/openrouter"],
 

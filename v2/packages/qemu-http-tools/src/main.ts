@@ -7,8 +7,6 @@ import * as Tools from "./tools.ts";
 import type * as Types from "./types.ts";
 
 export { GuestOff, IntentOpen, NoPointer, NotPoweredOff, ToolInvalid } from "./errors.ts";
-// The model and mission prompts use the same catalogue as run().
-export const tools = Tools.definitions;
 export type {
   Button,
   Direction,
