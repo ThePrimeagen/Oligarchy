@@ -1,12 +1,20 @@
 import type * as App from "@oligarchy/app";
 import type * as Http from "@oligarchy/http";
 import * as Fake from "@oligarchy/http/testing";
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type * as Sentry from "../src/main.ts";
 import * as SentryTesting from "../src/testing.ts";
-import { errors, held, ingest, JOB_ID, spans, TRACE_ID, within } from "./support.ts";
+import { errors, held, ingest, JOB_ID, spans, TRACE_ID } from "./support.ts";
 
 const answered = () => Fake.json({ id: "stored" });
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("the sentry service", () => {
   it("is built by createService over the http it wants, the fake too (happy)", () => {
@@ -20,9 +28,11 @@ describe("the sentry service", () => {
 
 describe("sentry", () => {
   it("puts a job's spans, their children and the errors sent through them on the job's trace, and wait resolves once Sentry has them (happy)", async () => {
+    const entered = held<void>();
     const gate = held<void>();
     const { sentry, asked } = ingest({
       replies: async () => {
+        entered.release();
         await gate.promise;
         return answered();
       },
@@ -36,10 +46,15 @@ describe("sentry", () => {
     sentry.send(new Error("the client lost the drive"), { level: "fatal", jobId: JOB_ID });
     job.end("internal_error");
 
-    const waited = sentry.wait();
-    expect(await within(50, waited)).toBe(false);
+    let settled = false;
+    const waited = sentry.wait().then(() => {
+      settled = true;
+    });
+    await entered.promise;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(settled).toBe(false);
     gate.release();
-    expect(await within(2_000, waited)).toBe(true);
+    await waited;
 
     const sent = spans(asked);
     const root = sent.find((span) => span.name === "drive: lock screen");
@@ -75,7 +90,19 @@ describe("sentry", () => {
 
       sentry.trace("drive", { op: "qemu.job", jobId: JOB_ID }).fail(new Error("qemu crashed"));
 
-      expect(await within(2_000, sentry.wait())).toBe(true);
+      let settled = false;
+      const waited = sentry.wait().then(() => {
+        settled = true;
+      });
+      if (reply === "hang") {
+        await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+      } else {
+        // The SDK's flush checks for completed event processing after 1 ms.
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      await waited;
       expect(asked.length).toBeGreaterThan(0);
     }
   });

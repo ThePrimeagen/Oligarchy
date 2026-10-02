@@ -1,4 +1,3 @@
-import * as Async from "@oligarchy/async";
 import * as Fake from "@oligarchy/http/testing";
 import * as Sentry from "../src/main.ts";
 
@@ -11,17 +10,6 @@ export const ingest = (options: Fake.Options) => {
   const fake = Fake.http(options);
   const sentry = Sentry.create({ http: fake.http }, { dsn: DSN, environment: "test" });
   return { sentry, asked: fake.asked };
-};
-
-// Whether promise settles within ms.
-export const within = async (ms: number, promise: Promise<unknown>): Promise<boolean> => {
-  const stop = new AbortController();
-  const settled = await Promise.race([
-    promise.then(() => true),
-    Async.sleep(ms, stop.signal).then(() => false),
-  ]);
-  stop.abort();
-  return settled;
 };
 
 // A promise the test settles when it chooses.
