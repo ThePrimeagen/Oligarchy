@@ -1,26 +1,28 @@
 {
-  "name": "@oligarchy/drive-harness",
+  "name": "@oligarchy/driver",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./src/main.ts",
-    "./testing": "./src/testing.ts"
-  },
+  "exports": {},
   "scripts": {
+    "start": "bun --no-env-file src/main.ts",
     "check:types": "tsc --noEmit -p tsconfig.json",
     "test:unit": "bun --bun vitest run"
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/drive-harness": "workspace:*",
+    "@oligarchy/env": "workspace:*",
     "@oligarchy/http": "workspace:*",
+    "@oligarchy/logger": "workspace:*",
     "@oligarchy/openrouter": "workspace:*",
     "@oligarchy/qemu-http-tools": "workspace:*",
+    "@oligarchy/sentry": "workspace:*",
     "@oligarchy/stores": "workspace:*",
-    "jarl": "catalog:",
-    "zod": "catalog:"
+    "jarl": "catalog:"
   },
   "devDependencies": {
-    "@oligarchy/db": "workspace:*",
+    "@oligarchy/async": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

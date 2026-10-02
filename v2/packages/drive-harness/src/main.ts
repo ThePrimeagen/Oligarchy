@@ -1,4 +1,4 @@
-import type * as App from "@oligarchy/app";
+import * as App from "@oligarchy/app";
 import type * as Http from "@oligarchy/http";
 import type * as OpenRouter from "@oligarchy/openrouter";
 import type * as Qemu from "@oligarchy/qemu-http-tools";
@@ -25,14 +25,21 @@ export type {
 // The user turn beside the system prompt; the screenshot, when there is one, goes with it.
 const ASKING = "Reply with your next tool call.";
 
-export type Services = App.Needs<Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter>;
+type Wants = Stores.Tests.Tests | Qemu.QemuHttpTools | OpenRouter.OpenRouter;
+
+declare module "@oligarchy/app" {
+  interface Services {
+    driveHarness: App.Register<"driveHarness", DriveHarness>;
+  }
+}
 
 // One drive or setup job's guest and model, and what the model has been shown so far. The driver
 // runs the loop and its limits: load and start, then each turn getImage, ask and act until the
 // model is done, and finish. The driver loads the job before anything else; nothing here checks
-// that it did.
+// that it did. A service made by create, over that job's qemuHttpTools.
 export class DriveHarness {
-  readonly services: Services;
+  readonly service = "driveHarness";
+  readonly services: App.Needs<Wants>;
   readonly options: Types.Options;
   // The guest's tools with step and reason added, and Done.
   readonly tools: ReadonlyArray<OpenRouter.Tool>;
@@ -50,7 +57,7 @@ export class DriveHarness {
   // The screen the next ask shows. Any move that took none may have changed it, so it drops it.
   screen: Uint8Array | undefined = undefined;
 
-  constructor(services: Services, options: Types.Options) {
+  constructor(services: App.Needs<Wants>, options: Types.Options) {
     this.services = services;
     this.options = options;
     this.tools = Moves.tools(services.qemuHttpTools.tools);
@@ -211,3 +218,7 @@ export class DriveHarness {
       : this.services.qemuHttpTools.stop(end);
   }
 }
+
+export const create = App.createService<Wants, Types.Options, DriveHarness>(
+  (services, options) => new DriveHarness(services, options),
+);

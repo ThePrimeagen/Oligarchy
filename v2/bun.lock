@@ -58,6 +58,28 @@
         "vitest": "catalog:",
       },
     },
+    "apps/driver": {
+      "name": "@oligarchy/driver",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/db": "workspace:*",
+        "@oligarchy/drive-harness": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/logger": "workspace:*",
+        "@oligarchy/openrouter": "workspace:*",
+        "@oligarchy/qemu-http-tools": "workspace:*",
+        "@oligarchy/sentry": "workspace:*",
+        "@oligarchy/stores": "workspace:*",
+        "jarl": "catalog:",
+      },
+      "devDependencies": {
+        "@oligarchy/async": "workspace:*",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "apps/qemu-server": {
       "name": "@oligarchy/qemu-server",
       "dependencies": {
@@ -407,6 +429,8 @@
     "@oligarchy/db": ["@oligarchy/db@workspace:packages/db"],
 
     "@oligarchy/drive-harness": ["@oligarchy/drive-harness@workspace:packages/drive-harness"],
+
+    "@oligarchy/driver": ["@oligarchy/driver@workspace:apps/driver"],
 
     "@oligarchy/env": ["@oligarchy/env@workspace:packages/env"],
 
