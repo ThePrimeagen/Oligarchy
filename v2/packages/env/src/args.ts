@@ -162,17 +162,23 @@ export const debugLog = flag({
 
 export const output = flag({
   schema: words,
-  description: "Write it to this file instead of stdout",
+  description: "The file to write it to",
 });
 
 export const imageId = flag({
-  schema: words,
-  description: "Image id, as ctrl session --images prints it",
+  schema: z.uuid({ error: "must be a uuid" }),
+  description: "Image id, as ctrl logs prints it under images",
 });
 
 // ---------------------------------------------------------------------------
 // ctrl
 // ---------------------------------------------------------------------------
+
+// ctrl logs' and ctrl diagnose's --job-id: a job read back, not one being driven.
+export const reviewedJobId = flag({
+  schema: z.uuid({ error: "must be a uuid" }),
+  description: "The drive or setup job under review",
+});
 
 export const list = flag({ schema: toggle, description: "List what this command keeps" });
 
@@ -297,7 +303,7 @@ export const verdict = flag({
 
 export const type = flag({
   schema: errorTypeKey,
-  description: "Error type key of a failed verdict; error-type list prints them",
+  description: "Error type key of a failed verdict; ctrl logs prints them under errorTypes",
 });
 
 export const summary = flag({
