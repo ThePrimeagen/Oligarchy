@@ -1,5 +1,6 @@
+import { EventEmitter } from "node:events";
 import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Usage from "../src/usage.ts";
 
 const SECOND = 1_000_000_000n;
@@ -184,33 +185,120 @@ describe("reading usage from ps", () => {
 });
 
 describe("running ps", () => {
-  it("gives what the command printed and its pid (happy)", async () => {
-    const listing = jarl.unwrap(
-      await Usage.listProcesses({
-        command: process.execPath,
-        args: ["-e", "console.log(' 1 0 5')"],
-      }),
-    );
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
 
-    expect(listing.text).toBe(" 1 0 5\n");
-    expect(listing.ps).toBeGreaterThan(0);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const fakeProcess = () => {
+    const events = new EventEmitter();
+    const output = new EventEmitter();
+    const calls: Array<Parameters<Usage.Spawn>> = [];
+    const signals: Array<string> = [];
+    const encodings: Array<string> = [];
+    let exited = false;
+    const spawn: Usage.Spawn = (...args) => {
+      calls.push(args);
+      return {
+        pid: 42,
+        get exitCode() {
+          return exited ? 0 : null;
+        },
+        signalCode: null,
+        kill: (signal) => {
+          signals.push(signal);
+        },
+        on: events.on.bind(events),
+        stdout: {
+          setEncoding: (encoding) => {
+            encodings.push(encoding);
+          },
+          on: output.on.bind(output),
+        },
+      };
+    };
+    return {
+      spawn,
+      calls,
+      signals,
+      encodings,
+      write: (text: string) => output.emit("data", text),
+      fail: (error: Error) => events.emit("error", error),
+      close: () => {
+        exited = true;
+        events.emit("close");
+      },
+    };
+  };
+
+  it("gives what the command printed and its pid (happy)", async () => {
+    const child = fakeProcess();
+    const ran = Usage.listProcesses({ spawn: child.spawn });
+    child.write(" 1 0");
+    child.write(" 5\n");
+    child.close();
+
+    expect(jarl.unwrap(await ran)).toEqual({ text: " 1 0 5\n", ps: 42 });
+    expect(child.calls).toEqual([
+      [
+        "/bin/ps",
+        ["-A", "-o", "pid=", "-o", "ppid=", "-o", "rss="],
+        { stdio: ["ignore", "pipe", "ignore"] },
+      ],
+    ]);
+    expect(child.encodings).toEqual(["utf8"]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(child.signals).toEqual([]);
   });
 
   it("a command that cannot start is unreadable, with the platform's reason (error)", async () => {
-    const ran = await Usage.listProcesses({ command: "/nonexistent/ps" });
+    const child = fakeProcess();
+    const pending = Usage.listProcesses({ command: "/nonexistent/ps", spawn: child.spawn });
+    child.fail(new Error("spawn /nonexistent/ps ENOENT"));
+    child.close();
+    const ran = await pending;
 
-    expect(jarl.is_err(ran) && ran.error.message).toMatch(/ENOENT/);
+    expect(jarl.error.is(ran, Usage.UsageUnreadable)).toBe(true);
+    expect(jarl.is_err(ran) && ran.error.message).toBe("spawn /nonexistent/ps ENOENT");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(child.signals).toEqual([]);
   });
 
-  it("a command that does not answer in time is unreadable at the deadline (error)", async () => {
-    const started = Date.now();
-    const ran = await Usage.listProcesses({
-      command: process.execPath,
-      args: ["-e", "setTimeout(() => {}, 60_000)"],
-      timeoutMs: 200,
-    });
+  it.each([
+    { behavior: "exits during the grace period", exits: true },
+    { behavior: "ignores SIGTERM", exits: false },
+  ])(
+    "a command that $behavior times out at the deadline and is killed only while still running (error)",
+    async ({ exits }) => {
+      const child = fakeProcess();
+      let settled = false;
+      const pending = Usage.listProcesses({
+        spawn: child.spawn,
+        timeoutMs: 200,
+      }).then((result) => {
+        settled = true;
+        return result;
+      });
 
-    expect(jarl.is_err(ran) && ran.error.message).toBe("ps did not answer within 0.2 seconds");
-    expect(Date.now() - started).toBeLessThan(5_000);
-  });
+      await vi.advanceTimersByTimeAsync(199);
+      expect(settled).toBe(false);
+      expect(child.signals).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const ran = await pending;
+      expect(jarl.error.is(ran, Usage.UsageUnreadable)).toBe(true);
+      expect(jarl.is_err(ran) && ran.error.message).toBe("ps did not answer within 0.2 seconds");
+      expect(child.signals).toEqual(["SIGTERM"]);
+      if (exits) {
+        child.close();
+      }
+      await vi.advanceTimersByTimeAsync(999);
+      expect(child.signals).toEqual(["SIGTERM"]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(child.signals).toEqual(exits ? ["SIGTERM"] : ["SIGTERM", "SIGKILL"]);
+      child.close();
+    },
+  );
 });

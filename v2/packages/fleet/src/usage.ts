@@ -222,17 +222,38 @@ const PS_TIMEOUT_MS = 10_000;
 // It has nothing to flush, so SIGTERM gets a second before SIGKILL.
 const PS_FORCE_KILL_MS = 1_000;
 
+export type Spawn = (
+  command: string,
+  args: ReadonlyArray<string>,
+  options: { readonly stdio: ["ignore", "pipe", "ignore"] },
+) => {
+  readonly pid?: number | undefined;
+  readonly exitCode: number | null;
+  readonly signalCode: string | null;
+  readonly kill: (signal: "SIGTERM" | "SIGKILL") => void;
+  readonly on: {
+    (event: "error", handler: (error: Error) => void): void;
+    (event: "close", handler: () => void): void;
+  };
+  readonly stdout: {
+    readonly setEncoding: (encoding: "utf8") => void;
+    readonly on: (event: "data", handler: (chunk: string) => void) => void;
+  };
+};
+
 // Every process with its parent and rss, as ps lists them.
 export const listProcesses = (
   options: {
     readonly command?: string;
     readonly args?: ReadonlyArray<string>;
     readonly timeoutMs?: number;
+    readonly spawn?: Spawn;
   } = {},
 ): Promise<jarl.Result<Listing, UsageUnreadable>> =>
   new Promise((resolve) => {
     const { command = "/bin/ps", args = PS_ARGS, timeoutMs = PS_TIMEOUT_MS } = options;
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+    const start: Spawn = options.spawn ?? spawn;
+    const child = start(command, args, { stdio: ["ignore", "pipe", "ignore"] });
     let text = "";
     let settled = false;
     const settle = (result: jarl.Result<Listing, UsageUnreadable>) => {
