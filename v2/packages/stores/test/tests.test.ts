@@ -350,7 +350,7 @@ describe("a test, start to finish", () => {
     trail.push(
       `createTestSuite ${filed.suite.status}, its run ${run.status}, its drive ${drive.status}`,
     );
-    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    const queued = jarl.unwrap(await tests.nextPendingJob());
     await step("startRun", tests.startRun(run.id, MODEL));
     await step("runJob drive", tests.runJob(drive.id, SERVER));
     await step("completeJob drive", tests.completeJob(drive.id));
@@ -428,7 +428,7 @@ describe("a suite, written whole", () => {
 
     expect(said(refused)).toBe("NotFound: createTestSuite: no test definition 999");
     expect(await counted(db)).toEqual({ suites: 0, runs: 0, jobs: 0 });
-    expect(jarl.unwrap(await tests.nextPendingJob([]))).toBeUndefined();
+    expect(jarl.unwrap(await tests.nextPendingJob())).toBeUndefined();
   });
 
   it("naming no definitions is refused, and nothing is written (unhappy)", async () => {
@@ -460,7 +460,7 @@ describe("a single test run, with no suite", () => {
     const { run, job: drive } = jarl.unwrap(
       await tests.createTestRun({ definitionId: await definition(tests), ...SINGLE }),
     );
-    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    const queued = jarl.unwrap(await tests.nextPendingJob());
     jarl.unwrap(await tests.startRun(run.id, MODEL));
     jarl.unwrap(await tests.runJob(drive.id, SERVER));
     jarl.unwrap(await tests.completeJob(drive.id));
@@ -503,7 +503,7 @@ describe("a setup definition is filed with a setup job", () => {
     const { run, job } = jarl.unwrap(
       await tests.createTestRun({ definitionId: setupId, ...SINGLE, setupServer: QEMU_A }),
     );
-    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    const queued = jarl.unwrap(await tests.nextPendingJob());
 
     expect(`${job.action} ${job.status}`).toBe("setup pending");
     expect(queued?.id).toBe(job.id);
@@ -525,7 +525,7 @@ describe("a setup definition is filed with a setup job", () => {
         setupServers: [QEMU_A, QEMU_B],
       }),
     );
-    const queued = jarl.unwrap(await tests.nextPendingJob([]));
+    const queued = jarl.unwrap(await tests.nextPendingJob());
     const [first, second] = filed.runs;
 
     expect(filed.suite.status).toBe("running");
@@ -852,7 +852,7 @@ describe("a suite, state by state", () => {
 });
 
 describe("the reads with rules of their own", () => {
-  it("the queue hands out setups, then diagnoses, then drives, oldest first, skips what it is told to, and ends empty", async () => {
+  it("the queue hands out setups, then diagnoses, then drives, oldest first, and ends empty", async () => {
     const setup = await database();
     const queued: Array<[Tests.JobAction, number]> = [
       ["drive", 1],
@@ -868,16 +868,11 @@ describe("the reads with rules of their own", () => {
       await createdAt(setup.db, job.id, second);
       names.set(job.id, `${action} ${String(second)}`);
     }
-    const first = jarl.unwrap(await setup.tests.nextPendingJob([]));
-    const skipped = jarl.unwrap(
-      await setup.tests.nextPendingJob(first === undefined ? [] : [first.id]),
-    );
-
     const handed: Array<string | undefined> = [];
-    for (let next = first; next !== undefined;) {
+    for (let next = jarl.unwrap(await setup.tests.nextPendingJob()); next !== undefined;) {
       handed.push(names.get(next.id));
       await setJob(setup.db, next.id, "running");
-      next = jarl.unwrap(await setup.tests.nextPendingJob([]));
+      next = jarl.unwrap(await setup.tests.nextPendingJob());
     }
 
     expect(handed).toEqual([
@@ -888,8 +883,7 @@ describe("the reads with rules of their own", () => {
       "drive 0",
       "drive 1",
     ]);
-    expect(names.get(skipped?.id ?? "")).toBe("setup 4");
-    expect(jarl.unwrap(await setup.tests.nextPendingJob([]))).toBeUndefined();
+    expect(jarl.unwrap(await setup.tests.nextPendingJob())).toBeUndefined();
   });
 
   it("a definition's resume is kept with each wording: a newer wording that boots fresh does not resume, the older still does", async () => {
