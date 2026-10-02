@@ -1,0 +1,6 @@
+#!/bin/sh
+# V2's driver, run by an automation client for one drive or setup job: ./driver --job-id <id>
+# --server-url <proxy>. Exits 0 when the drive ran to its end, passed or failed, and 1 when the
+# system failed it.
+root=$(CDPATH= cd "$(dirname "$0")" && pwd)
+exec bun --no-env-file "$root/apps/driver/src/main.ts" "$@"
