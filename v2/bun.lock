@@ -750,6 +750,10 @@
 
     "@oligarchy/fleet/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
+    "@oligarchy/logger/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
+    "@oligarchy/sentry/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
+
     "@oligarchy/tester/jarl": ["jarl@github:ThePrimeagen/jarl#2363881", {}, "ThePrimeagen-jarl-2363881", "sha512-pjZJC7jRWzlSAHKcrxD8LlNofQjMFQ7q0kHIgzz/o/VyoMbqEDTWoYFMpae85UbBfReHcU8fH7cVYksi1pCvhQ=="],
 
     "import-in-the-middle/es-module-lexer": ["es-module-lexer@3.0.2", "", {}, "sha512-BuIB67FngDSyQ/dpQNOZybwdEBDUGJQvOqwWr4ha/ufYiqzuEwPkKO2zLhRAgay28tStRIHUeWmszZAJo3GCOg=="],
