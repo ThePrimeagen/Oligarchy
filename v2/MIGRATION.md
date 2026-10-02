@@ -483,7 +483,9 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       move it could make. A setup whose guest is off is done and saved; a drive's is failed. On
       SIGINT or SIGTERM the guest is stopped aborted. It exits 0 when the drive ran to its end,
       passed or failed, and 1 when the system failed it: the job would not load or start, or the
-      proxy or the model could not be reached. The OpenRouter client has `timeouts.header` as its
+      proxy or the model could not be reached. That failure is the failing step's own error,
+      returned as it came, logged with itself as the cause so Sentry gets its stack, printed with
+      its stack, and the reason the guest is stopped with. The OpenRouter client has `timeouts.header` as its
       timeout (`timeouts.chunk` means nothing without a stream) and three attempts. V1's
       `--prompt` and `--debug-log` do not come over: the harness renders its own prompt, and
       every line goes to the logs table under the job id.
