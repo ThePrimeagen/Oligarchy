@@ -1,7 +1,7 @@
 import * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import * as DbSchema from "@oligarchy/db/schema";
-import { and, asc, desc, eq, getTableColumns, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { alias, type PgUpdateSetSource } from "drizzle-orm/pg-core";
 import * as jarl from "jarl";
 import { type Answer, settle } from "./answer.ts";
@@ -163,7 +163,7 @@ export type Tests = {
   readonly getJobDetails: (jobId: string) => Found<JobDetails>;
   readonly listJobs: (limit?: number) => Answer<Queue>;
   readonly latestJob: (runId: string, action: JobAction) => Answer<JobRow | undefined>;
-  readonly nextPendingJob: (except: ReadonlyArray<string>) => Answer<JobRow | undefined>;
+  readonly nextPendingJob: () => Answer<JobRow | undefined>;
   readonly runJob: (jobId: string, serverId: string) => Moved<JobRow>;
   readonly completeJob: (jobId: string) => Moved<JobRow>;
   readonly finalizeJob: (jobId: string, status: JobVerdict, reason: string | null) => Moved<JobRow>;
@@ -1019,15 +1019,12 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
         return row;
       }),
 
-    nextPendingJob: (except) =>
+    nextPendingJob: () =>
       db.run(async (d) => {
-        const pending = eq(DbSchema.jobs.status, "pending");
         const [row] = await d
           .select()
           .from(DbSchema.jobs)
-          .where(
-            except.length === 0 ? pending : and(pending, notInArray(DbSchema.jobs.id, [...except])),
-          )
+          .where(eq(DbSchema.jobs.status, "pending"))
           .orderBy(queueRank, asc(DbSchema.jobs.createdAt), asc(DbSchema.jobs.id))
           .limit(1);
         return row;
