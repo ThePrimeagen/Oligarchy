@@ -57,7 +57,11 @@ const reserving = (options: {
   });
   const jobs = Jobs.create();
   const log = FakeLogger.logger();
-  const qemuServer = QemuServer.create({ http: fake.http, url: QEMU_SERVER, token: { reveal: () => TOKEN } });
+  const qemuServer = QemuServer.create({
+    http: fake.http,
+    url: QEMU_SERVER,
+    token: { reveal: () => TOKEN },
+  });
   const reservations = Reserve.create({
     maxJobs: options.maxJobs ?? 2,
     jobs,

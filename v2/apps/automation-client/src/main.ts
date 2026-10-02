@@ -8,7 +8,7 @@ import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
 import * as Jobs from "./jobs.ts";
-import * as Proxy from "./proxy.ts";
+import * as QemuServer from "./qemu-server.ts";
 import * as Reserve from "./reserve.ts";
 import { routes } from "./routes.ts";
 import { closeServices, createServices } from "./services.ts";
@@ -61,7 +61,7 @@ const main = async (app: App.App<Run, Announcing | Http.Http>) => {
   const reservations = Reserve.create({
     maxJobs: flags.maxJobs,
     jobs,
-    proxy: Proxy.create({ http, url: flags.serverUrl, token: vars.oligarchyToken }),
+    qemuServer: QemuServer.create({ http, url: flags.serverUrl, token: vars.oligarchyToken }),
     logger,
   });
   const listened = await listen(

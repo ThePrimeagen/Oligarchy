@@ -27,7 +27,7 @@ export type Ran = "ended" | "aborted";
 // A client that does not hold the job has nothing to stop.
 export type Stopped = "stopped" | "not-held";
 
-// The qemu reverse proxy could not reserve the job's guest; the message says why.
+// The qemu server could not reserve the job's guest; the message says why.
 export const ReserveFailed = jarl.error.define("ReserveFailed");
 export type ReserveFailed = InstanceType<typeof ReserveFailed>;
 
