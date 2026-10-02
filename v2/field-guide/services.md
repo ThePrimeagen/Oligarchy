@@ -54,11 +54,29 @@ export const create = App.createService<Db.Database, App.NoOptions, ProcessStats
 
 ## Class
 
+```ts
+// packages/drive-harness/src/main.ts
+class DriveHarness {
+  constructor(services: App.Needs<Wants>, signal: AbortSignal, options: Types.Options) {
+    this.qemuHttpTools = Qemu.create(services, signal, options);
+  }
+}
+
+export type { DriveHarness };
+
+export const create = (
+  services: App.Needs<Wants>,
+  signal: AbortSignal,
+  options: Types.Options,
+): DriveHarness => new DriveHarness(services, signal, options);
+```
+
 | Problem | Fact |
 | --- | --- |
-| constructor | `new C(services, options)`, services typed `App.Needs<...>` |
-| what it builds | imports and constructs it; never injected: `DriveHarness` builds its `QemuHttpTools` |
-| handing on services | pass `this.services` whole: `new QemuHttpTools(this.services, { job, baseUrl, token, signal })` |
+| export | `create` and the type only; never the class |
+| create | `create(services, signal, options)`: services typed `App.Needs<...>`, the signal it reacts to, then options |
+| what it builds | imports and creates it; never injected: `DriveHarness` creates its `QemuHttpTools` |
+| handing on services | pass the services object whole: `Qemu.create(services, signal, options)` |
 | registered | never in `Services`; no `service` field |
 | test | fake the service it reaches, `http`; prove `act` and `ask` make their calls through it |
 

@@ -105,7 +105,8 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
 - [x] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
       `src/harness/intent.ts`, `src/harness/pointer.ts` and `src/driver/client.ts`, over
       `packages/http/src/proxy-client.ts`. Controlling one job's qemu guest over HTTP for the AI's
-      tools. `create({ http }, { job, baseUrl, token, signal })` names the job once; every call
+      tools. Not a service: `create({ http }, signal, { job, baseUrl, token })` builds one job's
+      `QemuHttpTools`, a class the package does not export, and names the job once; every call
       carries it, and `OLIGARCHY_TOKEN` as the bearer, on `@oligarchy/http` to the qemu reverse
       proxy. The harness's calls are `start`, `intentStart`, `intentEnd`, `stop` and `save`. The
       guest's are `image` (the PNG's bytes, through `@oligarchy/http`'s `read: "bytes"`),
@@ -235,10 +236,13 @@ record, and the automation server acts on it directly.
       `prompts/custom-harness-driving-agent.html`, and lists the model's tools where V1 pastes in
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
-      `@oligarchy/drive-harness` is the `driveHarness` service: its `create({ tests,
-      qemuHttpTools, openRouter }, { recentActions })` builds a `DriveHarness`, the class, over
-      the job's `qemuHttpTools`, with `harness.recentActions` from `v2/oligarchy.json` (10).
-      `@oligarchy/drive-harness/testing` makes one over a fake tests store, guest and model. It holds one
+      `@oligarchy/drive-harness` is not a service: its `create({ tests, openRouter, http },
+      signal, { job, baseUrl, token, recentActions })` builds a `DriveHarness`, a class the
+      package does not export, which builds the job's `QemuHttpTools` over `http` itself, with
+      `harness.recentActions` from `v2/oligarchy.json` (10). The signal ends every guest call but
+      the stop, and every ask. `@oligarchy/drive-harness/testing` makes the services a test hands
+      it, a fake tests store, a fake model, and a fake `http` the guest answers through, and
+      records every request the guest was sent. It holds one
       drive or setup's state: the loaded job, every step opened with all its actions, the
       model's last response, the previous move and the screen. Its methods are the points the
       driver's loop calls:
@@ -249,7 +253,7 @@ record, and the automation server acts on it directly.
         the job before it calls anything else, and nothing in the harness checks that it did.
       - `start()` boots that ISO.
       - `getImage()` takes the guest's screen for the next ask.
-      - `ask({ model, reasoning, deadline, signal? })` renders the driving prompt and answers
+      - `ask({ model, reasoning, deadline })` renders the driving prompt and answers
         the model's turn. The prompt shows the open step's intent and its newest actions,
         newest first, `recentActions` lines in all; earlier steps stay in the harness. The
         model gets the guest's tools, each taking `step` and `reason` beside its own arguments,
@@ -501,8 +505,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             close. From the moment shutdown begins, every hold is refused.
 - [x] **driver** (`v2/apps/driver`, V1: `src/driver`, `src/harness`). `v2/driver --job-id <id>
       --server-url <proxy>` (or `bun run driver`) needs `DATABASE_URL`, `OLIGARCHY_TOKEN` and
-      `OPENROUTER_API_KEY`, and drives one drive or setup job over the `driveHarness` service
-      it creates with its other services (section 3's The drive harness): the job's action picks its model and reasoning from
+      `OPENROUTER_API_KEY`, and drives one drive or setup job over the `DriveHarness` that
+      `drive(services, app.signal, options)` creates (section 3's The drive harness): the job's action picks its model and reasoning from
       `v2/oligarchy.json`, so there is no `--action`. Each turn is `getImage`, `ask` and `act`,
       until the model is done, the step limit or the run ceiling (the deadline of every ask;
       `OpenRouterOutOfTime` is that ceiling reached), or three replies in a row that were not a
