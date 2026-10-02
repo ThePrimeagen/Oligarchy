@@ -17,7 +17,7 @@ The test isolation work below records the completed changes and the cases left u
   again is a new job.
 - **Setup, not mint.** What V1 calls a mint, installing an ISO and saving the disk a resume boots
   from, is a setup in V2, and that disk is its setup disk: the job action, the definition, the
-  config keys, the flags and `ctrl setup`. V2 reads its own `v2/oligarchy.json`, since V1 still
+  config keys and the flags. V2 reads its own `v2/oligarchy.json`, since V1 still
   reads `mint` from the root's.
 - **A definition says whether it resumes.** A drive of a resuming definition boots its test run's
   ISO from that ISO's setup disk, and one that does not boots fresh. A setup always boots fresh.
@@ -46,6 +46,8 @@ The test isolation work below records the completed changes and the cases left u
 - **No `./client`.** `src/client`, its `./client` wrapper and `client.md` are not ported, and
   nothing in V2 runs them. Everything else must still work as it does in V1: the driver drives a
   guest through `@oligarchy/qemu-http-tools`, not through `./client`'s words.
+- **ctrl is a service, not a program.** `@oligarchy/ctrl` is the diagnosing agent's tools, and
+  apps use it. There is no `./ctrl` and no `apps/ctrl` in V2 (section 6).
 
 ## Test isolation work
 
@@ -120,14 +122,15 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
       (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
       waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
       other calls go with the apps that make them: the automation client's reserve and
-      relinquish, `ctrl setup`'s setup disks and viz's follow.
+      relinquish, viz's follow, and `/setup-disks` for whatever files setups (section 6's Not in
+      ctrl).
 
 ## 2. Finish the services V2 has
 
 - [x] **`tests`: write the model at start.** `startRun(runId, model)` writes the model id to
       `test_runs.model` beside the running status, as V1's `startResult` did. A refused or missing
       start writes neither.
-- [x] **`tests`: the live queue for viz and `ctrl automation`.** `listJobs(limit = 25)` returns the
+- [x] **`tests`: the live queue for viz and the dashboard.** `listJobs(limit = 25)` returns the
       running and the pending jobs, each list in queue order and cut at `limit`, read on one
       snapshot. Each job carries its test's name, the url of the automation client that claimed it
       and that of the qemu server holding its guest. V1's also listed the newest finished jobs, which
@@ -194,8 +197,8 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
 - [x] **Mint is setup.** Migration 0010 renames the `job_action` value `mint` to `setup`, and the
       definition named `mint` to `setup`, rows already written included. The queue hands out
       setups first. The config's `models.setup` and `reasoning.setup` replace `mint`, in V2's own
-      `v2/oligarchy.json`; the driver's `--action` is `drive` or `setup`; `ctrl setup`'s
-      `--setup-only` replaces `--unminted`; and a minted disk is a setup disk.
+      `v2/oligarchy.json`; the driver's `--action` is `drive` or `setup`; and a minted disk is a
+      setup disk.
 
 ## 3. The flow that replaces the Linear board
 
@@ -214,8 +217,8 @@ record, and the automation server acts on it directly.
       the `setup` definition, one server per id, writes the suite and claims each server with
       `setupRequests.claim`, which refuses a lock a live setup holds and a lock still waiting on its job;
       one refusal rolls the suite back. A setup and a drive cannot share a suite, a setup suite
-      needs one server per run, and a drive suite names no servers. `ctrl test suite` and the
-      dashboard pass every definition but `setup`, with no `setupServers`.
+      needs one server per run, and a drive suite names no servers. The dashboard passes every
+      definition but `setup`, with no `setupServers`.
 - [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
@@ -271,11 +274,11 @@ record, and the automation server acts on it directly.
       bodies remain until V1 is retired.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
-- [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
-      `ctrl diagnose` (`diagnosis.saveDiagnosis`). Then the drive is `finalizeJob`ed, its run
-      `completeRun`s passed or failed, and its suite, when it has one, `completeSuite`s once its
-      last run has closed.
-- [ ] **Abort.** By job id or by suite id, from `ctrl`, the dashboard and the automation server's
+- [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job through
+      ctrl's verdict tool (`diagnosis.saveDiagnosis`; section 6). Then the drive is
+      `finalizeJob`ed, its run `completeRun`s passed or failed, and its suite, when it has one,
+      `completeSuite`s once its last run has closed.
+- [ ] **Abort.** By job id or by suite id, from the dashboard and the automation server's
       `/abort`. A pending job is `abortJob`ed; a running one is stopped at its automation client
       first.
 - [ ] **Restart and shutdown.** At startup, each job the last automation server left running is
@@ -283,8 +286,7 @@ record, and the automation server acts on it directly.
       which is closed as it would have been. At shutdown, each running job is stopped at its client
       and aborted. V1: `packages/jobs/src/reclaim.ts`, and `stopInherited` and `stopAtShutdown` in
       `worker.ts`.
-- [ ] **Try again.** An operator's retry, from `ctrl` or the dashboard, is a new job on the same test
-      run.
+- [ ] **Try again.** An operator's retry, from the dashboard, is a new job on the same test run.
 
 ## 4. Apps
 
@@ -408,7 +410,7 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             yet`.
 - [ ] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
       shutdown against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a
-      diagnose (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
+      diagnose (`opencode.ts`), until section 6's diagnosing loop replaces it; announces itself. Serves `/reserve`, `/run` and `/abort`. Done
       when every task below is ticked, roughly in their order.
       - [x] **Skeleton and routes.** `bun run automation-client`. `main` needs `DATABASE_URL`,
             `OLIGARCHY_TOKEN` and a required `--port`, builds its services with Sentry, listens
@@ -503,18 +505,22 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
 - [ ] **Docs and skills.** The root `AGENTS.md`, `client.md`, `ctrl.md`, `ctrl-linear.md`,
       `ctrl-diagnose.md`, `minted-disks.md`, `SUPER_RUN.md` and the skills in `.cursor/skills`
       describe V1 and its Linear board: a driving agent takes its task from a ticket, and a run is
-      watched on the board. Rewrite them for V2 as its apps land; `client.md` and `ctrl-linear.md`
-      go.
+      watched on the board. Rewrite them for V2 as its apps land. `client.md`, `ctrl.md` and
+      `ctrl-linear.md` go, since V2 has no `./client` or `./ctrl` to run; `ctrl-diagnose.md` is
+      the start of the diagnosing prompt (section 6).
 - [ ] **Retire V1.** Delete `apps/`, `packages/` and `src/`, V1's scripts and workspaces in the
       root `package.json`, V1's root `oligarchy.json`, and `LINEAR_*` from every env file, then
       move `v2/` to the root, V2's `oligarchy.json` and its config path with it.
 
 ## 6. ctrl, last
 
-`ctrl` is really the diagnosing agent's tool, so it is dealt with after everything else. It keeps
-V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
+`ctrl` is the diagnosing agent's tools and nothing else: a service apps use
+(`v2/packages/ctrl`), not a program. V2 has no `ctrl` command line and no `apps/ctrl`, and
+`@oligarchy/env` declares none of V1's ctrl or session flags. It goes in steps, one at a time:
+the reading tools first, which are done, then the verdict tool, then the diagnosing loop that
+hands them to the agent. Nothing past the step under way is written.
 
-- [x] **The diagnosing agent's evidence** (`v2/packages/ctrl`). V1: `ctrl session --all` and
+- [x] **Step one: the diagnosing agent's evidence** (`v2/packages/ctrl`). V1: `ctrl session --all` and
       `./session image`. The diagnosing agent walks a drive or setup back one screenshot at a
       time. The `logs` store reads it by offset:
       - `logs.getFrame(jobId, frame)` answers frame `frame` of `frames`. Frame 0 is the newest
@@ -533,23 +539,32 @@ V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
       `moreData()` answers the next frame back, starting at 0. It advances only when the store
       answered, so a failed read is asked again; past the oldest frame it stays at `NoFrame`.
       `debugLogs()` answers the job's debug log. These replace the first cut's `getEvidence`,
-      `getImage`, `logs.listJobLogs` and `debugLogs.getDebugLog`. The verdict tool (`diagnose`
-      below), the CLI and the diagnosing prompt build on it.
-- [ ] **ctrl** (`apps/ctrl`), cut down from V1's.
-      - `test run --name <definition> --iso <url>`: one test run on its own, with no suite, for
-        trying something out; prints its test run and job ids.
-      - `test suite --iso <url>`: a suite of every definition but `setup`; prints its id.
-      - `setup`: a setup on each server (section 3's File).
-      - `diagnose`: the diagnosing agent's verdict against a drive's job (section 3's Diagnose).
-
-      Open: whether the proxy's url is a flag, as V1's `--server-url` was, or read from the
-      environment; and which of V1's other commands come over at all (`test define`, `details`,
-      `list` and `start`, `test-results`, `session` as a job's view, `error-type` and
-      `automation`).
-- [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
-      `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
-      `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
-      `--debug-logs`, `--diagnosis` and `--all`. Rename or drop them as `ctrl` is ported.
+      `getImage`, `logs.listJobLogs` and `debugLogs.getDebugLog`.
+- [x] **No ctrl or session flags in env.** `v2/packages/env/src/args.ts` drops every flag only
+      a ctrl or session command line took: V1's `--agent-id`, `--session-id` (and `SESSION_ID`)
+      and `--test-result-id`; `./session image`'s `--output` and `--image-id`; and ctrl's
+      `--list`, `--details`, `--history`, `--name` (a definition's), `--description`,
+      `--instruction`, `--proof`, `--iso`, `--setup-only`, `--model`, `--id`, `--status`,
+      `--reason`, `--count`, `--active`, `--json`, `--search`, `--logs`, `--test-def`,
+      `--test-results`, `--test-run`, `--actions`, `--images`, `--debug-logs`, `--diagnosis`,
+      `--all`, `--key`, `--verdict`, `--type` and `--summary`. env's tests read a program of the
+      flags that remain.
+- [ ] **Step two: the verdict tool.** ctrl's tool beside `moreData` and `debugLogs` that ends a
+      diagnosis: the job's verdict, passed or failed, and for a failure its error type and what
+      happened, written with `diagnosis.saveDiagnosis` (section 3's Diagnose). V1:
+      `ctrl diagnose`, with `error-type list` and `error-type new` for the types. Open: how the
+      agent reads and adds error types, which in V1 were their own commands.
+- [ ] **Step three: the diagnosing loop.** Not started until step two is in. What runs a
+      diagnose job: the model loop that hands the agent ctrl's tools as native tool calls, as the
+      driver hands the model the harness's, and the diagnosing prompt, from V1's
+      `ctrl-diagnose.md`. It replaces V1's opencode running `./ctrl` and `./session image`, so the
+      automation client's diagnose runs it rather than opencode.
+- [ ] **Not in ctrl.** V1's other ctrl commands are not ctrl's in V2, and none is a command
+      line: `test run` (a test run on its own), `test suite` (a suite of every definition but
+      `setup`), `setup` (a setup on each server, section 3's File), `test define`, `details`,
+      `list`, `start`, `test-results`, `session`, `error-type` and `automation`. Open: what files
+      a lone test run, a suite or a setup for an operator, now that the dashboard is the only
+      caller named; and whether anything still needs a shell to do it.
 
 ## Not coming over
 
@@ -559,6 +574,8 @@ V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
   `serverForJob` replace.
 - `./client`: `src/client`, its wrapper, `client.md`, and the driver's one `client` tool.
   qemu-http-tools replaces them.
+- `./ctrl` as a program: V1's `apps/ctrl`, its `./ctrl` wrapper, `ctrl.md`, `ctrl-linear.md`
+  and `./session image`. ctrl is a service (section 6).
 - `Database.ping`.
 - The shared HTTP API package: V1's contract, middleware, `serve` and wire errors. Each app's Hono
   routes are its contract.
