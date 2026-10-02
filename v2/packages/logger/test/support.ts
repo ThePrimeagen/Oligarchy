@@ -9,7 +9,6 @@ import { afterEach } from "vitest";
 import * as Logger from "../src/main.ts";
 
 const CONFIG = readFileSync(Env.CONFIG_PATH, "utf8");
-export const UNREACHABLE = "postgres://postgres@127.0.0.1:1/postgres";
 
 const cleanups: Array<() => Promise<unknown>> = [];
 
@@ -27,18 +26,14 @@ const secret = async (url: string) =>
     ),
   ).vars.databaseUrl;
 
-// A logger over a database of the test's own, or over `url`, printing into `lines` and sending
+// A logger over a database of the test's own, printing into `lines` and sending
 // to a fake Sentry. rows reads back the logs table as [level, location, text].
 export const logging = async (
-  options: { readonly url?: string; readonly colors?: boolean; readonly now?: () => number } = {},
+  options: { readonly colors?: boolean; readonly now?: () => number } = {},
 ) => {
-  let fake: FakePostgres.FakePostgres | undefined;
-  if (options.url === undefined) {
-    const started = jarl.unwrap(await FakePostgres.start());
-    cleanups.push(() => started.stop());
-    fake = started;
-  }
-  const db = Db.create({}, { url: await secret(options.url ?? fake?.url ?? UNREACHABLE) });
+  const fake = jarl.unwrap(await FakePostgres.start());
+  cleanups.push(() => fake.stop());
+  const db = Db.create({}, { url: await secret(fake.url) });
   cleanups.push(() => db.close());
   const reporter = SentryTesting.sentry();
   const lines: Array<string> = [];

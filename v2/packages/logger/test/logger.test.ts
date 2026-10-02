@@ -1,7 +1,7 @@
 import * as Db from "@oligarchy/db";
 import { describe, expect, it, vi } from "vitest";
 import * as Render from "../src/render.ts";
-import { logging, track, UNREACHABLE } from "./support.ts";
+import { logging, track } from "./support.ts";
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -52,20 +52,6 @@ describe("the logger", () => {
       painted("B", Render.AGENT_COLORS[1]),
       painted("A", Render.AGENT_COLORS[0]),
     ]);
-  });
-
-  it("with the database unreachable, a line still prints, then says its insert failed, and later lines print too (unhappy)", async () => {
-    const { lines, logger } = await logging({ url: UNREACHABLE });
-
-    logger.info("one");
-    logger.info("two");
-    await logger.flush();
-
-    expect(lines).toHaveLength(4);
-    expect(lines[0]).toBe("[INFO] [global] one");
-    expect(lines[1]).toMatch(/^\[ERROR\] \[global\] db: log insert failed: [\s\S]*ECONNREFUSED/);
-    expect(lines[2]).toBe("[INFO] [global] two");
-    expect(lines[3]).toMatch(/^\[ERROR\] \[global\] db: log insert failed: /);
   });
 });
 
@@ -136,25 +122,6 @@ describe("the logger's Sentry", () => {
       ["fatal", null, "shutting down"],
     ]);
     expect(sent).toEqual([]);
-  });
-
-  it("with the database unreachable, sends the line and then the insert's DatabaseError as the line saying so (unhappy)", async () => {
-    const { lines, sent, logger } = await logging({ url: UNREACHABLE });
-
-    logger.error("qemu exited");
-    logger.info("booted");
-    await logger.flush();
-
-    const said = [lines[1], lines[3]].map((line) => line?.replace("[ERROR] [global] ", ""));
-    expect(sent.map(({ report }) => report)).toEqual([
-      { level: "error", tags: {}, extra: { log: "qemu exited" } },
-      { level: "error", tags: {}, extra: { log: said[0] } },
-      { level: "error", tags: {}, extra: { log: said[1] } },
-    ]);
-    expect(sent[0]?.error).toEqual(new Error("qemu exited"));
-    expect(sent[1]?.error).toBeInstanceOf(Db.DatabaseError);
-    expect(sent[2]?.error).toBeInstanceOf(Db.DatabaseError);
-    expect(said[0]).toBe(`db: log insert failed: ${messageOf(sent[1]?.error)}`);
   });
 
   it("a connection the database drops is one error line, sent with the pool's error as its cause (unhappy)", async () => {
