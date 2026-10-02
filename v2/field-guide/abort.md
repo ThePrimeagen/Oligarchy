@@ -7,6 +7,8 @@ Two meanings. Do not mix them.
 | signal abort | an `AbortSignal` stops work in flight | apps, services, HTTP, business logic |
 | status abort | a row moves to `aborted` | `tests.abortJob` / `abortRun` / `abortSuite` |
 
+Also a status, not a signal: qemu `StopStatus` `"aborted"`, and Sentry `SpanStatus` `"aborted"`.
+
 ## Errors
 
 | Error | From | Means |
@@ -18,7 +20,9 @@ Two meanings. Do not mix them.
 - Abort with a reason: `controller.abort(new Aborted("why"))`. Never a bare `.abort()`.
 - A helper hands back `signal.reason` when it is an `Aborted`. Otherwise it hands back `new Aborted("aborted")`.
 - An abort comes back as `jarl.err(Aborted)`. Nothing throws.
-- Check it with `jarl.error.is(result, Async.Aborted)`.
+- Check it with `jarl.error.is(result, Async.Aborted)`. A raw reason works too: `jarl.error.is(signal.reason, Aborted)`.
+- Never DOMException `AbortError`. Never `AbortSignal.any` or `AbortSignal.timeout`.
+- To join a deadline with a caller's signal, use `Async.timeout(fn, { ms, signal })`. It owns an inner controller and forwards to it.
 - Reasons in use: `"SIGINT received"`, `"main returned"`, `"parent stopped"`, `` `job ${jobId} aborted` ``, `"shutting down"`.
 
 ## Application
@@ -27,11 +31,14 @@ Two meanings. Do not mix them.
 
 | Problem | Fact |
 | --- | --- |
-| main runs until killed | `await App.waitForAbort(app.signal)` |
+| main runs until killed | `await App.waitForAbort(app.signal)`. It resolves `void`. |
 | ordering on stop | close the listener, then shut down jobs, then log `stopped; ${reason}`, then `return jarl.ok(undefined)` |
+| listener `close()` | stops new connections. A handler still running is not stopped, so abort held jobs yourself. |
 | a loop | make it a sub-app: `app.sub(new App.App(app.environment).main(loop))` |
 | sub-app's signal | `sub.signal`. It aborts with `"parent stopped"` when the parent stops. |
 | main returns `Aborted` after a stop | not an error. App drops it. |
+| main returns `Aborted` with no stop | an error. The process exits 1. |
+| second process signal | `exit(1)` at once. Exit handlers are skipped. |
 | main returns or throws | `app.signal` aborts, every sub-app stops, and the process exits 1 if errors were reported |
 | `onExit` handler | runs after `app.signal` aborted. Never hand `app.signal` to its calls. Give them their own deadline. |
 | work that must stop with the app but is built before it | own controller, forwarded from the app signal (driver) |
@@ -77,6 +84,7 @@ app.signal.addEventListener("abort", () => guest.abort(app.signal.reason), { onc
 | mapping errors | return `Aborted` unchanged: `if (jarl.error.is(error, Async.Aborted)) return error;` |
 | retrying | never retry `Aborted`. `Http.retryable` leaves it out. `Async.repeat` stops once its `signal` aborts. |
 | a cleanup call that must still run after the abort | opt it out of the signal: qemu `stop` uses `{ aborts: false }` |
+| a tick loop | `Async.tick` settles once the call in flight returns. Clean up after it: `Fleet.announce` deletes its row. |
 
 ```ts
 // packages/openrouter/src/main.ts
@@ -160,7 +168,7 @@ AGENTS.md rule 9: the path `/abort` calls a function named `abort`, which perfor
 
 ## Business logic: one job's abort
 
-A plain module, not a service (`apps/automation-client/src/jobs.ts`). It keeps one `AbortController` per id, in memory.
+Use a plain module, not a service (`apps/automation-client/src/jobs.ts`). It has `export const create = ()`, no `createService`, and no entry in `services.ts`. `main` creates it and hands `jobs.abort` to the routes. It keeps one `AbortController` per id, in memory only.
 
 | Problem | Fact |
 | --- | --- |
@@ -251,6 +259,8 @@ while (true) {
 | proof of cleanup | `expect(vi.getTimerCount()).toBe(0)` |
 | proof of the reason | `expect(jarl.error.is(held.signal.reason, Aborted)).toBe(true)` |
 | abort during a call | wait until the fake is entered, then abort (dispatch test) |
+| answers only after release | prove "not yet" with a flush: `await new Promise((r) => setImmediate(r))`, then check (`settled()` in `jobs.test.ts`) |
+| routes | test them over the `sessions()` fake in `src/testing.ts`, not a real `jobs` |
 | coverage | one test per abort boundary: a signal already aborted before the call, and one that aborts during it |
 
 ```ts
