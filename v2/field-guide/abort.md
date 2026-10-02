@@ -129,6 +129,7 @@ if (jarl.is_err(reserved)) {
 ## The `/abort` route
 
 - `/abort` calls a function named `abort`, which performs the abort sequence (AGENTS.md rule 9).
+- A stub route answers 501 `abort is not written yet` until its `abort` is handed in.
 
 | App | Body | Answers |
 | --- | --- | --- |
@@ -236,13 +237,17 @@ while (true) {
 
 ## Scope
 
-| Abort | Who | How |
-| --- | --- | --- |
-| one call | caller | `Async.timeout(fn, { ms, signal })`, or `signal` / `timeoutMs` on the call |
-| one job at a client | automation server | `AutomationClient.create(...).post("/abort", { jobId })`, then `jobs.abort` |
-| one job, one suite (operator) | ctrl, dashboard | automation server `/abort` `{ jobId }` or `{ suiteId }` |
-| every job at a client | the client on stop | `jobs.shutdown()` after closing the listener |
-| one app and its sub-apps | process signal, or main returning | `app.signal` |
+| Abort | Who | How | Built |
+| --- | --- | --- | --- |
+| one call | caller | `Async.timeout(fn, { ms, signal })`, or `signal` / `timeoutMs` on the call | yes |
+| one job at a client | automation server | `AutomationClient.create(...).post("/abort", { jobId })`, then `jobs.abort` | yes |
+| one job, one suite (operator) | ctrl, dashboard | automation server `/abort` `{ jobId }` or `{ suiteId }` | no: 501 |
+| one job at a qemu server | | qemu-server `/abort` `{ job }` | no: 501 |
+| every job at a client | the client on stop | `jobs.shutdown()` after closing the listener | yes |
+| every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | no: no-op |
+| one host, server or location | | none exists. Abort each job on it. | no |
+| one app and its sub-apps | process signal, or main returning | `app.signal` | yes |
+| a driver run | `app.signal`, forwarded to the guest controller | `drive` ends `{ status: "aborted" }`, exit 0 | yes |
 
 ## Tests
 
