@@ -17,9 +17,10 @@ export type Running = {
   readonly judgedJobId: string | undefined;
 };
 
-// aborting holds the jobs an operator's /abort is stopping at their clients; each is the abort's
-// to write.
-type Services = App.Needs<Stores.Tests.Tests | Stores.Diagnosis.Diagnosis | Logger.Logger> & {
+type Services = App.Needs<Stores.Tests.Tests | Stores.Diagnosis.Diagnosis | Logger.Logger>;
+
+export type Options = {
+  // The jobs an operator's /abort is stopping at their clients; each is the abort's to write.
   readonly aborting: ReadonlySet<string>;
 };
 
@@ -46,7 +47,7 @@ const queueDiagnose = async ({ tests, logger }: Services, job: Stores.Tests.JobR
 // A suite closes with its last open run: passed when every run passed. Two of its runs closing at
 // once can each find none open, and the one that completes the suite second is refused.
 export const closeSuite = async (
-  { tests }: { readonly tests: Stores.Tests.Tests },
+  { tests }: App.Needs<Stores.Tests.Tests>,
   suiteId: string,
 ): Closed => {
   const found = await tests.getTestSuite(suiteId);
@@ -108,7 +109,11 @@ const finalize = async (
 };
 
 // An operator's abort may have aborted the job before its client answered; that abort stands.
-const abort = async ({ tests, logger, aborting }: Services, job: Stores.Tests.JobRow): Closed => {
+const abort = async (
+  { tests, logger }: Services,
+  { aborting }: Options,
+  job: Stores.Tests.JobRow,
+): Closed => {
   if (aborting.has(job.id)) {
     return jarl.ok(undefined);
   }
@@ -138,6 +143,7 @@ const fail = async (
 // Closes the job by how its /run answered. A write that fails stops the close where it is.
 export const close = async (
   services: Services,
+  options: Options,
   running: Running,
   ran: jarl.Result<ClientRoutes.Ran, Http.HttpFailure>,
 ): Promise<void> => {
@@ -146,7 +152,7 @@ export const close = async (
   if (jarl.is_err(ran)) {
     closed = await fail(services, job, ran.error);
   } else if (jarl.value(ran) === "aborted") {
-    closed = await abort(services, job);
+    closed = await abort(services, options, job);
   } else if (judgedJobId === undefined) {
     closed = await queueDiagnose(services, job);
   } else {

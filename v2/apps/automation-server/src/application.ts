@@ -77,7 +77,7 @@ export const main =
     const { config, flags, vars } = app.environment;
     const { models } = config;
     const aborting: Abort.Aborting = new Set();
-    const aborter = Abort.create({ ...app.services, token: vars.oligarchyToken, aborting });
+    const aborter = Abort.create(app.services, { token: vars.oligarchyToken, aborting });
     const served = routes({ token: vars.oligarchyToken.reveal(), abort: aborter.abort });
     const listened = await options.listen(served.fetch, {
       hostname: HOST,

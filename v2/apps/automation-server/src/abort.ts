@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import type * as Db from "@oligarchy/db";
 import type * as Http from "@oligarchy/http";
 import type * as Logger from "@oligarchy/logger";
@@ -24,12 +25,10 @@ export type NotStopped = InstanceType<typeof NotStopped>;
 // kills it; that close leaves the job to the abort, which writes it with the operator's reason.
 export type Aborting = Set<string>;
 
+type Services = App.Needs<Http.Http | Stores.Tests.Tests | Stores.Servers.Servers | Logger.Logger>;
+
 export type Options = {
-  readonly http: Http.Http;
   readonly token: { readonly reveal: () => string };
-  readonly tests: Stores.Tests.Tests;
-  readonly servers: Stores.Servers.Servers;
-  readonly logger: Logger.Logger;
   readonly aborting: Aborting;
 };
 
@@ -47,8 +46,9 @@ export type Aborter = {
 
 const OPEN: ReadonlyArray<Stores.Tests.JobStatus> = ["pending", "running"];
 
-export const create = (options: Options): Aborter => {
-  const { http, token, tests, servers, logger, aborting } = options;
+export const create = (services: Services, options: Options): Aborter => {
+  const { http, tests, servers, logger } = services;
+  const { token, aborting } = options;
   const inFlight = new Set<Promise<unknown>>();
 
   const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, agentId: job.id });
@@ -178,7 +178,7 @@ export const create = (options: Options): Aborter => {
     if (suiteId === null) {
       return jarl.ok(undefined);
     }
-    const suiteClosed = await Close.closeSuite({ tests }, suiteId);
+    const suiteClosed = await Close.closeSuite(services, suiteId);
     return jarl.error.is(suiteClosed, Stores.Tests.InvalidState) ? jarl.ok(undefined) : suiteClosed;
   };
 

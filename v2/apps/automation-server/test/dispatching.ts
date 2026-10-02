@@ -161,14 +161,10 @@ export const dispatching = async (
     aborting,
     signal: shutdown.signal,
   });
-  const aborter = Abort.create({
-    http: http.http,
-    token: { reveal: () => TOKEN },
-    tests: seen(tests),
-    servers,
-    logger: log.logger,
-    aborting,
-  });
+  const aborter = Abort.create(
+    { http: http.http, tests: seen(tests), servers, logger: log.logger },
+    { token: { reveal: () => TOKEN }, aborting },
+  );
   // As the app's signal aborts when the server stops.
   const stop = () => shutdown.abort(new Async.Aborted("parent stopped"));
   cleanups.push(async () => {

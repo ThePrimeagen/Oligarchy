@@ -38,8 +38,7 @@ export type Options = {
   readonly diagnosis: Stores.Diagnosis.Diagnosis;
   readonly logger: Logger.Logger;
   readonly models: Env.Config["models"];
-  // The jobs an operator's /abort is stopping; a run of one that answers aborted is the abort's.
-  readonly aborting: ReadonlySet<string>;
+  readonly aborting: Close.Options["aborting"];
   // Ends a reserve or a run in flight, so a shutdown does not wait on a client.
   readonly signal: AbortSignal;
 };
@@ -241,7 +240,7 @@ export const create = (options: Options): Dispatcher => {
       if (jarl.error.is(ran, Async.Aborted)) {
         return;
       }
-      await Close.close(options, { job, judgedJobId: requests.judgedJobId }, ran);
+      await Close.close(options, options, { job, judgedJobId: requests.judgedJobId }, ran);
     })();
     runs.add(running);
     void running.finally(() => runs.delete(running));
