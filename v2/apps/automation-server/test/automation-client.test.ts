@@ -55,6 +55,7 @@ const served = async (told: Partial<ClientRoutes.Sessions> = {}) => {
     http: fake.http,
     url: CLIENT_URL,
     token: await token(),
+    abortTimeoutMs: 15_000,
   });
   return { client, asked: fake.asked, handed };
 };

@@ -22,20 +22,35 @@ const PROMPT = "diagnose the job";
 const DRIVER = `${Env.ROOT}v2/driver`;
 const STDIO = ["ignore", "inherit", "pipe"];
 const CEILING_MS = 60_000;
-const DRIVER_CEILING_MS = CEILING_MS + 300_000;
+const DRIVER_RUN_CEILING_MS = 120_000;
+const DRIVER_CEILING_MS = DRIVER_RUN_CEILING_MS + 240_000;
+const KILL_GRACE_MS = 3_000;
+const STDERR_GRACE_MS = 1_000;
 
 const CONFIG = JSON.stringify({
   models: { drive: "test/drive", diagnose: "test/diagnose", setup: "test/setup" },
   reasoning: { drive: "high", diagnose: "medium", setup: "low" },
   openRouterBaseUrl: "https://openrouter.test",
-  timeouts: { header: "1 second", chunk: "1 second" },
-  runCeiling: "1 minute",
-  stepLimit: 10,
-  harness: { defaultRetry: "1 second", recentActions: 10 },
+  httpTimeout: "10 seconds",
+  driver: {
+    runCeiling: "2 minutes",
+    stepLimit: 10,
+    askTimeout: "1 second",
+    harness: { defaultRetry: "1 second", recentActions: 10 },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+  },
+  diagnose: { runCeiling: "1 minute", headerTimeout: "20 seconds", chunkTimeout: "30 seconds" },
+  automationClient: {
+    driverGrace: "4 minutes",
+    killGrace: "3 seconds",
+    stderrGrace: "1 second",
+    reserveTimeout: "1 minute",
+  },
   automationServer: {
     dispatchInterval: "1 second",
     forgetInterval: "1 second",
     forgetAfter: "1 minute",
+    abortTimeout: "15 seconds",
   },
 });
 
@@ -50,7 +65,7 @@ const VARS = {
 const CHILD_ENV = { ...PARENT, ...VARS };
 const OPENCODE_CONFIG = JSON.stringify({
   permission: { external_directory: "allow", doom_loop: "allow" },
-  provider: { openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } } },
+  provider: { openrouter: { options: { headerTimeout: 20_000, chunkTimeout: 30_000 } } },
 });
 
 beforeEach(() => {
@@ -157,7 +172,12 @@ const running = async (refusal?: Error) => {
   const reservations = Reserve.create({
     maxJobs: 2,
     jobs,
-    proxy: Proxy.create({ http: proxy.http, url: PROXY, token: { reveal: () => TOKEN } }),
+    proxy: Proxy.create({
+      http: proxy.http,
+      url: PROXY,
+      token: { reveal: () => TOKEN },
+      reserveTimeoutMs: 60_000,
+    }),
     logger: log.logger,
   });
   const spawned = fakeSpawn(refusal);
@@ -309,7 +329,7 @@ describe("an automation client's run", () => {
     expect(threw.jobs.count()).toBe(0);
   });
 
-  it("an abort sends SIGTERM, SIGKILL after 5 seconds, and answers aborted only once the child has exited, when the abort is stopped (unhappy)", async () => {
+  it("an abort sends SIGTERM, SIGKILL after the kill grace, and answers aborted only once the child has exited, when the abort is stopped (unhappy)", async () => {
     const at = await running();
     jarl.unwrap(await at.reservations.reserve(DRIVE));
     const ran = at.run({ jobId: JOB });
@@ -318,7 +338,7 @@ describe("an automation client's run", () => {
     const aborting = at.jobs.abort({ jobId: JOB });
 
     expect(child.signals).toEqual(["SIGTERM"]);
-    await vi.advanceTimersByTimeAsync(4_999);
+    await vi.advanceTimersByTimeAsync(KILL_GRACE_MS - 1);
     expect(child.signals).toEqual(["SIGTERM"]);
     await vi.advanceTimersByTimeAsync(1);
     expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
@@ -344,11 +364,11 @@ describe("an automation client's run", () => {
 
     expect(await ran).toEqual(jarl.ok("ended"));
     expect(await aborting).toBe("stopped");
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(KILL_GRACE_MS);
     expect(child.signals).toEqual([]);
   });
 
-  it("a child still running at its ceiling is killed and RunTimedOut naming the ceiling: opencode at the run ceiling, the driver 5 minutes later; each lets its job go (unhappy)", async () => {
+  it("a child still running at its ceiling is killed and RunTimedOut naming the ceiling: opencode at its run ceiling, the driver at its own plus its grace; each lets its job go (unhappy)", async () => {
     const at = await running();
     jarl.unwrap(await at.reservations.reserve(DRIVE));
     jarl.unwrap(await at.reservations.reserve(DIAGNOSE));
@@ -396,7 +416,7 @@ describe("an automation client's run", () => {
     const timedOut = await drive;
     expect(jarl.error.is(timedOut, RunTimedOut)).toBe(true);
     expect(jarl.is_err(timedOut) && timedOut.error.message).toBe(
-      `driver timed out: run ceiling of ${String(CEILING_MS)} ms`,
+      `driver timed out: run ceiling of ${String(DRIVER_RUN_CEILING_MS)} ms`,
     );
     const failed = await diagnose;
     expect(jarl.error.is(failed, RunFailed)).toBe(true);
@@ -404,7 +424,7 @@ describe("an automation client's run", () => {
     expect(at.jobs.count()).toBe(0);
   });
 
-  it("a child that exits while something it started still holds its stderr answers 2 seconds later with the tail so far (unhappy)", async () => {
+  it("a child that exits while something it started still holds its stderr answers the stderr grace later with the tail so far (unhappy)", async () => {
     const at = await running();
     jarl.unwrap(await at.reservations.reserve(DIAGNOSE));
     const ran = at.run({ jobId: OTHER, prompt: PROMPT });
@@ -413,7 +433,7 @@ describe("an automation client's run", () => {
 
     child.exit(1);
 
-    await vi.advanceTimersByTimeAsync(1_999);
+    await vi.advanceTimersByTimeAsync(STDERR_GRACE_MS - 1);
     expect(await settled(ran)).toBe(false);
     expect(at.jobs.count()).toBe(1);
     await vi.advanceTimersByTimeAsync(1);

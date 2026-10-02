@@ -47,6 +47,10 @@ const token = async () =>
     ),
   ).vars.oligarchyToken;
 
+// What oligarchy.json's driver.guest names, handed in as the driver hands them.
+export const START_TIMEOUT_MS = 90_000;
+export const SAVE_TIMEOUT_MS = 30_000;
+
 // JOB's tools over a fake proxy: one reply for every request, or one per request in order.
 export const tools = async (
   replies: Fake.Reply | ReadonlyArray<Fake.Reply>,
@@ -55,7 +59,14 @@ export const tools = async (
   const fake = Fake.http({ replies, timeoutMs: DEFAULT_TIMEOUT_MS });
   const qemu = QemuHttpTools.create(
     { http: fake.http },
-    { job: JOB, baseUrl: BASE_URL, token: await token(), ...options },
+    {
+      job: JOB,
+      baseUrl: BASE_URL,
+      token: await token(),
+      startTimeoutMs: START_TIMEOUT_MS,
+      saveTimeoutMs: SAVE_TIMEOUT_MS,
+      ...options,
+    },
   );
   return { qemu, asked: fake.asked };
 };

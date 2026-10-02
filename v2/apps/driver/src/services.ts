@@ -40,7 +40,7 @@ export const createServices = (
   signal: AbortSignal,
 ) => {
   const { flags, vars, config } = env;
-  const http = Http.create({});
+  const http = Http.create({}, { timeoutMs: config.httpTimeout });
   const sentry = Sentry.create({ http }, { dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT });
   const db = Db.create({}, { url: vars.databaseUrl });
   const logger = Logger.create(
@@ -50,21 +50,28 @@ export const createServices = (
   const tests = Stores.Tests.create({ db });
   const qemuHttpTools = Qemu.create(
     { http },
-    { job: flags.jobId, baseUrl: flags.serverUrl, token: vars.oligarchyToken, signal },
+    {
+      job: flags.jobId,
+      baseUrl: flags.serverUrl,
+      token: vars.oligarchyToken,
+      signal,
+      startTimeoutMs: config.driver.guest.startTimeout,
+      saveTimeoutMs: config.driver.guest.saveTimeout,
+    },
   );
   const openRouter = OpenRouter.create(
     { http },
     {
       token: vars.openRouterToken,
       baseUrl: config.openRouterBaseUrl,
-      timeoutMs: config.timeouts.header,
-      defaultRetry: config.harness.defaultRetry,
+      timeoutMs: config.driver.askTimeout,
+      defaultRetry: config.driver.harness.defaultRetry,
       attempts: ATTEMPTS,
     },
   );
   const driveHarness = DriveHarness.create(
     { tests, qemuHttpTools, openRouter },
-    { recentActions: config.harness.recentActions },
+    { recentActions: config.driver.harness.recentActions },
   );
   return {
     http,

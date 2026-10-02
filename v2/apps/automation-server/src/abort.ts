@@ -30,6 +30,7 @@ type Services = App.Needs<Http.Http | Stores.Tests.Tests | Stores.Servers.Server
 export type Options = {
   readonly token: { readonly reveal: () => string };
   readonly aborting: Aborting;
+  readonly abortTimeoutMs: number;
 };
 
 type Failure = Db.DatabaseError | Stores.Tests.NotFound | NothingToAbort | NotStopped;
@@ -48,7 +49,7 @@ const OPEN: ReadonlyArray<Stores.Tests.JobStatus> = ["pending", "running"];
 
 export const create = (services: Services, options: Options): Aborter => {
   const { http, tests, servers, logger } = services;
-  const { token, aborting } = options;
+  const { token, aborting, abortTimeoutMs } = options;
   const inFlight = new Set<Promise<unknown>>();
 
   const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, agentId: job.id });
@@ -71,7 +72,12 @@ export const create = (services: Services, options: Options): Aborter => {
         said: `aborted running ${job.action}; its automation client is forgotten, so nothing was stopped`,
       });
     }
-    const stopped = await AutomationClient.create({ http, url: found.url, token }).post("/abort", {
+    const stopped = await AutomationClient.create({
+      http,
+      url: found.url,
+      token,
+      abortTimeoutMs,
+    }).post("/abort", {
       jobId: job.id,
     });
     if (jarl.is_err(stopped)) {

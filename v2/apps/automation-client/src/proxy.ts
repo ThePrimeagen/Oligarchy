@@ -2,9 +2,6 @@ import * as Http from "@oligarchy/http";
 import * as jarl from "jarl";
 import * as Routes from "./routes.ts";
 
-// The proxy probes every qemu server, each for up to 10 seconds, and then asks them one at a time.
-const RESERVE_TIMEOUT_MS = 60_000;
-
 // The reserves that take a guest.
 export type GuestRequest = Exclude<Routes.ReserveRequest, { readonly action: "diagnose" }>;
 
@@ -12,6 +9,9 @@ export type Options = {
   readonly http: Http.Http;
   readonly url: string;
   readonly token: { readonly reveal: () => string };
+  // The proxy probes every qemu server before it asks them one at a time, so a reserve waits
+  // longer than any one call.
+  readonly reserveTimeoutMs: number;
 };
 
 export type Proxy = {
@@ -57,7 +57,7 @@ export const create = (options: Options): Proxy => {
               job: request.jobId,
               ...(request.resume === undefined ? {} : { resume: request.resume }),
             };
-      const answered = await post("reserve", body, { timeoutMs: RESERVE_TIMEOUT_MS, signal });
+      const answered = await post("reserve", body, { timeoutMs: options.reserveTimeoutMs, signal });
       if (jarl.error.is(answered, Http.HttpServerError) && answered.error.status === 503) {
         return jarl.err(new Routes.AtCapacity(answered.error.message));
       }

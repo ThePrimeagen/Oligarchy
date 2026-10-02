@@ -38,6 +38,7 @@ export type Options = {
   readonly diagnosis: Stores.Diagnosis.Diagnosis;
   readonly logger: Logger.Logger;
   readonly models: Env.Config["models"];
+  readonly abortTimeoutMs: number;
   readonly aborting: Close.Options["aborting"];
   // Ends a reserve or a run in flight, so a shutdown does not wait on a client.
   readonly signal: AbortSignal;
@@ -61,7 +62,8 @@ type Requests = {
 };
 
 export const create = (options: Options): Dispatcher => {
-  const { http, token, tests, servers, setupRequests, logger, models, signal } = options;
+  const { http, token, tests, servers, setupRequests, logger, models, abortTimeoutMs, signal } =
+    options;
   // The client the next job is offered to first: the one after the client that took the last.
   let nextClientUrl: string | undefined;
   const runs = new Set<Promise<void>>();
@@ -144,10 +146,13 @@ export const create = (options: Options): Dispatcher => {
     clients: ReadonlyArray<LiveClient>,
   ): Promise<jarl.Result<LiveClient, Async.Aborted | NoClientsAvailable>> => {
     for (const client of clients) {
-      const reserved = await AutomationClient.create({ http, url: client.url, token, signal }).post(
-        "/reserve",
-        request,
-      );
+      const reserved = await AutomationClient.create({
+        http,
+        url: client.url,
+        token,
+        signal,
+        abortTimeoutMs,
+      }).post("/reserve", request);
       if (jarl.is_err(reserved)) {
         if (signal.aborted) {
           return jarl.err(new Async.Aborted(`reserve on ${client.url} ended: shutting down`));
@@ -180,10 +185,13 @@ export const create = (options: Options): Dispatcher => {
       agentId: job.id,
       cause: running.error,
     });
-    const given = await AutomationClient.create({ http, url: client.url, token, signal }).post(
-      "/abort",
-      { jobId: job.id },
-    );
+    const given = await AutomationClient.create({
+      http,
+      url: client.url,
+      token,
+      signal,
+      abortTimeoutMs,
+    }).post("/abort", { jobId: job.id });
     if (jarl.is_err(given)) {
       logger.error(`reserve release failed; ${client.url}: ${given.error.message}`, {
         location: LOCATION,
@@ -233,10 +241,13 @@ export const create = (options: Options): Dispatcher => {
   // shutdown ended closes nothing: settling its job is the shutdown's.
   const sendRun = (job: Stores.Tests.JobRow, client: LiveClient, requests: Requests): void => {
     const running = (async () => {
-      const ran = await AutomationClient.create({ http, url: client.url, token, signal }).post(
-        "/run",
-        requests.run,
-      );
+      const ran = await AutomationClient.create({
+        http,
+        url: client.url,
+        token,
+        signal,
+        abortTimeoutMs,
+      }).post("/run", requests.run);
       if (jarl.error.is(ran, Async.Aborted)) {
         return;
       }

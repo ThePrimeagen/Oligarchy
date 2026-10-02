@@ -20,8 +20,7 @@ const { JOB } = Testing;
 const CONFIG: Drive.Limits = {
   models: { drive: "meta/drive", setup: "meta/setup", diagnose: "meta/diagnose" },
   reasoning: { drive: "minimal", setup: "low", diagnose: "xhigh" },
-  stepLimit: 200,
-  runCeiling: 60_000,
+  driver: { stepLimit: 200, runCeiling: 60_000 },
 };
 
 const move = () => Testing.said("send_keys", { step: 1, reason: "Type", keys: "x" });
@@ -106,7 +105,9 @@ it("fails the drive at the step limit, counting the moves that reached the guest
     guest: { run: sequence<Ran>([jarl.ok({ text: "sent the keys" })], jarl.err(off)) },
     turns: [move(), prose(), move()],
   });
-  const { result } = drive(world, { config: { ...CONFIG, stepLimit: 2 } });
+  const { result } = drive(world, {
+    config: { ...CONFIG, driver: { ...CONFIG.driver, stepLimit: 2 } },
+  });
   const ended = { status: "failed", reason: "step limit of 2 reached" };
   expect(jarl.unwrap(await result)).toEqual(ended);
   expect(names(world.calls).filter((name) => name === "run")).toHaveLength(2);

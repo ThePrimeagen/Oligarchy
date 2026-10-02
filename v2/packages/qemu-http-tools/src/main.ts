@@ -25,11 +25,6 @@ declare module "@oligarchy/app" {
   }
 }
 
-// A first start downloads its ISO before it answers.
-export const START_TIMEOUT_MS = 45 * 60_000;
-// A save gives the guest two minutes to power off before it keeps the disk.
-export const SAVE_TIMEOUT_MS = 5 * 60_000;
-
 // A nudge's share of the screen, from where the pointer is.
 const NUDGE = 0.02;
 const NUDGES: Readonly<Record<Types.Direction, Types.Point>> = {
@@ -66,6 +61,10 @@ export type Options = {
   readonly baseUrl: string;
   readonly token: Env.Secret;
   readonly signal?: AbortSignal;
+  // A first start downloads its ISO before it answers; a save gives the guest time to power off
+  // before it keeps the disk.
+  readonly startTimeoutMs: number;
+  readonly saveTimeoutMs: number;
 };
 
 // Every call names job and carries token as the bearer. signal aborts every call but stop.
@@ -205,7 +204,7 @@ export const create = App.createService<Http.Http, Options, Types.QemuHttpTools>
           where("start"),
           posting(
             { iso: boot.iso, mode: boot.resume ? "resume" : "fresh" },
-            { timeoutMs: START_TIMEOUT_MS },
+            { timeoutMs: options.startTimeoutMs },
           ),
           { decode: ignored },
         ),
@@ -229,7 +228,7 @@ export const create = App.createService<Http.Http, Options, Types.QemuHttpTools>
           { decode: ignored },
         ),
       save: () =>
-        http.fetch(where("save"), posting({}, { timeoutMs: SAVE_TIMEOUT_MS }), {
+        http.fetch(where("save"), posting({}, { timeoutMs: options.saveTimeoutMs }), {
           decode: ignored,
           status: { 409: conflict("save", Errors.NotPoweredOff) },
         }),

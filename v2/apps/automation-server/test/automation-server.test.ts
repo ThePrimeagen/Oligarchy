@@ -56,14 +56,26 @@ const CONFIG = JSON.stringify({
   models: { drive: "test/drive", diagnose: "test/diagnose", setup: "test/setup" },
   reasoning: { drive: "high", diagnose: "high", setup: "high" },
   openRouterBaseUrl: "https://openrouter.test",
-  timeouts: { header: "1 second", chunk: "1 second" },
-  runCeiling: "1 minute",
-  stepLimit: 10,
-  harness: { defaultRetry: "1 second", recentActions: 10 },
+  httpTimeout: "10 seconds",
+  driver: {
+    runCeiling: "1 minute",
+    stepLimit: 10,
+    askTimeout: "1 second",
+    harness: { defaultRetry: "1 second", recentActions: 10 },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+  },
+  diagnose: { runCeiling: "1 minute", headerTimeout: "1 second", chunkTimeout: "1 second" },
+  automationClient: {
+    driverGrace: "5 minutes",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    reserveTimeout: "1 minute",
+  },
   automationServer: {
     dispatchInterval: "10 seconds",
     forgetInterval: "30 seconds",
     forgetAfter: "10 minutes",
+    abortTimeout: "15 seconds",
   },
 });
 

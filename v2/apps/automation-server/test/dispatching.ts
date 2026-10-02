@@ -111,6 +111,7 @@ export const dispatching = async (
   const setupRequests = Stores.SetupRequests.create({ db });
   const diagnosis = Stores.Diagnosis.create({ db });
   const { models } = env.config;
+  const { abortTimeout: abortTimeoutMs } = env.config.automationServer;
   const shutdown = new AbortController();
 
   const handed: Record<string, ReadonlyArray<unknown>> = {};
@@ -158,12 +159,13 @@ export const dispatching = async (
     diagnosis,
     logger: log.logger,
     models,
+    abortTimeoutMs,
     aborting,
     signal: shutdown.signal,
   });
   const aborter = Abort.create(
     { http: http.http, tests: seen(tests), servers, logger: log.logger },
-    { token: { reveal: () => TOKEN }, aborting },
+    { token: { reveal: () => TOKEN }, aborting, abortTimeoutMs },
   );
   // As the app's signal aborts when the server stops.
   const stop = () => shutdown.abort(new Async.Aborted("parent stopped"));

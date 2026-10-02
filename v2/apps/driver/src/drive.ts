@@ -30,7 +30,9 @@ type Refused = Extract<
 // or started, or the proxy or the model could not be reached. A test that failed is an Ended.
 export type Failure = Refused | NotDrivable;
 
-export type Limits = Pick<Env.Config, "models" | "reasoning" | "stepLimit" | "runCeiling">;
+export type Limits = Pick<Env.Config, "models" | "reasoning"> & {
+  readonly driver: Pick<Env.Config["driver"], "runCeiling" | "stepLimit">;
+};
 
 // How the drive ended. Its guest is stopped with it, a drive that timed out as failed.
 export type Ended = {
@@ -58,7 +60,8 @@ const mainLoop = async (
   const { logger, driveHarness: harness } = services;
   const { config, signal } = options;
   const at = { location: LOCATION, agentId: options.jobId };
-  const deadline = Date.now() + config.runCeiling;
+  const { runCeiling, stepLimit } = config.driver;
+  const deadline = Date.now() + runCeiling;
   const request = {
     model: config.models[action],
     reasoning: config.reasoning[action],
@@ -74,16 +77,16 @@ const mainLoop = async (
     if (signal.aborted) {
       return aborted();
     }
-    if (moves >= config.stepLimit) {
+    if (moves >= stepLimit) {
       return jarl.ok({
         status: "failed",
-        reason: `step limit of ${String(config.stepLimit)} reached`,
+        reason: `step limit of ${String(stepLimit)} reached`,
       });
     }
     if (Date.now() >= deadline) {
       return jarl.ok({
         status: "timed_out",
-        reason: `run ceiling of ${String(config.runCeiling)} ms passed`,
+        reason: `run ceiling of ${String(runCeiling)} ms passed`,
       });
     }
 

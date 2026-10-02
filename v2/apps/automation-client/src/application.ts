@@ -62,12 +62,17 @@ export const main =
   }) =>
   async (app: App.App<Environment.Run, Announcing | Http.Http>) => {
     const { logger, http } = app.services;
-    const { flags, vars } = app.environment;
+    const { flags, vars, config } = app.environment;
     const jobs = Jobs.create();
     const reservations = Reserve.create({
       maxJobs: flags.maxJobs,
       jobs,
-      proxy: Proxy.create({ http, url: flags.serverUrl, token: vars.oligarchyToken }),
+      proxy: Proxy.create({
+        http,
+        url: flags.serverUrl,
+        token: vars.oligarchyToken,
+        reserveTimeoutMs: config.automationClient.reserveTimeout,
+      }),
       logger,
     });
     const run = Run.create({
@@ -75,7 +80,7 @@ export const main =
       spawn: options.spawn,
       env: options.env,
       serverUrl: flags.serverUrl,
-      config: app.environment.config,
+      config,
       vars,
       logger,
     });

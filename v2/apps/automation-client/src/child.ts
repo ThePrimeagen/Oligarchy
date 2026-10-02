@@ -7,12 +7,6 @@ export type SpawnFailed = InstanceType<typeof SpawnFailed>;
 // The end of stderr says why a child failed. It lands in a job's reason and a logs row, and
 // Postgres text refuses NUL, so a binary blob a tool dumped there must not cost the run its verdict.
 const STDERR_TAIL = 4_096;
-const KILL_GRACE_MS = 5_000;
-// stderr is a pipe the child shares with everything it started (a tool the agent ran, an MCP
-// server), and it closes only once the last of them has; the exit is the end of the run. After it
-// the pipe gets this long to deliver what the child itself wrote, so a straggler cannot hold the
-// run to its ceiling.
-const STDERR_GRACE_MS = 2_000;
 
 export type Spawn = (
   command: string,
@@ -52,7 +46,11 @@ export type Child = {
   readonly kill: () => boolean;
 };
 
-// stdout is the child's own story and passes through to whoever watches this process.
+// stdout is the child's own story and passes through to whoever watches this process. stderr is a
+// pipe the child shares with everything it started (a tool the agent ran, an MCP server), and it
+// closes only once the last of them has; the exit is the end of the run. After it the pipe gets
+// stderrGraceMs to deliver what the child itself wrote, so a straggler cannot hold the run to its
+// ceiling.
 export const start = (
   spawn: Spawn,
   command: string,
@@ -60,12 +58,15 @@ export const start = (
   options: {
     readonly env: Readonly<Record<string, string | undefined>>;
     readonly cwd?: string;
+    readonly killGraceMs: number;
+    readonly stderrGraceMs: number;
   },
 ): Child => {
+  const { killGraceMs, stderrGraceMs, ...spawning } = options;
   let child: ReturnType<Spawn>;
   // An argument node will not pass, a NUL in a prompt among them, throws here rather than erroring.
   try {
-    child = spawn(command, args, { stdio: ["ignore", "inherit", "pipe"], ...options });
+    child = spawn(command, args, { stdio: ["ignore", "inherit", "pipe"], ...spawning });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ended: Promise.resolve(jarl.err(new SpawnFailed(message))), kill: () => false };
@@ -103,7 +104,7 @@ export const start = (
     child.on("exit", () => {
       exited = true;
       clearTimeout(forceKill);
-      drained = setTimeout(exit, STDERR_GRACE_MS);
+      drained = setTimeout(exit, stderrGraceMs);
     });
     child.on("close", () => {
       if (exited) {
@@ -123,7 +124,7 @@ export const start = (
         child.kill("SIGTERM");
         forceKill = setTimeout(() => {
           child.kill("SIGKILL");
-        }, KILL_GRACE_MS);
+        }, killGraceMs);
       }
       return true;
     },
