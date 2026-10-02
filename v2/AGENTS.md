@@ -40,3 +40,4 @@
 13. pass the services object.  never decompose it and reconstruct the services object.  The type
     definition should narrow the services object to the ones that are needed and validate we are
     crafting the right services object.
+14. jevlint should only be ran at the behest of the developer.

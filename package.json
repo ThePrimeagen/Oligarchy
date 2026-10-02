@@ -39,6 +39,7 @@
     "automation-client": "bun --no-env-file --preload ./packages/observability/src/instrument.ts apps/automation-client/src/main.ts",
     "dev": "bun run --cwd apps/dashboard dev",
     "check:lint": "oxlint --deny-warnings .",
+    "jev:lint": "bun --env-file=.env run jevlint check --config v2/jevlint.json --changed",
     "check:format": "oxfmt --check .",
     "format": "oxfmt .",
     "check:types": "tsc --noEmit -p tsconfig.json && bun run --workspaces check:types",
