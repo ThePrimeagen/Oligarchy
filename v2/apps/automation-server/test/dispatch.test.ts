@@ -37,7 +37,7 @@ type Told = Readonly<Record<string, Partial<ClientRoutes.Sessions>>>;
 
 // A migrated database of the test's own with the stores over it, and an automation client at each
 // url of told: its own routes behind the fake transport, over sessions answering as told. Only the
-// urls announced with live() are clients the pass can find.
+// urls announced with live() are clients the dispatcher can find.
 const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = {}) => {
   const fake = jarl.unwrap(await FakePostgres.start());
   cleanups.push(() => fake.stop());
@@ -77,7 +77,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     },
   });
   const log = FakeLogger.logger();
-  const dispatch = Dispatch.create({
+  const dispatcher = Dispatch.create({
     http: http.http,
     token: { reveal: () => TOKEN },
     tests,
@@ -137,7 +137,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     fake,
     tests,
     setupRequests,
-    dispatch,
+    dispatcher,
     live,
     clientId,
     drive,
@@ -153,7 +153,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
 const errors = (said: ReadonlyArray<FakeLogger.Said>) =>
   said.filter((one) => one.level === "error").map((one) => one.text);
 
-describe("a dispatch pass", () => {
+describe("starting the next job", () => {
   it("reserves each pending job in queue order on the live clients round robin, a drive resuming its ISO only when its definition resumes and a setup on its lock's server, moves it to running naming the client that took it, and with nothing left says to wait (happy)", async () => {
     const at = await dispatching({ [FIRST]: {}, [SECOND]: {} });
     await at.live(FIRST, SECOND);
@@ -162,12 +162,12 @@ describe("a dispatch pass", () => {
     const resumed = (await at.drive(true)).job;
     const fresh = (await at.drive(false)).job;
 
-    const passes = [];
-    for (let pass = 0; pass < 5; pass += 1) {
-      passes.push(await at.dispatch.pass());
+    const started = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      started.push(await at.dispatcher.startNextJob());
     }
 
-    expect(passes).toEqual([true, true, true, true, false]);
+    expect(started).toEqual([true, true, true, true, false]);
     expect(at.handed[FIRST]).toEqual([
       { jobId: setup.id, action: "setup", setupServer: QEMU_SERVER },
       { jobId: resumed.id, action: "drive", resume: ISO },
@@ -196,7 +196,7 @@ describe("a dispatch pass", () => {
     const at = await dispatching({ [FIRST]: {} });
     const { job } = await at.drive();
 
-    expect(await at.dispatch.pass()).toBe(false);
+    expect(await at.dispatcher.startNextJob()).toBe(false);
 
     expect(at.asked()).toEqual([]);
     expect((await at.job(job.id)).status).toBe("pending");
@@ -215,7 +215,7 @@ describe("a dispatch pass", () => {
     await at.live(FIRST, SECOND);
     const { job } = await at.drive();
 
-    expect(await at.dispatch.pass()).toBe(false);
+    expect(await at.dispatcher.startNextJob()).toBe(false);
 
     expect(at.handed[FIRST]).toHaveLength(1);
     expect(at.handed[SECOND]).toHaveLength(1);
@@ -233,7 +233,7 @@ describe("a dispatch pass", () => {
     await at.live(FIRST, SECOND);
     const { job } = await at.drive();
 
-    expect(await at.dispatch.pass()).toBe(true);
+    expect(await at.dispatcher.startNextJob()).toBe(true);
 
     const failed = at.said.filter((one) => one.level === "error");
     expect(failed.map((one) => one.text)).toEqual([
@@ -252,7 +252,7 @@ describe("a dispatch pass", () => {
     await at.live(FIRST);
     const { job } = await at.drive();
 
-    expect(await at.dispatch.pass()).toBe(false);
+    expect(await at.dispatcher.startNextJob()).toBe(false);
 
     expect(errors(at.said)).toEqual([
       `reserve failed; ${FIRST}: POST ${FIRST}/reserve: fetch failed`,
@@ -260,7 +260,7 @@ describe("a dispatch pass", () => {
     expect((await at.job(job.id)).status).toBe("pending");
   });
 
-  it("a job that left pending while its client reserved it is given back at that client with /abort, an error line says why, and the pass says to wait (unhappy)", async () => {
+  it("a job that left pending while its client reserved it is given back at that client with /abort, an error line says why, and it says to wait (unhappy)", async () => {
     const at = await dispatching((tests) => ({
       [FIRST]: {
         reserve: async (request) => {
@@ -272,7 +272,7 @@ describe("a dispatch pass", () => {
     await at.live(FIRST);
     const { job } = await at.drive();
 
-    expect(await at.dispatch.pass()).toBe(false);
+    expect(await at.dispatcher.startNextJob()).toBe(false);
 
     expect(at.handed[FIRST]).toEqual([
       { jobId: job.id, action: "drive", resume: ISO },
@@ -284,13 +284,13 @@ describe("a dispatch pass", () => {
     expect((await at.job(job.id)).status).toBe("aborted");
   });
 
-  it("a setup whose lock is gone can never be reserved: it is aborted saying so, nothing is asked, and the pass asks again (unhappy)", async () => {
+  it("a setup whose lock its qemu server cleared on a restart can never be reserved: it is aborted saying so, nothing is asked, and the next job is asked for at once (unhappy)", async () => {
     const at = await dispatching({ [FIRST]: {} });
     await at.live(FIRST);
     const setup = await at.setup();
     jarl.unwrap(await at.setupRequests.removeServer(QEMU_SERVER));
 
-    expect(await at.dispatch.pass()).toBe(true);
+    expect(await at.dispatcher.startNextJob()).toBe(true);
 
     const { status, reason } = await at.job(setup.id);
     expect({ status, reason }).toEqual({
@@ -307,7 +307,7 @@ describe("a dispatch pass", () => {
     await at.drive();
     await at.fake.stop();
 
-    expect(await at.dispatch.pass()).toBe(false);
+    expect(await at.dispatcher.startNextJob()).toBe(false);
 
     const failed = errors(at.said);
     expect(failed).toHaveLength(1);
