@@ -1,9 +1,11 @@
 import type * as App from "@oligarchy/app";
 import * as DriveHarness from "@oligarchy/drive-harness";
 import type * as Env from "@oligarchy/env";
+import type * as Http from "@oligarchy/http";
 import type * as Logger from "@oligarchy/logger";
 import * as OpenRouter from "@oligarchy/openrouter";
 import * as Qemu from "@oligarchy/qemu-http-tools";
+import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 
 const LOCATION = "driver";
@@ -16,7 +18,9 @@ const BAD_REPLY_LIMIT = 3;
 export const NotDrivable = jarl.error.define("NotDrivable");
 export type NotDrivable = InstanceType<typeof NotDrivable>;
 
-export type Services = App.Needs<Logger.Logger | DriveHarness.DriveHarness>;
+export type Services = App.Needs<
+  Logger.Logger | Stores.Tests.Tests | OpenRouter.OpenRouter | Http.Http
+>;
 
 type Steps = "loadJobHarnessData" | "start" | "getImage" | "ask" | "act" | "finish";
 
@@ -30,7 +34,10 @@ type Refused = Extract<
 // or started, or the proxy or the model could not be reached. A test that failed is an Ended.
 export type Failure = Refused | NotDrivable;
 
-export type Limits = Pick<Env.Config, "models" | "reasoning" | "stepLimit" | "runCeiling">;
+export type Limits = Pick<
+  Env.Config,
+  "models" | "reasoning" | "stepLimit" | "runCeiling" | "harness"
+>;
 
 // How the drive ended, as its guest is stopped with it.
 export type Ended = {
@@ -40,9 +47,10 @@ export type Ended = {
 
 export type Options = {
   readonly jobId: string;
+  // The qemu reverse proxy holding the job's guest, and the bearer it takes.
+  readonly serverUrl: string;
+  readonly token: { readonly reveal: () => string };
   readonly config: Limits;
-  // Aborts on SIGINT or SIGTERM; the guest is then stopped aborted.
-  readonly signal: AbortSignal;
 };
 
 const reasonOf = (signal: AbortSignal): string =>
@@ -52,18 +60,19 @@ const reasonOf = (signal: AbortSignal): string =>
 // the guest is off, or on the signal.
 const mainLoop = async (
   services: Services,
+  harness: DriveHarness.DriveHarness,
+  signal: AbortSignal,
   action: "drive" | "setup",
   options: Options,
 ): Promise<jarl.Result<Ended, Failure>> => {
-  const { logger, driveHarness: harness } = services;
-  const { config, signal } = options;
+  const { logger } = services;
+  const { config } = options;
   const at = { location: LOCATION, agentId: options.jobId };
   const deadline = Date.now() + config.runCeiling;
   const request = {
     model: config.models[action],
     reasoning: config.reasoning[action],
     deadline,
-    signal,
   };
   const aborted = (): jarl.Result<Ended, never> =>
     jarl.ok({ status: "aborted", reason: reasonOf(signal) });
@@ -150,12 +159,20 @@ const mainLoop = async (
 
 // One drive or setup job, from its load to its guest's stop. A test that failed is still a drive
 // that ran to its end; only the system failing it is a Failure, returned as it came. Each
-// failure is logged with itself as the cause, so Sentry gets the error and its stack.
+// failure is logged with itself as the cause, so Sentry gets the error and its stack. The signal
+// aborts on SIGINT or SIGTERM; the guest is then stopped aborted.
 export const drive = async (
   services: Services,
+  signal: AbortSignal,
   options: Options,
 ): Promise<jarl.Result<Ended, Failure>> => {
-  const { logger, driveHarness: harness } = services;
+  const { logger } = services;
+  const harness = DriveHarness.create(services, signal, {
+    job: options.jobId,
+    baseUrl: options.serverUrl,
+    token: options.token,
+    recentActions: options.config.harness.recentActions,
+  });
   const at = { location: LOCATION, agentId: options.jobId };
   const report = (error: Failure) => logger.error(error.message, { ...at, cause: error });
 
@@ -179,7 +196,7 @@ export const drive = async (
   }
   logger.info(`${action} ${name}: started ${iso}${resume ? ", resumed" : ""}`, at);
 
-  const looped = await mainLoop(services, action, options);
+  const looped = await mainLoop(services, harness, signal, action, options);
   if (jarl.is_err(looped)) {
     report(looped.error);
     const stopped = await harness.finish({ status: "failed", reason: looped.error.message });
