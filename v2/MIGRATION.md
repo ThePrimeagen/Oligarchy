@@ -227,14 +227,24 @@ record, and the automation server acts on it directly.
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
       releases its lock, so the drive's next reserve sets up again; decide when a drive whose ISO
       keeps failing to set up is errored instead. V1: `dispatch` in `worker.ts`.
-- [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
+- [x] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
-      the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
-      `prompts/driving-agent.html` and `prompts/diagnosing-agent.html` take the job id where they
-      take `{{LINEAR_TICKET}}`. `prompts/custom-harness-driving-agent.html`, the driver's system
-      prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
-      tool, and `prompts/driving-agent.html` names them where it names `./client`.
-      `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go.
+      the agent is its job id. V2's prompts are its own, under `v2/prompts/`, since V1 still renders
+      the root's `prompts/`. The automation server's `Prompts.create({ tests }, { readFile, models
+      }).forJob(jobId)` (`src/prompts.ts`) is what `/run` sends: it reads the job with
+      `tests.getJobDetails`, and a drive or setup gets `v2/prompts/driving-agent.html`, filled with
+      the job id where V1's took `{{LINEAR_TICKET}}`, its action's model, qemu-http-tools' tools
+      (`QemuHttpTools.definitions`) where it named `./client`, and its definition's mission, which
+      V1 appended after the template. A diagnose gets `v2/prompts/diagnosing-agent.html`, filled
+      with its job id, its test run's id where V1's took the result's, the diagnose model, and V1's
+      `ctrl-diagnose.md` as its guide until `ctrl` is ported. Each template is read for each job,
+      and a guide only when its template names it; each placeholder is filled in one pass, so a
+      mission's own braces stay as written. A job that is gone is `NotFound`, a database that
+      cannot be reached its `DatabaseError`, a template or guide that cannot be read Env's
+      `FileMissing` or `FileUnreadable` naming its path, and a placeholder nothing fills
+      `PromptUnfilled` naming the template and the placeholder. `prompts/linear-issue.html` and
+      `prompts/mint-issue.html` were ticket bodies and are not ported. The driver's side, its
+      mission by job id and its system prompt, is in driver and harness.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
@@ -353,7 +363,9 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             head the queue, so a setup no client can take holds back every drive behind it until
             it is placed.
       - [ ] **Dispatch: run.** Once the job is running, `/run` sends the prompt, without holding
-            the next pass. Needs the prompt from section 3's The mission.
+            the next pass. The prompt is section 3's The mission, `Prompts.forJob(jobId)`, over
+            `Env.Io`'s `readFile` and `config.models`; decide what a prompt that cannot be built
+            does to a job the client already holds.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
             answers.
       - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
@@ -448,7 +460,11 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
       `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
-      client, which `@oligarchy/openrouter` does not have yet.
+      client, which `@oligarchy/openrouter` does not have yet. It is handed its job id where V1's
+      was handed the ticket, and loads its mission with `tests.getJobDetails(jobId)` where V1's
+      used `findResultByLinearId`. Its system prompt is a V2 copy of
+      `prompts/custom-harness-driving-agent.html` under `v2/prompts/`, listing qemu-http-tools'
+      tools where V1's pastes in `client.md` and describes its `client` tool.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
       stores, the pages keyed by ticket (`/tickets/:ticket`) key by job id, and `@oligarchy/linear`
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
@@ -469,8 +485,9 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       watched on the board. Rewrite them for V2 as its apps land; `client.md` and `ctrl-linear.md`
       go.
 - [ ] **Retire V1.** Delete `apps/`, `packages/` and `src/`, V1's scripts and workspaces in the
-      root `package.json`, V1's root `oligarchy.json`, and `LINEAR_*` from every env file, then
-      move `v2/` to the root, V2's `oligarchy.json` and its config path with it.
+      root `package.json`, V1's root `oligarchy.json`, V1's root `prompts/`, and `LINEAR_*` from
+      every env file, then move `v2/` to the root, V2's `oligarchy.json` and its config path with
+      it, and `v2/prompts/` with the automation server's paths to it.
 
 ## 6. ctrl, last
 
@@ -483,6 +500,10 @@ V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
       - `test suite --iso <url>`: a suite of every definition but `setup`; prints its id.
       - `setup`: a setup on each server (section 3's File).
       - `diagnose`: the diagnosing agent's verdict against a drive's job (section 3's Diagnose).
+
+      `v2/prompts/diagnosing-agent.html` still tells the agent V1's `./ctrl session` commands
+      and embeds V1's `ctrl-diagnose.md`; both are rewritten for these commands, and the guide
+      moves under `v2/`.
 
       Open: whether the proxy's url is a flag, as V1's `--server-url` was, or read from the
       environment; and which of V1's other commands come over at all (`test define`, `details`,
