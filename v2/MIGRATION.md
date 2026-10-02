@@ -242,7 +242,8 @@ record, and the automation server acts on it directly.
       driver's loop calls:
       - `loadJobHarnessData(jobId)` reads `tests.getJobDetails`: the job and run IDs, action,
         pinned definition, ISO, proxy URL and boot mode. Only a resuming drive resumes; a setup
-        always boots fresh. `start`, `ask` and `finish` before it are `NotLoaded`.
+        always boots fresh. It keeps them as `data` and answers `true`; the driver loads the
+        job before it calls anything else, and nothing in the harness checks that it did.
       - `start()` boots that ISO. Opening and closing each step's intent is not written yet.
       - `ask({ model, reasoning, deadline, signal? })` renders the driving prompt from that
         state and asks the model, with the last screenshot when there is one. The model gets the
