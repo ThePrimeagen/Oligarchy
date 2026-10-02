@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import * as Async from "@oligarchy/async";
 import * as ClientRoutes from "@oligarchy/automation-client/routes";
 import * as FakeSessions from "@oligarchy/automation-client/testing";
 import * as Db from "@oligarchy/db";
@@ -14,6 +15,8 @@ import * as Dispatch from "../src/dispatch.ts";
 const TOKEN = "oligarchy-s3cret";
 const FIRST = "http://10.0.0.7:4100";
 const SECOND = "http://10.0.0.8:4100";
+// A client that never answers: its reserve ends only when the dispatcher's signal aborts.
+const HANGING = "http://10.0.0.9:4100";
 const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 const PROXY = "http://127.0.0.1:42069";
 const QEMU_SERVER = "http://10.0.0.5:4000";
@@ -63,6 +66,9 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
   );
   const http = Fake.http({
     replies: (asked) => {
+      if (new URL(asked.url).origin === HANGING) {
+        return "hang";
+      }
       const routes = clients[new URL(asked.url).origin];
       if (routes === undefined) {
         return "unreachable";
@@ -77,6 +83,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     },
   });
   const log = FakeLogger.logger();
+  const shutdown = new AbortController();
   const dispatcher = Dispatch.create({
     http: http.http,
     token: { reveal: () => TOKEN },
@@ -84,8 +91,10 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     servers,
     setupRequests,
     logger: log.logger,
-    signal: new AbortController().signal,
+    signal: shutdown.signal,
   });
+  // As the app's signal aborts when the server stops.
+  const stop = () => shutdown.abort(new Async.Aborted("parent stopped"));
 
   const live = async (...urls: ReadonlyArray<string>) => {
     for (const url of urls) {
@@ -138,6 +147,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     tests,
     setupRequests,
     dispatcher,
+    stop,
     live,
     clientId,
     drive,
@@ -257,6 +267,21 @@ describe("starting the next job", () => {
     expect(errors(at.said)).toEqual([
       `reserve failed; ${FIRST}: POST ${FIRST}/reserve: fetch failed`,
     ]);
+    expect((await at.job(job.id)).status).toBe("pending");
+  });
+
+  it("a shutdown during a reserve ends it: no error line, no other client asked, the job left pending (unhappy)", async () => {
+    const at = await dispatching({ [SECOND]: {} });
+    await at.live(HANGING, SECOND);
+    const { job } = await at.drive();
+
+    const starting = at.dispatcher.startNextJob();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    at.stop();
+
+    expect(await starting).toBe(false);
+    expect(at.asked().map(([url]) => url)).toEqual([`${HANGING}/reserve`]);
+    expect(errors(at.said)).toEqual([]);
     expect((await at.job(job.id)).status).toBe("pending");
   });
 
