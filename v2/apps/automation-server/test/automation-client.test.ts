@@ -5,7 +5,7 @@ import * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
 import * as Fake from "@oligarchy/http/testing";
 import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as AutomationClient from "../src/automation-client.ts";
 
 const JOB = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
@@ -14,7 +14,6 @@ const CLIENT_URL = "http://10.0.0.7:4100";
 const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 const QEMU_SERVER = "http://10.0.0.5:4000";
 const PROMPT = "You are the driving agent for job 6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11.";
-// Far below the HTTP default, so a call that kept it would time out here.
 const DEFAULT_TIMEOUT_MS = 50;
 
 const POSTED = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
@@ -60,8 +59,13 @@ const served = async (told: Partial<ClientRoutes.Sessions> = {}) => {
   return { client, asked: fake.asked, handed };
 };
 
-const later = <T>(ms: number, value: T): Promise<T> =>
-  new Promise((resolve) => setTimeout(() => resolve(value), ms));
+const held = () => {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((release) => {
+    resolve = release;
+  });
+  return { promise, resolve };
+};
 
 describe("the automation server's calls to an automation client", () => {
   describe("/reserve", () => {
@@ -121,14 +125,34 @@ describe("the automation server's calls to an automation client", () => {
 
   describe("/run", () => {
     it("posts its job and prompt, and answers ended once the client answers, however long past the HTTP default that is (happy)", async () => {
-      const { client, asked } = await served({
-        run: () => later(DEFAULT_TIMEOUT_MS * 4, jarl.ok("ended" as const)),
-      });
+      vi.useFakeTimers();
+      const entered = held();
+      const response = held();
+      try {
+        const { client, asked } = await served({
+          run: async () => {
+            entered.resolve();
+            await response.promise;
+            return jarl.ok("ended" as const);
+          },
+        });
+        let settled = false;
+        const ran = client.post("/run", { jobId: JOB, prompt: PROMPT }).then((result) => {
+          settled = true;
+          return result;
+        });
 
-      const ran = await client.post("/run", { jobId: JOB, prompt: PROMPT });
+        await entered.promise;
+        await vi.advanceTimersByTimeAsync(DEFAULT_TIMEOUT_MS * 4);
+        expect(settled).toBe(false);
 
-      expect(ran).toEqual(jarl.ok("ended"));
-      expect(asked).toEqual([posted("run", { jobId: JOB, prompt: PROMPT })]);
+        response.resolve();
+        expect(await ran).toEqual(jarl.ok("ended"));
+        expect(asked).toEqual([posted("run", { jobId: JOB, prompt: PROMPT })]);
+      } finally {
+        response.resolve();
+        vi.useRealTimers();
+      }
     });
 
     it("an abort ended answers aborted: no failure (unhappy)", async () => {
