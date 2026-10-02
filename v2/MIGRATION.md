@@ -235,25 +235,26 @@ record, and the automation server acts on it directly.
       `prompts/custom-harness-driving-agent.html`, and lists the model's tools where V1 pastes in
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
-      `@oligarchy/drive-harness` is the `driveHarness` service over `tests`, the job's
-      `qemuHttpTools` and `openRouter`, and holds only a drive or setup's steps:
+      `@oligarchy/drive-harness` exports `class DriveHarness`, made with
+      `new DriveHarness(services)` over `tests`, the job's `qemuHttpTools` and `openRouter`. It
+      holds one drive or setup's state: the loaded job, the model's past steps, its last
+      response, the previous move and the last screenshot. Its methods are the points the
+      driver's loop calls:
       - `loadJobHarnessData(jobId)` reads `tests.getJobDetails`: the job and run IDs, action,
         pinned definition, ISO, proxy URL and boot mode. Only a resuming drive resumes; a setup
-        always boots fresh.
-      - `start(data)` boots that ISO. Opening and closing each step's intent is not written
-        yet.
-      - `prompt(data, turn)` renders the driving prompt for one model turn, with past reasons,
-        the last response and the previous move (a native tool name and its arguments). All
-        replacements happen once, so a definition or model reply containing `{{MODEL}}` stays
-        literal text.
-      - `ask({ model, reasoning, deadline, prompt, screen?, signal? })` asks the model with the
+        always boots fresh. `start`, `ask` and `finish` before it are `NotLoaded`.
+      - `start()` boots that ISO. Opening and closing each step's intent is not written yet.
+      - `ask({ model, reasoning, deadline, signal? })` renders the driving prompt from that
+        state and asks the model, with the last screenshot when there is one. The model gets the
         guest's tools, each taking `step` and `reason` beside its own arguments, and `Done`; the
         prompt lists the same tools. Its answer is one move, a guest call or done; any other
-        turn is `ReplyInvalid`.
-      - `act(move)` runs the guest call with only its own arguments.
-      - `finish(data, end)` saves a setup that succeeded and stops the guest otherwise.
-      The loop's limits, its history and its reasons are the driver's (section 4). V1's root
-      templates and ticket bodies remain until V1 is retired.
+        turn is `ReplyInvalid`, which becomes a past step. All replacements happen once, so a
+        definition or model reply containing `{{MODEL}}` stays literal text.
+      - `act(move)` runs the guest call with only its own arguments, and records its outcome,
+        or the guest's refusal, as a past step.
+      - `finish(end)` saves a setup that succeeded and stops the guest otherwise.
+      The loop and its limits are the driver's (section 4). V1's root templates and ticket
+      bodies remain until V1 is retired.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
@@ -461,10 +462,10 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             connections but not a `/run` still under way, then `jobs.shutdown()` aborts every
             held job and waits until each is let go, before it says it stopped and the services
             close. From the moment shutdown begins, every hold is refused.
-- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop: history, the
-      reasons, and the stop rule (result closed, step limit, model stopped, run ceiling), over
-      `driveHarness`'s steps (section 3's The drive harness), which hold the tools and the
-      pointer. Each step's intent is still to be placed. It creates the OpenRouter client with `timeouts.header` from
+- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop and its stop rule
+      (result closed, step limit, model stopped, run ceiling, bad replies in a row), over a
+      `DriveHarness` (section 3's The drive harness), which holds the tools, the pointer and
+      what the model has been shown. Each step's intent is still to be placed. It creates the OpenRouter client with `timeouts.header` from
       `v2/oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
       still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
       deadline;
