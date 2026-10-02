@@ -235,9 +235,10 @@ record, and the automation server acts on it directly.
       `prompts/custom-harness-driving-agent.html`, and lists the model's tools where V1 pastes in
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
-      `@oligarchy/drive-harness` exports `class DriveHarness`, made with
-      `new DriveHarness(services, { recentActions })` over `tests`, the job's `qemuHttpTools`
-      and `openRouter`, with `harness.recentActions` from `v2/oligarchy.json` (10). It holds one
+      `@oligarchy/drive-harness` is the `driveHarness` service: its `create({ tests,
+      qemuHttpTools, openRouter }, { recentActions })` builds a `DriveHarness`, the class, over
+      the job's `qemuHttpTools`, with `harness.recentActions` from `v2/oligarchy.json` (10).
+      `@oligarchy/drive-harness/testing` makes one over a fake tests store, guest and model. It holds one
       drive or setup's state: the loaded job, every step opened with all its actions, the
       model's last response, the previous move and the screen. Its methods are the points the
       driver's loop calls:
@@ -474,8 +475,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             close. From the moment shutdown begins, every hold is refused.
 - [x] **driver** (`v2/apps/driver`, V1: `src/driver`, `src/harness`). `v2/driver --job-id <id>
       --server-url <proxy>` (or `bun run driver`) needs `DATABASE_URL`, `OLIGARCHY_TOKEN` and
-      `OPENROUTER_API_KEY`, and drives one drive or setup job over a `DriveHarness` (section 3's
-      The drive harness): the job's action picks its model and reasoning from
+      `OPENROUTER_API_KEY`, and drives one drive or setup job over the `driveHarness` service
+      it creates with its other services (section 3's The drive harness): the job's action picks its model and reasoning from
       `v2/oligarchy.json`, so there is no `--action`. Each turn is `getImage`, `ask` and `act`,
       until the model is done, the step limit or the run ceiling (the deadline of every ask;
       `OpenRouterOutOfTime` is that ceiling reached), or three replies in a row that were not a
