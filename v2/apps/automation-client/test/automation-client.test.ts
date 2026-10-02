@@ -93,7 +93,7 @@ const automationClient = (argv: ReadonlyArray<string>, env: Readonly<Record<stri
   return { child, exited, lines, stderr: () => stderr };
 };
 
-// A diagnose asks the reverse proxy nothing, so none listens at --server-url.
+// A diagnose asks the qemu server nothing, so none listens at --server-url.
 const flags = (port: number) => [
   "--port",
   String(port),
