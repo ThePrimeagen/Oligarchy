@@ -342,10 +342,11 @@ bearer, and runs under `@oligarchy/app`.
             and for a drive or setup a guest reserved first at the qemu reverse proxy at a
             required `--server-url` (or `SERVER_URL`), which has no default; a diagnose asks the
             proxy for nothing. At `--max-jobs`, or while another reserve is still asking the
-            proxy, it is 503 at capacity and the proxy is not asked. The reservation is
+            proxy, it is `AtCapacity` (503) and the proxy is not asked. The reservation is
             `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
-            shutdown has begun is `ShuttingDown` (503). The proxy's own answers are 503 at
-            capacity and 409 setup needed, each letting the job go; any other is a
+            shutdown has begun is `ShuttingDown` (503). The proxy's own refusals are
+            `AtCapacity` (503) and `SetupNeeded` (409), errors naming what it said, each letting
+            the job go; any other is a
             `ReserveFailed` (500) naming why, and lets the job go too. One that may have landed
             first, anything but a 4xx (an abort or a timeout among them), gives its guest back
             before that. When the held signal aborts before a run takes the job, the reservation

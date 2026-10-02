@@ -1,6 +1,6 @@
 import * as Http from "@oligarchy/http";
 import * as jarl from "jarl";
-import type * as Routes from "./routes.ts";
+import * as Routes from "./routes.ts";
 
 // The proxy probes every qemu server, each for up to 10 seconds, and then asks them one at a time.
 const RESERVE_TIMEOUT_MS = 60_000;
@@ -15,12 +15,12 @@ export type Options = {
 };
 
 export type Proxy = {
-  // A refusal is no failure: the proxy is full, or no qemu server with room holds the setup disk
-  // the drive resumes. signal ends the call.
+  // The proxy is full, or no qemu server with room holds the setup disk the drive resumes: each
+  // a refusal that reserved nothing. signal ends the call.
   readonly reserve: (
     request: GuestRequest,
     signal: AbortSignal,
-  ) => Promise<jarl.Result<Routes.Reserved, Http.HttpFailure>>;
+  ) => Promise<jarl.Result<void, Routes.AtCapacity | Routes.SetupNeeded | Http.HttpFailure>>;
   readonly relinquish: (jobId: string) => Promise<jarl.Result<void, Http.HttpFailure>>;
 };
 
@@ -58,14 +58,11 @@ export const create = (options: Options): Proxy => {
               ...(request.resume === undefined ? {} : { resume: request.resume }),
             };
       const answered = await post("reserve", body, { timeoutMs: RESERVE_TIMEOUT_MS, signal });
-      if (jarl.is_ok(answered)) {
-        return jarl.ok("reserved");
-      }
       if (jarl.error.is(answered, Http.HttpServerError) && answered.error.status === 503) {
-        return jarl.ok("at-capacity");
+        return jarl.err(new Routes.AtCapacity(answered.error.message));
       }
       if (jarl.error.is(answered, Http.HttpUnhandled) && answered.error.status === 409) {
-        return jarl.ok("setup-needed");
+        return jarl.err(new Routes.SetupNeeded(answered.error.message));
       }
       return answered;
     },

@@ -20,12 +20,20 @@ export type RunRequest = z.infer<typeof RunRequest>;
 export const AbortRequest = z.strictObject({ jobId: z.uuid() });
 export type AbortRequest = z.infer<typeof AbortRequest>;
 
-// A refusal is no failure: the job stays pending and is asked for again.
-export type Reserved = "reserved" | "at-capacity" | "setup-needed";
 // The driver or opencode ran to its end, or an abort ended it.
 export type Ran = "ended" | "aborted";
 // A client that does not hold the job has nothing to stop.
 export type Stopped = "stopped" | "not-held";
+
+// The client is at --max-jobs or already asking the proxy for another guest, or the proxy has no
+// room; the message says which. The job stays pending and is asked for again.
+export const AtCapacity = jarl.error.define("AtCapacity");
+export type AtCapacity = InstanceType<typeof AtCapacity>;
+
+// No qemu server with room holds the setup disk the drive resumes; the message says what the proxy
+// said. The job stays pending until a setup lands.
+export const SetupNeeded = jarl.error.define("SetupNeeded");
+export type SetupNeeded = InstanceType<typeof SetupNeeded>;
 
 // The qemu reverse proxy could not reserve the job's guest; the message says why.
 export const ReserveFailed = jarl.error.define("ReserveFailed");
@@ -39,7 +47,12 @@ export type RunFailed = InstanceType<typeof RunFailed>;
 export type Sessions = {
   readonly reserve: (
     request: ReserveRequest,
-  ) => Promise<jarl.Result<Reserved, Jobs.AlreadyHeld | Jobs.ShuttingDown | ReserveFailed>>;
+  ) => Promise<
+    jarl.Result<
+      void,
+      AtCapacity | SetupNeeded | Jobs.AlreadyHeld | Jobs.ShuttingDown | ReserveFailed
+    >
+  >;
   readonly run: (request: RunRequest) => Promise<jarl.Result<Ran, RunFailed>>;
   readonly abort: (request: AbortRequest) => Promise<Stopped>;
 };
@@ -72,21 +85,20 @@ export const routes = (options: {
           return c.json({ error: "reserve is not written yet" }, 501);
         }
         const reserved = await reserve(c.req.valid("json"));
+        if (jarl.error.is(reserved, AtCapacity)) {
+          return c.json({ error: reserved.error.message }, 503);
+        }
         if (jarl.error.is(reserved, Jobs.ShuttingDown)) {
           return c.json({ error: reserved.error.message }, 503);
+        }
+        if (jarl.error.is(reserved, SetupNeeded)) {
+          return c.json({ error: reserved.error.message }, 409);
         }
         if (jarl.error.is(reserved, Jobs.AlreadyHeld)) {
           return c.json({ error: reserved.error.message }, 400);
         }
         if (jarl.is_err(reserved)) {
           return c.json({ error: reserved.error.message }, 500);
-        }
-        const word = jarl.value(reserved);
-        if (word === "at-capacity") {
-          return c.json({ error: "at capacity" }, 503);
-        }
-        if (word === "setup-needed") {
-          return c.json({ error: "setup needed" }, 409);
         }
         return c.json({}, 200);
       },

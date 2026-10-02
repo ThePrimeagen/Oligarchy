@@ -28,7 +28,7 @@ export type Options = {
 };
 
 // A reserve holds its job against maxJobs, and a drive or setup a guest at the proxy first. One
-// reserve asks the proxy at a time; another meanwhile is at-capacity, and the automation server
+// reserve asks the proxy at a time; another meanwhile is AtCapacity, and the automation server
 // asks again. A reservation lives in memory only, so a restarted client holds nothing.
 export const create = (options: Options): Reservations => {
   const { maxJobs, jobs, proxy, logger } = options;
@@ -75,6 +75,10 @@ export const create = (options: Options): Reservations => {
     held: Jobs.Held,
   ): ReturnType<Routes.Sessions["reserve"]> => {
     const asked = await proxy.reserve(request, held.signal);
+    if (jarl.error.is(asked, Routes.AtCapacity) || jarl.error.is(asked, Routes.SetupNeeded)) {
+      held.release();
+      return asked;
+    }
     if (jarl.is_err(asked)) {
       // A 4xx reserved nothing. Any other failure, an abort or a timeout among them, may have
       // reserved the guest before its answer was lost.
@@ -88,19 +92,17 @@ export const create = (options: Options): Reservations => {
       held.release();
       return jarl.err(new Routes.ReserveFailed(`reserving a guest failed: ${asked.error.message}`));
     }
-    const reserved = jarl.value(asked);
-    if (reserved !== "reserved") {
-      held.release();
-      return jarl.ok(reserved);
-    }
     keep(request.jobId, request.action, held);
-    return jarl.ok("reserved");
+    return jarl.ok(undefined);
   };
 
   return {
     reserve: async (request) => {
-      if (reserving || jobs.count() >= maxJobs) {
-        return jarl.ok("at-capacity");
+      if (reserving) {
+        return jarl.err(new Routes.AtCapacity("at capacity: a reserve is already in flight"));
+      }
+      if (jobs.count() >= maxJobs) {
+        return jarl.err(new Routes.AtCapacity(`at capacity: max-jobs is ${String(maxJobs)}`));
       }
       const held = jobs.hold(request.jobId);
       if (jarl.is_err(held)) {
@@ -108,7 +110,7 @@ export const create = (options: Options): Reservations => {
       }
       if (request.action === "diagnose") {
         keep(request.jobId, request.action, jarl.value(held));
-        return jarl.ok("reserved");
+        return jarl.ok(undefined);
       }
       reserving = true;
       try {
