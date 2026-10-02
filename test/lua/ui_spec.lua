@@ -167,6 +167,7 @@ describe("Cursor jobs in Neovim", function()
     S.wait(function()
       return vim.b[buffer].oligarchy_agents ~= nil
     end)
+    S.select("Job first")
     return buffer
   end
 
@@ -298,6 +299,33 @@ describe("Cursor jobs in Neovim", function()
     end)
     assert.matches("Job first", text(buffer), 1, true)
     assert.equals(2, #vim.b[buffer].oligarchy_agents)
+  end)
+
+  it("cancels a pending list refresh before archiving a cached job", function()
+    local buffer = jobs()
+    press("r")
+    S.request(http, 2)
+    S.select("Job first")
+    press("a")
+    press("<Tab>")
+    press("<CR>")
+    assert.equals("POST", S.request(http, 3).method)
+    assert.is_true(http.requests[2].cancelled)
+    http:respond(3, { id = "first" })
+    S.wait(function()
+      local result = vim.b[buffer].oligarchy_agents
+      return result and #result == 1
+    end)
+    http:respond(2, { items = { S.agent("first"), S.agent("second") } })
+    local drained = false
+    vim.schedule(function()
+      drained = true
+    end)
+    S.wait(function()
+      return drained
+    end)
+    assert.equals(1, #vim.b[buffer].oligarchy_agents)
+    assert.equals("second", vim.b[buffer].oligarchy_agents[1].id)
   end)
 
   it("closes a pending confirmation when the jobs buffer is wiped", function()

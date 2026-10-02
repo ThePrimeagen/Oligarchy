@@ -39,8 +39,7 @@ describe("live Cursor jobs pane", function()
       local buffer = vim.api.nvim_get_current_buf()
       assert.is_true(
         vim.wait(6000, function()
-          local line = vim.api.nvim_buf_get_lines(buffer, 0, 1, false)[1]
-          return line ~= "Loading Cursor cloud jobs…"
+          return vim.b[buffer].oligarchy_agents ~= nil
         end, 5),
         "Live Cursor request timed out"
       )
@@ -89,6 +88,16 @@ describe("live Cursor jobs pane", function()
     assert.is_true(#vim.b[buffer].oligarchy_agents > 0)
     local started = vim.uv.hrtime()
     local enter = vim.api.nvim_replace_termcodes("<CR>", true, false, true)
+    local function select_job()
+      local id = vim.b[buffer].oligarchy_agents[1].id
+      for row, line in ipairs(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)) do
+        if line == "  " .. id then
+          vim.api.nvim_win_set_cursor(0, { row, 0 })
+          return
+        end
+      end
+    end
+    select_job()
     vim.api.nvim_feedkeys(enter, "xt", false)
     assert.is_true(vim.wait(6000, function()
       local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
@@ -122,6 +131,7 @@ describe("live Cursor jobs pane", function()
     )
     local back = vim.api.nvim_replace_termcodes("<BS>", true, false, true)
     vim.api.nvim_feedkeys(back, "xt", false)
+    select_job()
     local cached_at = vim.uv.hrtime()
     vim.api.nvim_feedkeys(enter, "xt", false)
     assert.equals(#messages, #vim.b[buffer].oligarchy_conversation)

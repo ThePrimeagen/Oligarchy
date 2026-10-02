@@ -3,6 +3,7 @@ local M = {}
 local function repository_key(url)
   return vim
     .trim(url)
+    :gsub("^(%w+://[^/]+):%d+/", "%1/")
     :gsub("^%w+://", "")
     :gsub("^[^/@]+@", "")
     :gsub(":", "/")

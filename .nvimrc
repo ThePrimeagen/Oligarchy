@@ -20,6 +20,8 @@ plugin.setup({
   skip_files = {
     "bun.lock",
     "package.json",
+    { match = "*.lua", pattern = true },
+    { match = "doc/*", pattern = true },
     -- Strings match exact paths relative to this repository.
     -- To match anywhere in a path, use:
     -- { partial = true, match = "package.json" },

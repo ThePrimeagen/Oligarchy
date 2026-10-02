@@ -4,6 +4,10 @@ local client = require("oligarchy.cursor").new({ root = root })
 local buffer, cancel, close_popup
 local agents, rows = {}, {}
 local conversation
+local local_view = false
+local local_entry = {}
+local local_summary, summary_error, summary_cancel
+local summary_namespace = vim.api.nvim_create_namespace("oligarchy.local-summary")
 local archiving = false
 local action_cancel, branch_cancel, action
 local state, box_rows = { closed = {} }, {}
@@ -39,6 +43,7 @@ local function stop_refresh()
 end
 
 local function render(lines)
+  vim.api.nvim_buf_clear_namespace(buffer, summary_namespace, 0, -1)
   vim.bo[buffer].modifiable = true
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
   vim.bo[buffer].modifiable = false
@@ -46,6 +51,10 @@ end
 
 local function stop()
   stop_refresh()
+  if summary_cancel then
+    summary_cancel()
+    summary_cancel = nil
+  end
   if action == "send" and composer then
     composer.lock(false)
   end
@@ -105,9 +114,55 @@ function M.prompt()
   composer.focus()
 end
 
+local function show_summary()
+  local chunks = { { " (loading…)", "Comment" } }
+  if summary_error then
+    chunks = { { " (diff unavailable)", "Comment" } }
+  elseif local_summary then
+    if local_summary.files == 0 then
+      chunks = { { " (unchanged)", "Comment" } }
+    else
+      chunks = {
+        { " +" .. local_summary.added, "Added" },
+        { "/", "Normal" },
+        { "-" .. local_summary.removed, "Removed" },
+        {
+          " with "
+            .. local_summary.files
+            .. (local_summary.files == 1 and " file" or " files")
+            .. " changed",
+          "Normal",
+        },
+      }
+    end
+  end
+  for row, entry in pairs(rows) do
+    if entry == local_entry then
+      local label = "Local"
+      for _, chunk in ipairs(chunks) do
+        label = label .. chunk[1]
+      end
+      vim.bo[buffer].modifiable = true
+      vim.api.nvim_buf_set_lines(buffer, row - 1, row, false, { label })
+      vim.bo[buffer].modifiable = false
+      vim.api.nvim_buf_clear_namespace(buffer, summary_namespace, 0, -1)
+      local column = #"Local"
+      for _, chunk in ipairs(chunks) do
+        vim.api.nvim_buf_set_extmark(buffer, summary_namespace, row - 1, column, {
+          end_col = column + #chunk[1],
+          hl_group = chunk[2],
+        })
+        column = column + #chunk[1]
+      end
+      return
+    end
+  end
+end
+
 local function show_list(message)
   close_composer()
   conversation = nil
+  local_view = false
   box_rows = {}
   vim.b[buffer].oligarchy_boxes = nil
   rows = {}
@@ -116,9 +171,13 @@ local function show_list(message)
   local lines = {
     "Recent Cursor cloud jobs — " .. vim.fn.fnamemodify(root, ":t"),
     "",
-    "Enter: conversation    P: Push & Review    a: archive    r: refresh    q: close",
+    "Enter: open    P: Push & Review    a: archive    r: refresh    q: close",
+    "",
+    "Local",
     "",
   }
+  local first_row = 5
+  rows[first_row] = local_entry
   if message then
     vim.list_extend(lines, vim.split(message, "\n", { plain = true }))
     table.insert(lines, "")
@@ -126,20 +185,38 @@ local function show_list(message)
   if #agents == 0 then
     table.insert(lines, "No recent cloud jobs for this project among the latest 10.")
   end
-  local first_row
   for _, agent in ipairs(agents) do
     local line = #lines + 1
-    first_row = first_row or line
     rows[line], rows[line + 1] = agent, agent
     table.insert(lines, agent.status .. "  " .. agent.name:gsub("[\r\n]", " "))
     table.insert(lines, "  " .. agent.id)
     table.insert(lines, "")
   end
   render(lines)
+  show_summary()
+  if summary_cancel then
+    summary_cancel()
+  end
+  summary_cancel = require("oligarchy.local_diff").summary(root, skip_files, function(err, result)
+    summary_cancel = nil
+    local_summary, summary_error = result, err
+    show_summary()
+  end)
   local window = vim.fn.bufwinid(buffer)
   if window ~= -1 then
-    vim.api.nvim_win_set_cursor(window, { first_row or 1, 0 })
+    vim.api.nvim_win_set_cursor(window, { first_row, 0 })
   end
+end
+
+local function show_local(message)
+  local lines = {
+    "Local",
+    "d: diff    r: refresh diff    Ctrl-b: jobs    q: close",
+    "",
+    "Staged and unstaged changes against HEAD, plus untracked files on disk.",
+  }
+  vim.list_extend(lines, vim.split(message or "", "\n", { plain = true }))
+  render(lines)
 end
 
 local function show_conversation()
@@ -400,6 +477,47 @@ function M.abort()
   end)
 end
 
+local function open_diff(items, title, origin)
+  vim.fn.setqflist({}, " ", { items = items, title = title })
+  require("oligarchy.diff").show(items)
+  if #items == 0 then
+    return
+  end
+  close_composer()
+  vim.api.nvim_set_current_win(origin)
+  vim.cmd("botright new")
+  vim.wo.signcolumn = "auto:2"
+  local editor = vim.api.nvim_get_current_win()
+  for _, window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if window ~= editor then
+      -- Hide file buffers so unsaved edits survive closing their windows.
+      vim.api.nvim_win_call(window, function()
+        vim.cmd("hide close")
+      end)
+    end
+  end
+  vim.cmd("cc 1")
+  vim.cmd("botright copen")
+end
+
+function M.local_diff()
+  if not local_view or action then
+    return
+  end
+  local origin = vim.fn.bufwinid(buffer)
+  action = "diff"
+  show_local("Reading local diff…")
+  action_cancel = require("oligarchy.local_diff").collect(root, skip_files, function(err, items)
+    action, action_cancel = nil, nil
+    if err then
+      show_local(err)
+      return
+    end
+    show_local(tostring(#items) .. " diff hunks in quickfix")
+    open_diff(items, "Oligarchy local diff", origin)
+  end)
+end
+
 function M.pr(diff)
   if not conversation or action then
     return
@@ -443,35 +561,20 @@ function M.pr(diff)
         done("Could not parse PR diff")
         return
       end
-      local first = #vim.fn.getqflist() + 1
-      if #items > 0 then
-        vim.fn.setqflist({}, "a", { items = items, title = "Oligarchy PR diff" })
-      end
-      require("oligarchy.diff").show(items)
-      done(tostring(#items) .. " diff hunks added to quickfix")
-      if #items > 0 then
-        close_composer()
-        vim.api.nvim_set_current_win(origin)
-        vim.cmd("botright new")
-        vim.wo.signcolumn = "auto:2"
-        local editor = vim.api.nvim_get_current_win()
-        for _, window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-          if window ~= editor then
-            -- Hide file buffers so unsaved edits survive closing their windows.
-            vim.api.nvim_win_call(window, function()
-              vim.cmd("hide close")
-            end)
-          end
-        end
-        vim.cmd("cc " .. first)
-        vim.cmd("botright copen")
-      end
+      done(tostring(#items) .. " diff hunks in quickfix")
+      open_diff(items, "Oligarchy PR diff", origin)
     end)
   end)
 end
 
 function M.push_review()
-  if vim.api.nvim_get_current_buf() ~= buffer or action or archiving or close_popup then
+  if
+    vim.api.nvim_get_current_buf() ~= buffer
+    or local_view
+    or action
+    or archiving
+    or close_popup
+  then
     return
   end
   stop()
@@ -513,7 +616,7 @@ function M.push_review()
 end
 
 function M.back()
-  if archiving or action == "review" or not conversation then
+  if archiving or action == "review" or not (conversation or local_view) then
     return
   end
   stop()
@@ -521,7 +624,7 @@ function M.back()
 end
 
 function M.enter()
-  if action == "review" then
+  if action == "review" or local_view then
     return
   end
   if conversation then
@@ -532,7 +635,12 @@ function M.enter()
     return
   end
   local agent = rows[vim.api.nvim_win_get_cursor(0)[1]]
-  if agent then
+  if agent == local_entry then
+    stop()
+    rows = {}
+    local_view = true
+    show_local()
+  elseif agent then
     load_conversation(agent)
   end
 end
@@ -542,7 +650,7 @@ function M.archive()
     return
   end
   local agent = rows[vim.api.nvim_win_get_cursor(0)[1]]
-  if not agent then
+  if not agent or agent == local_entry then
     return
   end
   close_popup = require("oligarchy.confirm").archive(agent.name, function(confirmed)
@@ -550,6 +658,7 @@ function M.archive()
     if not confirmed then
       return
     end
+    stop()
     archiving = true
     rows = {}
     render({ "Archiving " .. agent.name:gsub("[\r\n]", " ") .. "…" })
@@ -581,19 +690,20 @@ function M.refresh()
     load_conversation(conversation)
     return
   end
+  if local_view then
+    M.local_diff()
+    return
+  end
   stop()
-  rows = {}
+  show_list("Loading Cursor cloud jobs…")
   vim.b[buffer].oligarchy_agents = nil
-  render({ "Loading Cursor cloud jobs…" })
   cancel = client:get_cloud_agents(function(err, result)
     cancel = nil
     if not buffer or not vim.api.nvim_buf_is_valid(buffer) then
       return
     end
     if err then
-      local lines = vim.split(err, "\n", { plain = true })
-      vim.list_extend(lines, { "", "r: retry    q: close" })
-      render(lines)
+      show_list(err)
       return
     end
     agents = result
@@ -631,7 +741,11 @@ function M.open()
       M.pr(false)
     end, { buffer = buffer })
     vim.keymap.set("n", "d", function()
-      M.pr(true)
+      if local_view then
+        M.local_diff()
+      else
+        M.pr(true)
+      end
     end, { buffer = buffer })
     vim.keymap.set("n", "J", function()
       M.jump(1)
@@ -664,6 +778,7 @@ function M.open()
           close_popup = nil
         end
         buffer, conversation = nil, nil
+        local_view = false
         archiving = false
         agents, rows = {}, {}
       end,
@@ -685,6 +800,7 @@ function M.setup(options)
   options = options or {}
   refresh_clock, refresh_timer = options.refresh_clock, options.refresh_timer
   root = options.root or root
+  local_summary, summary_error = nil, nil
   skip_files = options.skip_files or {}
   start_review = options.start_review or require("oligarchy.review").start
   http = options.http or require("oligarchy.cursor.http").request
@@ -706,6 +822,7 @@ function M.setup(options)
     end,
   })
   conversation = nil
+  local_view = false
   archiving = false
   vim.api.nvim_create_user_command(
     "OligarchyJobs",

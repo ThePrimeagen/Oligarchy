@@ -3,11 +3,24 @@ local M = {}
 local function filename(value)
   if value:sub(1, 1) == '"' then
     value = value:match('^"(.*)"$') or ""
-    value = value
-      :gsub("\\(%d%d%d)", function(octal)
-        return string.char(tonumber(octal, 8))
-      end)
-      :gsub('\\([\\"tnr])', { ["\\"] = "\\", ['"'] = '"', t = "\t", n = "\n", r = "\r" })
+    local escapes = {
+      ["\\"] = "\\",
+      ['"'] = '"',
+      a = "\a",
+      b = "\b",
+      f = "\f",
+      n = "\n",
+      r = "\r",
+      t = "\t",
+      v = "\v",
+    }
+    -- Decode once: an escaped backslash followed by digits is a literal name.
+    value = value:gsub("\\([0-7]?[0-7]?.)", function(escape)
+      if #escape == 3 then
+        return string.char(tonumber(escape, 8))
+      end
+      return assert(escapes[escape], "Invalid diff path escape")
+    end)
   else
     value = value:match("^[^\t]*")
   end
@@ -26,19 +39,26 @@ local function filename(value)
   return value
 end
 
--- One quickfix entry per textual hunk in a surviving file.
-function M.hunks(text, root, skip_files)
-  local function skipped(path)
-    for _, rule in ipairs(skip_files or {}) do
-      if
-        rule == path
-        or (type(rule) == "table" and rule.partial and path:find(rule.match, 1, true))
-      then
+function M.skipped(path, skip_files)
+  for _, rule in ipairs(skip_files or {}) do
+    if rule == path then
+      return true
+    end
+    if type(rule) == "table" then
+      if rule.pattern then
+        if vim.fn.match(path, "\\C" .. vim.fn.glob2regpat(rule.match)) >= 0 then
+          return true
+        end
+      elseif rule.partial and path:find(rule.match, 1, true) then
         return true
       end
     end
-    return false
   end
+  return false
+end
+
+-- One quickfix entry per textual hunk in a surviving file.
+function M.hunks(text, root, skip_files)
   local entries, old, new, hunk = {}, nil, nil, nil
   local has_hunks = false
   local function finish()
@@ -46,12 +66,13 @@ function M.hunks(text, root, skip_files)
       return
     end
     -- Deleted files have +++ /dev/null; opening them would create empty buffers.
-    if new and not skipped(new) then
+    if new and not M.skipped(new, skip_files) then
       local changes, current = {}, hunk.line
       for i = 2, #hunk.lines do
         local operation = hunk.lines[i]:sub(1, 1)
         if operation == "+" or operation == "-" then
-          local line = math.max(1, current)
+          -- A trailing deletion has no new-side line of its own.
+          local line = math.max(1, math.min(current, hunk.last))
           local change = changes[#changes]
           if not change or change.lnum ~= line then
             change = { lnum = line }
@@ -65,7 +86,7 @@ function M.hunks(text, root, skip_files)
       end
       table.insert(entries, {
         filename = root .. "/" .. hunk.path,
-        lnum = math.max(1, hunk.line),
+        lnum = changes[1] and changes[1].lnum or math.max(1, hunk.line),
         col = 1,
         text = hunk.path .. " " .. hunk.lines[1],
         user_data = { diff = table.concat(hunk.lines, "\n"), changes = changes },
@@ -79,12 +100,19 @@ function M.hunks(text, root, skip_files)
       old, new = nil, nil
     elseif line:match("^@@ ") then
       finish()
-      local from, to = line:match("^@@ %-(%d+),?%d* %+(%d+),?%d* @@")
+      local from, to, count = line:match("^@@ %-(%d+),?%d* %+(%d+),?(%d*) @@")
       if not from or not (new or old) then
         error("Invalid diff hunk")
       end
       has_hunks = true
-      hunk = { path = new, line = tonumber(to), lines = { line } }
+      local start = tonumber(to)
+      local length = tonumber(count) or 1
+      hunk = {
+        path = new,
+        line = start,
+        last = start + math.max(0, length - 1),
+        lines = { line },
+      }
     elseif hunk then
       table.insert(hunk.lines, line)
     elseif line:match("^%-%-%- ") then
@@ -110,7 +138,7 @@ function M.clear()
   end
 end
 
--- Apply the latest PR's changes without loading files just to decorate them.
+-- Apply the latest diff's changes without loading files just to decorate them.
 function M.show(items)
   local namespace = vim.api.nvim_create_namespace("oligarchy-diff")
   local files = {}

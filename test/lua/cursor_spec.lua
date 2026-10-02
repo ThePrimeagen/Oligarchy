@@ -61,6 +61,34 @@ describe("Cursor cloud agents", function()
     assert.are.same({ S.agent("first", nil, "IDLE"), S.agent("second") }, result.agents)
   end)
 
+  it("matches an SSH origin with an explicit port to the HTTPS repository", function()
+    assert.equals(
+      0,
+      vim
+        .system({
+          "git",
+          "-C",
+          root,
+          "remote",
+          "set-url",
+          "origin",
+          "ssh://git@github.com:22/ThePrimeagen/Oligarchy.git",
+        })
+        :wait().code
+    )
+    local result = S.collect(client)
+    S.request(http, 1)
+    http:respond(
+      1,
+      { items = { S.agent("matched"), S.agent("other", "https://github.com/other/repo") } }
+    )
+    S.wait(function()
+      return result.done
+    end)
+    assert.is_nil(result.error)
+    assert.same({ S.agent("matched") }, result.agents)
+  end)
+
   it("caps even an oversized response at ten jobs", function()
     local result = S.collect(client)
     S.request(http, 1)

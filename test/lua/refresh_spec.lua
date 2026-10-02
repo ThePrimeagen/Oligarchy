@@ -28,6 +28,7 @@ describe("active conversation refresh", function()
     S.wait(function()
       return vim.b[buffer].oligarchy_agents ~= nil
     end)
+    S.select("Job first")
     Plugin.enter()
     S.request(http, 2)
   end

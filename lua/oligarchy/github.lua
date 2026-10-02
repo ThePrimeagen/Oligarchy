@@ -31,9 +31,15 @@ function M.diff(root, url, http, callback)
       ["User-Agent"] = "oligarchy.nvim",
       ["X-GitHub-Api-Version"] = "2022-11-28",
     }
-    local token = env.GITHUB_TOKEN or vim.env.GITHUB_TOKEN or env.GH_TOKEN or vim.env.GH_TOKEN
-    if token and token ~= "" then
-      headers.Authorization = "Bearer " .. token
+    for _, key in ipairs({ "GITHUB_TOKEN", "GH_TOKEN" }) do
+      local token = env[key]
+      if not token or token == "" then
+        token = vim.env[key]
+      end
+      if token and token ~= "" then
+        headers.Authorization = "Bearer " .. token
+        break
+      end
     end
     cancel = http({
       method = "GET",

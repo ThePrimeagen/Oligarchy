@@ -48,6 +48,16 @@ function M.wait(predicate)
   assert(vim.wait(2000, predicate, 5), "Timed out waiting for the operation")
 end
 
+function M.select(label)
+  for line, value in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+    if value:find(label, 1, true) then
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+      return
+    end
+  end
+  error("Missing entry: " .. label)
+end
+
 function M.request(fake, index)
   M.wait(function()
     return #fake.requests >= index

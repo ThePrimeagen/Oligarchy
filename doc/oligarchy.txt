@@ -31,6 +31,20 @@ earlier assistant messages, not a verified reasoning channel. The latest
 message can still be a progress update while a job is running. All original
 messages remain in the cache and can be expanded; none are discarded.
 
+The first entry in the list is Local. Its summary shows added lines in green,
+removed lines in red, and the number of changed files, or a gray "(unchanged)".
+Counts refresh when opening or refreshing the list and returning to it. They
+use the same ignores as the local diff. Deleted, binary, renamed and empty
+files count as changed even when they have no navigable textual hunks.
+Enter opens the local changes view;
+d (or r) reads staged and unstaged changes against HEAD, adds untracked files,
+and fills a fresh quickfix list with the textual hunks. This respects .gitignore for
+untracked files and the same skip_files rules as PR diffs.
+Before the first commit, it compares against an empty tree. Save buffers first
+to include their edits. It does not change the index, checkout, or Git history.
+Local remains available while cloud jobs load or if Cursor reports an error.
+Ctrl-b / Backspace returns to the jobs list. Local has no agent chat yet.
+
 Inside a conversation:
   P           Push & Review: publish a commit and start a grok-review job.
   i           Focus the prompt below the conversation and enter insert mode.
@@ -43,7 +57,7 @@ Inside a conversation:
   r           Refresh conversation and fetch the remote branch concurrently.
   a           Abort the running agent (stop execution, without archiving).
   g           Open the job's current GitHub pull request in your browser.
-  d           Fetch that PR's diff and append each textual hunk to quickfix.
+  d           Fetch that PR's diff into a fresh quickfix list, one entry per hunk.
   Ctrl-b / Backspace  Return to the cached job list (normal mode).
 
 Opening a conversation also opens a three-line prompt below it. It wraps long
@@ -66,7 +80,8 @@ selected commit to that branch on origin. The local checkout stays on it.
 After the push succeeds, a new Cursor job follows
 .cursor/skills/grok-review/SKILL.md to review the commit and apply appropriate
 fixes on the review branch. That skill must exist in the published commit.
-The job appears at the top of the jobs list; Enter opens its conversation.
+The job appears below Local at the top of the cloud jobs; Enter opens its
+conversation.
 This uses the configured Cursor model to orchestrate the skill's Grok review.
 It does not automatically create a pull request.
 
@@ -105,20 +120,24 @@ The g and d actions read fresh job metadata to find its current PR. Diff
 retrieval uses GitHub's API directly; private repositories need GITHUB_TOKEN
 (or GH_TOKEN) in .env or the environment. CURSOR_API_TOKEN is never used as
 GitHub authentication. A missing PR or HTTP error is shown without clearing
-history or quickfix. After appending hunks, d closes the other windows in the
-current tab and leaves one editing window plus quickfix. Unsaved file buffers
-remain available. The first new hunk opens in the editing window, and quickfix
+history or quickfix. Successful local and PR diffs create a fresh quickfix list,
+including an empty list when no hunks remain. Previous lists stay available
+in quickfix history (:colder). When there are hunks, d closes
+the other windows in the current tab and leaves one editing window plus quickfix. Unsaved file buffers
+remain available. The first hunk opens in the editing window, and quickfix
 gets focus. <leader>C reopens the Cursor pane. :cnext / :cprev
-navigate the local project files at the new-side hunk line. Deleted files are
+navigate the local project files at the first changed line in each hunk,
+skipping leading unchanged context. Trailing deletions anchor to the last
+surviving line. Deleted files are
 excluded; removed lines within a surviving file still appear. The full hunk
 is also in each entry's user_data.diff. Binary changes have no textual hunks.
-Line positions describe the PR, so local file contents
+For PR diffs, line positions describe the PR, so local file contents
 can differ until you choose to check out its branch.
 
 The editing gutter shows green + signs for added lines and red - signs for
 removed lines, using Neovim's Added and Removed highlight groups. Removals
 anchor to a nearby remaining line, or the last line at the end of a file.
-Replacements show both signs. Markers use the PR's new-file line numbers;
+Replacements show both signs. Markers use the diff's new-file line numbers;
 added lines beyond the local file's end have no marker. Fetching another diff
 replaces the previous markers. Files are decorated when opened, without
 loading other files just to add signs. Opening the Cursor pane with <leader>C
@@ -131,17 +150,24 @@ To exclude files from diff calculation, edit the setup call in .nvimrc:
       'bun.lock',
       'path/to/generated-file.json',
       { partial = true, match = 'package.json' },
+      { match = '*.lua', pattern = true },
     },
   })
 <
 Strings match exact paths relative to the repository root. An entry such as
 { partial = true, match = 'package.json' } matches that literal text anywhere
 in the relative path, including nested directories and longer filenames.
+Use { match = '*.lua', pattern = true } for a glob: this ignores .lua files
+at any depth. Globs use Neovim's glob2regpat() against the repository-relative
+path, supporting * (any text), ? (one character), and classes such as [ch].
+For example, 'lua/*' matches everything under lua/, including subdirectories.
+These are filename globs, not Lua patterns. The same rules filter Local
+summary counts, local diff hunks, and PR diff hunks.
 Matching is case-sensitive and uses the new path for renamed files.
 Skipped files produce no quickfix hunks or gutter markers.
 The list defaults to empty. Run :source .nvimrc after editing it; the next
-diff fetch uses the updated list. Existing quickfix entries remain until
-cleared, for example with :cexpr [].
+diff fetch uses the updated rules and replaces the active quickfix results.
+There is no need to clear old entries manually before generating another diff.
 
 On a job in the list, a opens a centered confirmation popup. Archive is red;
 Cancel has a gray background and is initially selected. Tab, arrow keys, h

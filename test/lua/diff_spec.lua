@@ -4,6 +4,56 @@ local Github = require("oligarchy.github")
 local S = require("support")
 
 describe("diff hunk navigation", function()
+  it("jumps to the first edit after leading context", function()
+    local entries = Diff.hunks(
+      table.concat({
+        "--- a/file.lua",
+        "+++ b/file.lua",
+        "@@ -26,4 +26,5 @@ local function filename(value)",
+        "   return value",
+        " end",
+        " ",
+        "+local added = true",
+        " -- next section",
+      }, "\n"),
+      "/project"
+    )
+    assert.equals(29, entries[1].lnum)
+    assert.same({ { lnum = 29, added = true } }, entries[1].user_data.changes)
+  end)
+
+  it("anchors trailing deletions to the last surviving line of the hunk", function()
+    local entries = Diff.hunks(
+      table.concat({
+        "--- a/file.lua",
+        "+++ b/file.lua",
+        "@@ -4,4 +4,2 @@",
+        " keep",
+        " last",
+        "-remove",
+        "-also remove",
+      }, "\n"),
+      "/project"
+    )
+    assert.equals(5, entries[1].lnum)
+    assert.same({ { lnum = 5, removed = true } }, entries[1].user_data.changes)
+  end)
+
+  it("anchors deletion-only hunks at the beginning, middle and empty end of a file", function()
+    for _, case in ipairs({
+      { header = "@@ -1,2 +1 @@", body = "-remove\n keep", line = 1 },
+      { header = "@@ -5,2 +4,0 @@", body = "-remove\n-also remove", line = 4 },
+      { header = "@@ -1,2 +0,0 @@", body = "-remove\n-also remove", line = 1 },
+    }) do
+      local entries = Diff.hunks(
+        "--- a/file.lua\n+++ b/file.lua\n" .. case.header .. "\n" .. case.body,
+        "/project"
+      )
+      assert.equals(case.line, entries[1].lnum)
+      assert.same({ { lnum = case.line, removed = true } }, entries[1].user_data.changes)
+    end
+  end)
+
   it("skips deleted files while keeping new, renamed, quoted files and multiple hunks", function()
     local patch = table.concat({
       "diff --git a/new.lua b/new.lua",
@@ -100,6 +150,59 @@ describe("diff hunk navigation", function()
     assert.equals(3, result[1].lnum)
     assert.matches("-one\n-two", result[1].user_data.diff, 1, true)
   end)
+
+  it("mixes glob ignores with exact and partial rules, including nested Lua files", function()
+    local patches = {}
+    for _, path in ipairs({
+      "init.lua",
+      "lua/plugin/init.lua",
+      "initXlua",
+      "init.lua.bak",
+      "INIT.LUA",
+      "bun.lock",
+      "generated/output.txt",
+    }) do
+      table.insert(
+        patches,
+        "diff --git a/"
+          .. path
+          .. " b/"
+          .. path
+          .. "\n--- a/"
+          .. path
+          .. "\n+++ b/"
+          .. path
+          .. "\n@@ -1 +1 @@\n-old\n+new\n"
+      )
+    end
+    local ignorecase = vim.o.ignorecase
+    vim.o.ignorecase = true
+    local result = Diff.hunks(table.concat(patches), "/project", {
+      { match = "*.lua", pattern = true },
+      "bun.lock",
+      { match = "generated/", partial = true },
+    })
+    vim.o.ignorecase = ignorecase
+    local names = {}
+    for _, item in ipairs(result) do
+      table.insert(names, item.filename)
+    end
+    assert.same({ "/project/initXlua", "/project/init.lua.bak", "/project/INIT.LUA" }, names)
+  end)
+
+  it("supports directory prefixes, single-character globs and character classes", function()
+    local patch =
+      "diff --git a/src/file1.c b/src/file1.c\n--- a/src/file1.c\n+++ b/src/file1.c\n@@ -1 +1 @@\n-old\n+new\n"
+    assert.same({}, Diff.hunks(patch, "/project", { { match = "src/file?.[ch]", pattern = true } }))
+    assert.equals(
+      1,
+      #Diff.hunks(patch, "/project", { { match = "lib/file?.[ch]", pattern = true } })
+    )
+    assert.equals(
+      1,
+      #Diff.hunks(patch, "/project", { { match = "src/file??.[ch]", pattern = true } })
+    )
+  end)
   it("rejects invalid patches and paths outside the project", function()
     assert.has_error(function()
       Diff.hunks("not a diff", "/project")
@@ -168,6 +271,23 @@ describe("conversation disk cache", function()
 end)
 
 describe("GitHub HTTP boundary", function()
+  it("uses GH_TOKEN when GITHUB_TOKEN is empty", function()
+    local root, http = S.project(), S.http()
+    local github_token, gh_token = vim.env.GITHUB_TOKEN, vim.env.GH_TOKEN
+    vim.env.GITHUB_TOKEN, vim.env.GH_TOKEN = "", nil
+    vim.fn.writefile({ "GITHUB_TOKEN=", "GH_TOKEN=dotenv-fallback" }, root .. "/.env")
+    local cancel = Github.diff(root, "https://github.com/o/r/pull/1", http.request, function() end)
+    assert.equals("Bearer dotenv-fallback", S.request(http, 1).headers.Authorization)
+    cancel()
+    vim.fn.writefile({ "GITHUB_TOKEN=" }, root .. "/.env")
+    vim.env.GH_TOKEN = "environment-fallback"
+    cancel = Github.diff(root, "https://github.com/o/r/pull/1", http.request, function() end)
+    assert.equals("Bearer environment-fallback", S.request(http, 2).headers.Authorization)
+    cancel()
+    vim.env.GITHUB_TOKEN, vim.env.GH_TOKEN = github_token, gh_token
+    vim.fn.delete(root, "rf")
+  end)
+
   it("uses only GitHub credentials and reports HTTP errors and cancellation", function()
     local root, http = S.project(), S.http()
     local previous = vim.env.GITHUB_TOKEN
