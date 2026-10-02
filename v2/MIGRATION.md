@@ -227,13 +227,12 @@ record, and the automation server acts on it directly.
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
       releases its lock, so the drive's next reserve sets up again; decide when a drive whose ISO
       keeps failing to set up is errored instead. V1: `dispatch` in `worker.ts`.
-- [ ] **The drive harness.** V1's driving and diagnosing prompts name only the agent's Linear
-      ticket; the task was the ticket's body, and V1's driver looks it up with
-      `findResultByLinearId`. In V2 the agent is its job id, and `v2/prompts/driving-agent.html`
-      and `v2/prompts/diagnosing-agent.html` take the job id where V1 takes `{{LINEAR_TICKET}}`.
-      V2 has one driving prompt: `v2/prompts/driving-agent.html` is the driver's system prompt and
-      replaces both V1's `prompts/driving-agent.html` and
-      `prompts/custom-harness-driving-agent.html`. It lists the model's tools where V1 pastes in
+- [ ] **The drive harness.** V1's driving prompt names only the agent's Linear ticket; the task
+      was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2 the
+      agent is its job id, and the driving prompt takes the job id where V1 takes
+      `{{LINEAR_TICKET}}`. V2 has one driving prompt, the driver's system prompt, embedded in
+      `@oligarchy/drive-harness`; it replaces both V1's `prompts/driving-agent.html` and
+      `prompts/custom-harness-driving-agent.html`, and lists the model's tools where V1 pastes in
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
       `@oligarchy/drive-harness` is the `driveHarness` service over `tests`, the job's
@@ -253,11 +252,8 @@ record, and the automation server acts on it directly.
         turn is `ReplyInvalid`.
       - `act(move)` runs the guest call with only its own arguments.
       - `finish(data, end)` saves a setup that succeeded and stops the guest otherwise.
-      The loop's limits, its history and its reasons are the driver's (section 4). Dispatch: run
-      renders `v2/prompts/diagnosing-agent.html` for a diagnose; that prompt identifies its own
-      job and run and requires a verdict against the preceding drive or setup job, and exact
-      evidence commands wait for the V2 ctrl port. V1's root templates and ticket bodies remain
-      until V1 is retired.
+      The loop's limits, its history and its reasons are the driver's (section 4). V1's root
+      templates and ticket bodies remain until V1 is retired.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
@@ -376,8 +372,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             head the queue, so a setup no client can take holds back every drive behind it until
             it is placed.
       - [ ] **Dispatch: run.** Once the job is running, `/run` sends the prompt, without holding
-            the next pass. Needs a renderer for `v2/prompts/diagnosing-agent.html` (section 3's
-            The drive harness); a drive or setup's driver renders its own prompt.
+            the next pass. A drive or setup's driver renders its own prompt (section 3's The
+            drive harness).
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
             answers.
       - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
