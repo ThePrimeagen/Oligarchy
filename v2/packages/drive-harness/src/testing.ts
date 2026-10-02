@@ -1,9 +1,11 @@
+// Fakes for tests: a driveHarness made over a fake tests store, guest and model, so a test scripts
+// what the job, the guest and the model answer and reads every call the harness made.
 import * as App from "@oligarchy/app";
 import type * as OpenRouter from "@oligarchy/openrouter";
 import type * as Qemu from "@oligarchy/qemu-http-tools";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import * as DriveHarness from "../src/main.ts";
+import * as DriveHarness from "./main.ts";
 
 export const JOB = "00000000-0000-4000-8000-000000000001";
 // Two steps; the trailing crash line holds for the whole run and is not one.
@@ -89,16 +91,18 @@ export type Call = readonly [string, ...ReadonlyArray<unknown>];
 export type World = {
   readonly calls: Array<Call>;
   readonly requests: Array<OpenRouter.Request>;
-  readonly harness: DriveHarness.DriveHarness;
+  readonly driveHarness: App.Made<DriveHarness.DriveHarness>;
 };
 
+type Answered = jarl.Result<OpenRouter.Turn, OpenRouter.Failure>;
+
 // Each guest call answers what `guest` scripts, and ok otherwise. The model answers `turns` in
-// order; asking past the last is a test failure.
+// order, a function one when it is asked; asking past the last throws.
 export const world = (
   script: {
     readonly getJobDetails?: Stores.Tests.Tests["getJobDetails"];
     readonly guest?: Partial<Guest>;
-    readonly turns?: ReadonlyArray<jarl.Result<OpenRouter.Turn, OpenRouter.Failure>>;
+    readonly turns?: ReadonlyArray<Answered | (() => Answered)>;
     readonly recentActions?: number;
   } = {},
 ): World => {
@@ -182,15 +186,15 @@ export const world = (
       if (next === undefined) {
         throw new Error("the model was asked once too often");
       }
-      return next;
+      return typeof next === "function" ? next() : next;
     },
   }))({});
 
-  const harness = new DriveHarness.DriveHarness(
+  const driveHarness = DriveHarness.create(
     { tests, qemuHttpTools, openRouter },
     { recentActions: script.recentActions ?? 10 },
   );
-  return { calls, requests, harness };
+  return { calls, requests, driveHarness };
 };
 
 // One tool call, with the model's text beside it.

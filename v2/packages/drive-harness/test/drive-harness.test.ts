@@ -6,7 +6,17 @@ import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as DriveHarness from "../src/main.ts";
-import { details, INSTRUCTION, JOB, RUN, SCREEN, said, shown, turn, world } from "./support.ts";
+import {
+  details,
+  INSTRUCTION,
+  JOB,
+  RUN,
+  SCREEN,
+  said,
+  shown,
+  turn,
+  world,
+} from "../src/testing.ts";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -26,7 +36,11 @@ const ran = async (name: string) =>
   );
 
 it("drives a job step by step, keeping each step's actions and what the model is shown", async () => {
-  const { harness, calls, requests } = world({
+  const {
+    driveHarness: harness,
+    calls,
+    requests,
+  } = world({
     guest: { run: ran },
     turns: [
       said(
@@ -149,7 +163,7 @@ it("drives a job step by step, keeping each step's actions and what the model is
 
 it("shows the open step's intent and only its newest actions, newest first", async () => {
   const keys = ["a", "b", "c", "d"];
-  const { harness, requests } = world({
+  const { driveHarness: harness, requests } = world({
     recentActions: 3,
     turns: [
       ...keys.map((key) => said("send_keys", { step: 1, reason: "Type", keys: key })),
@@ -175,7 +189,7 @@ it("shows the open step's intent and only its newest actions, newest first", asy
 });
 
 it("names each step after its ActionList line, and a step past the list by its number", async () => {
-  const { harness, calls } = world();
+  const { driveHarness: harness, calls } = world();
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.nextStep(2));
   jarl.unwrap(await harness.nextStep(3));
@@ -192,7 +206,9 @@ it("names each step after its ActionList line, and a step past the list by its n
 
 it("returns a step whose intent would not start, and runs nothing outside it", async () => {
   const down = new Http.HttpInvalid("intent/start: down", asked);
-  const { harness, calls } = world({ guest: { intentStart: async () => jarl.err(down) } });
+  const { driveHarness: harness, calls } = world({
+    guest: { intentStart: async () => jarl.err(down) },
+  });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   const result = await harness.act(turn("send_keys", { step: 1, reason: "Type", keys: "x" }));
   expect(jarl.is_err(result)).toBe(true);
@@ -206,7 +222,7 @@ it("returns a step whose intent would not start, and runs nothing outside it", a
 it("starts a step again after its intent would not start, without ending a closed one", async () => {
   const down = new Http.HttpInvalid("intent/start: down", asked);
   const starts = [jarl.ok(undefined), jarl.err(down), jarl.ok(undefined)];
-  const { harness, calls } = world({
+  const { driveHarness: harness, calls } = world({
     guest: { intentStart: async () => starts.shift() ?? jarl.ok(undefined) },
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
@@ -224,7 +240,9 @@ it("starts a step again after its intent would not start, without ending a close
 
 it("returns an intent that would not end, and keeps the step open", async () => {
   const down = new Http.HttpInvalid("intent/end: down", asked);
-  const { harness, calls } = world({ guest: { intentEnd: async () => jarl.err(down) } });
+  const { driveHarness: harness, calls } = world({
+    guest: { intentEnd: async () => jarl.err(down) },
+  });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.nextStep(1));
   const result = await harness.nextStep(2);
@@ -239,7 +257,7 @@ it("returns an intent that would not end, and keeps the step open", async () => 
 it("returns an image the guest refused, and asks without the old screenshot", async () => {
   const off = new Qemu.GuestOff("image: 409");
   const images = [jarl.ok(SCREEN), jarl.err(off)];
-  const { harness, requests } = world({
+  const { driveHarness: harness, requests } = world({
     guest: { image: async () => images.shift() ?? jarl.err(off) },
     turns: [said("Done", {})],
   });
@@ -293,7 +311,7 @@ it.each([
   ],
   ["Done with arguments", turn("Done", { step: 1 }), "reply: Done takes no arguments"],
 ] as const)("refuses a reply with %s", async (_, reply, message) => {
-  const { harness, calls } = world();
+  const { driveHarness: harness, calls } = world();
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   const result = await harness.act(reply);
   expect(jarl.error.is(result, DriveHarness.ReplyInvalid)).toBe(true);
@@ -304,7 +322,7 @@ it.each([
 });
 
 it("keeps a refused reply under the open step, and reads no arguments as an empty object", async () => {
-  const { harness, requests } = world({
+  const { driveHarness: harness, requests } = world({
     turns: [jarl.ok({ content: "I am finished", toolCalls: [] }), said("Done", "")],
   });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
@@ -327,7 +345,7 @@ it("keeps a refused reply under the open step, and reads no arguments as an empt
 
 it("returns a move the guest refused, keeps why under its step, and drops the screenshot", async () => {
   const off = new Qemu.GuestOff("send-keys: 409");
-  const { harness, requests } = world({
+  const { driveHarness: harness, requests } = world({
     guest: { run: async () => jarl.err(off) },
     turns: [said("Done", {})],
   });
@@ -351,7 +369,7 @@ it("loads the job's harness data and derives its boot mode from its action and d
     ["setup", true, false],
   ] as const) {
     const getJobDetails = vi.fn(async () => jarl.ok(details(action, resumes)));
-    const { harness } = world({ getJobDetails });
+    const { driveHarness: harness } = world({ getJobDetails });
     expect(jarl.unwrap(await harness.loadJobHarnessData(JOB))).toBe(true);
     expect(harness.data).toEqual({
       jobId: JOB,
@@ -373,7 +391,7 @@ it.each([
   ["a missing job", new Stores.Tests.NotFound("getJobDetails: no job")],
   ["a database failure", new Db.DatabaseError("database refused the lookup")],
 ])("returns %s and loads nothing", async (_, error) => {
-  const { harness } = world({ getJobDetails: async () => jarl.err(error) });
+  const { driveHarness: harness } = world({ getJobDetails: async () => jarl.err(error) });
   const result = await harness.loadJobHarnessData(JOB);
   expect(jarl.is_err(result)).toBe(true);
   if (jarl.is_err(result)) {
@@ -397,7 +415,9 @@ it.each([
     [["stop", { status: "failed", reason: "step limit" }]],
   ],
 ] as const)("finishes the guest: %s", async (_, action, end, expected) => {
-  const { harness, calls } = world({ getJobDetails: async () => jarl.ok(details(action, true)) });
+  const { driveHarness: harness, calls } = world({
+    getJobDetails: async () => jarl.ok(details(action, true)),
+  });
   jarl.unwrap(await harness.loadJobHarnessData(JOB));
   jarl.unwrap(await harness.finish(end));
   expect(calls).toEqual(expected);
@@ -405,7 +425,7 @@ it.each([
 
 it("returns a setup's save that the guest refused by staying up", async () => {
   const refused = new Qemu.NotPoweredOff("save: 409");
-  const { harness } = world({
+  const { driveHarness: harness } = world({
     getJobDetails: async () => jarl.ok(details("setup", true)),
     guest: { save: async () => jarl.err(refused) },
   });
@@ -420,7 +440,7 @@ it("returns a setup's save that the guest refused by staying up", async () => {
 it("returns a failed start or ask as it came", async () => {
   const down = new Http.HttpInvalid("proxy: down", asked);
   const unreachable = new OpenRouter.OpenRouterUnreachable("openrouter: down");
-  const { harness } = world({
+  const { driveHarness: harness } = world({
     guest: { start: async () => jarl.err(down) },
     turns: [jarl.err(unreachable)],
   });
