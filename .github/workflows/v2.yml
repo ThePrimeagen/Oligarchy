@@ -1,0 +1,72 @@
+name: v2
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# The root's checks lint and format v2 too; these are what only v2's own install can run.
+jobs:
+  checks:
+    name: v2 types and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run check:types
+      - run: bun run test:unit
+
+  migrations-append-only:
+    name: v2 migrations are append-only
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: fail if an existing v2 migration file was edited, deleted, or renamed
+        run: |
+          # Without rename detection a renamed migration shows as a deletion, which is refused.
+          violations=$(git diff --no-renames --name-status --diff-filter=MDT \
+            "origin/${{ github.base_ref }}...HEAD" \
+            -- 'v2/packages/db/drizzle/' ':(exclude)v2/packages/db/drizzle/meta/_journal.json')
+          if [ -n "$violations" ]; then
+            echo "Migrations are append-only. These files were edited, deleted, or renamed:"
+            echo "$violations"
+            echo "Revert them and add a new migration instead (bun run db:generate in v2)."
+            exit 1
+          fi
+
+  migrations-in-sync:
+    name: v2 migrations match the drizzle schema
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run db:check
+      - name: fail if drizzle-kit generate produces changes
+        run: |
+          bun run db:generate
+          drift=$(git status --porcelain packages/db/drizzle/)
+          if [ -n "$drift" ]; then
+            echo "v2/packages/db/src/schema.ts does not match the committed migrations:"
+            echo "$drift"
+            echo "Run 'bun run db:generate' in v2 and commit the result."
+            exit 1
+          fi
