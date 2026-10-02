@@ -16,6 +16,7 @@
     "@oligarchy/app": "workspace:*",
     "@oligarchy/async": "workspace:*",
     "@oligarchy/db": "workspace:*",
+    "@oligarchy/driver": "workspace:*",
     "@oligarchy/env": "workspace:*",
     "@oligarchy/fleet": "workspace:*",
     "@oligarchy/http": "workspace:*",

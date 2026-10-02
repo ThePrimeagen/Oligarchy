@@ -1,3 +1,4 @@
+import * as Exits from "@oligarchy/driver/exits";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
@@ -43,6 +44,8 @@ type Command = {
   readonly env: Readonly<Record<string, string>>;
   readonly cwd?: string;
   readonly ceilingMs: number;
+  // The exit the child gives when its own run ceiling stopped it; only the driver has one.
+  readonly timedOutExit?: number;
 };
 
 const failed = (message: string) => jarl.err(new Routes.RunFailed(message));
@@ -65,6 +68,7 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     args: ["--job-id", jobId, "--server-url", serverUrl],
     env: secrets(),
     ceilingMs: config.runCeiling + DRIVER_GRACE_MS,
+    timedOutExit: Exits.TIMED_OUT,
   });
 
   // opencode reads the first segment of --model as its provider, so the OpenRouter id goes under
@@ -127,10 +131,21 @@ export const create = (options: Options): Routes.Sessions["run"] => {
       return jarl.ok("aborted");
     }
     if (stopped === "ceiling") {
-      return failed(`${command.name} exceeded its ceiling of ${String(command.ceilingMs)} ms`);
+      return jarl.err(
+        new Routes.RunTimedOut(
+          `${command.name} exceeded its ceiling of ${String(command.ceilingMs)} ms`,
+        ),
+      );
     }
     if (exit.code === 0) {
       return jarl.ok("ended");
+    }
+    if (command.timedOutExit !== undefined && exit.code === command.timedOutExit) {
+      return jarl.err(
+        new Routes.RunTimedOut(
+          `${command.name} timed out: run ceiling of ${String(config.runCeiling)} ms`,
+        ),
+      );
     }
     return failed(exit.stderr === "" ? exited : exit.stderr);
   };

@@ -47,6 +47,11 @@ export type ReserveFailed = InstanceType<typeof ReserveFailed>;
 export const RunFailed = jarl.error.define("RunFailed");
 export type RunFailed = InstanceType<typeof RunFailed>;
 
+// The driver stopped its drive at the run ceiling, or the client killed a child still running at
+// its own; the message says which.
+export const RunTimedOut = jarl.error.define("RunTimedOut");
+export type RunTimedOut = InstanceType<typeof RunTimedOut>;
+
 // What the routes hand each request to. A run answers once the driver or opencode has ended.
 export type Sessions = {
   readonly reserve: (
@@ -57,7 +62,7 @@ export type Sessions = {
       AtCapacity | SetupNeeded | Jobs.AlreadyHeld | Jobs.ShuttingDown | ReserveFailed
     >
   >;
-  readonly run: (request: RunRequest) => Promise<jarl.Result<Ran, RunFailed>>;
+  readonly run: (request: RunRequest) => Promise<jarl.Result<Ran, RunFailed | RunTimedOut>>;
   readonly abort: (request: AbortRequest) => Promise<Stopped>;
 };
 
@@ -119,6 +124,9 @@ export const routes = (options: {
           return c.json({ error: "run is not written yet" }, 501);
         }
         const ran = await run(c.req.valid("json"));
+        if (jarl.error.is(ran, RunTimedOut)) {
+          return c.json({ error: ran.error.message }, 504);
+        }
         if (jarl.is_err(ran)) {
           return c.json({ error: ran.error.message }, 500);
         }

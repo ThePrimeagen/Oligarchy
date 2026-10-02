@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { TIMED_OUT } from "@oligarchy/driver/exits";
 import * as Env from "@oligarchy/env";
 import * as Fake from "@oligarchy/http/testing";
 import * as FakeLogger from "@oligarchy/logger/testing";
@@ -8,7 +9,7 @@ import type * as Child from "../src/child.ts";
 import * as Jobs from "../src/jobs.ts";
 import * as Proxy from "../src/proxy.ts";
 import * as Reserve from "../src/reserve.ts";
-import { RunFailed } from "../src/routes.ts";
+import { RunFailed, RunTimedOut } from "../src/routes.ts";
 import * as Run from "../src/run.ts";
 
 const TOKEN = "oligarchy-token";
@@ -347,7 +348,7 @@ describe("an automation client's run", () => {
     expect(child.signals).toEqual([]);
   });
 
-  it("a child still running at its ceiling is killed and RunFailed naming the ceiling: opencode at the run ceiling, the driver 5 minutes later; each lets its job go (unhappy)", async () => {
+  it("a child still running at its ceiling is killed and RunTimedOut naming the ceiling: opencode at the run ceiling, the driver 5 minutes later; each lets its job go (unhappy)", async () => {
     const at = await running();
     jarl.unwrap(await at.reservations.reserve(DRIVE));
     jarl.unwrap(await at.reservations.reserve(DIAGNOSE));
@@ -370,15 +371,36 @@ describe("an automation client's run", () => {
     driver.end(1);
     const killedDriver = await drive;
 
-    expect(jarl.error.is(killedOpencode, RunFailed)).toBe(true);
+    expect(jarl.error.is(killedOpencode, RunTimedOut)).toBe(true);
     expect(jarl.is_err(killedOpencode) && killedOpencode.error.message).toBe(
       `opencode exceeded its ceiling of ${String(CEILING_MS)} ms`,
     );
-    expect(jarl.error.is(killedDriver, RunFailed)).toBe(true);
+    expect(jarl.error.is(killedDriver, RunTimedOut)).toBe(true);
     expect(jarl.is_err(killedDriver) && killedDriver.error.message).toBe(
       `driver exceeded its ceiling of ${String(DRIVER_CEILING_MS)} ms`,
     );
     expect(opencode.signals).toEqual(["SIGTERM"]);
+    expect(at.jobs.count()).toBe(0);
+  });
+
+  it("a driver that exits 124 stopped at its run ceiling and is RunTimedOut; opencode exiting 124 is only RunFailed; each lets its job go (unhappy)", async () => {
+    const at = await running();
+    jarl.unwrap(await at.reservations.reserve(DRIVE));
+    jarl.unwrap(await at.reservations.reserve(DIAGNOSE));
+    const drive = at.run({ jobId: JOB });
+    const diagnose = at.run({ jobId: OTHER, prompt: PROMPT });
+
+    at.spawned.child(0).end(TIMED_OUT);
+    at.spawned.child(1).end(TIMED_OUT);
+
+    const timedOut = await drive;
+    expect(jarl.error.is(timedOut, RunTimedOut)).toBe(true);
+    expect(jarl.is_err(timedOut) && timedOut.error.message).toBe(
+      `driver timed out: run ceiling of ${String(CEILING_MS)} ms`,
+    );
+    const failed = await diagnose;
+    expect(jarl.error.is(failed, RunFailed)).toBe(true);
+    expect(jarl.is_err(failed) && failed.error.message).toBe("opencode exited 124");
     expect(at.jobs.count()).toBe(0);
   });
 
