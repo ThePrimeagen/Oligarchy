@@ -38,6 +38,8 @@ export type Options = {
   readonly diagnosis: Stores.Diagnosis.Diagnosis;
   readonly logger: Logger.Logger;
   readonly models: Env.Config["models"];
+  // The jobs an operator's /abort is stopping; a run of one that answers aborted is the abort's.
+  readonly aborting: ReadonlySet<string>;
   // Ends a reserve or a run in flight, so a shutdown does not wait on a client.
   readonly signal: AbortSignal;
 };

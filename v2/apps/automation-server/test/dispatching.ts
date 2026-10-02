@@ -10,6 +10,7 @@ import * as Fake from "@oligarchy/http/testing";
 import * as FakeLogger from "@oligarchy/logger/testing";
 import * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
+import * as Abort from "../src/abort.ts";
 import * as Dispatch from "../src/dispatch.ts";
 
 export const TOKEN = "oligarchy-s3cret";
@@ -17,6 +18,8 @@ export const FIRST = "http://10.0.0.7:4100";
 export const SECOND = "http://10.0.0.8:4100";
 // A client that never answers: its reserve ends only when the dispatcher's signal aborts.
 export const HANGING = "http://10.0.0.9:4100";
+// A live client no request reaches.
+export const UNREACHABLE = "http://10.0.0.10:4100";
 export const ISO = "https://iso.omarchy.org/omarchy-4.0.4.iso";
 export const PROXY = "http://127.0.0.1:42069";
 export const QEMU_SERVER = "http://10.0.0.5:4000";
@@ -44,6 +47,27 @@ export type Told = Readonly<Record<string, Partial<ClientRoutes.Sessions>>>;
 
 // A run still under way: it answers only once the dispatcher's signal ends it at the transport.
 export const underWay: ClientRoutes.Sessions["run"] = () => new Promise(() => undefined);
+
+// A client whose runs go on until its /abort stops them, as a driver killed at its client does:
+// each run then answers aborted, and an abort of a job it is not running answers not-held.
+export const stoppable = (): Partial<ClientRoutes.Sessions> => {
+  const held = new Map<string, () => void>();
+  return {
+    run: ({ jobId }) =>
+      new Promise((resolve) => {
+        held.set(jobId, () => resolve(jarl.ok("aborted")));
+      }),
+    abort: async ({ jobId }) => {
+      const stop = held.get(jobId);
+      if (stop === undefined) {
+        return "not-held";
+      }
+      held.delete(jobId);
+      stop();
+      return "stopped";
+    },
+  };
+};
 
 // Answers only once released, as a driver that runs until the test lets it end.
 export const gate = () => {
@@ -124,6 +148,7 @@ export const dispatching = async (
     },
   });
   const log = FakeLogger.logger();
+  const aborting: Abort.Aborting = new Set();
   const dispatcher = Dispatch.create({
     http: http.http,
     token: { reveal: () => TOKEN },
@@ -133,12 +158,22 @@ export const dispatching = async (
     diagnosis,
     logger: log.logger,
     models,
+    aborting,
     signal: shutdown.signal,
+  });
+  const aborter = Abort.create({
+    http: http.http,
+    token: { reveal: () => TOKEN },
+    tests: seen(tests),
+    servers,
+    logger: log.logger,
+    aborting,
   });
   // As the app's signal aborts when the server stops.
   const stop = () => shutdown.abort(new Async.Aborted("parent stopped"));
   cleanups.push(async () => {
     stop();
+    await aborter.settled();
     await dispatcher.waitForRuns();
   });
 
@@ -150,6 +185,12 @@ export const dispatching = async (
   const clientId = async (url: string) =>
     jarl.unwrap(await servers.listLiveServers("automation-client")).find((one) => one.url === url)
       ?.id;
+  // A filed drive moved to running on a client id, and its test run started, as dispatch leaves
+  // it once /run is sent.
+  const runOn = async (job: Stores.Tests.JobRow, serverId: string) => {
+    jarl.unwrap(await tests.runJob(job.id, serverId));
+    jarl.unwrap(await tests.startRun(job.runId, models.drive));
+  };
   const define = async (name: string, resume = true) =>
     jarl.unwrap(
       await tests.defineTestDefinition({
@@ -219,10 +260,12 @@ export const dispatching = async (
     setupRequests,
     diagnosis,
     dispatcher,
+    aborter,
     hangingReserveEntered,
     stop,
     live,
     clientId,
+    runOn,
     drive,
     setup,
     diagnose,

@@ -17,7 +17,11 @@ export type Running = {
   readonly judgedJobId: string | undefined;
 };
 
-type Services = App.Needs<Stores.Tests.Tests | Stores.Diagnosis.Diagnosis | Logger.Logger>;
+// aborting holds the jobs an operator's /abort is stopping at their clients; each is the abort's
+// to write.
+type Services = App.Needs<Stores.Tests.Tests | Stores.Diagnosis.Diagnosis | Logger.Logger> & {
+  readonly aborting: ReadonlySet<string>;
+};
 
 type Closed = Promise<
   jarl.Result<void, Db.DatabaseError | Stores.Tests.InvalidState | Stores.Tests.NotFound>
@@ -41,7 +45,10 @@ const queueDiagnose = async ({ tests, logger }: Services, job: Stores.Tests.JobR
 
 // A suite closes with its last open run: passed when every run passed. Two of its runs closing at
 // once can each find none open, and the one that completes the suite second is refused.
-const closeSuite = async ({ tests }: Services, suiteId: string): Closed => {
+export const closeSuite = async (
+  { tests }: { readonly tests: Stores.Tests.Tests },
+  suiteId: string,
+): Closed => {
   const found = await tests.getTestSuite(suiteId);
   if (jarl.is_err(found)) {
     return found;
@@ -101,7 +108,10 @@ const finalize = async (
 };
 
 // An operator's abort may have aborted the job before its client answered; that abort stands.
-const abort = async ({ tests, logger }: Services, job: Stores.Tests.JobRow): Closed => {
+const abort = async ({ tests, logger, aborting }: Services, job: Stores.Tests.JobRow): Closed => {
+  if (aborting.has(job.id)) {
+    return jarl.ok(undefined);
+  }
   const aborted = await tests.abortJob(job.id, ABORTED);
   if (jarl.error.is(aborted, Stores.Tests.InvalidState)) {
     return jarl.ok(undefined);
