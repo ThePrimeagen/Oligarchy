@@ -221,6 +221,28 @@ while (true) {
 }
 ```
 
+## Child process
+
+| Problem | Fact |
+| --- | --- |
+| spawning | inject it: `options.spawn ?? spawn`, typed `Spawn` (`packages/fleet/src/usage.ts`) |
+| stop a child | `child.kill("SIGTERM")`, then after a grace `child.kill("SIGKILL")` if `exitCode` and `signalCode` are both `null` |
+| grace timer | `.unref()` it |
+| missing binary | arrives as an `error` event, not a throw |
+| settle once | a `settled` flag. The first of deadline, `error` or `close` wins. |
+| job run (automation client) | not built. Spec (`MIGRATION.md` Run): spawn on the held signal, SIGTERM on abort, SIGKILL after a grace (V1: 5 s), answer 409 only when the kill reached the child, `release()` once it is reaped |
+| tests | fake child, as in `packages/fleet/test/usage.test.ts` |
+
+```ts
+// packages/fleet/src/usage.ts
+child.kill("SIGTERM");
+setTimeout(() => {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
+}, PS_FORCE_KILL_MS).unref();
+```
+
 ## Status abort (database)
 
 | Call | Moves | Refuses with `InvalidState` when |
