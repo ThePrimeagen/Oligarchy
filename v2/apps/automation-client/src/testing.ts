@@ -13,7 +13,7 @@ export const sessions = (
       handed.push(request);
       return answer(request);
     };
-  const reserve: Routes.Sessions["reserve"] = told.reserve ?? (async () => "reserved");
+  const reserve: Routes.Sessions["reserve"] = told.reserve ?? (async () => jarl.ok(undefined));
   const run: Routes.Sessions["run"] = told.run ?? (async () => jarl.ok("ended"));
   const abort: Routes.Sessions["abort"] = told.abort ?? (async () => "stopped");
   return { sessions: { reserve: keep(reserve), run: keep(run), abort: keep(abort) }, handed };

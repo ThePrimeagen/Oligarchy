@@ -1,7 +1,15 @@
 import { testClient } from "hono/testing";
 import * as jarl from "jarl";
 import { describe, expect, it } from "vitest";
-import { type Sessions, RunFailed, routes } from "../src/routes.ts";
+import { AlreadyHeld, ShuttingDown } from "../src/jobs.ts";
+import {
+  type Sessions,
+  AtCapacity,
+  ReserveFailed,
+  RunFailed,
+  SetupNeeded,
+  routes,
+} from "../src/routes.ts";
 import { sessions } from "../src/testing.ts";
 
 const TOKEN = "oligarchy-token";
@@ -118,22 +126,67 @@ describe("the automation client's routes", () => {
     expect(handed).toEqual([]);
   });
 
-  it("answer a reserve at --max-jobs 503, at capacity (unhappy)", async () => {
-    const at = handedTo(sessions({ reserve: async () => "at-capacity" }).sessions);
+  it("answer a reserve at --max-jobs 503, naming it (unhappy)", async () => {
+    const at = handedTo(
+      sessions({ reserve: async () => jarl.err(new AtCapacity("at capacity: max-jobs is 1")) })
+        .sessions,
+    );
 
     const answer = await at.reserve.$post({ json: RESERVE });
 
     expect(answer.status).toBe(503);
-    expect(await answer.json()).toEqual({ error: "at capacity" });
+    expect(await answer.json()).toEqual({ error: "at capacity: max-jobs is 1" });
   });
 
-  it("answer a reserve no qemu server holds a setup disk for yet 409, setup needed (unhappy)", async () => {
-    const at = handedTo(sessions({ reserve: async () => "setup-needed" }).sessions);
+  it("answer a reserve no qemu server holds a setup disk for yet 409, naming it (unhappy)", async () => {
+    const at = handedTo(
+      sessions({ reserve: async () => jarl.err(new SetupNeeded("setup needed: 4.0.4")) }).sessions,
+    );
 
     const answer = await at.reserve.$post({ json: RESERVE });
 
     expect(answer.status).toBe(409);
-    expect(await answer.json()).toEqual({ error: "setup needed" });
+    expect(await answer.json()).toEqual({ error: "setup needed: 4.0.4" });
+  });
+
+  it("answer a reserve once shutdown has begun 503, naming it (unhappy)", async () => {
+    const at = handedTo(
+      sessions({
+        reserve: async () => jarl.err(new ShuttingDown(`shutting down; job ${JOB_ID} not held`)),
+      }).sessions,
+    );
+
+    const answer = await at.reserve.$post({ json: RESERVE });
+
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({ error: `shutting down; job ${JOB_ID} not held` });
+  });
+
+  it("answer a reserve of a job already held 400, naming it (unhappy)", async () => {
+    const at = handedTo(
+      sessions({
+        reserve: async () => jarl.err(new AlreadyHeld(`job ${JOB_ID} is already held`)),
+      }).sessions,
+    );
+
+    const answer = await at.reserve.$post({ json: RESERVE });
+
+    expect(answer.status).toBe(400);
+    expect(await answer.json()).toEqual({ error: `job ${JOB_ID} is already held` });
+  });
+
+  it("answer a reserve whose guest could not be reserved 500, naming why (unhappy)", async () => {
+    const at = handedTo(
+      sessions({
+        reserve: async () =>
+          jarl.err(new ReserveFailed("reserving a guest failed: POST /reserve: 500")),
+      }).sessions,
+    );
+
+    const answer = await at.reserve.$post({ json: RESERVE });
+
+    expect(answer.status).toBe(500);
+    expect(await answer.json()).toEqual({ error: "reserving a guest failed: POST /reserve: 500" });
   });
 
   it("answer a run an abort ended 409, aborted (unhappy)", async () => {

@@ -93,7 +93,19 @@ const automationClient = (argv: ReadonlyArray<string>, env: Readonly<Record<stri
   return { child, exited, lines, stderr: () => stderr };
 };
 
-const flags = (port: number) => ["--port", String(port), "--name", NAME, "--url", CLIENT_URL];
+// A diagnose asks the reverse proxy nothing, so none listens at --server-url.
+const flags = (port: number) => [
+  "--port",
+  String(port),
+  "--name",
+  NAME,
+  "--url",
+  CLIENT_URL,
+  "--max-jobs",
+  "1",
+  "--server-url",
+  "http://127.0.0.1:1",
+];
 
 // What the automation server's listLiveServers reads: a client heard from in the last 45 seconds.
 const LIVE_CLIENTS =
@@ -101,7 +113,7 @@ const LIVE_CLIENTS =
 const READINGS = "select name, type, jobs from process_stats";
 
 describe("the automation client as a process", () => {
-  it("listens on --port behind the bearer, announces itself as a live automation client under --name and --url, runs until SIGTERM, takes its row back, says it stopped and exits 0, each line stored (happy)", async () => {
+  it("listens on --port behind the bearer, announces itself as a live automation client under --name and --url, holds a reserve, runs until SIGTERM, lets the job go, takes its row back, says it stopped and exits 0, each line stored (happy)", async () => {
     const fake = await started();
     const port = await freePort();
     const running = automationClient(flags(port), {
@@ -114,12 +126,14 @@ describe("the automation client as a process", () => {
     });
     await vi.waitFor(async () => expect(await query(fake.url, READINGS)).toHaveLength(1));
     expect(await query(fake.url, LIVE_CLIENTS)).toEqual([{ url: CLIENT_URL, name: NAME }]);
-    const unauthorized = await fetch(`http://127.0.0.1:${String(port)}/reserve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11", action: "diagnose" }),
-    });
-    expect(unauthorized.status).toBe(401);
+    const reserve = (headers: Readonly<Record<string, string>>) =>
+      fetch(`http://127.0.0.1:${String(port)}/reserve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ jobId: "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11", action: "diagnose" }),
+      });
+    expect((await reserve({})).status).toBe(401);
+    expect((await reserve({ Authorization: `Bearer ${TOKEN}` })).status).toBe(200);
     expect(running.child.exitCode).toBe(null);
     running.child.kill("SIGTERM");
 
@@ -138,7 +152,7 @@ describe("the automation client as a process", () => {
   it("with no --url, refuses to start: says so on stderr, serves nothing, writes no row and exits 1 (unhappy)", async () => {
     const fake = await started();
     const port = await freePort();
-    const running = automationClient(["--port", String(port), "--name", NAME], {
+    const running = automationClient(["--port", String(port), "--name", NAME, "--max-jobs", "1"], {
       DATABASE_URL: fake.url,
       OLIGARCHY_TOKEN: TOKEN,
     });

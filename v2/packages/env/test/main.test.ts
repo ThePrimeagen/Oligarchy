@@ -16,7 +16,11 @@ const io = (options: {
 }) => Env.fakeIo({ ...options, files: { [Env.CONFIG_PATH]: CONFIG, ...options.files } });
 
 const ctrl = Env.cli({ name: "ctrl", description: "Record and inspect test runs" })
-  .flags({ serverUrl: Env.args.serverUrl(false), sessionId: Env.args.sessionId(false) })
+  .flags({
+    serverUrl: Env.args.serverUrl(false),
+    sessionId: Env.args.sessionId(false),
+    count: Env.args.count(false),
+  })
   .needs("databaseUrl")
   .command("setup", "Set the ISO up on every live qemu server")
   .flags({ iso: Env.args.iso(), setupOnly: Env.args.setupOnly(false) })
@@ -46,15 +50,17 @@ describe("create", () => {
       throw new Error(`expected test run one, got ${env.command}`);
     }
     expectTypeOf(env.flags).toEqualTypeOf<{
-      serverUrl: string;
+      serverUrl: string | undefined;
       sessionId: string | undefined;
+      count: number;
       iso: string;
       name: string;
     }>();
     expectTypeOf(env.vars).toEqualTypeOf<{ databaseUrl: Env.Secret }>();
     expect(env.flags).toEqual({
-      serverUrl: "http://127.0.0.1:42069",
+      serverUrl: undefined,
       sessionId: "s-1",
+      count: 10,
       iso: ISO,
       name: "lock-screen",
     });

@@ -58,6 +58,17 @@
         "vitest": "catalog:",
       },
     },
+    "apps/qemu-server": {
+      "name": "@oligarchy/qemu-server",
+      "dependencies": {
+        "@hono/zod-validator": "catalog:",
+        "hono": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "typescript": "catalog:",
+      },
+    },
     "packages/app": {
       "name": "@oligarchy/app",
       "dependencies": {
@@ -390,6 +401,8 @@
     "@oligarchy/openrouter": ["@oligarchy/openrouter@workspace:packages/openrouter"],
 
     "@oligarchy/qemu-http-tools": ["@oligarchy/qemu-http-tools@workspace:packages/qemu-http-tools"],
+
+    "@oligarchy/qemu-server": ["@oligarchy/qemu-server@workspace:apps/qemu-server"],
 
     "@oligarchy/sentry": ["@oligarchy/sentry@workspace:packages/sentry"],
 

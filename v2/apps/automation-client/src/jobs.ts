@@ -19,6 +19,8 @@ export type Held = {
 
 export type Jobs = {
   readonly hold: (jobId: string) => jarl.Result<Held, AlreadyHeld | ShuttingDown>;
+  // The jobs held until their holder lets them go: each reserved or running against --max-jobs.
+  readonly count: () => number;
   // Aborts the job and settles once its holder has let it go.
   readonly abort: Routes.Sessions["abort"];
   // Aborts every job held and settles once each has been let go. From its start no job is held
@@ -69,6 +71,7 @@ export const create = (): Jobs => {
       held.set(jobId, entry);
       return jarl.ok({ signal: aborter.signal, release: entry.release });
     },
+    count: () => held.size,
     abort: async ({ jobId }) => {
       const entry = held.get(jobId);
       if (entry === undefined) {

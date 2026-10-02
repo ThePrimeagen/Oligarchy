@@ -1,12 +1,15 @@
 import * as App from "@oligarchy/app";
 import * as Env from "@oligarchy/env";
 import * as Fleet from "@oligarchy/fleet";
+import type * as Http from "@oligarchy/http";
 import { listen } from "@oligarchy/http/serve";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import { environment, type Run } from "./environment.ts";
 import * as Jobs from "./jobs.ts";
+import * as Proxy from "./proxy.ts";
+import * as Reserve from "./reserve.ts";
 import { routes } from "./routes.ts";
 import { closeServices, createServices } from "./services.ts";
 
@@ -25,8 +28,8 @@ type Announcing =
 
 // The announce sub-app's main: the servers row under --url, written now and every heartbeat with
 // the host's cpu sampled in between, until the client is killed; then the row goes. It boots no
-// guests, and holds no jobs until reserve is written.
-const announcing = async (sub: App.App<Run, Announcing>) => {
+// guests itself; each reading counts the jobs held.
+const announcing = (jobs: Jobs.Jobs) => async (sub: App.App<Run, Announcing>) => {
   const { host, usage, servers, processStats, logger } = sub.services;
   const { name, url } = sub.environment.flags;
   await Promise.all([
@@ -37,7 +40,7 @@ const announcing = async (sub: App.App<Run, Announcing>) => {
         url,
         name,
         attribution: { location: LOCATION },
-        report: async () => jarl.ok({ qemus: 0, jobs: 0 }),
+        report: async () => jarl.ok({ qemus: 0, jobs: jobs.count() }),
       },
       { host, usage, servers, processStats, logger },
       sub.signal,
@@ -51,12 +54,21 @@ const announcing = async (sub: App.App<Run, Announcing>) => {
 // connections but not a /run still under way, so every job held is then aborted and let go. Both
 // finish before main returns, and every sub-app's main has returned, its row deleted, before any
 // exit handler closes the services under them.
-const main = async (app: App.App<Run, Announcing>) => {
-  const { logger } = app.services;
+const main = async (app: App.App<Run, Announcing | Http.Http>) => {
+  const { logger, http } = app.services;
   const { flags, vars } = app.environment;
   const jobs = Jobs.create();
+  const reservations = Reserve.create({
+    maxJobs: flags.maxJobs,
+    jobs,
+    proxy: Proxy.create({ http, url: flags.serverUrl, token: vars.oligarchyToken }),
+    logger,
+  });
   const listened = await listen(
-    routes({ token: vars.oligarchyToken.reveal(), sessions: { abort: jobs.abort } }).fetch,
+    routes({
+      token: vars.oligarchyToken.reveal(),
+      sessions: { reserve: reservations.reserve, abort: jobs.abort },
+    }).fetch,
     { hostname: HOST, port: flags.port },
   );
   if (jarl.is_err(listened)) {
@@ -67,7 +79,7 @@ const main = async (app: App.App<Run, Announcing>) => {
     `started on ${HOST}:${String(flags.port)}; name ${flags.name}; announcing ${flags.url}`,
     { location: LOCATION },
   );
-  app.sub(new App.App(app.environment).main(announcing));
+  app.sub(new App.App(app.environment).main(announcing(jobs)));
   await App.waitForAbort(app.signal);
   await jarl.value(listened).close();
   await jobs.shutdown();
