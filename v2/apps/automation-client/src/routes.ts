@@ -14,7 +14,11 @@ export const ReserveRequest = z.discriminatedUnion("action", [
 ]);
 export type ReserveRequest = z.infer<typeof ReserveRequest>;
 
-export const RunRequest = z.strictObject({ jobId: z.uuid(), prompt: z.string().min(1) });
+// A drive's or setup's driver renders its own prompt, so only a diagnose names one.
+export const RunRequest = z.strictObject({
+  jobId: z.uuid(),
+  prompt: z.string().min(1).optional(),
+});
 export type RunRequest = z.infer<typeof RunRequest>;
 
 export const AbortRequest = z.strictObject({ jobId: z.uuid() });
@@ -106,7 +110,9 @@ export const routes = (options: {
     .post(
       "/run",
       zValidator("json", RunRequest, (result, c) =>
-        result.success ? undefined : c.json({ error: "name a jobId and a prompt" }, 400),
+        result.success
+          ? undefined
+          : c.json({ error: "name a jobId; a diagnose names its prompt" }, 400),
       ),
       async (c) => {
         if (run === undefined) {

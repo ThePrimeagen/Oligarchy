@@ -219,7 +219,7 @@ record, and the automation server acts on it directly.
 - [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
-      `/run` send the prompt. A reserve that is refused or fails leaves the job pending, and the
+      `/run` go, a diagnose's with its prompt. A reserve that is refused or fails leaves the job pending, and the
       loop sleeps `automationServer.dispatchInterval` from `v2/oligarchy.json` (30 seconds)
       before it asks again. One reserve is in flight at a time. A drive's
       reserve resumes its test run's ISO when its definition resumes and asks for a fresh boot
@@ -265,12 +265,23 @@ record, and the automation server acts on it directly.
       - `finish(end)` saves a setup that succeeded and stops the guest otherwise.
       The loop and its limits are the driver's (section 4). V1's root templates and ticket
       bodies remain until V1 is retired.
-- [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
-      diagnose job on the same test run; `errorJob` with the reason when the system failed it.
-- [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
-      `ctrl diagnose` (`diagnosis.saveDiagnosis`). Then the drive is `finalizeJob`ed, its run
-      `completeRun`s passed or failed, and its suite, when it has one, `completeSuite`s once its
-      last run has closed.
+- [x] **Close a drive or setup** (the automation server's `src/close.ts`). `completeJob` when the
+      driver ran to its end, then queue a diagnose job on the same test run; `errorJob` with the
+      reason when the system failed it, which queues no diagnose and leaves its test run running
+      for Try again. A run its client answers `aborted` is `abortJob`ed, unless an operator's
+      abort closed the job first, which stands. A write that fails stops the close where it is,
+      with one error line.
+- [x] **Diagnose.** A diagnose judges the newest completed drive or setup on its test run; one
+      with none to judge can never run, so dispatch `abortJob`s it saying so. Its `/run` carries
+      the diagnosing prompt (`src/diagnose-prompt.ts`), which names that job and its model and
+      tells the agent to use `./ctrl logs`, `./ctrl image` and `./ctrl diagnose` only. The agent
+      writes its verdict with `ctrl diagnose` (`diagnosis.saveDiagnosis`). Once opencode has
+      ended, the diagnose is `completeJob`ed, the judged job `finalizeJob`ed succeeded or failed
+      with the summary, its run `completeRun`s passed or failed, and its suite, when it has one,
+      `completeSuite`s once none of its runs is pending or running: passed when every run
+      passed. Two runs closing at once can each find the suite done; the second completion is
+      refused and says nothing. A diagnose whose agent recorded no verdict is `errorJob`ed, and
+      the job it judged and its run stay open for Try again.
 - [ ] **Abort.** By job id or by suite id, from `ctrl`, the dashboard and the automation server's
       `/abort`. A pending job is `abortJob`ed; a running one is stopped at its automation client
       first.
@@ -382,16 +393,23 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             never be reserved, so it is `abortJob`ed saying so, as V1 errored it. Open: setups
             head the queue, so a setup no client can take holds back every drive behind it until
             it is placed.
-      - [ ] **Dispatch: run.** Once the job is running, `/run` sends the prompt, without holding
-            the next pass. A drive or setup's driver renders its own prompt (section 3's The
-            drive harness).
-      - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
-            answers.
+      - [x] **Dispatch: run.** Once the job is running, a drive or setup starts its test run with
+            `startRun` and its action's model, unless the run is already running, as a retried
+            drive's is; a failed write is an error line and the job runs all the same. Then
+            `/run` is sent without holding the next pass. A drive or setup's `/run` names only
+            its job, since the driver renders its own prompt (section 3's The drive harness); a
+            diagnose's carries the diagnosing prompt (section 3's Diagnose).
+      - [x] **Close** (section 3's Close a drive or setup, and Diagnose's finalize;
+            `src/close.ts`) once `/run` answers. A `/run` the signal ends closes nothing: settling
+            its job is Shutdown's. The dispatch sub-app's main returns only once every `/run` in
+            flight has answered and its job is closed (`waitForRuns`), so no close writes after
+            the services are closed.
       - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
       - [ ] **Shutdown** (section 3's Restart and shutdown, at shutdown) in `shutdown`. Today
-            it runs as soon as the signal lands, beside a dispatch pass still in flight; decide
-            whether it moves to an exit handler of the dispatch sub-app, which runs only once the
-            loop has ended and before the services close.
+            it runs as soon as the signal lands, beside a dispatch pass still in flight, and
+            before the dispatch sub-app has waited out its runs; decide whether it moves to an
+            exit handler of the dispatch sub-app, which runs only once the loop has ended and
+            before the services close.
       - [x] **Serve.** `routes.ts` is one chained Hono app behind the `OLIGARCHY_TOKEN` bearer,
             exported as `Routes`; `@oligarchy/http/serve`'s `listen` serves it on 127.0.0.1 at a
             required `--port` through `@hono/node-server`. `main` listens before anything else starts: the started line names
@@ -404,7 +422,7 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             yet`.
 - [ ] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
       shutdown against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a
-      diagnose (`opencode.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
+      diagnose (`run.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
       when every task below is ticked, roughly in their order.
       - [x] **Skeleton and routes.** `bun run automation-client`. `main` needs `DATABASE_URL`,
             `OLIGARCHY_TOKEN` and a required `--port`, builds its services with Sentry, listens
@@ -417,7 +435,7 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             - `/reserve`: `{ jobId, action }`, where a drive may name `resume` (the ISO's url), a
               setup names `setupServer` (the qemu server its setup lock names), and a diagnose
               names neither.
-            - `/run`: `{ jobId, prompt }`.
+            - `/run`: `{ jobId, prompt? }`, where only a diagnose names its prompt.
             - `/abort`: `{ jobId }`.
 
             Handed its function, a route answers what it says: a reserve `reserved` is 200,
@@ -454,13 +472,21 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             reserve and its run, is held until it is aborted or the client restarts. V1 gave one
             back after ten minutes unused; decide whether Restart aborts it at the client, or the
             client expires it.
-      - [ ] **Run.** Takes the job's reservation with `take` and spawns `v2/driver --job-id
-            <id> --server-url <its --server-url>` for a drive or setup (section 4's driver; exit 0
-            is ran to its end, 1 failed) or opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
-            409 when an abort ended it, 500 when it failed. It spawns on the held signal: when it
-            aborts the child is sent SIGTERM, and SIGKILL after a grace (V1's was 5 seconds).
+      - [x] **Run** (`src/run.ts`, over `src/child.ts`). Takes the job's reservation with `take`
+            and spawns `v2/driver --job-id <id> --server-url <its --server-url>` for a drive or
+            setup (section 4's driver; exit 0 is ran to its end, 1 failed) or `opencode run
+            --auto --model openrouter/<models.diagnose> --variant <reasoning.diagnose> --
+            <prompt>` in `v2` for a diagnose, and answers once it has ended: 200 when it ran to
+            its end, 409 when an abort ended it, 500 when it failed, naming the tail of its
+            stderr or its exit. `main` therefore also needs `OPENROUTER_API_KEY`, and hands
+            `DATABASE_URL`, `OLIGARCHY_TOKEN` and `OPENROUTER_API_KEY` to every child, since one
+            read from an `--env-file` is not in the child's environment. A job with no
+            reservation, a diagnose with no prompt and a child that cannot be spawned are 500s.
+            When the held signal aborts, the child is sent SIGTERM, and SIGKILL after 5 seconds.
             Only a child that kill reached answers 409; one that had already exited answers as it
-            ended. The run calls `release` once the child is reaped.
+            ended. A diagnose has `runCeiling`, and the driver, which stops itself at that
+            ceiling, five minutes more to stop its guest; past it the child is killed and the run
+            is a 500. The run calls `release` once the child is reaped, whatever it answers.
       - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
             each job it has reserved or is running, in memory only, by an `AbortController`;
             `main` creates it and hands `jobs.abort` to the routes as their `Sessions` abort.
@@ -514,24 +540,31 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
 
 ## 6. ctrl, last
 
-`ctrl` is really the diagnosing agent's tool, so it is dealt with after everything else. It keeps
-V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
+`ctrl` is the diagnosing agent's tool and nothing else: it reads a job's evidence and records the
+verdict on it. Filing test runs, suites and setups is not ctrl's.
 
-- [ ] **ctrl** (`apps/ctrl`), cut down from V1's.
-      - `test run --name <definition> --iso <url>`: one test run on its own, with no suite, for
-        trying something out; prints its test run and job ids.
-      - `test suite --iso <url>`: a suite of every definition but `setup`; prints its id.
-      - `setup`: a setup on each server (section 3's File).
-      - `diagnose`: the diagnosing agent's verdict against a drive's job (section 3's Diagnose).
+- [x] **ctrl** (`apps/ctrl`). `v2/ctrl <command>` (or `bun run ctrl`) needs `DATABASE_URL` and
+      reads and writes the database only. It exits 0 when the command worked, and 1 with its
+      reason on stderr when it did not. Three commands:
+      - `logs --job-id <id>`: the drive or setup under review as one JSON object: `job`, `run`,
+        `suite`, `definition`, `vmStatus`, `intents`, `actions`, `images` (oldest first),
+        `debugLog`, `diagnosis` and `errorTypes`. An unknown job and a diagnose job are refused.
+      - `image --image-id <id> --output <file>`: one screenshot's bytes, written to the file.
+        V1's agent read them with `./session image`; V2's uses ctrl only.
+      - `diagnose --job-id <id> --verdict passed|failed --summary <text> --model <id>`: the one
+        verdict on a completed drive or setup (section 3's Diagnose). `passed` takes no `--type`;
+        `failed` takes an existing `--type` from `logs`' `errorTypes`, or a new one with its
+        `--description`. Everything is checked before anything is written; a second diagnosis
+        of the same job is refused and the first stands.
 
-      Open: whether the proxy's url is a flag, as V1's `--server-url` was, or read from the
-      environment; and which of V1's other commands come over at all (`test define`, `details`,
-      `list` and `start`, `test-results`, `session` as a job's view, `error-type` and
-      `automation`).
+      There is no `error-type` command: `logs` lists the types and `diagnose --description`
+      mints one. V1's `test`, `setup`, `details`, `list`, `start`, `test-results`, `session` and
+      `automation` do not come over to ctrl. Open: what files test runs, suites and setups in V2.
 - [ ] **Session flags in env.** `v2/packages/env/src/args.ts` still carries V1's session flags:
       `--session-id` (and `SESSION_ID`), `--search`, `--test-result-id`, and `ctrl session`'s
       `--status`, `--logs`, `--test-def`, `--test-results`, `--test-run`, `--actions`, `--images`,
-      `--debug-logs`, `--diagnosis` and `--all`. Rename or drop them as `ctrl` is ported.
+      `--debug-logs`, `--diagnosis` and `--all`. ctrl uses none of them; drop them. `--image-id`
+      and `--output` are ctrl `image`'s.
 
 ## Not coming over
 
@@ -541,6 +574,8 @@ V1's shape, `ctrl <command> <subcommand>`, with far fewer commands.
   `serverForJob` replace.
 - `./client`: `src/client`, its wrapper, `client.md`, and the driver's one `client` tool.
   qemu-http-tools replaces them.
+- `./session image`: the diagnosing agent reads screenshots with `./ctrl image` instead. The rest
+  of the session REPL is section 4's.
 - `Database.ping`.
 - The shared HTTP API package: V1's contract, middleware, `serve` and wire errors. Each app's Hono
   routes are its contract.

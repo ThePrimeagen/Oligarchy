@@ -19,19 +19,23 @@ const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
 // The dispatch sub-app's main. It runs until the server is killed: once a job is started the next
-// is tried at once, and when none could be it waits the interval, which the kill ends at once.
+// is tried at once, and when none could be it waits the interval, which the kill ends at once. It
+// returns only once every run in flight is closed, so none is closed after its services are.
 type DispatchWants =
   | Http.Http
   | Stores.Tests.Tests
   | Stores.Servers.Servers
   | Stores.SetupRequests.SetupRequests
+  | Stores.Diagnosis.Diagnosis
   | Logger.Logger;
 
 const dispatch = async (sub: App.App<Run, DispatchWants>) => {
-  const { dispatchInterval } = sub.environment.config.automationServer;
+  const { config, vars } = sub.environment;
+  const { dispatchInterval } = config.automationServer;
   const dispatcher = Dispatch.create({
     ...sub.services,
-    token: sub.environment.vars.oligarchyToken,
+    token: vars.oligarchyToken,
+    models: config.models,
     signal: sub.signal,
   });
   while (!sub.signal.aborted) {
@@ -40,6 +44,7 @@ const dispatch = async (sub: App.App<Run, DispatchWants>) => {
       await Async.sleep(dispatchInterval, sub.signal);
     }
   }
+  await dispatcher.waitForRuns();
   return jarl.ok(undefined);
 };
 
