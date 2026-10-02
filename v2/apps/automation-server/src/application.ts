@@ -6,6 +6,7 @@ import type * as Serve from "@oligarchy/http/serve";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
+import * as Abort from "./abort.ts";
 import * as Dispatch from "./dispatch.ts";
 import type { Run } from "./environment.ts";
 import { restart } from "./restart.ts";
@@ -29,13 +30,15 @@ type DispatchWants =
   | Stores.Diagnosis.Diagnosis
   | Logger.Logger;
 
-const dispatch = async (sub: App.App<Run, DispatchWants>) => {
+const dispatch = (aborting: Abort.Aborting) => async (sub: App.App<Run, DispatchWants>) => {
   const { config, vars } = sub.environment;
   const { dispatchInterval } = config.automationServer;
   const dispatcher = Dispatch.create({
     ...sub.services,
     token: vars.oligarchyToken,
     models: config.models,
+    abortTimeoutMs: config.automationServer.abortTimeout,
+    aborting,
     signal: sub.signal,
   });
   while (!sub.signal.aborted) {
@@ -66,15 +69,22 @@ const forgetClients = async (sub: App.App<Run, Stores.Servers.Servers | Logger.L
 };
 
 // Nothing starts unless the port is bound. On a signal the listener closes first, so no request
-// lands during shutdown, and shutdown runs before main returns, so it finishes before any exit
-// handler closes the services under it.
+// lands during shutdown; the aborts it had taken finish writing, and shutdown runs, before main
+// returns, so both finish before any exit handler closes the services under them.
 export const main =
   (options: { readonly listen: typeof Serve.listen }) =>
   async (app: App.App<Run, DispatchWants>) => {
     const { logger } = app.services;
     const { config, flags, vars } = app.environment;
     const { models } = config;
-    const listened = await options.listen(routes({ token: vars.oligarchyToken.reveal() }).fetch, {
+    const aborting: Abort.Aborting = new Set();
+    const aborter = Abort.create(app.services, {
+      token: vars.oligarchyToken,
+      aborting,
+      abortTimeoutMs: config.automationServer.abortTimeout,
+    });
+    const served = routes({ token: vars.oligarchyToken.reveal(), abort: aborter.abort });
+    const listened = await options.listen(served.fetch, {
       hostname: HOST,
       port: flags.port,
     });
@@ -89,9 +99,10 @@ export const main =
     );
     await restart();
     app.sub(new App.App(app.environment).main(forgetClients));
-    app.sub(new App.App(app.environment).main(dispatch));
+    app.sub(new App.App(app.environment).main(dispatch(aborting)));
     await App.waitForAbort(app.signal);
     await listening.close();
+    await aborter.settled();
     await shutdown();
     logger.info(`stopped; ${reasonOf(app.signal)}`, { location: LOCATION });
     return jarl.ok(undefined);

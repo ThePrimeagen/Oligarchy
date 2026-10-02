@@ -35,6 +35,8 @@ export const all = {
   oligarchyToken: secret("OLIGARCHY_TOKEN"),
   // The harness talks to OpenRouter as itself. The token stays out of oligarchy.json.
   openRouterToken: secret("OPENROUTER_API_KEY"),
+  cloudflareAccountId: required("CLOUDFLARE_ACCOUNT_ID"),
+  cloudflareApiToken: secret("CLOUDFLARE_API_TOKEN"),
   databaseUrl: secretUrl("DATABASE_URL"),
   // `db:migrate` only. Kept off DATABASE_URL so the programs can use a pooler while migrations
   // stay on a direct connection.

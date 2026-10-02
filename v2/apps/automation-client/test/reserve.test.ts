@@ -56,7 +56,12 @@ const reserving = (options: {
   });
   const jobs = Jobs.create();
   const log = FakeLogger.logger();
-  const proxy = Proxy.create({ http: fake.http, url: PROXY, token: { reveal: () => TOKEN } });
+  const proxy = Proxy.create({
+    http: fake.http,
+    url: PROXY,
+    token: { reveal: () => TOKEN },
+    reserveTimeoutMs: 60_000,
+  });
   const reservations = Reserve.create({
     maxJobs: options.maxJobs ?? 2,
     jobs,

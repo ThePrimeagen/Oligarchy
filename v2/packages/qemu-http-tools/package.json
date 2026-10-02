@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@oligarchy/app": "workspace:*",
-    "@oligarchy/async": "workspace:*",
-    "@oligarchy/env": "workspace:*",
     "@oligarchy/http": "workspace:*",
     "@oligarchy/openrouter": "workspace:*",
     "jarl": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@oligarchy/async": "workspace:*",
+    "@oligarchy/env": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

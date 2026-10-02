@@ -1,3 +1,4 @@
+import * as Exits from "@oligarchy/driver/exits";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
 import * as jarl from "jarl";
@@ -7,19 +8,22 @@ import * as Routes from "./routes.ts";
 
 const LOCATION = "automation-client";
 
-// The driver stops itself at the run ceiling, and then needs this long to stop its guest.
-const DRIVER_GRACE_MS = 300_000;
-
 // A headless run has nobody to answer a permission prompt. --auto approves the root session's
 // asks, but a subagent asks into the void and the run deadlocks (anomalyco/opencode#36868), so
 // the two permissions that default to ask are allowed for every session: a screenshot read outside
 // the working directory, the same get-image repeated while a guest boots. OpenRouter streams have
-// no timeout of their own (anomalyco/opencode#37580): three minutes without a first byte or a next
-// chunk aborts the request, which opencode retries, rather than holding the run to its ceiling.
-const OPENCODE_CONFIG = JSON.stringify({
-  permission: { external_directory: "allow", doom_loop: "allow" },
-  provider: { openrouter: { options: { headerTimeout: 180_000, chunkTimeout: 180_000 } } },
-});
+// no timeout of their own (anomalyco/opencode#37580): diagnose's header and chunk timeouts abort a
+// request with no first byte or next chunk, which opencode retries, rather than holding the run to
+// its ceiling.
+const opencodeConfig = (diagnose: Env.Config["diagnose"]) =>
+  JSON.stringify({
+    permission: { external_directory: "allow", doom_loop: "allow" },
+    provider: {
+      openrouter: {
+        options: { headerTimeout: diagnose.headerTimeout, chunkTimeout: diagnose.chunkTimeout },
+      },
+    },
+  });
 
 export type Options = {
   readonly reservations: Pick<Reserve.Reservations, "take">;
@@ -27,7 +31,10 @@ export type Options = {
   // This process's own environment, which every child inherits.
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly serverUrl: string;
-  readonly config: Pick<Env.Config, "models" | "reasoning" | "runCeiling">;
+  readonly config: Pick<
+    Env.Config,
+    "models" | "reasoning" | "driver" | "diagnose" | "automationClient"
+  >;
   readonly vars: {
     readonly databaseUrl: Env.Secret;
     readonly oligarchyToken: Env.Secret;
@@ -43,6 +50,8 @@ type Command = {
   readonly env: Readonly<Record<string, string>>;
   readonly cwd?: string;
   readonly ceilingMs: number;
+  // The exit the child gives when its own run ceiling stopped it; only the driver has one.
+  readonly timedOutExit?: number;
 };
 
 const failed = (message: string) => jarl.err(new Routes.RunFailed(message));
@@ -64,7 +73,8 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     command: `${Env.ROOT}v2/driver`,
     args: ["--job-id", jobId, "--server-url", serverUrl],
     env: secrets(),
-    ceilingMs: config.runCeiling + DRIVER_GRACE_MS,
+    ceilingMs: config.driver.runCeiling + config.automationClient.driverGrace,
+    timedOutExit: Exits.TIMED_OUT,
   });
 
   // opencode reads the first segment of --model as its provider, so the OpenRouter id goes under
@@ -82,9 +92,9 @@ export const create = (options: Options): Routes.Sessions["run"] => {
       "--",
       prompt,
     ],
-    env: { ...secrets(), OPENCODE_CONFIG_CONTENT: OPENCODE_CONFIG },
+    env: { ...secrets(), OPENCODE_CONFIG_CONTENT: opencodeConfig(config.diagnose) },
     cwd: `${Env.ROOT}v2`,
-    ceilingMs: config.runCeiling,
+    ceilingMs: config.diagnose.runCeiling,
   });
 
   // A failure is the answer, which the automation server logs; the lines here only say the child
@@ -99,6 +109,8 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     const child = Child.start(spawn, command.command, command.args, {
       env: { ...env, ...command.env },
       ...(command.cwd === undefined ? {} : { cwd: command.cwd }),
+      killGraceMs: config.automationClient.killGrace,
+      stderrGraceMs: config.automationClient.stderrGrace,
     });
     let stopped: "aborted" | "ceiling" | undefined;
     const onAbort = () => {
@@ -127,10 +139,21 @@ export const create = (options: Options): Routes.Sessions["run"] => {
       return jarl.ok("aborted");
     }
     if (stopped === "ceiling") {
-      return failed(`${command.name} exceeded its ceiling of ${String(command.ceilingMs)} ms`);
+      return jarl.err(
+        new Routes.RunTimedOut(
+          `${command.name} exceeded its ceiling of ${String(command.ceilingMs)} ms`,
+        ),
+      );
     }
     if (exit.code === 0) {
       return jarl.ok("ended");
+    }
+    if (command.timedOutExit !== undefined && exit.code === command.timedOutExit) {
+      return jarl.err(
+        new Routes.RunTimedOut(
+          `${command.name} timed out: run ceiling of ${String(config.driver.runCeiling)} ms`,
+        ),
+      );
     }
     return failed(exit.stderr === "" ? exited : exit.stderr);
   };

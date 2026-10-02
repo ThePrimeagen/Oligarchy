@@ -28,7 +28,7 @@
 | --- | --- |
 | `app.signal` aborts | on the first SIGINT, SIGTERM or SIGHUP, when its parent stops, or once its main returns |
 | main runs until killed | `await App.waitForAbort(app.signal)`. It resolves `void`. |
-| ordering on stop | close the listener, then shut down jobs, then log `stopped; ${reason}`, then `return jarl.ok(undefined)` |
+| ordering on stop | close the listener, then wait out the aborts it took (`aborter.settled()`), then shut down jobs, then log `stopped; ${reason}`, then `return jarl.ok(undefined)` |
 | listener `close()` | stops new connections. A handler still running is not stopped, so abort held jobs yourself. |
 | a loop | make it a sub-app: `app.sub(new App.App(app.environment).main(loop))` |
 | sub-app's signal | `sub.signal`. It aborts with `"parent stopped"` when the parent stops. |
@@ -37,7 +37,7 @@
 | second process signal | `exit(1)` at once. Exit handlers are skipped. |
 | main returns or throws | `app.signal` aborts, every sub-app stops, and the process exits 1 if errors were reported |
 | `onExit` handler | runs after `app.signal` aborted. Never hand `app.signal` to its calls. Give them their own deadline. |
-| work that must stop with the app but is built before it | own controller, forwarded from the app signal (driver) |
+| work that must stop with the app | build it in main and hand it `app.signal` (driver) |
 
 ```ts
 // apps/automation-client/src/application.ts
@@ -61,19 +61,22 @@ return jarl.ok(undefined);
 ```
 
 ```ts
-// apps/driver/src/main.ts: services built before the app
-const guest = new AbortController();
-const services = createServices(env, guest.signal);
-const app = new App.App(env).main(main);
-app.signal.addEventListener("abort", () => guest.abort(app.signal.reason), { once: true });
+// apps/driver/src/main.ts: the run's harness is built in main, on the app's signal
+const ended = await Drive.drive(app.services, app.signal, {
+  jobId: flags.jobId,
+  serverUrl: flags.serverUrl,
+  token: vars.oligarchyToken,
+  config,
+});
 ```
 
 ## Service
 
 | Problem | Fact |
 | --- | --- |
-| signal for one call | optional `signal?: AbortSignal` field on the request: `http.fetch(url, { signal })`, `openRouter.complete({ signal })`, `driveHarness.ask({ signal })` |
-| signal for every call | optional `signal?` in the create options: `Qemu.create({ http }, { job, baseUrl, token, signal })`, `HttpClient.create({ http, url, token, signal })` |
+| signal for one call | optional `signal?: AbortSignal` field on the request: `http.fetch(url, { signal })`, `openRouter.complete({ signal })` |
+| signal for every call | optional `signal?` in the create options: `HttpClient.create({ http, url, token, signal })` |
+| a class that reacts to aborts | signal is the required second argument: `Qemu.create({ http }, signal, { job, baseUrl, token })`, `DriveHarness.create(services, signal, options)` |
 | no signal given | use a signal that never aborts: `const NEVER = new AbortController().signal` |
 | a long-running helper | signal is a required positional, last before options: `Async.sleep(ms, signal)`, `Async.tick(fn, ms, signal)`, `Fleet.announce(member, needs, signal, options)`, `Fleet.Host.sampling(host, signal)` |
 | failure union | put `Async.Aborted` in it (`Http.HttpFailure`, `OpenRouter.Failure`) |
@@ -104,7 +107,7 @@ posting({ status: end.status }, { aborts: false });
 
 | Problem | Fact |
 | --- | --- |
-| every call | has a deadline. Default 10 000 ms. Set `timeoutMs` in the init, or in a client spec. |
+| every call | has a deadline: `httpTimeout` from `oligarchy.json`, handed to `Http.create`. Set `timeoutMs` in the init, or in a client spec. |
 | deadline passes | `Http.HttpTimedOut` |
 | caller's signal aborts | `Async.Aborted`, with the signal's reason |
 | a call only an abort may end | `timeoutMs: 2 ** 31 - 1` (the automation client's `/run`) |
@@ -134,10 +137,10 @@ if (jarl.is_err(reserved)) {
 | App | Body | Answers |
 | --- | --- | --- |
 | automation-client | `z.strictObject({ jobId: z.uuid() })` | 200 `stopped`, 404 `not-held`, 400 bad body, 501 not written |
-| automation-server | `{ jobId }` or `{ suiteId }`, never both | 400 `name a jobId or a suiteId`, 501 not written |
+| automation-server | `{ jobId }` or `{ suiteId }`, never both | 200 `{}` aborted, 404 unknown, 409 `NothingToAbort` (already ended), 502 `NotStopped` (its client could not stop it), 500 database, 400 `name a jobId or a suiteId` |
 | qemu-server | `z.strictObject({ job: z.uuid() })` | 501 not written |
 
-- The route hands off to `Sessions["abort"]`. The route holds no logic.
+- The route hands off to `Sessions["abort"]` (client) or `Aborter["abort"]` (server). The route holds no logic; it maps each error to its status.
 - `abort` answers only once the job's holder has let it go.
 - Unknown id is `not-held` (404). It is not an error.
 - Signal aborts never write a job's status. The automation server writes status.
@@ -221,6 +224,30 @@ while (true) {
 }
 ```
 
+## Business logic: an operator's abort (automation server)
+
+- A plain module: `Abort.create(services, { token, aborting })` (`apps/automation-server/src/abort.ts`). `main` hands `aborter.abort` to the routes.
+- Every status it writes says `Abort.REASON`, `"aborted by an operator"`.
+
+| Problem | Fact |
+| --- | --- |
+| a pending job | `abortJob`. Refused because dispatch ran it meanwhile: read it again and abort it as it is now. |
+| a running job | add it to `aborting`, `/abort` it at its client (`automationServer.abortTimeout` deadline), `abortJob`, then delete it from `aborting` in `finally` |
+| its run answers `aborted` meanwhile | `Close` skips a job in `aborting`. The operator's abort writes it. |
+| its run ended meanwhile | `abortJob` is refused. Read the job: `aborted` stands; anything else is `NothingToAbort`, closed as it would have been. |
+| client unreachable | `NotStopped`. The job stays running. |
+| client forgotten, or answers `not-held` | nothing to stop. Write `aborted`, with a warning under the job. |
+| after the job | `abortRun` (refused is fine), then `Close.closeSuite` once none of the suite's runs is open |
+| a suite | every open run at once: its open job, then the run. The first failure is the answer and the suite stays open. Otherwise `abortSuite`. |
+| on stop | `settled()` resolves once every abort in flight has written |
+
+```ts
+// apps/automation-server/src/close.ts
+if (aborting.has(job.id)) {
+  return jarl.ok(undefined);
+}
+```
+
 ## Child process
 
 | Problem | Fact |
@@ -230,7 +257,7 @@ while (true) {
 | grace timer | `.unref()` it |
 | missing binary | arrives as an `error` event, not a throw |
 | settle once | a `settled` flag. The first of deadline, `error` or `close` wins. |
-| job run (automation client) | not built. Spec (`MIGRATION.md` Run): spawn on the held signal, SIGTERM on abort, SIGKILL after a grace (V1: 5 s), answer 409 only when the kill reached the child, `release()` once it is reaped |
+| job run (automation client) | `src/run.ts` over `src/child.ts`: spawn on the held signal, SIGTERM on abort, SIGKILL after `automationClient.killGrace`, answer 409 only when the kill reached the child, `release()` once it is reaped |
 | tests | fake child, as in `packages/fleet/test/usage.test.ts` |
 
 ```ts
@@ -263,13 +290,13 @@ setTimeout(() => {
 | --- | --- | --- | --- |
 | one call | caller | `Async.timeout(fn, { ms, signal })`, or `signal` / `timeoutMs` on the call | yes |
 | one job at a client | automation server | `AutomationClient.create(...).post("/abort", { jobId })`, then `jobs.abort` | yes |
-| one job, one suite (operator) | ctrl, dashboard | automation server `/abort` `{ jobId }` or `{ suiteId }` | no: 501 |
+| one job, one suite (operator) | an operator; not ctrl. The caller is open. | automation server `/abort` `{ jobId }` or `{ suiteId }` | yes |
 | one job at a qemu server | | qemu-server `/abort` `{ job }` | no: 501 |
 | every job at a client | the client on stop | `jobs.shutdown()` after closing the listener | yes |
 | every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | no: no-op |
 | one host, server or location | | none exists. Abort each job on it. | no |
 | one app and its sub-apps | process signal, or main returning | `app.signal` | yes |
-| a driver run | `app.signal`, forwarded to the guest controller | `drive` ends `{ status: "aborted" }`, exit 0 | yes |
+| a driver run | `app.signal`, handed to `drive` and its harness | `drive` ends `{ status: "aborted" }`, exit 0 | yes |
 
 ## Tests
 
@@ -283,6 +310,7 @@ setTimeout(() => {
 | proof of cleanup | `expect(vi.getTimerCount()).toBe(0)` |
 | proof of the reason | `expect(jarl.error.is(held.signal.reason, Aborted)).toBe(true)` |
 | abort during a call | wait until the fake is entered, then abort (dispatch test) |
+| a stop while a request's write is held | hand the request to the listener's handler, `await vi.advanceTimersByTimeAsync(0)` so it reaches the store, then signal. A fake listener's `close()` does not wait for handlers. |
 | answers only after release | prove "not yet" with a flush: `await new Promise((r) => setImmediate(r))`, then check (`settled()` in `jobs.test.ts`) |
 | routes | test them over the `sessions()` fake in `src/testing.ts`, not a real `jobs` |
 | coverage | one test per abort boundary: a signal already aborted before the call, and one that aborts during it |

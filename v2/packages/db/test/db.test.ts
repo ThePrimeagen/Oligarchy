@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import * as net from "node:net";
 import type * as App from "@oligarchy/app";
 import * as Env from "@oligarchy/env";
 import * as FakePostgres from "@oligarchy/fake-postgres";
@@ -45,6 +46,57 @@ const connected = async () => {
 const selectOne = (db: Db.Database) =>
   db.run(async (d) => (await d.execute<{ one: number }>(sql`select 1 as one`)).rows);
 
+// A database the test's own relay stands in front of. Once cut is named, the first connection to
+// send a query carrying that text is dropped before the query reaches the server, as a server
+// that drops the connection at that query would.
+const relayed = async () => {
+  const fake = jarl.unwrap(await FakePostgres.start());
+  cleanups.push(() => fake.stop());
+  const target = new URL(fake.url);
+  let cut: string | undefined;
+  const relay = net.createServer((client) => {
+    const upstream = net.connect(Number(target.port), target.hostname);
+    client.on("data", (chunk) => {
+      if (cut !== undefined && chunk.toString("latin1").includes(cut)) {
+        cut = undefined;
+        client.destroy();
+        upstream.destroy();
+        return;
+      }
+      upstream.write(chunk);
+    });
+    upstream.on("data", (chunk) => client.write(chunk));
+    client.on("error", () => undefined);
+    upstream.on("error", () => undefined);
+    client.on("close", () => upstream.destroy());
+    upstream.on("close", () => client.destroy());
+  });
+  await new Promise<void>((listening) => relay.listen(0, "127.0.0.1", listening));
+  cleanups.push(() => new Promise((closed) => relay.close(closed)));
+  const address = relay.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the relay has no port");
+  }
+  const db = await created(`postgres://postgres@127.0.0.1:${String(address.port)}/postgres`);
+  jarl.unwrap(await selectOne(db));
+  return {
+    db,
+    cutAt: (text: string) => {
+      cut = text;
+    },
+  };
+};
+
+const transact = (db: Db.Database) =>
+  db.run((d) => d.transaction(async (tx) => (await tx.execute(sql`select 42 as answer`)).rows));
+
+// A close that never settles is the leak: a connection the pool handed out and never got back.
+const closedWithin = (db: Db.Database, ms: number) =>
+  Promise.race([
+    db.close().then(() => "closed"),
+    new Promise((hung) => setTimeout(() => hung("still open"), ms)),
+  ]);
+
 describe("the database", () => {
   it("is built at once and answers its queries (happy)", async () => {
     const fake = jarl.unwrap(await FakePostgres.start());
@@ -87,6 +139,36 @@ describe("the database", () => {
 
     expect(jarl.error.is(await selectOne(db), Db.DatabaseError)).toBe(true);
     expect(jarl.error.is(await db.close(), Db.DatabaseError)).toBe(true);
+  });
+});
+
+describe("a transaction whose connection the server drops", () => {
+  it("at its begin is a DatabaseError naming the drop, gives its connection back, and the pool goes on and closes (unhappy)", async () => {
+    const { db, cutAt } = await relayed();
+    cutAt("begin");
+
+    const answered = await transact(db);
+
+    if (!jarl.error.is(answered, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(answered.error.message).toMatch(/begin.*Connection terminated unexpectedly/s);
+    expect(jarl.unwrap(await selectOne(db))).toEqual([{ one: 1 }]);
+    expect(await closedWithin(db, 2_000)).toBe("closed");
+  });
+
+  it("inside its work is a DatabaseError naming the query that failed, not its rollback, and the pool goes on and closes (unhappy)", async () => {
+    const { db, cutAt } = await relayed();
+    cutAt("select 42");
+
+    const answered = await transact(db);
+
+    if (!jarl.error.is(answered, Db.DatabaseError)) {
+      throw new Error("expected a DatabaseError");
+    }
+    expect(answered.error.message).toMatch(/select 42.*Connection terminated unexpectedly/s);
+    expect(jarl.unwrap(await selectOne(db))).toEqual([{ one: 1 }]);
+    expect(await closedWithin(db, 2_000)).toBe("closed");
   });
 });
 

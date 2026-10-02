@@ -62,6 +62,45 @@ const connectionString = (url: Env.Secret): string => {
   return parsed.toString();
 };
 
+type Transaction = Parameters<Parameters<Drizzle["transaction"]>[0]>[0];
+
+// drizzle's own transaction on a pool sends begin before its try, so a connection dropped at
+// begin is never given back and the pool's close never settles; and a client the pool has handed
+// out has no listener for its error event, so a drop is thrown out of the process. Each
+// transaction here runs on a client of its own: it is listened to while out, destroyed rather
+// than given back unless the transaction committed or rolled back, and a failure is the first
+// error, not its rollback's.
+const transactionOn =
+  (pool: Pool): Drizzle["transaction"] =>
+  async <T>(
+    work: (tx: Transaction) => Promise<T>,
+    config?: Parameters<Drizzle["transaction"]>[1],
+  ): Promise<T> => {
+    const client = await pool.connect();
+    const ignore = () => undefined;
+    client.on("error", ignore);
+    let failure: { readonly thrown: unknown } | undefined;
+    let settled = false;
+    try {
+      const result = await drizzle({ client, schema: Schema }).transaction(async (tx) => {
+        try {
+          return await work(tx);
+        } catch (thrown) {
+          failure = { thrown };
+          throw thrown;
+        }
+      }, config);
+      settled = true;
+      return result;
+    } catch (thrown) {
+      settled = failure !== undefined && failure.thrown === thrown;
+      throw failure === undefined ? thrown : failure.thrown;
+    } finally {
+      client.off("error", ignore);
+      client.release(!settled);
+    }
+  };
+
 // Nothing connects until the first query.
 export const create = App.createService<never, Options, Database>((_, { url }) => {
   const pool = new Pool({ connectionString: connectionString(url) });
@@ -72,6 +111,7 @@ export const create = App.createService<never, Options, Database>((_, { url }) =
     }
   });
   const db = drizzle({ client: pool, schema: Schema });
+  db.transaction = transactionOn(pool);
   return {
     service: "db",
     run: (query) => jarl.exec(() => query(db), failed),

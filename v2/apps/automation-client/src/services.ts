@@ -30,12 +30,12 @@ export type World = App.Needs<App.Made<Http.Http> | App.Made<Fleet.Usage.Usage>>
   readonly host: Fleet.Host.Source;
 };
 
-const live = (): World => ({
+const live = (config: Pick<Env.Config, "httpTimeout">): World => ({
   terminal: {
     write: (line) => process.stdout.write(`${line}\n`),
     colors: process.stdout.isTTY,
   },
-  http: Http.create({}),
+  http: Http.create({}, { timeoutMs: config.httpTimeout }),
   host: Fleet.Host.osSource,
   usage: Fleet.Usage.forThisProcess(),
 });
@@ -43,8 +43,11 @@ const live = (): World => ({
 // Every line is printed and stored in the logs table; an error or fatal line, and a line that
 // could not be stored, also go to the project's Sentry.
 export const createServices = (
-  env: { readonly vars: { readonly databaseUrl: Env.Secret } },
-  world: World = live(),
+  env: {
+    readonly vars: { readonly databaseUrl: Env.Secret };
+    readonly config: Pick<Env.Config, "httpTimeout">;
+  },
+  world: World = live(env.config),
 ) => {
   const { terminal, http, usage } = world;
   const sentry = Sentry.create({ http }, { dsn: Sentry.DSN, environment: Sentry.ENVIRONMENT });

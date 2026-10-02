@@ -7,6 +7,7 @@ import {
   AtCapacity,
   ReserveFailed,
   RunFailed,
+  RunTimedOut,
   SetupNeeded,
   routes,
 } from "../src/routes.ts";
@@ -209,6 +210,19 @@ describe("the automation client's routes", () => {
 
     expect(answer.status).toBe(500);
     expect(await answer.json()).toEqual({ error: "driver exited 1: OpenRouterUnreachable" });
+  });
+
+  it("answer a run that hit its ceiling 504, naming it (unhappy)", async () => {
+    const at = handedTo(
+      sessions({
+        run: async () => jarl.err(new RunTimedOut("driver timed out: run ceiling of 60000 ms")),
+      }).sessions,
+    );
+
+    const answer = await at.run.$post({ json: RUN });
+
+    expect(answer.status).toBe(504);
+    expect(await answer.json()).toEqual({ error: "driver timed out: run ceiling of 60000 ms" });
   });
 
   it("answer an abort of a job they do not hold 404, job not found (unhappy)", async () => {

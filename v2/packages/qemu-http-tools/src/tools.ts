@@ -4,13 +4,9 @@ import * as z from "zod";
 import * as Errors from "./errors.ts";
 import type * as Types from "./types.ts";
 
-// What a tool acts on: the guest's screen, keys and mouse. Start, intents, stop and save are the
-// harness's, and no tool reaches them.
-export type Calls = Pick<Types.QemuHttpTools, "image" | "serial" | "sendKeys" | "mouse">;
-
 type Tool = {
   readonly definition: OpenRouter.Tool;
-  readonly run: (calls: Calls, args: unknown) => Types.Answer<Types.Ran, Types.RunFailure>;
+  readonly run: (calls: Types.Calls, args: unknown) => Types.Answer<Types.Ran, Types.RunFailure>;
 };
 
 const x = z.number().min(0).max(1).describe("From the left edge of the screenshot, 0 to 1");
@@ -32,7 +28,7 @@ const tool = <S extends z.ZodType>(
   name: string,
   description: string,
   schema: S,
-  act: (calls: Calls, args: z.output<S>) => Types.Answer<Types.Ran, Types.RunFailure>,
+  act: (calls: Types.Calls, args: z.output<S>) => Types.Answer<Types.Ran, Types.RunFailure>,
 ): Tool => {
   // Some providers refuse a $schema inside a tool's parameters.
   const parameters = Object.fromEntries(
@@ -202,7 +198,7 @@ const BY_NAME = new Map(TOOLS.map((one) => [one.definition.function.name, one]))
 export const definitions: ReadonlyArray<OpenRouter.Tool> = TOOLS.map((one) => one.definition);
 
 export const run = (
-  calls: Calls,
+  calls: Types.Calls,
   name: string,
   args: unknown,
 ): Types.Answer<Types.Ran, Types.RunFailure> => {

@@ -1,8 +1,9 @@
-// Fakes for tests: a driveHarness made over a fake tests store, guest and model, so a test scripts
-// what the job, the guest and the model answer and reads every call the harness made.
+// Fakes for tests: the harness's services, with the guest behind a fake http, so a test scripts
+// what the job, the guest and the model answer and reads every request the guest was sent.
 import * as App from "@oligarchy/app";
+import type * as Http from "@oligarchy/http";
+import * as Fake from "@oligarchy/http/testing";
 import type * as OpenRouter from "@oligarchy/openrouter";
-import type * as Qemu from "@oligarchy/qemu-http-tools";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
 import * as DriveHarness from "./main.ts";
@@ -18,6 +19,8 @@ export const INSTRUCTION = [
   "</ActionList>",
 ].join("\n");
 export const RUN = "00000000-0000-4000-8000-000000000002";
+export const SERVER_URL = "http://proxy:42069";
+export const TOKEN = "oligarchy-s3cret";
 
 export const details = (
   action: Stores.Tests.JobAction,
@@ -39,7 +42,7 @@ export const details = (
     suiteId: null,
     definitionId: 1,
     iso: "https://iso.example/test.iso",
-    serverUrl: "http://proxy:42069",
+    serverUrl: SERVER_URL,
     model: null,
     status: "pending",
     reason: null,
@@ -64,58 +67,70 @@ const unused = (): never => {
   throw new Error("unexpected call");
 };
 
-export const SEND_KEYS: OpenRouter.Tool = {
-  type: "function",
-  function: {
-    name: "send_keys",
-    description: "Type into the guest.",
-    parameters: {
-      type: "object",
-      properties: { keys: { type: "string", minLength: 1 } },
-      required: ["keys"],
-      additionalProperties: false,
-    },
-  },
+export const screen = (): Response =>
+  new Response(SCREEN, { headers: { "Content-Type": "image/png" } });
+
+export const OK = Fake.json({});
+
+// A path the guest answers 409 on, with the proxy's message.
+export const conflict = (message: string): Response => Fake.status(409, message);
+
+// Every request the guest was sent, in order, as its path and the fields beside the job.
+export type Call = readonly [string] | readonly [string, Readonly<Record<string, unknown>>];
+
+const callOf = (asked: Fake.Asked): Call => {
+  const path = new URL(asked.url).pathname.slice(1);
+  const body: Readonly<Record<string, unknown>> =
+    typeof asked.body === "object" && asked.body !== null ? { ...asked.body } : {};
+  const fields = Object.fromEntries(Object.entries(body).filter(([key]) => key !== "job"));
+  return Object.keys(fields).length === 0 ? [path] : [path, fields];
 };
 
-type Guest = Pick<
-  Qemu.QemuHttpTools,
-  "start" | "image" | "intentStart" | "intentEnd" | "stop" | "save" | "run"
->;
-
-const ok = async () => jarl.ok(undefined);
-
-// Every call the harness makes on the guest, in order, as [name, ...arguments].
-export type Call = readonly [string, ...ReadonlyArray<unknown>];
+export type Services = App.Needs<Stores.Tests.Tests | OpenRouter.OpenRouter | Http.Http>;
 
 export type World = {
-  readonly calls: Array<Call>;
-  readonly requests: Array<OpenRouter.Request>;
-  readonly driveHarness: App.Made<DriveHarness.DriveHarness>;
+  readonly calls: ReadonlyArray<Call>;
+  readonly asked: ReadonlyArray<Fake.Asked>;
+  readonly requests: ReadonlyArray<OpenRouter.Request>;
+  readonly services: Services;
+  readonly driveHarness: DriveHarness.DriveHarness;
 };
 
 type Answered = jarl.Result<OpenRouter.Turn, OpenRouter.Failure>;
 
-// Each guest call answers what `guest` scripts, and ok otherwise. The model answers `turns` in
-// order, a function one when it is asked; asking past the last throws.
+// The guest answers each path what `guest` scripts: one reply, or a list in order whose last
+// answers every request after it. An image is SCREEN and anything else ok otherwise. The model
+// answers `turns` in order, a function one when it is asked; asking past the last throws.
 export const world = (
   script: {
     readonly getJobDetails?: Stores.Tests.Tests["getJobDetails"];
-    readonly guest?: Partial<Guest>;
+    readonly guest?: Readonly<Record<string, Fake.Reply | ReadonlyArray<Fake.Reply>>>;
     readonly turns?: ReadonlyArray<Answered | (() => Answered)>;
     readonly recentActions?: number;
+    readonly signal?: AbortSignal;
   } = {},
 ): World => {
   const calls: Array<Call> = [];
   const requests: Array<OpenRouter.Request> = [];
   const turns = [...(script.turns ?? [])];
-  const guest = script.guest ?? {};
-  const recorded =
-    <A extends ReadonlyArray<unknown>, R>(name: string, act: (...args: A) => R) =>
-    (...args: A): R => {
-      calls.push([name, ...args]);
-      return act(...args);
-    };
+  const answered = new Map<string, number>();
+
+  const reply = (asked: Fake.Asked): Fake.Reply => {
+    const call = callOf(asked);
+    calls.push(call);
+    const [path] = call;
+    const scripted = script.guest?.[path];
+    if (scripted === undefined) {
+      return path === "image" ? screen() : OK;
+    }
+    if (typeof scripted === "string" || scripted instanceof Response) {
+      return scripted;
+    }
+    const at = answered.get(path) ?? 0;
+    answered.set(path, at + 1);
+    return scripted[Math.min(at, scripted.length - 1)] ?? OK;
+  };
+  const fake = Fake.http({ replies: reply });
 
   const tests = App.createService<never, App.NoOptions, Stores.Tests.Tests>(() => ({
     service: "tests",
@@ -139,6 +154,7 @@ export const world = (
     startRun: unused,
     completeRun: unused,
     errorRun: unused,
+    timeoutRun: unused,
     abortRun: unused,
     createJob: unused,
     getJob: unused,
@@ -153,31 +169,6 @@ export const world = (
     abortJob: unused,
   }))({});
 
-  const qemuHttpTools = App.createService<never, App.NoOptions, Qemu.QemuHttpTools>(() => ({
-    service: "qemuHttpTools",
-    start: recorded("start", guest.start ?? ok),
-    image: recorded("image", guest.image ?? (async () => jarl.ok(SCREEN))),
-    serial: unused,
-    sendKeys: unused,
-    mouse: {
-      at: unused,
-      move: unused,
-      nudge: unused,
-      click: unused,
-      doubleClick: unused,
-      drag: unused,
-      scroll: unused,
-      hold: unused,
-      release: unused,
-    },
-    intentStart: recorded("intentStart", guest.intentStart ?? ok),
-    intentEnd: recorded("intentEnd", guest.intentEnd ?? ok),
-    stop: recorded("stop", guest.stop ?? ok),
-    save: recorded("save", guest.save ?? ok),
-    tools: [SEND_KEYS],
-    run: recorded("run", guest.run ?? (async () => jarl.ok({ text: "sent the keys" }))),
-  }))({});
-
   const openRouter = App.createService<never, App.NoOptions, OpenRouter.OpenRouter>(() => ({
     service: "openRouter",
     complete: async (request) => {
@@ -190,11 +181,20 @@ export const world = (
     },
   }))({});
 
+  const services = { tests, openRouter, http: fake.http };
   const driveHarness = DriveHarness.create(
-    { tests, qemuHttpTools, openRouter },
-    { recentActions: script.recentActions ?? 10 },
+    services,
+    script.signal ?? new AbortController().signal,
+    {
+      recentActions: script.recentActions ?? 10,
+      job: JOB,
+      baseUrl: SERVER_URL,
+      token: { reveal: () => TOKEN },
+      startTimeoutMs: 90_000,
+      saveTimeoutMs: 30_000,
+    },
   );
-  return { calls, requests, driveHarness };
+  return { calls, asked: fake.asked, requests, services, driveHarness };
 };
 
 // One tool call, with the model's text beside it.

@@ -105,7 +105,8 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
 - [x] **qemu-http-tools** (`v2/packages/qemu-http-tools`). V1: `src/harness/tools.ts`,
       `src/harness/intent.ts`, `src/harness/pointer.ts` and `src/driver/client.ts`, over
       `packages/http/src/proxy-client.ts`. Controlling one job's qemu guest over HTTP for the AI's
-      tools. `create({ http }, { job, baseUrl, token, signal })` names the job once; every call
+      tools. Not a service: `create({ http }, signal, { job, baseUrl, token })` builds one job's
+      `QemuHttpTools`, a class the package does not export, and names the job once; every call
       carries it, and `OLIGARCHY_TOKEN` as the bearer, on `@oligarchy/http` to the qemu reverse
       proxy. The harness's calls are `start`, `intentStart`, `intentEnd`, `stop` and `save`. The
       guest's are `image` (the PNG's bytes, through `@oligarchy/http`'s `read: "bytes"`),
@@ -118,7 +119,9 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
       arguments before `run`. Nothing is asked again: every error comes back in the result,
       `@oligarchy/http`'s own and `GuestOff` (a 409 from the screen, keys or mouse), `IntentOpen`
       (from intent start), `NotPoweredOff` (from save), `NoPointer` and `ToolInvalid`. `start`
-      waits 45 minutes and `save` 5; the run's signal aborts every call but `stop`. The proxy's
+      waits `driver.guest.startTimeout` and `save` `driver.guest.saveTimeout` from
+      `v2/oligarchy.json`, and every other call `httpTimeout`; the run's signal aborts every
+      call but `stop`. The proxy's
       other calls go with the apps that make them: the automation client's reserve and
       relinquish, `ctrl setup`'s setup disks and viz's follow.
 
@@ -235,10 +238,14 @@ record, and the automation server acts on it directly.
       `prompts/custom-harness-driving-agent.html`, and lists the model's tools where V1 pastes in
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
-      `@oligarchy/drive-harness` is the `driveHarness` service: its `create({ tests,
-      qemuHttpTools, openRouter }, { recentActions })` builds a `DriveHarness`, the class, over
-      the job's `qemuHttpTools`, with `harness.recentActions` from `v2/oligarchy.json` (10).
-      `@oligarchy/drive-harness/testing` makes one over a fake tests store, guest and model. It holds one
+      `@oligarchy/drive-harness` is not a service: its `create({ tests, openRouter, http },
+      signal, { job, baseUrl, token, recentActions, startTimeoutMs, saveTimeoutMs })` builds a
+      `DriveHarness`, a class the package does not export, which builds the job's
+      `QemuHttpTools` over `http` itself, with `driver.harness.recentActions` (10) and
+      `driver.guest` from `v2/oligarchy.json`. The signal ends every guest call but
+      the stop, and every ask. `@oligarchy/drive-harness/testing` makes the services a test hands
+      it, a fake tests store, a fake model, and a fake `http` the guest answers through, and
+      records every request the guest was sent. It holds one
       drive or setup's state: the loaded job, every step opened with all its actions, the
       model's last response, the previous move and the screen. Its methods are the points the
       driver's loop calls:
@@ -249,7 +256,7 @@ record, and the automation server acts on it directly.
         the job before it calls anything else, and nothing in the harness checks that it did.
       - `start()` boots that ISO.
       - `getImage()` takes the guest's screen for the next ask.
-      - `ask({ model, reasoning, deadline, signal? })` renders the driving prompt and answers
+      - `ask({ model, reasoning, deadline })` renders the driving prompt and answers
         the model's turn. The prompt shows the open step's intent and its newest actions,
         newest first, `recentActions` lines in all; earlier steps stay in the harness. The
         model gets the guest's tools, each taking `step` and `reason` beside its own arguments,
@@ -268,9 +275,11 @@ record, and the automation server acts on it directly.
 - [x] **Close a drive or setup** (the automation server's `src/close.ts`). `completeJob` when the
       driver ran to its end, then queue a diagnose job on the same test run; `errorJob` with the
       reason when the system failed it, which queues no diagnose and leaves its test run running
-      for Try again. A run its client answers `aborted` is `abortJob`ed, unless an operator's
-      abort closed the job first, which stands. A write that fails stops the close where it is,
-      with one error line.
+      for Try again. A run its client answers timed out (504), a drive, setup or diagnose, is
+      `timeoutJob`ed with the reason, its test run `timeoutRun`s, nothing is queued, and its
+      suite closes once none of its runs is open; a warning under the job says so. A run its
+      client answers `aborted` is `abortJob`ed, unless an operator's abort closed the job first,
+      which stands. A write that fails stops the close where it is, with one error line.
 - [x] **Diagnose.** A diagnose judges the newest completed drive or setup on its test run; one
       with none to judge can never run, so dispatch `abortJob`s it saying so. Its `/run` carries
       the diagnosing prompt (`src/diagnose-prompt.ts`), which names that job and its model and
@@ -281,10 +290,22 @@ record, and the automation server acts on it directly.
       `completeSuite`s once none of its runs is pending or running: passed when every run
       passed. Two runs closing at once can each find the suite done; the second completion is
       refused and says nothing. A diagnose whose agent recorded no verdict is `errorJob`ed, and
-      the job it judged and its run stay open for Try again.
-- [ ] **Abort.** By job id or by suite id, from `ctrl`, the dashboard and the automation server's
-      `/abort`. A pending job is `abortJob`ed; a running one is stopped at its automation client
-      first.
+      the job it judged and its run stay open for Try again. A diagnose that timed out times its
+      run out, as any job does, and the job it judged stays completed.
+- [x] **Abort.** By job id or by suite id, through the automation server's `/abort`
+      (`src/abort.ts`); ctrl does not abort, and who calls it (the dashboard, a V2 tool) is
+      open. Every write says `aborted by an operator`. A pending job is `abortJob`ed. A running
+      one is stopped at its automation client first, with `/abort` and
+      `automationServer.abortTimeout` as its deadline (longer than the client's kill and
+      stderr graces together, and than `httpTimeout`; the config refuses a shorter one),
+      then `abortJob`ed: a client that cannot be reached leaves it running and the abort fails;
+      one that is forgotten, or answers `not-held`, had nothing to stop, which is a warning
+      under the job. While its client stops it, the job's run answers `aborted`, and that close
+      leaves the job to the abort. A job that ended while it was being stopped has nothing to
+      abort and closes as it would have. A job's run is aborted with it, and the run's suite
+      closes once none of its runs is open. A suite has each open run's job aborted, and each
+      run with it, all at once; when one fails, the rest still go, the first failure is the
+      answer, and the suite stays open. Otherwise the suite is aborted.
 - [ ] **Restart and shutdown.** At startup, each job the last automation server left running is
       stopped at its client and errored, except a drive or setup whose driver had already finished,
       which is closed as it would have been. At shutdown, each running job is stopped at its client
@@ -415,11 +436,13 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             required `--port` through `@hono/node-server`. `main` listens before anything else starts: the started line names
             the address, and a port that cannot be bound is a fatal line and exit 1. On a signal
             the listener closes before `shutdown`.
-      - [ ] **`/abort`** (section 3's Abort), by job id or by suite id. The route and its contract
-            are in: a body of `{ jobId }` or `{ suiteId }`, each a uuid, never both, since a job
-            filed on its own has no suite; anything else is 400 `name a jobId or a suiteId`, and
-            the typed client refuses it too. Until this task it answers 501 `abort is not written
-            yet`.
+      - [x] **`/abort`** (section 3's Abort), by job id or by suite id. A body of `{ jobId }` or
+            `{ suiteId }`, each a uuid, never both, since a job filed on its own has no suite;
+            anything else is 400 `name a jobId or a suiteId`, and the typed client refuses it
+            too. It answers 200 `{}` once the abort is written, 404 for a job or suite it does not
+            know, 409 for one already ended, 502 when a running job's client could not stop it,
+            and 500 for a database error; each refusal is `{ error }` naming why. On a signal,
+            the aborts it has taken finish writing before `shutdown`.
 - [ ] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
       shutdown against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a
       diagnose (`run.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
@@ -439,8 +462,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             - `/abort`: `{ jobId }`.
 
             Handed its function, a route answers what it says: a reserve `reserved` is 200,
-            `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409 and a
-            `RunFailed` 500 naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
+            `at-capacity` 503 and `setup-needed` 409; a run `ended` is 200, `aborted` 409, a
+            `RunTimedOut` 504 and a `RunFailed` 500, each naming why; an abort `stopped` is 200 and `not-held` 404. `./testing`
             fakes `Sessions`. The tasks below write the functions.
       - [x] **Announce.** A required `--name` and a required `--url`: a client the automation
             server cannot reach is no client, so one with no `--url` refuses to start (V1's was
@@ -454,7 +477,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             and for a drive or setup a guest reserved first at the qemu reverse proxy at a
             required `--server-url` (or `SERVER_URL`), which has no default; a diagnose asks the
             proxy for nothing. At `--max-jobs`, or while another reserve is still asking the
-            proxy, it is `AtCapacity` (503) and the proxy is not asked. The reservation is
+            proxy, it is `AtCapacity` (503) and the proxy is not asked. A reserve waits
+            `automationClient.reserveTimeout` for the proxy. The reservation is
             `jobs.hold(jobId)`: a second hold of the job is `AlreadyHeld` (400), and one once
             shutdown has begun is `ShuttingDown` (503). The proxy's own refusals are
             `AtCapacity` (503) and `SetupNeeded` (409), errors naming what it said, each letting
@@ -474,19 +498,26 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             client expires it.
       - [x] **Run** (`src/run.ts`, over `src/child.ts`). Takes the job's reservation with `take`
             and spawns `v2/driver --job-id <id> --server-url <its --server-url>` for a drive or
-            setup (section 4's driver; exit 0 is ran to its end, 1 failed) or `opencode run
+            setup (section 4's driver; exit 0 is ran to its end, 124 timed out, 1 failed) or
+            `opencode run
             --auto --model openrouter/<models.diagnose> --variant <reasoning.diagnose> --
             <prompt>` in `v2` for a diagnose, and answers once it has ended: 200 when it ran to
-            its end, 409 when an abort ended it, 500 when it failed, naming the tail of its
-            stderr or its exit. `main` therefore also needs `OPENROUTER_API_KEY`, and hands
+            its end, 409 when an abort ended it, 504 when it timed out, 500 when it failed,
+            naming the tail of its stderr or its exit. `main` therefore also needs `OPENROUTER_API_KEY`, and hands
             `DATABASE_URL`, `OLIGARCHY_TOKEN` and `OPENROUTER_API_KEY` to every child, since one
             read from an `--env-file` is not in the child's environment. A job with no
             reservation, a diagnose with no prompt and a child that cannot be spawned are 500s.
-            When the held signal aborts, the child is sent SIGTERM, and SIGKILL after 5 seconds.
+            When the held signal aborts, the child is sent SIGTERM, and SIGKILL after
+            `automationClient.killGrace`; its stderr is drained for at most
+            `automationClient.stderrGrace` once it has exited.
             Only a child that kill reached answers 409; one that had already exited answers as it
-            ended. A diagnose has `runCeiling`, and the driver, which stops itself at that
-            ceiling, five minutes more to stop its guest; past it the child is killed and the run
-            is a 500. The run calls `release` once the child is reaped, whatever it answers.
+            ended. A diagnose has `diagnose.runCeiling`, and the driver, which stops itself at
+            `driver.runCeiling` and exits 124, `automationClient.driverGrace` more to stop its
+            guest; past it the child is killed. Either is a `RunTimedOut` (504); opencode exiting
+            124 is only a 500. opencode's OpenRouter stream waits `diagnose.headerTimeout` for its
+            headers and `diagnose.chunkTimeout` between chunks, handed to it as
+            `OPENCODE_CONFIG_CONTENT`. The run calls `release` once the child is reaped, whatever
+            it answers.
       - [x] **Abort.** `src/jobs.ts`, a plain module of the client's own and not a service, holds
             each job it has reserved or is running, in memory only, by an `AbortController`;
             `main` creates it and hands `jobs.abort` to the routes as their `Sessions` abort.
@@ -501,18 +532,23 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             close. From the moment shutdown begins, every hold is refused.
 - [x] **driver** (`v2/apps/driver`, V1: `src/driver`, `src/harness`). `v2/driver --job-id <id>
       --server-url <proxy>` (or `bun run driver`) needs `DATABASE_URL`, `OLIGARCHY_TOKEN` and
-      `OPENROUTER_API_KEY`, and drives one drive or setup job over the `driveHarness` service
-      it creates with its other services (section 3's The drive harness): the job's action picks its model and reasoning from
+      `OPENROUTER_API_KEY`, and drives one drive or setup job over the `DriveHarness` that
+      `drive(services, app.signal, options)` creates (section 3's The drive harness): the job's action picks its model and reasoning from
       `v2/oligarchy.json`, so there is no `--action`. Each turn is `getImage`, `ask` and `act`,
       until the model is done, the step limit or the run ceiling (the deadline of every ask;
       `OpenRouterOutOfTime` is that ceiling reached), or three replies in a row that were not a
       move it could make. A setup whose guest is off is done and saved; a drive's is failed. On
-      SIGINT or SIGTERM the guest is stopped aborted. It exits 0 when the drive ran to its end,
-      passed or failed, and 1 when the system failed it: the job would not load or start, or the
+      SIGINT or SIGTERM the guest is stopped aborted. At the run ceiling the drive ends
+      `timed_out`, its guest is stopped failed with the reason (a guest's stop has no timed
+      out), and it exits 124 (`src/exits.ts`, as timeout(1) exits), which its automation client
+      answers as timed out. It exits 0 when the drive ran to its end, passed or failed, and 1
+      when the system failed it: the job would not load or start, or the
       proxy or the model could not be reached. That failure is the failing step's own error,
       returned as it came, logged with itself as the cause so Sentry gets its stack, printed with
-      its stack, and the reason the guest is stopped with. The OpenRouter client has `timeouts.header` as its
-      timeout (`timeouts.chunk` means nothing without a stream) and three attempts. V1's
+      its stack, and the reason the guest is stopped with. The OpenRouter client has
+      `driver.askTimeout` as its timeout and three attempts, waiting
+      `driver.harness.defaultRetry` between them when OpenRouter names no wait. The step limit is
+      `driver.stepLimit`. V1's
       `--prompt` and `--debug-log` do not come over: the harness renders its own prompt, and
       every line goes to the logs table under the job id.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
@@ -526,9 +562,11 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
 
 ## 5. Cutover
 
-- [ ] **CI for V2.** CI lints and formats `v2/` but never runs its type checks or unit tests, and
-      the migration checks guard only `packages/db/drizzle`. Add V2's `check:types`, `test:unit`
-      and `db:check`, and the append-only and in-sync checks for `v2/packages/db/drizzle`.
+- [x] **CI for V2.** `.github/workflows/v2.yml` runs V2's `check:types` and `test:unit` from
+      `v2/` on every pull request and every push to master, and guards `v2/packages/db/drizzle`:
+      on a pull request, no migration already in master is modified or deleted, and `db:check`
+      passes and `db:generate` writes nothing new. Each package carries the types it builds
+      against, since a clean `v2/` install has no root `@types/node`.
 - [ ] **Docs and skills.** The root `AGENTS.md`, `client.md`, `ctrl.md`, `ctrl-linear.md`,
       `ctrl-diagnose.md`, `minted-disks.md`, `SUPER_RUN.md` and the skills in `.cursor/skills`
       describe V1 and its Linear board: a driving agent takes its task from a ticket, and a run is

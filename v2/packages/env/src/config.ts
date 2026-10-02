@@ -61,35 +61,80 @@ const File = z
     models: z.strictObject({ drive: ModelId, diagnose: ModelId, setup: ModelId }),
     reasoning: z.strictObject({ drive: Effort, diagnose: Effort, setup: Effort }),
     openRouterBaseUrl: z.string().refine(isHttpUrl, "must be an http or https url"),
-    timeouts: z.strictObject({ header: Duration, chunk: Duration }),
-    runCeiling: Duration,
-    stepLimit: z.int().min(1, "stepLimit must be at least 1"),
-    // recentActions: the lines of a step the driving prompt shows, its intent among them.
-    harness: z.strictObject({
-      defaultRetry: Duration,
-      recentActions: z.int().min(1, "recentActions must be at least 1"),
+    // Any HTTP call that names no deadline of its own.
+    httpTimeout: Duration,
+    // A drive's or setup's driver. askTimeout bounds each OpenRouter ask; recentActions is the
+    // lines of a step the driving prompt shows, its intent among them. A guest's first start
+    // downloads its ISO before it answers, and a save gives it time to power off.
+    driver: z.strictObject({
+      runCeiling: Duration,
+      stepLimit: z.int().min(1, "stepLimit must be at least 1"),
+      askTimeout: Duration,
+      harness: z.strictObject({
+        defaultRetry: Duration,
+        recentActions: z.int().min(1, "recentActions must be at least 1"),
+      }),
+      guest: z.strictObject({ startTimeout: Duration, saveTimeout: Duration }),
     }),
+    // A diagnose's opencode: killed at runCeiling, and an OpenRouter stream with no first byte,
+    // or no next chunk, for its timeout is asked again.
+    diagnose: z.strictObject({
+      runCeiling: Duration,
+      headerTimeout: Duration,
+      chunkTimeout: Duration,
+    }),
+    // A driver is killed driverGrace past driver.runCeiling, the time it has to stop its guest.
+    // A kill is SIGTERM, then SIGKILL killGrace later; a child's stderr gets stderrGrace past its
+    // exit. reserveTimeout bounds asking the qemu reverse proxy for a guest.
+    automationClient: z.strictObject({
+      driverGrace: Duration,
+      killGrace: Duration,
+      stderrGrace: Duration,
+      reserveTimeout: Duration,
+    }),
+    // abortTimeout bounds a client's /abort, which answers once its job is let go.
     automationServer: z.strictObject({
       dispatchInterval: Duration,
       forgetInterval: Duration,
       forgetAfter: Duration,
+      abortTimeout: Duration,
     }),
   })
   .superRefine((config, ctx) => {
-    // Header before chunk before defaultRetry: the order the file writes them.
+    const { driver, diagnose, automationClient, automationServer } = config;
+    // In the order the file writes them.
     const waits = [
-      { path: ["timeouts", "header"], ms: config.timeouts.header },
-      { path: ["timeouts", "chunk"], ms: config.timeouts.chunk },
-      { path: ["harness", "defaultRetry"], ms: config.harness.defaultRetry },
-    ];
+      { path: ["driver", "askTimeout"], ms: driver.askTimeout, ceiling: "driver" },
+      {
+        path: ["driver", "harness", "defaultRetry"],
+        ms: driver.harness.defaultRetry,
+        ceiling: "driver",
+      },
+      { path: ["diagnose", "headerTimeout"], ms: diagnose.headerTimeout, ceiling: "diagnose" },
+      { path: ["diagnose", "chunkTimeout"], ms: diagnose.chunkTimeout, ceiling: "diagnose" },
+    ] as const;
     for (const wait of waits) {
-      if (wait.ms >= config.runCeiling) {
+      if (wait.ms >= config[wait.ceiling].runCeiling) {
         ctx.addIssue({
           code: "custom",
-          path: wait.path,
-          message: "must be shorter than runCeiling",
+          path: [...wait.path],
+          message: `must be shorter than ${wait.ceiling}.runCeiling`,
         });
       }
+    }
+    // A client's abort kills its child and drains its stderr, or gives a reserved guest back
+    // with one HTTP call, before it answers.
+    const stopping = Math.max(
+      automationClient.killGrace + automationClient.stderrGrace,
+      config.httpTimeout,
+    );
+    if (automationServer.abortTimeout <= stopping) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["automationServer", "abortTimeout"],
+        message:
+          "must be longer than automationClient.killGrace plus automationClient.stderrGrace, and than httpTimeout",
+      });
     }
   });
 

@@ -1,5 +1,4 @@
 import type * as Http from "@oligarchy/http";
-import type * as OpenRouter from "@oligarchy/openrouter";
 import type * as jarl from "jarl";
 import type * as Errors from "./errors.ts";
 
@@ -43,28 +42,11 @@ export type Ran = { readonly text: string; readonly image?: Uint8Array };
 
 export type RunFailure = Guest | Errors.NoPointer | Errors.ToolInvalid;
 
-// One job's guest, over the qemu reverse proxy. The harness's calls, the guest's screen, keys and
-// mouse, and the model's tools over them.
-export type QemuHttpTools = {
-  readonly service: "qemuHttpTools";
-  readonly start: (boot: {
-    readonly iso: string;
-    readonly resume: boolean;
-  }) => Answer<void, Http.HttpFailure>;
+// What a tool acts on: the guest's screen, keys and mouse. Start, intents, stop and save are the
+// harness's, and no tool reaches them.
+export type Calls = {
   readonly image: () => Answer<Uint8Array, Guest>;
   readonly serial: () => Answer<string, Http.HttpFailure>;
   readonly sendKeys: (keys: string) => Answer<void, Guest>;
   readonly mouse: Mouse;
-  readonly intentStart: (message: string) => Answer<void, Http.HttpFailure | Errors.IntentOpen>;
-  readonly intentEnd: () => Answer<void, Http.HttpFailure>;
-  // Not aborted by the run's signal: an aborted run still ends its guest.
-  readonly stop: (end: {
-    readonly status: StopStatus;
-    readonly reason?: string;
-  }) => Answer<void, Http.HttpFailure>;
-  readonly save: () => Answer<void, Http.HttpFailure | Errors.NotPoweredOff>;
-  readonly tools: ReadonlyArray<OpenRouter.Tool>;
-  // A tool call's own arguments, parsed; the caller's fields beside them are the caller's to take
-  // out first.
-  readonly run: (name: string, args: unknown) => Answer<Ran, RunFailure>;
 };

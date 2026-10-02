@@ -14,7 +14,12 @@ const NEVER = new AbortController().signal;
 
 const proxied = (replies: Fake.Options["replies"]) => {
   const fake = Fake.http({ replies });
-  const proxy = Proxy.create({ http: fake.http, url: PROXY, token: { reveal: () => TOKEN } });
+  const proxy = Proxy.create({
+    http: fake.http,
+    url: PROXY,
+    token: { reveal: () => TOKEN },
+    reserveTimeoutMs: 60_000,
+  });
   return { proxy, asked: fake.asked };
 };
 

@@ -2,7 +2,9 @@
   "name": "@oligarchy/driver",
   "private": true,
   "type": "module",
-  "exports": {},
+  "exports": {
+    "./exits": "./src/exits.ts"
+  },
   "scripts": {
     "start": "bun --no-env-file src/main.ts",
     "check:types": "tsc --noEmit -p tsconfig.json",
