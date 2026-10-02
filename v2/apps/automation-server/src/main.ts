@@ -20,8 +20,8 @@ const HOST = "127.0.0.1";
 const reasonOf = (signal: AbortSignal): string =>
   signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
 
-// The dispatch sub-app's main. It runs until the server is killed: a pass that moved a job to
-// running asks for the next at once, and any other waits the interval, which the kill ends at once.
+// The dispatch sub-app's main. It runs until the server is killed: once a job is started the next
+// is tried at once, and when none could be it waits the interval, which the kill ends at once.
 type DispatchWants =
   | Http.Http
   | Stores.Tests.Tests
@@ -37,7 +37,8 @@ const dispatch = async (sub: App.App<Run, DispatchWants>) => {
     signal: sub.signal,
   });
   while (!sub.signal.aborted) {
-    if (!(await dispatcher.pass())) {
+    const started = await dispatcher.startNextJob();
+    if (!started) {
       await Async.sleep(dispatchInterval, sub.signal);
     }
   }

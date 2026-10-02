@@ -290,20 +290,23 @@ bearer, and runs under `@oligarchy/app`.
             sessions. Open for Restart: a client whose host vanished mid-run leaves its `/run`
             waiting until the signal.
       - [x] **Dispatch: reserve** (section 3's Dispatch, up to the running write;
-            `src/dispatch.ts`). Each pass takes `nextPendingJob` and offers it to the live
-            automation clients in turn, starting after the one that took the last job. A drive's
-            reserve names its test run's ISO as `resume` only when its definition resumes; a
-            setup's names the server `setupRequests.serverForJob` gives; a diagnose's names
-            neither. At capacity or setup needed is no error line, and the next client is asked;
-            any other failure is an error line naming the client, and the next client is asked.
-            The first client to answer reserved has the job moved to running with `runJob`,
-            naming that client, and the next pass runs at once. A pass that placed nothing, found
-            no client or no job, or met a database error (one error line) waits
-            `dispatchInterval`. A `runJob` the job refuses, usually an abort that landed during
-            the reserve, gives the reservation back with the client's `/abort`. A setup whose lock
-            is gone (forgetting a qemu server takes its locks) can never be reserved, so it is
-            `abortJob`ed saying so, and the next pass runs at once. Open: setups head the queue,
-            so a setup no client can take holds back every drive behind it until it is placed.
+            `src/dispatch.ts`). The loop calls `startNextJob` again at once after it started a
+            job, and waits `dispatchInterval` when it could not. `startNextJob` takes
+            `nextPendingJob`, builds its `/reserve` body, and offers it to the live automation
+            clients in turn, starting after the one that took the last job. A drive's body names
+            its test run's ISO as `resume` only when its definition resumes; a setup's names the
+            qemu server whose setup lock it holds; a diagnose's names neither. Each client counts
+            its own jobs against its `--max-jobs`: the automation server never sees that number,
+            and a full client answers at-capacity. At capacity or setup needed is no error line,
+            and the next client is asked; any other failure is an error line naming the client,
+            and the next client is asked. The first client to answer reserved has the job moved
+            to running with `runJob`, naming that client. A `runJob` the job refuses, usually an
+            abort that landed during the reserve, gives the reservation back with the client's
+            `/abort`. A database error is one error line. A setup whose lock is gone, because its
+            qemu server restarted and cleared its locks (V1: `heartbeat.ts`'s `onJoin`), can
+            never be reserved, so it is `abortJob`ed saying so, as V1 errored it. Open: setups
+            head the queue, so a setup no client can take holds back every drive behind it until
+            it is placed.
       - [ ] **Dispatch: run.** Once the job is running, `/run` sends the prompt, without holding
             the next pass. Needs the prompt from section 3's The mission.
       - [ ] **Close** (section 3's Close a drive or setup, and Diagnose's finalize) once `/run`
