@@ -453,8 +453,9 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             reserve and its run, is held until it is aborted or the client restarts. V1 gave one
             back after ten minutes unused; decide whether Restart aborts it at the client, or the
             client expires it.
-      - [ ] **Run.** Takes the job's reservation with `take` and spawns `./driver` for a drive or
-            setup or opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
+      - [ ] **Run.** Takes the job's reservation with `take` and spawns `v2/driver --job-id
+            <id> --server-url <its --server-url>` for a drive or setup (section 4's driver; exit 0
+            is ran to its end, 1 failed) or opencode for a diagnose, and answers once it has ended: 200 when it ran to its end,
             409 when an abort ended it, 500 when it failed. It spawns on the held signal: when it
             aborts the child is sent SIGTERM, and SIGKILL after a grace (V1's was 5 seconds).
             Only a child that kill reached answers 409; one that had already exited answers as it
@@ -471,16 +472,20 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             connections but not a `/run` still under way, then `jobs.shutdown()` aborts every
             held job and waits until each is let go, before it says it stopped and the services
             close. From the moment shutdown begins, every hold is refused.
-- [ ] **driver and harness** (`src/driver`, `src/harness`). The model loop and its stop rule
-      (result closed, step limit, model stopped, run ceiling, bad replies in a row), over a
-      `DriveHarness` (section 3's The drive harness), which holds the tools, the pointer and
-      what the model has been shown, and each step's intent. It creates the OpenRouter client
-      with `timeouts.header` from
-      `v2/oligarchy.json` as its timeout (`timeouts.chunk` means nothing without a stream, but V1
-      still reads it) and a number of attempts, and hands `complete` the run's ceiling as the
-      deadline;
-      `OpenRouterOutOfTime` is that ceiling reached. Its tests need a fake of the OpenRouter
-      client, which `@oligarchy/openrouter` does not have yet.
+- [x] **driver** (`v2/apps/driver`, V1: `src/driver`, `src/harness`). `v2/driver --job-id <id>
+      --server-url <proxy>` (or `bun run driver`) needs `DATABASE_URL`, `OLIGARCHY_TOKEN` and
+      `OPENROUTER_API_KEY`, and drives one drive or setup job over a `DriveHarness` (section 3's
+      The drive harness): the job's action picks its model and reasoning from
+      `v2/oligarchy.json`, so there is no `--action`. Each turn is `getImage`, `ask` and `act`,
+      until the model is done, the step limit or the run ceiling (the deadline of every ask;
+      `OpenRouterOutOfTime` is that ceiling reached), or three replies in a row that were not a
+      move it could make. A setup whose guest is off is done and saved; a drive's is failed. On
+      SIGINT or SIGTERM the guest is stopped aborted. It exits 0 when the drive ran to its end,
+      passed or failed, and 1 when the system failed it: the job would not load or start, or the
+      proxy or the model could not be reached. The OpenRouter client has `timeouts.header` as its
+      timeout (`timeouts.chunk` means nothing without a stream) and three attempts. V1's
+      `--prompt` and `--debug-log` do not come over: the harness renders its own prompt, and
+      every line goes to the logs table under the job id.
 - [ ] **dashboard** (`apps/dashboard`). Already Hono. Its queries (`query.ts`) move onto the V2
       stores, the pages keyed by ticket (`/tickets/:ticket`) key by job id, and `@oligarchy/linear`
       and `@oligarchy/jobs` go. It runs on Cloudflare Workers with a `pg` client per request, while
