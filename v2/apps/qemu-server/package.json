@@ -1,0 +1,19 @@
+{
+  "name": "@oligarchy/qemu-server",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./routes": "./src/routes.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "catalog:",
+    "hono": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}
