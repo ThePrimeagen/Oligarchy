@@ -40,11 +40,17 @@ export const fake = (
   };
 };
 
-export const node = (): Io => ({
-  argv: process.argv.slice(2),
-  env: process.env,
+type NodeSource = Pick<Io, "argv" | "env"> & {
+  readonly readFile: (path: string, encoding: "utf8") => Promise<string>;
+};
+
+export const node = (
+  source: NodeSource = { argv: process.argv, env: process.env, readFile },
+): Io => ({
+  argv: source.argv.slice(2),
+  env: source.env,
   readFile: jarl.fn(
-    (path: string) => readFile(path, "utf8"),
+    (path: string) => source.readFile(path, "utf8"),
     (cause, path) =>
       isNotFound(cause) ? new Errors.FileMissing(path) : new Errors.FileUnreadable(path, cause),
   ),
