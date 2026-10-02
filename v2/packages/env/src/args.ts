@@ -144,6 +144,11 @@ export const action = flag({
   description: "drive or setup; the model is that action's in oligarchy.json",
 });
 
+export const jobId = flag({
+  schema: z.uuid({ error: "must be a uuid" }),
+  description: "The drive or setup job to drive; its definition, ISO and boot mode are the job's",
+});
+
 export const prompt = flag({ schema: words, description: "The user prompt" });
 
 export const debugLog = flag({
