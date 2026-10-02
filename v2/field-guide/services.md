@@ -80,31 +80,3 @@ export const createServices = (env: Env) => {
 app.onExit(() => closeServices(services));
 await app.run(services, onClose);
 ```
-
-| Problem | Fact |
-| --- | --- |
-| a create | `create(services, options)`. Two arguments, never one object. |
-| services type | `App.Needs<A \| B>`. Never written out, never `Pick<...>`. |
-| passing services | the object whole; never destructured and rebuilt |
-| `World` | what reaches outside the process but `db`; a test passes its own |
-| close order | `logger.flush`, `db.close`, `logger.flush`, `sentry.wait` |
-| signal for every call | in options: `{ job, baseUrl, token, signal }` |
-
-## Test
-
-| Problem | Fact |
-| --- | --- |
-| fake | `App.createService<never, App.NoOptions, S>(() => ({ service: "x", ... }))({})` |
-| methods not used | `unexpected` |
-| `http` | `FakeHttp.http({ replies })` from `@oligarchy/http/testing` |
-| `logger`, `sentry` | `@oligarchy/logger/testing`, `@oligarchy/sentry/testing` |
-| database | a real `@oligarchy/fake-postgres`, started and stopped in the test |
-
-## Breaks the guide today
-
-| Rule | Where |
-| --- | --- |
-| `create(services, options)` | `dispatch.ts`, `reserve.ts`, `proxy.ts`, `HttpClient.create` |
-| `App.Needs` | `automation-server/src/services.ts`, `Fleet.Member.Needs` |
-| inside our system goes through routes | `automation-client/src/proxy.ts`: raw `http.fetch` to QemuServer |
-| class, not a service | `driveHarness`, `qemuHttpTools`: still services |
