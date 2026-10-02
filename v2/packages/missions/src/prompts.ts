@@ -7,32 +7,35 @@ export const PromptError = jarl.error.define("PromptError");
 export type PromptError = InstanceType<typeof PromptError>;
 
 type Answer = jarl.Result<string, PromptError>;
-type Read = (url: URL) => Promise<Answer>;
 
-const read: Read = jarl.fn(
-  (url: URL) => readFile(url, "utf8"),
-  (cause, url) => {
-    const error = new PromptError(`prompt: ${url.pathname}: ${String(cause)}`);
-    error.cause = cause;
-    return error;
-  },
-);
+const messageOf = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
 
 const PLACEHOLDER = /\{\{([A-Z_]+)\}\}/g;
 
 // One replacement pass: placeholders in instructions, past reasons and model replies are data.
-const fill = (text: string, values: Readonly<Record<string, string>>): Answer => {
+const fill = (name: string, text: string, values: Readonly<Record<string, string>>): Answer => {
   let missing: string | undefined;
-  const filled = text.replace(PLACEHOLDER, (match: string, name: string) => {
-    if (values[name] === undefined) {
-      missing ??= name;
+  const filled = text.replace(PLACEHOLDER, (match: string, key: string) => {
+    if (values[key] === undefined) {
+      missing ??= key;
       return match;
     }
-    return values[name];
+    return values[key];
   });
   return missing === undefined
     ? jarl.ok(filled)
-    : jarl.err(new PromptError(`prompt uses {{${missing}}}, which has no value`));
+    : jarl.err(new PromptError(`prompt: ${name} uses {{${missing}}}, which has no value`));
+};
+
+// The harness's own tool: it ends the loop, so qemu-http-tools never runs it.
+const DONE: (typeof Qemu.tools)[number] = {
+  type: "function",
+  function: {
+    name: "Done",
+    description: "Finish the driving loop so the harness can save or stop the guest.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
 };
 
 const values = (mission: Mission) => ({
@@ -56,21 +59,32 @@ export type Turn = {
   };
 };
 
+const HARNESS = "custom-harness-driving-agent.html";
+
 // A module, not a long-lived service. Apps can provide their file IO; importing it reads nothing.
-export const create = (io: { readonly read: Read } = { read }) => {
-  const template = (name: string) => io.read(new URL(`../../../prompts/${name}`, import.meta.url));
+export const create = (
+  io: { readonly readFile: (url: URL, encoding: "utf8") => Promise<string> } = { readFile },
+) => {
+  const read = jarl.fn(
+    (url: URL) => io.readFile(url, "utf8"),
+    (cause, url) => {
+      const error = new PromptError(`prompt: ${url.pathname}: ${messageOf(cause)}`);
+      error.cause = cause;
+      return error;
+    },
+  );
+  const template = (name: string) => read(new URL(`../../../prompts/${name}`, import.meta.url));
   return {
     agent: async (mission: Mission, options: { readonly model: string }): Promise<Answer> => {
-      const source = await template(
-        mission.action === "diagnose" ? "diagnosing-agent.html" : "driving-agent.html",
-      );
+      const name = mission.action === "diagnose" ? "diagnosing-agent.html" : "driving-agent.html";
+      const source = await template(name);
       if (jarl.is_err(source)) {
         return source;
       }
-      return fill(jarl.value(source), { ...values(mission), MODEL: options.model });
+      return fill(name, jarl.value(source), { ...values(mission), MODEL: options.model });
     },
     harness: async (mission: Mission, turn: Turn): Promise<Answer> => {
-      const source = await template("custom-harness-driving-agent.html");
+      const source = await template(HARNESS);
       if (jarl.is_err(source)) {
         return source;
       }
@@ -81,12 +95,18 @@ export const create = (io: { readonly read: Read } = { read }) => {
       if (turn.previous === undefined) {
         text = text.replace(/\n*<previous-move>[\s\S]*?<\/previous-move>/, "");
       }
-      return fill(text, {
+      // A stripped section gets no value, so a section the strip missed fails fill.
+      return fill(HARNESS, text, {
         ...values(mission),
+        TOOLS: JSON.stringify([...Qemu.tools, DONE]),
         REASONS: turn.reasons,
-        RESPONSE: turn.response ?? "",
-        PREVIOUS_ACTION: turn.previous?.name ?? "",
-        PREVIOUS_VALUES: turn.previous === undefined ? "" : JSON.stringify(turn.previous.arguments),
+        ...(turn.response === undefined ? {} : { RESPONSE: turn.response }),
+        ...(turn.previous === undefined
+          ? {}
+          : {
+              PREVIOUS_ACTION: turn.previous.name,
+              PREVIOUS_VALUES: JSON.stringify(turn.previous.arguments),
+            }),
       });
     },
   };

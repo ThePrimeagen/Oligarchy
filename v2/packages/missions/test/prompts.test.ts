@@ -28,11 +28,12 @@ const contents = Object.fromEntries(
   ),
 );
 
+const tools = (prompt: string): unknown =>
+  JSON.parse(/<tools>([\s\S]*)<\/tools>/.exec(prompt)?.[1] ?? "");
+
 it("renders each mission and the native tool catalogue without reinterpreting inserted text", async () => {
-  const read = vi.fn(async (url: URL) =>
-    jarl.ok(contents[url.pathname.split("/").pop() ?? ""] ?? ""),
-  );
-  const prompts = Prompts.create({ read });
+  const readFile = vi.fn(async (url: URL) => contents[url.pathname.split("/").pop() ?? ""] ?? "");
+  const prompts = Prompts.create({ readFile });
   for (const action of ["drive", "setup", "diagnose"] as const) {
     const prompt = jarl.unwrap(
       await prompts.agent({ ...mission, action }, { model: "test-model" }),
@@ -53,8 +54,16 @@ it("renders each mission and the native tool catalogue without reinterpreting in
   expect(first).toContain("Type {{MODEL}}");
   expect(first).not.toContain("<last-response>");
   expect(first).not.toContain("<previous-move>");
-  expect(first).toContain(JSON.stringify(Qemu.tools));
-  expect(first).not.toContain('"name":"client"');
+  expect(tools(first)).toEqual([
+    ...Qemu.tools,
+    {
+      type: "function",
+      function: expect.objectContaining({
+        name: "Done",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+      }),
+    },
+  ]);
   const next = jarl.unwrap(
     await prompts.harness(mission, {
       reasons: "1. Unlock",
@@ -68,16 +77,28 @@ it("renders each mission and the native tool catalogue without reinterpreting in
 });
 
 it("refuses an unknown placeholder in the template", async () => {
-  const prompts = Prompts.create({ read: async () => jarl.ok("{{JOB_ID}} {{TYPO}}") });
+  const prompts = Prompts.create({ readFile: async () => "{{JOB_ID}} {{TYPO}}" });
   const result = await prompts.agent(mission, { model: "test-model" });
   expect(jarl.error.is(result, Prompts.PromptError)).toBe(true);
-  if (jarl.is_err(result)) expect(result.error.message).toContain("{{TYPO}}");
+  if (jarl.is_err(result)) {
+    expect(result.error.message).toBe(
+      "prompt: driving-agent.html uses {{TYPO}}, which has no value",
+    );
+  }
 });
 
-it.each(["ENOENT", "EACCES"])("returns a prompt read failure (%s)", async (code) => {
-  const error = new Prompts.PromptError(code);
-  const prompts = Prompts.create({ read: async () => jarl.err(error) });
+it("returns a PromptError naming the template it could not read", async () => {
+  const cause = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+  const prompts = Prompts.create({
+    readFile: async () => {
+      throw cause;
+    },
+  });
   const result = await prompts.agent(mission, { model: "test-model" });
   expect(jarl.error.is(result, Prompts.PromptError)).toBe(true);
-  if (jarl.is_err(result)) expect(result.error).toBe(error);
+  if (jarl.is_err(result)) {
+    const path = new URL("../../../prompts/driving-agent.html", import.meta.url).pathname;
+    expect(result.error.message).toBe(`prompt: ${path}: ENOENT: no such file or directory`);
+    expect(result.error.cause).toBe(cause);
+  }
 });
