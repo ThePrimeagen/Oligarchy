@@ -159,7 +159,7 @@ local function show_summary()
   end
 end
 
-local function show_list(message)
+local function show_list(message, selected)
   close_composer()
   conversation = nil
   local_view = false
@@ -171,7 +171,7 @@ local function show_list(message)
   local lines = {
     "Recent Cursor cloud jobs — " .. vim.fn.fnamemodify(root, ":t"),
     "",
-    "Enter: open    P: Push & Review    a: archive    r: refresh    q: close",
+    "Enter: open    P: Push & Review    D: toggle done    a: archive    r: refresh    q: close",
     "",
     "Local",
     "",
@@ -183,12 +183,16 @@ local function show_list(message)
     table.insert(lines, "")
   end
   if #agents == 0 then
-    table.insert(lines, "No recent cloud jobs for this project among the latest 10.")
+    table.insert(lines, "No recent cloud jobs for this project among the latest 4.")
   end
   for _, agent in ipairs(agents) do
     local line = #lines + 1
+    if agent == selected then
+      first_row = line
+    end
     rows[line], rows[line + 1] = agent, agent
-    table.insert(lines, agent.status .. "  " .. agent.name:gsub("[\r\n]", " "))
+    local marker = cache.read(agent.id).done and "[DONE] " or ""
+    table.insert(lines, agent.status .. "  " .. marker .. agent.name:gsub("[\r\n]", " "))
     table.insert(lines, "  " .. agent.id)
     table.insert(lines, "")
   end
@@ -243,8 +247,8 @@ local function show_conversation()
     end
   end
   local lines = {
-    conversation.name:gsub("[\r\n]", " "),
-    "J/K: next/previous  Enter/za: fold  r: refresh  a: abort",
+    (state.done and "[DONE] " or "") .. conversation.name:gsub("[\r\n]", " "),
+    "J/K: next/previous  Enter/za: fold  r: refresh  D: toggle done  a: abort",
     "i: prompt  Ctrl-Enter: send  P: Push & Review  g: PR  d: diff  Ctrl-b: jobs  q: close",
     "",
   }
@@ -645,6 +649,35 @@ function M.enter()
   end
 end
 
+function M.toggle_done()
+  if
+    vim.api.nvim_get_current_buf() ~= buffer
+    or local_view
+    or archiving
+    or close_popup
+    or action
+  then
+    return
+  end
+  local agent = conversation or rows[vim.api.nvim_win_get_cursor(0)[1]]
+  if not agent or agent == local_entry then
+    return
+  end
+  local saved = conversation and state or cache.read(agent.id)
+  local previous = saved.done
+  saved.done = not previous or nil
+  local err = cache.write(agent.id, saved)
+  if err then
+    saved.done = previous
+  end
+  if conversation then
+    action_status = err or ""
+    show_conversation()
+  else
+    show_list(err, agent)
+  end
+end
+
 function M.archive()
   if archiving or conversation or close_popup or action then
     return
@@ -728,6 +761,7 @@ function M.open()
     vim.bo[buffer].filetype = "oligarchy"
     vim.keymap.set("n", "<CR>", M.enter, { buffer = buffer, desc = "Open conversation" })
     vim.keymap.set("n", "P", M.push_review, { buffer = buffer, desc = "Push & Review" })
+    vim.keymap.set("n", "D", M.toggle_done, { buffer = buffer, desc = "Toggle job done" })
     vim.keymap.set("n", "<BS>", M.back, { buffer = buffer, desc = "Back to jobs" })
     vim.keymap.set("n", "<C-b>", M.back, { buffer = buffer, desc = "Back to jobs" })
     vim.keymap.set("n", "a", function()

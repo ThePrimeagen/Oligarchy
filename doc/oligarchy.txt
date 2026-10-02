@@ -56,6 +56,7 @@ Inside a conversation:
   zc / zo     Close / open that section.
   r           Refresh conversation and fetch the remote branch concurrently.
   a           Abort the running agent (stop execution, without archiving).
+  D           Toggle the job's saved [DONE] marker.
   g           Open the job's current GitHub pull request in your browser.
   d           Fetch that PR's diff into a fresh quickfix list, one entry per hunk.
   Ctrl-b / Backspace  Return to the cached job list (normal mode).
@@ -91,7 +92,12 @@ If the Cursor request times out after the push, check the jobs list before
 retrying: the job may already have started. No push or job creation is retried
 automatically. CURSOR_API_TOKEN and an HTTPS or SSH origin are required.
 
-Conversation history, drafts and collapsed-section state are saved under
+Press D on a cloud job in the list or inside its conversation to mark it done.
+[DONE] appears before its title in both views. Press D again to remove the
+marker. This is a local tracking label; the job's Cursor run status stays
+independent. The marker survives refreshes and reopening Neovim.
+
+Conversation history, drafts, done markers and collapsed-section state are saved under
 stdpath('cache')/oligarchy, separated by project and agent. Cache files are
 private (0600) and atomically replaced. They contain conversation text, not
 tokens. Cached history appears immediately; every entry and r still requests

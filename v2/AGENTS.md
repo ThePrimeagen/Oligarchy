@@ -25,3 +25,18 @@
    whose mapError keeps that error so the caller still gets it typed; or in a test, where the
    throw fails the test.
    Anywhere else, handle the error. `oligarchy/unwrap-inside-jarl-fn` lints it outside `test/`.
+9. Keep naming stable.  path /abort should call function abort which performs the abort sequence.
+10. An application should be created for any long running process that is expected to start at the
+    start and end when the end signal comes in (signal, exit, or error).
+    - Applications should, when dying, cause the rest of the system to die.
+11. Services should only be created when:
+    - they manipulate the database
+    - they are required by multiple apps and depend nothing or other services (sentry, logger, db)
+    - they make external calls
+    - they are the contract line for this application and the rest of the system
+12. create functions for long running should take in services and options and return the object of
+    functions.  Do not create one mega object.  create(services, {...}) allows type checking at the
+    service level easily.
+13. pass the services object.  never decompose it and reconstruct the services object.  The type
+    definition should narrow the services object to the ones that are needed and validate we are
+    crafting the right services object.

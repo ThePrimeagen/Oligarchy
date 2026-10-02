@@ -39,6 +39,7 @@ function M.new(root, directory)
       closed = closed,
       messages = valid and data.messages or nil,
       draft = type(data.draft) == "string" and data.draft or nil,
+      done = data.done == true or nil,
     }
   end
   function cache.write(id, data)
@@ -52,6 +53,7 @@ function M.new(root, directory)
         messages = data.messages,
         closed = data.closed,
         draft = data.draft,
+        done = data.done,
       })
       assert(vim.uv.fs_write(fd, bytes, 0) == #bytes)
       assert(vim.uv.fs_close(fd))
