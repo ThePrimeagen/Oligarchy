@@ -64,9 +64,14 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
       return [url, ClientRoutes.routes({ token: TOKEN, sessions: faked.sessions })];
     }),
   );
+  let enterHangingReserve: () => void = () => undefined;
+  const hangingReserveEntered = new Promise<void>((resolve) => {
+    enterHangingReserve = resolve;
+  });
   const http = Fake.http({
     replies: (asked) => {
       if (new URL(asked.url).origin === HANGING) {
+        enterHangingReserve();
         return "hang";
       }
       const routes = clients[new URL(asked.url).origin];
@@ -147,6 +152,7 @@ const dispatching = async (told: Told | ((tests: Stores.Tests.Tests) => Told) = 
     tests,
     setupRequests,
     dispatcher,
+    hangingReserveEntered,
     stop,
     live,
     clientId,
@@ -276,7 +282,7 @@ describe("starting the next job", () => {
     const { job } = await at.drive();
 
     const starting = at.dispatcher.startNextJob();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await at.hangingReserveEntered;
     at.stop();
 
     expect(await starting).toBe(false);
