@@ -1,0 +1,25 @@
+{
+  "name": "@oligarchy/missions",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/mission.ts",
+    "./prompts": "./src/prompts.ts"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/qemu-http-tools": "workspace:*",
+    "@oligarchy/stores": "workspace:*",
+    "jarl": "catalog:"
+  },
+  "devDependencies": {
+    "@oligarchy/db": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

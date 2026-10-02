@@ -230,11 +230,26 @@ record, and the automation server acts on it directly.
 - [ ] **The mission.** V1's driving and diagnosing prompts name only the agent's Linear ticket; the
       mission was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2
       the agent is its job id: the driver loads its mission with `tests.getJobDetails(jobId)`, and
-      `prompts/driving-agent.html` and `prompts/diagnosing-agent.html` take the job id where they
-      take `{{LINEAR_TICKET}}`. `prompts/custom-harness-driving-agent.html`, the driver's system
+      `v2/prompts/driving-agent.html` and `v2/prompts/diagnosing-agent.html` take the job id where
+      V1 takes `{{LINEAR_TICKET}}`. `v2/prompts/custom-harness-driving-agent.html`, the driver's system
       prompt, lists qemu-http-tools' tools where it pastes in `client.md` and describes its `client`
-      tool, and `prompts/driving-agent.html` names them where it names `./client`.
-      `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go.
+      tool, and `v2/prompts/driving-agent.html` names them where V1 names `./client`.
+      V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
+      The V2 implementation is `@oligarchy/missions`: `load(services, { jobId })` reads
+      `tests.getJobDetails` and returns the job and run IDs, action, pinned definition, ISO,
+      proxy URL and boot mode. Only a resuming drive resumes; setup always boots fresh.
+      `@oligarchy/missions/prompts` provides `create({ read })` (real file IO by default),
+      with `agent(mission, { model })` for dispatch and
+      `harness(mission, { reasons, response?, previous? })` for each model turn. Previous
+      actions are native tool names and argument objects. All replacements happen once, so
+      a definition or model reply containing `{{MODEL}}` stays literal text.
+      Its templates live in `v2/prompts/` and list the exported `qemu-http-tools.tools`
+      catalogue. Step, reason and Done belong to the driver; it must expose those alongside
+      the native tools and remove step and reason before `qemu-http-tools.run`.
+      Dispatch: run and the driver port wire these entrypoints into their execution paths.
+      The diagnosis prompt identifies its own job and run and requires a verdict against
+      the preceding drive or setup job; exact evidence commands wait for the V2 ctrl port.
+      V1's root templates and ticket bodies remain until V1 is retired.
 - [ ] **Close a drive or setup.** `completeJob` when the driver ran to its end, then queue a
       diagnose job on the same test run; `errorJob` with the reason when the system failed it.
 - [ ] **Diagnose.** The diagnosing agent writes its verdict against the drive's job with
