@@ -6,7 +6,7 @@
 // cell's p, the weighted point and the box the next round looks at), final.png (the screenshot with
 // every round's box and the point), sheet.png (each round's in beside its out, final.png below) and
 // result.json. Rounds and the rest come from oligarchy.json; a job's optional "locator" overrides any
-// of them for that job alone, as { "grid": 5 }.
+// of them for that job alone, as { "grid": 5, "rounds": ["highest", "pcenter", "pcenter"] }.
 import * as DecisionApi from "@oligarchy/decision-api";
 import * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
@@ -127,6 +127,7 @@ const sheet = async (out: string, rounds: number): Promise<void> => {
 };
 
 const summary = (round: Locator.Round) => ({
+  pick: round.pick,
   box: round.box,
   best: round.best,
   point: round.point,
@@ -149,7 +150,7 @@ const writeRounds = async (
     await writeFile(join(job.out, `round-${k + 1}-in.webp`), round.image.bytes);
     await writeFile(
       join(job.out, `round-${k + 1}-out.png`),
-      await roundOut(round, k + 1 < options.rounds ? next : null),
+      await roundOut(round, k + 1 < options.rounds.length ? next : null),
     );
   }
 };
@@ -200,7 +201,10 @@ const traceOne = async (
   const { error } = result;
   if ("round" in error) {
     await writeFile(join(job.out, "overview.webp"), error.overview.bytes);
-    await writeRounds(job, bytes, [error.round], { ...options, rounds: 1 });
+    await writeRounds(job, bytes, [error.round], {
+      ...options,
+      rounds: options.rounds.slice(0, 1),
+    });
     await writeFile(join(job.out, "final.png"), await finalOut(bytes, [error.round], null));
     await sheet(job.out, 1);
     await writeFile(
@@ -275,7 +279,7 @@ const run = async (): Promise<void> => {
   console.log(`${jobs.length} job(s)`);
   for (const job of jobs) {
     const jobOptions = { ...options, ...job.locator };
-    const shape = `${jobOptions.rounds} rounds of ${jobOptions.grid}x${jobOptions.grid}`;
+    const shape = `${jobOptions.grid}x${jobOptions.grid}, rounds ${jobOptions.rounds.join(" ")}`;
     console.log(`${job.out} (${shape}): ${await traceOne(decisionApi, jobOptions, job)}`);
   }
 };

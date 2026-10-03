@@ -5,9 +5,27 @@ import * as ScreenGrid from "@oligarchy/screen-grid";
 import * as jarl from "jarl";
 import * as Errors from "./errors.ts";
 import * as Geometry from "./geometry.ts";
-import type { CellAnswer, Failure, Locator, Location, Options, Request, Round } from "./types.ts";
+import type {
+  CellAnswer,
+  Failure,
+  Locator,
+  Location,
+  Options,
+  Pick,
+  Request,
+  Round,
+} from "./types.ts";
 
-export type { CellAnswer, Failure, Locator, Location, Options, Request, Round } from "./types.ts";
+export type {
+  CellAnswer,
+  Failure,
+  Locator,
+  Location,
+  Options,
+  Pick,
+  Request,
+  Round,
+} from "./types.ts";
 export { NotFound, notFound, QuestionInvalid } from "./errors.ts";
 
 declare module "@oligarchy/app" {
@@ -61,6 +79,7 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
       context: ScreenGrid.Image,
       box: ScreenGrid.Box,
       first: boolean,
+      pick: Pick,
       signal: AbortSignal,
     ): Promise<jarl.Result<Round, Failure>> => {
       const viewed = await ScreenGrid.gridImage(screen, {
@@ -107,20 +126,20 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
       return jarl.ok({
         box,
         image: view,
+        pick,
         cells,
         best: Math.max(...cells.map((cell) => cell.p)),
-        // Round one commits to its best cell, so weaker cells elsewhere on the screen cannot drag
-        // the next box off the target; later rounds look inside that box and weigh every cell.
-        point: first
-          ? Geometry.bestCentre(
-              cells.map((cell) => cell.box),
-              cells.map((cell) => cell.p),
-            )
-          : Geometry.weightedCentre(
-              cells.map((cell) => cell.box),
-              cells.map((cell) => cell.p),
-              options.power,
-            ),
+        point:
+          pick === "highest"
+            ? Geometry.bestCentre(
+                cells.map((cell) => cell.box),
+                cells.map((cell) => cell.p),
+              )
+            : Geometry.weightedCentre(
+                cells.map((cell) => cell.box),
+                cells.map((cell) => cell.p),
+                options.power,
+              ),
         inputTokens: decision.usage.inputTokens,
       });
     };
@@ -152,8 +171,8 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
       const context = jarl.value(pictured);
       const rounds: Round[] = [];
       let box: ScreenGrid.Box = { left: 0, top: 0, right: screen.width, bottom: screen.height };
-      for (let k = 0; k < options.rounds; k += 1) {
-        const looked = await round(request, screen, context, box, k === 0, signal);
+      for (const [k, pick] of options.rounds.entries()) {
+        const looked = await round(request, screen, context, box, k === 0, pick, signal);
         if (jarl.is_err(looked)) {
           return looked;
         }

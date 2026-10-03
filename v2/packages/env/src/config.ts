@@ -151,22 +151,24 @@ const File = z
       forgetAfter: Duration,
       abortTimeout: Duration,
     }),
-    // Finding where to click on a screenshot. Each of `rounds` asks Clef one noul per cell of a
-    // grid x grid view (64 questions at most) and the next round looks at a box boxScale x a cell
-    // around a point: round one's best cell's centre, every later round's p^power weighted centre
-    // of the cells, the last of which is clicked. A round-one best cell below
-    // threshold is not found. Each round sends two pictures: an overview, the whole screen shrunk to
-    // overviewScale of its size, and a grid image as wide as gridImageScale x the screen's width:
-    // round one's is the screen, later rounds' the box enlarged to that width. Clef sees about a
-    // megapixel at most, so neither is above 1. quality is both pictures' WebP quality. callTimeout
-    // bounds one Clef call; a busy, down or slow one is asked again up to retries times, retryWait
-    // apart.
+    // Finding where to click on a screenshot. rounds names each round, as deep as the search goes:
+    // each asks Clef one noul per cell of a grid x grid view (64 questions at most) and takes a
+    // point, "highest" the centre of its best cell and "pcenter" the p^power weighted centre of every
+    // cell. The next round looks at a box boxScale x a cell around that point; the last round's is
+    // clicked. A round-one best cell below threshold is not found. Each round sends two pictures: an
+    // overview, the whole screen shrunk to overviewScale of its size, and a grid image as wide as
+    // gridImageScale x the screen's width: round one's is the screen, later rounds' the box enlarged
+    // to that width. Clef sees about a megapixel at most, so neither is above 1. quality is both
+    // pictures' WebP quality. callTimeout bounds one Clef call; a busy, down or slow one is asked
+    // again up to retries times, retryWait apart.
     locator: z.strictObject({
       grid: z
         .int()
         .min(2, "grid must be at least 2")
         .max(8, "grid must be at most 8: 64 questions"),
-      rounds: z.int().min(1, "rounds must be at least 1"),
+      rounds: z
+        .array(z.enum(["highest", "pcenter"], 'a round is "highest" or "pcenter"'))
+        .min(1, "rounds must name at least one round"),
       power: z.number().positive("power must be greater than zero"),
       boxScale: z.number().min(1, "boxScale must be at least 1"),
       threshold: z.number().min(0).max(1, "threshold is a probability"),

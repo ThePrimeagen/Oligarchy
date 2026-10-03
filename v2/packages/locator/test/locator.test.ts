@@ -10,6 +10,7 @@ import {
   answering,
   CALL_TIMEOUT_MS,
   decisions,
+  OPTIONS,
   RETRIES,
   scoring,
   settle,
@@ -169,6 +170,32 @@ describe("locate", () => {
     expect(found.rounds.map((round) => round.image.box)).toEqual(
       found.rounds.map((round) => round.box),
     );
+  });
+
+  it("goes as many rounds deep as rounds names, each taking its own rule (pcenter then highest)", async () => {
+    const { locator, asked } = decisions(
+      [
+        scoring([
+          { B2: 1, C4: 0.9 },
+          { C3: 0.9, D3: 0.9, A1: 0.5 },
+        ]),
+      ],
+      { ...OPTIONS, rounds: ["pcenter", "highest"] },
+    );
+    const found = jarl.unwrap(
+      await settle(locator.locate({ screen: await screen(), question: QUESTION, task: TASK })),
+    );
+
+    // pcenter: B2's centre (480, 300) at weight 1 and C4's (800, 700) at 0.9^4.
+    const [first, second] = found.rounds;
+    expect(first?.point.x).toBeCloseTo((480 + 0.9 ** 4 * 800) / (1 + 0.9 ** 4), 9);
+    expect(first?.point.y).toBeCloseTo((300 + 0.9 ** 4 * 700) / (1 + 0.9 ** 4), 9);
+    // highest: C3 and D3 tie, so C3; its centre in 367-847 x 308-608 is (667, 495.5).
+    expect(second?.box).toEqual({ left: 367, top: 308, right: 847, bottom: 608 });
+    expect(second?.point).toEqual({ x: 667, y: 495.5 });
+    expect(found.pixel).toEqual({ x: 667, y: 495.5 });
+    expect(found.rounds.map((round) => round.pick)).toEqual(["pcenter", "highest"]);
+    expect(asked).toHaveLength(2);
   });
 
   it("returns NotFound with round one when its best cell is below the threshold, and asks no more (unhappy)", async () => {
