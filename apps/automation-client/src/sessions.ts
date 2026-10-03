@@ -3,6 +3,7 @@ import {
   Clock,
   Context,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Layer,
@@ -242,10 +243,6 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
       const diagnose = action === "diagnose";
       const bin = diagnose ? OpenCode.BIN : Driver.BIN;
       const env = diagnose ? OpenCode.ENV : {};
-      const ceiling = diagnose ? OpenCode.CEILING : Driver.CEILING;
-      const exceeded = diagnose
-        ? `opencode run exceeded ${OpenCode.CEILING}`
-        : `driver exceeded ${Driver.CEILING}`;
       return yield* Effect.scoped(
         Effect.gen(function* () {
           // The reservation is the run's first resource: consumed and its release registered
@@ -254,20 +251,24 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
           yield* Effect.acquireRelease(consume(ticket), () =>
             Ref.update(slots, (held) => ({ ...held, count: held.count - 1 })),
           );
+          const config = yield* Oligarchy.load.pipe(
+            Effect.mapError((error) =>
+              ApiErrors.RunFailed.make({ message: error.message, cause: error }),
+            ),
+          );
           const args = diagnose
-            ? yield* Oligarchy.load.pipe(
-                Effect.mapError((error) =>
-                  ApiErrors.RunFailed.make({ message: error.message, cause: error }),
-                ),
-                Effect.map((config) =>
-                  OpenCode.args(prompt, config.models.diagnose, config.reasoning.diagnose),
-                ),
-              )
+            ? OpenCode.args(prompt, config.models.diagnose, config.reasoning.diagnose)
             : Driver.args({
                 prompt,
                 agentId: ticket,
                 action: action === "mint" ? "mint" : "drive",
               });
+          const ceiling = diagnose
+            ? Duration.fromInputUnsafe(OpenCode.CEILING)
+            : Driver.ceiling(config.runCeiling);
+          const exceeded = diagnose
+            ? `opencode run exceeded ${OpenCode.CEILING}`
+            : `driver exceeded ${Duration.format(ceiling)}`;
           const handle = yield* Child.spawn(bin, args, env);
           const claimed = yield* Ref.modify(running, (map) =>
             map.has(ticket)
@@ -282,7 +283,16 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
               map.get(ticket) === handle ? mapWithout(map, ticket) : map,
             ).pipe(Effect.andThen(Ref.update(aborts, (map) => mapWithout(map, ticket)))),
           );
-          const exit = yield* Effect.exit(Child.awaitExit(bin, handle, { headline: !diagnose }));
+          // Past the ceiling the wait gives up; leaving the scope kills the child and gives the
+          // slot back before the failure is raised.
+          const exit = yield* Effect.exit(
+            Child.awaitExit(bin, handle, { headline: !diagnose }).pipe(
+              Effect.timeoutOrElse({
+                duration: ceiling,
+                orElse: () => ApiErrors.RunFailed.make({ message: exceeded }),
+              }),
+            ),
+          );
           const stopping = (yield* Ref.get(aborts)).get(ticket);
           if (stopping !== undefined && (yield* Deferred.await(stopping))) {
             return yield* ApiErrors.RunAborted.make({ agentId: ticket });
@@ -293,11 +303,6 @@ const make = (maxJobs: number, reserveQemu: ReserveQemu, relinquishQemu: Relinqu
         Effect.catchTag("CliFailed", (error) =>
           ApiErrors.RunFailed.make({ message: error.message, cause: error }),
         ),
-        // Leaving the scope kills the child and gives the slot back before the failure is raised.
-        Effect.timeoutOrElse({
-          duration: ceiling,
-          orElse: () => ApiErrors.RunFailed.make({ message: exceeded }),
-        }),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
     });
