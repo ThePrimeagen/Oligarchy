@@ -55,7 +55,4 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      # Type-aware lint reads v2's sources too; without v2's packages their types do not resolve.
-      - run: bun install --frozen-lockfile
-        working-directory: v2
       - run: bun run check:fast
