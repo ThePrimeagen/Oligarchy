@@ -84,7 +84,7 @@
       "rules": { "oligarchy/unwrap-inside-jarl-fn": "off" }
     },
     {
-      "files": ["scripts/**"],
+      "files": ["test-apps/**"],
       "jsPlugins": ["./v2/lint/plugin.js"],
       "rules": {
         "oligarchy/result-through-jarl": "error",

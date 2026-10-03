@@ -26,9 +26,9 @@ jobs:
       - run: bun run check:types
       - run: bun run test:unit
 
-  # scripts/ runs on v2's packages and is checked with the root's tools, so it needs both installs.
-  scripts:
-    name: scripts types, lint, format and compile
+  # test-apps/ runs on v2's packages and is checked with the root's tools, so it needs both installs.
+  test-apps:
+    name: test-apps types, lint, format and compile
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -39,7 +39,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: v2
-      - run: bun run check:scripts
+      - run: bun run check:test-apps
 
   migrations-append-only:
     name: v2 migrations are append-only
