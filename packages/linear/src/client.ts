@@ -106,6 +106,15 @@ const TICKET_STATE_QUERY =
 const ISSUE_STATE_QUERY =
   "query ExperimentIssueState($id: String!) { issue(id: $id) { state { id } } }";
 
+// The issue a create named by its own id, read back when a resend of that create is refused.
+const ISSUE_QUERY = "query ExperimentIssue($id: String!) { issue(id: $id) { id identifier url } }";
+
+// A create whose answer was lost may still have made the issue, so it is sent again under the id
+// it was first sent with: Linear makes that issue once. Three resends, five seconds apart, carry a
+// suite of hundreds of tickets through a Linear that stops answering for half a minute.
+const CREATE_RESENDS = 3;
+const CREATE_RESEND_AFTER = "5 seconds";
+
 const ISSUE_CREATE_MUTATION = `mutation ExperimentIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     success
@@ -175,6 +184,7 @@ const LabelCreate = Schema.Struct({
 const IssueCreate = Schema.Struct({
   issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.NullOr(LinearTicket) }),
 });
+const IssueRead = Schema.Struct({ issue: LinearTicket });
 const IssueUpdate = Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean }) });
 const IssueState = Schema.Struct({
   issue: Schema.Struct({ state: Schema.Struct({ id: Schema.String }) }),
@@ -402,20 +412,40 @@ const makeLinear = (
       return { backlog, automationNeeded } satisfies WorkflowStateIds;
     });
 
+    // A create Linear answered, made or refused, is final. One whose answer was lost is sent
+    // again under the same id; a resend Linear refuses is an id it already has, so the issue the
+    // lost create made is read back by it, and only an id Linear does not have is the refusal.
     const createIssue = Effect.fn("Linear.createIssue")(function* (input: CreateIssueInput) {
-      const created = yield* request(
-        "createIssue",
-        ISSUE_CREATE_MUTATION,
-        { input: { ...input } },
-        IssueCreate,
+      const id = crypto.randomUUID();
+      const create = Effect.gen(function* () {
+        const created = yield* request(
+          "createIssue",
+          ISSUE_CREATE_MUTATION,
+          { input: { ...input, id } },
+          IssueCreate,
+        );
+        if (!created.issueCreate.success || created.issueCreate.issue === null) {
+          return yield* Errors.LinearError.make({
+            operation: "createIssue",
+            message: "linear: issue creation failed",
+          });
+        }
+        return created.issueCreate.issue;
+      });
+      const lost = (error: Errors.LinearError) => error.retryable === true;
+      const resent = create.pipe(
+        Effect.delay(CREATE_RESEND_AFTER),
+        Effect.retry({ times: CREATE_RESENDS - 1, while: lost }),
+        Effect.catchIf(
+          (error) => !lost(error),
+          (refused) =>
+            request("createIssue", ISSUE_QUERY, { id }, IssueRead).pipe(
+              Effect.map((read) => read.issue),
+              Effect.catch(() => Effect.fail(refused)),
+            ),
+        ),
       );
-      if (!created.issueCreate.success || created.issueCreate.issue === null) {
-        return yield* Errors.LinearError.make({
-          operation: "createIssue",
-          message: "linear: issue creation failed",
-        });
-      }
-      return created.issueCreate.issue;
+      return yield* create.pipe(Effect.catchIf(lost, () => resent));
     });
 
     // State only. A description of "" would wipe a body the watch does not have.

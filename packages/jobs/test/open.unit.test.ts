@@ -375,7 +375,7 @@ describe("Open.open happy path", () => {
 
 describe("Open.open files past one ticket Linear did not answer", () => {
   it.effect(
-    "a suite create Linear did not answer fails that result alone, is never sent again, and the rest are handed off",
+    "a suite create Linear did not answer fails that result alone, is not filed again, and the rest are handed off",
     () =>
       Effect.gen(function* () {
         const linear = creates(
@@ -396,7 +396,7 @@ describe("Open.open files past one ticket Linear did not answer", () => {
           retryable: true,
           message: reason,
         });
-        // Each create is sent once: one whose answer was lost may still have made the issue.
+        // Each ticket is asked for once; the client's resends of a lost create reuse its id.
         expect(linear.sent.count).toBe(4);
         expect(handedOff(h)).toEqual(["OLI-42", "OLI-44"]);
         expect(h.tests.results.map((row) => [row.status, row.linearId, row.reason])).toEqual([

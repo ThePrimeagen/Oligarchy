@@ -49,6 +49,8 @@ const graphql = (request: HttpClientRequest.HttpClientRequest): GraphQl => {
   return JSON.parse(decoder.decode(body.body));
 };
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 const labelId = (name: string): string => `label-${name}`;
 
 const stateId = (name: string): string => `state-${name}`;
@@ -188,7 +190,7 @@ describe("Linear happy path", () => {
         );
         expect(bodies[4]?.variables).toEqual({ name: "Backlog", teamId: "team-id" });
         expect(bodies[5]?.variables).toEqual({ name: "Automation Needed", teamId: "team-id" });
-        // Born in Backlog, where the automation server queues nothing.
+        // Born in Backlog, where the automation server queues nothing, under an id of its own.
         expect(bodies[6]?.variables).toEqual({
           input: {
             teamId: "team-id",
@@ -196,6 +198,7 @@ describe("Linear happy path", () => {
             labelIds: [labelId("agent test"), labelId(experiment.version)],
             assigneeId: "user-id",
             stateId: stateId("Backlog"),
+            id: expect.stringMatching(UUID_V4),
           },
         });
         // The body and the move into Automation Needed land in one update, so the ticket is never
@@ -1469,6 +1472,163 @@ describe("Linear unhappy path", () => {
       const error = yield* failureOf(createTicket).pipe(Effect.provide(http.layer));
       const rendered = `${error.message}\n${Cause.pretty(Cause.fail(error))}\n${JSON.stringify(error)}`;
       expect(rendered).not.toContain(TOKEN);
+    }),
+  );
+});
+
+describe("a create whose answer was lost", () => {
+  const createOne = Effect.flatMap(Linear.Linear, (client) =>
+    client.createIssue({
+      teamId: "team-id",
+      title: `Omarchy: ${firstTest.name}`,
+      labelIds: [labelId("agent test")],
+      assigneeId: "user-id",
+      stateId: stateId("Backlog"),
+    }),
+  );
+
+  type Sent = {
+    readonly query: string;
+    readonly variables?: { readonly id?: string; readonly input?: { readonly id?: string } };
+  };
+
+  const bodiesOf = (requests: ReadonlyArray<FakeHttp.Recorded>): ReadonlyArray<Sent> =>
+    requests.map((request) => JSON.parse(request.body));
+
+  const createdIds = (requests: ReadonlyArray<FakeHttp.Recorded>) =>
+    bodiesOf(requests).flatMap((body) =>
+      body.query.includes("issueCreate") ? [body.variables?.input?.id] : [],
+    );
+
+  const readIds = (requests: ReadonlyArray<FakeHttp.Recorded>) =>
+    bodiesOf(requests).flatMap((body) =>
+      body.query.includes("issue(id:") ? [body.variables?.id] : [],
+    );
+
+  // Synthetic: the refusal text a create naming an id Linear already has comes back with.
+  const takenId = (): Response =>
+    FakeHttp.json({ errors: [{ message: "Entity already exists" }], data: null });
+
+  const readBack = (body: GraphQl): Response =>
+    FakeHttp.json({
+      data: {
+        issue: {
+          id: body.variables?.id,
+          identifier: "OLI-43",
+          url: "https://linear.app/issue/OLI-43",
+        },
+      },
+    });
+
+  it.effect("is sent again under the same id, and the ticket the resend makes is kept", () =>
+    Effect.gen(function* () {
+      let creates = 0;
+      const http = FakeHttp.recordRequests(() => {
+        creates += 1;
+        return creates === 1 ? Effect.never : issueResponse("OLI-42");
+      });
+      const fiber = yield* createOne.pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("1 minute");
+      expect(yield* Fiber.join(fiber)).toEqual({
+        id: "issue-OLI-42",
+        identifier: "OLI-42",
+        url: "https://linear.app/issue/OLI-42",
+      });
+      const ids = createdIds(http.requests);
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).toMatch(UUID_V4);
+      expect(ids[1]).toBe(ids[0]);
+    }),
+  );
+
+  it.effect("a resend Linear refuses reads back the issue the lost create made", () =>
+    Effect.gen(function* () {
+      let creates = 0;
+      const http = withHttp((body) => {
+        if (body.query.includes("issueCreate")) {
+          creates += 1;
+          return creates === 1 ? new Response("busy", { status: 503 }) : takenId();
+        }
+        return body.query.includes("issue(id:") ? readBack(body) : happyLinear(body);
+      });
+      const fiber = yield* createOne.pipe(
+        Effect.provide(linear().pipe(Layer.provide(http.layer))),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("1 minute");
+      const ticket = yield* Fiber.join(fiber);
+      const ids = createdIds(http.requests);
+      expect(ticket).toEqual({
+        id: ids[0],
+        identifier: "OLI-43",
+        url: "https://linear.app/issue/OLI-43",
+      });
+      expect(ids).toHaveLength(2);
+      expect(ids[1]).toBe(ids[0]);
+      expect(readIds(http.requests)).toEqual([ids[0]]);
+    }),
+  );
+
+  it.effect(
+    "fails worth asking again after three resends, every one under the same id (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const http = FakeHttp.recordRequests(() => new Response("busy", { status: 503 }));
+        const fiber = yield* failureOf(createOne).pipe(
+          Effect.provide(http.layer),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("5 minutes");
+        expect(yield* Fiber.join(fiber)).toMatchObject({
+          _tag: "LinearError",
+          operation: "createIssue",
+          status: 503,
+          retryable: true,
+        });
+        const ids = createdIds(http.requests);
+        expect(ids).toHaveLength(4);
+        expect(new Set(ids).size).toBe(1);
+        expect(readIds(http.requests)).toEqual([]);
+      }),
+  );
+
+  it.effect("a create Linear answers with a refusal is never sent again or read (unhappy)", () =>
+    Effect.gen(function* () {
+      const http = withHttp(() => FakeHttp.json({ errors: [{ message: "labelIds invalid" }] }));
+      const error = yield* failureOf(createOne).pipe(Effect.provide(http.layer));
+      expect(error).toMatchObject({
+        operation: "createIssue",
+        message: "linear: labelIds invalid",
+      });
+      expect(error.retryable).toBeUndefined();
+      expect(http.requests).toHaveLength(1);
+    }),
+  );
+
+  it.effect("a refused resend whose id Linear does not have fails with the refusal (unhappy)", () =>
+    Effect.gen(function* () {
+      let creates = 0;
+      const http = withHttp((body) => {
+        if (body.query.includes("issueCreate")) {
+          creates += 1;
+          return creates === 1
+            ? new Response("busy", { status: 503 })
+            : FakeHttp.json({ errors: [{ message: "Argument Validation Error" }] });
+        }
+        return FakeHttp.json({ errors: [{ message: "Entity not found" }], data: null });
+      });
+      const fiber = yield* failureOf(createOne).pipe(Effect.provide(http.layer), Effect.forkChild);
+      yield* TestClock.adjust("1 minute");
+      const error = yield* Fiber.join(fiber);
+      expect(error).toMatchObject({
+        operation: "createIssue",
+        message: "linear: Argument Validation Error",
+      });
+      expect(error.retryable).toBeUndefined();
+      expect(readIds(http.requests)).toHaveLength(1);
     }),
   );
 });
