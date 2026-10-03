@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 
 export type Pick = "highest" | "pcenter";
+export type Model = "clef" | "clef-flash";
 
 // Only what was given: anything left out is oligarchy.json's.
 export type Overrides = {
@@ -18,6 +19,7 @@ export type Plan = {
   readonly overrides: Overrides;
   readonly out: string | null;
   readonly envFile: string | null;
+  readonly model: Model;
 };
 
 type Refused = { readonly ok: false; readonly message: string };
@@ -104,6 +106,7 @@ export const parse = (
         "box-scale": { type: "string" },
         out: { type: "string" },
         "env-file": { type: "string" },
+        model: { type: "string" },
         help: { type: "boolean" },
       },
     });
@@ -178,6 +181,10 @@ export const parse = (
     }
     overrides.boxScale = boxScale;
   }
+  const model = values.model ?? "clef";
+  if (model !== "clef" && model !== "clef-flash") {
+    return { ok: false, message: "--model must be clef or clef-flash" };
+  }
   return {
     ok: true,
     plan: {
@@ -187,6 +194,7 @@ export const parse = (
       overrides,
       out: values.out ?? null,
       envFile: values["env-file"] ?? null,
+      model,
     },
   };
 };

@@ -37,6 +37,9 @@ Search (each defaults to v2/oligarchy.json's locator section):
   --power <n>                The power pcenter raises each probability to.
   --box-scale <n>            The next round's box, in cells of this round; smaller than --grid.
 
+Model:
+  --model <name>             clef (default) or clef-flash.
+
 Output:
   --out <dir>                Where to write. Default scripts/out/<time>-<task>/. Each image gets a
                              directory with round-<n>-in.webp (sent to Clef), round-<n>-out.png
@@ -192,9 +195,24 @@ const run = async (): Promise<void> => {
   }
   const decisionApi = DecisionApi.create(
     { http: Http.create({}) },
-    { accountId: env.vars.cloudflareAccountId, token: env.vars.cloudflareApiToken },
+    {
+      accountId: env.vars.cloudflareAccountId,
+      token: env.vars.cloudflareApiToken,
+      model: plan.model,
+    },
   );
-  const locator = Locator.create({ "decision-api": decisionApi }, options);
+  // Every Clef call's wall time, in order: one per round, plus any retries.
+  let calls: number[] = [];
+  const timed: typeof decisionApi = {
+    ...decisionApi,
+    decide: async (request) => {
+      const started = performance.now();
+      const decided = await decisionApi.decide(request);
+      calls.push(Math.round(performance.now() - started));
+      return decided;
+    },
+  };
+  const locator = Locator.create({ "decision-api": timed }, options);
 
   const out = resolve(
     plan.out ??
@@ -203,6 +221,7 @@ const run = async (): Promise<void> => {
   await mkdir(out, { recursive: true });
   console.log(`question  ${plan.question}`);
   console.log(`task      ${plan.task}`);
+  console.log(`model     ${plan.model}`);
   console.log(
     `search    ${options.grid}x${options.grid}, rounds ${options.rounds.join(" ")}, threshold ${options.threshold}`,
   );
@@ -220,10 +239,19 @@ const run = async (): Promise<void> => {
     const dir = join(out, name);
     await mkdir(dir, { recursive: true });
     const screen = new Uint8Array(await readFile(image));
-    const started = Date.now();
+    calls = [];
+    const started = performance.now();
     const result = await locator.locate({ screen, question: plan.question, task: plan.task });
-    const ms = Date.now() - started;
-    const base = { image: resolve(image), question: plan.question, task: plan.task, options, ms };
+    const ms = Math.round(performance.now() - started);
+    const timing = { totalMs: ms, clefCallsMs: calls };
+    const base = {
+      image: resolve(image),
+      question: plan.question,
+      task: plan.task,
+      model: plan.model,
+      options,
+      timing,
+    };
     let line: string;
     let record: object;
     if (jarl.is_ok(result)) {
@@ -265,7 +293,9 @@ const run = async (): Promise<void> => {
     await writeFile(join(dir, "result.json"), JSON.stringify(record, null, 2));
     results.push(record);
     const look = shown(join(dir, "failure" in record ? "result.json" : "sheet.png"));
-    console.log(`${basename(image)}\n  ${line}\n  ${look}`);
+    console.log(
+      `${basename(image)}\n  ${line}\n  ${ms} ms (Clef calls ${calls.join(" + ")} ms)\n  ${look}`,
+    );
   }
   await writeFile(join(out, "summary.json"), JSON.stringify(results, null, 2));
   if (failures > 0) {

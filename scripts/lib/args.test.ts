@@ -78,6 +78,8 @@ describe("parse", () => {
       "/tmp/out",
       "--env-file",
       ".prod-env",
+      "--model",
+      "clef-flash",
     ]);
     expect(parsed).toEqual({
       ok: true,
@@ -94,14 +96,15 @@ describe("parse", () => {
         },
         out: "/tmp/out",
         envFile: ".prod-env",
+        model: "clef-flash",
       },
     });
   });
 
-  test("leaves out every override not given, so oligarchy.json decides", () => {
+  test("leaves out every override not given, so oligarchy.json decides, and asks clef", () => {
     expect(parse(["a.png", "--target", "Setup"])).toMatchObject({
       ok: true,
-      plan: { overrides: {}, out: null, envFile: null },
+      plan: { overrides: {}, out: null, envFile: null, model: "clef" },
     });
   });
 
@@ -130,6 +133,11 @@ describe("parse", () => {
       name: "a threshold that is not a probability",
       argv: ["a.png", "--target", "x", "--threshold", "1.5"],
       message: "--threshold must be a number from 0 to 1",
+    },
+    {
+      name: "a model that is neither clef nor clef-flash",
+      argv: ["a.png", "--target", "x", "--model", "flash"],
+      message: "--model must be clef or clef-flash",
     },
     {
       name: "an unknown flag",
