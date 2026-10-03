@@ -4,7 +4,8 @@
 // "out": "<directory>" }. Each job's directory gets overview.webp (image 1 of every ask), per round
 // round-<n>-in.webp (image 2, as Clef was sent it) and round-<n>-out.png (that picture with each
 // cell's p, the weighted point and the box the next round looks at), final.png (the screenshot with
-// every round's box and the point) and result.json. Rounds and the rest come from oligarchy.json.
+// every round's box and the point), sheet.png (each round's in beside its out, final.png below) and
+// result.json. Rounds and the rest come from oligarchy.json.
 import * as DecisionApi from "@oligarchy/decision-api";
 import * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
@@ -92,6 +93,37 @@ const finalOut = async (
     .toBuffer();
 };
 
+const SHEET_TILE = 640;
+const SHEET_GAP = 10;
+
+const sheet = async (out: string, rounds: number): Promise<void> => {
+  const fit = async (file: string, width: number) => {
+    const input = await sharp(join(out, file)).resize({ width }).png().toBuffer();
+    const { height } = await sharp(input).metadata();
+    return { input, height };
+  };
+  const tiles: { input: Buffer; top: number; left: number }[] = [];
+  let top = 0;
+  for (let k = 1; k <= rounds; k += 1) {
+    const sent = await fit(`round-${k}-in.webp`, SHEET_TILE);
+    const answered = await fit(`round-${k}-out.png`, SHEET_TILE);
+    tiles.push(
+      { input: sent.input, top, left: 0 },
+      { input: answered.input, top, left: SHEET_TILE + SHEET_GAP },
+    );
+    top += Math.max(sent.height, answered.height) + SHEET_GAP;
+  }
+  const width = 2 * SHEET_TILE + SHEET_GAP;
+  const final = await fit("final.png", width);
+  tiles.push({ input: final.input, top, left: 0 });
+  await sharp({
+    create: { width, height: top + final.height, channels: 3, background: "#000000" },
+  })
+    .composite(tiles)
+    .png()
+    .toFile(join(out, "sheet.png"));
+};
+
 const summary = (round: Locator.Round) => ({
   box: round.box,
   best: round.best,
@@ -136,6 +168,7 @@ const traceOne = async (
     await writeFile(join(job.out, "overview.webp"), found.overview.bytes);
     await writeRounds(job, bytes, found.rounds, options);
     await writeFile(join(job.out, "final.png"), await finalOut(bytes, found.rounds, found.pixel));
+    await sheet(job.out, found.rounds.length);
     await writeFile(
       join(job.out, "result.json"),
       JSON.stringify(
@@ -156,6 +189,7 @@ const traceOne = async (
     await writeFile(join(job.out, "overview.webp"), error.overview.bytes);
     await writeRounds(job, bytes, [error.round], { ...options, rounds: 1 });
     await writeFile(join(job.out, "final.png"), await finalOut(bytes, [error.round], null));
+    await sheet(job.out, 1);
     await writeFile(
       join(job.out, "result.json"),
       JSON.stringify(
