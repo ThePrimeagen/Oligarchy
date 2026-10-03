@@ -19,6 +19,7 @@ import * as DbSchema from "@oligarchy/db/schema";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
+import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
@@ -1176,6 +1177,34 @@ describe("driver loop", () => {
       }),
   );
 
+  it.effect("a stop a gateway drops once still closes the result as the run ended", () =>
+    Effect.gen(function* () {
+      let stops = 0;
+      const recorder = routed(answers(sendKeys("open it", 1), done()), (url) => {
+        if (url.pathname === "/start") {
+          return TestingHttp.json({ id: SESSION });
+        }
+        if (url.pathname === "/stop") {
+          stops += 1;
+          return stops === 1
+            ? new Response("error code: 502", { status: 502 })
+            : TestingHttp.json({ ok: "true" });
+        }
+        return TestingHttp.json({ ok: "true" });
+      });
+      const fiber = yield* Effect.forkChild(
+        run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
+      );
+      yield* TestClock.adjust("2 seconds");
+      const { stopped, spawner } = yield* Fiber.join(fiber);
+      expect(stopped).toEqual({ reason: "result-closed" });
+      expect(guestPaths(recorder.requests).filter((path) => path === "/stop")).toHaveLength(2);
+      const closed = spawner.spawned.at(-1)?.args ?? [];
+      expect(closed).toEqual(expect.arrayContaining(["test-results", "--status", "success"]));
+      expect(closed.join(" ")).not.toContain("502");
+    }),
+  );
+
   it.effect("an interrupt after the session starts still stops it", () =>
     Effect.gen(function* () {
       const recorder = routed(answers(done()));
@@ -2102,6 +2131,33 @@ describe("driver loop", () => {
         expect(modelRequests(recorder.requests)).toHaveLength(2);
         expect(guestPaths(recorder.requests).at(-1)).toBe("/stop");
         expect(past(recorder.requests, 1)).toContain("IMAGE HAS FAILED, MACHINE IS SHUT DOWN");
+      }),
+  );
+
+  it.effect(
+    "a get-image the tunnel keeps answering for ends the run as the proxy's failure, not a shut-down guest",
+    () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(getImage(), done()),
+          withScreen(() => new Response("error code: 502", { status: 502 })),
+        );
+        const fiber = yield* Effect.forkChild(
+          Effect.flip(run(config(), recorder.layer, () => ({ exitCode: 0 }), [])),
+        );
+        for (let i = 0; i < 160; i++) {
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("250 millis");
+        }
+        const error = yield* Fiber.join(fiber);
+        expect(Render.headline(error)).toContain("error code: 502");
+        expect(modelRequests(recorder.requests)).toHaveLength(1);
+        const images = guestPaths(recorder.requests).filter((path) => path === "/image");
+        expect(images).toHaveLength(5);
+        const stop = JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}");
+        expect(stop).toMatchObject({ status: "failed" });
+        expect(stop.reason).toContain("error code: 502");
+        expect(stop.reason).not.toContain("SHUT DOWN");
       }),
   );
 
