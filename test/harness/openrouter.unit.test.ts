@@ -258,24 +258,101 @@ describe("OpenRouter client", () => {
     }),
   );
 
-  it.effect("a connection failure is an unreachable service", () =>
-    Effect.gen(function* () {
-      const layer = TestingHttp.respondWith((request) =>
-        Effect.fail(
-          new HttpClientError.HttpClientError({
-            reason: new HttpClientError.TransportError({
-              request,
-              cause: new Error("connect ECONNREFUSED 127.0.0.1:443"),
+  it.effect(
+    "a connection that keeps failing is sent again twice, then is an unreachable service (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = TestingHttp.recordRequests((request) =>
+          Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request,
+                cause: new Error("connect ECONNREFUSED 127.0.0.1:443"),
+              }),
             }),
-          }),
-        ),
+          ),
+        );
+        const fiber = yield* Effect.forkScoped(run(recorder.layer));
+        yield* TestClock.adjust("1 minute");
+        const error = yield* Effect.flip(Fiber.join(fiber));
+        expect(error._tag).toBe("OpenRouterUnreachable");
+        expect(error.message).toBe(`POST ${URL} failed`);
+        expect(Render.headline(error)).toBe(
+          `POST ${URL} failed: connect ECONNREFUSED 127.0.0.1:443`,
+        );
+        expect(recorder.requests).toHaveLength(3);
+        expect(rendered(error)).not.toContain(TOKEN);
+      }),
+  );
+
+  it.effect("a connection that fails once is sent again, and the answer it streams is kept", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests((request) =>
+        recorder.requests.length === 1
+          ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request,
+                  cause: new Error("socket hang up"),
+                }),
+              }),
+            )
+          : doneTurn(),
       );
-      const error = yield* Effect.flip(run(layer));
-      expect(error._tag).toBe("OpenRouterUnreachable");
-      expect(error.message).toBe(`POST ${URL} failed`);
-      expect(Render.headline(error)).toBe(`POST ${URL} failed: connect ECONNREFUSED 127.0.0.1:443`);
-      expect(rendered(error)).not.toContain(TOKEN);
+      const fiber = yield* Effect.forkScoped(run(recorder.layer));
+      yield* TestClock.adjust("1 second");
+      const turn = yield* Fiber.join(fiber);
+      expect(turn.content).toBe("Locked.");
+      expect(recorder.requests).toHaveLength(2);
     }),
+  );
+
+  // A 200 whose stream the connection cuts after the first event: the body read fails, as a
+  // socket closed mid-answer does.
+  const droppedStream = (): Response => {
+    const encoder = new TextEncoder();
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${frame(choice({ role: "assistant", content: "Loc" }, null))}\n\n`,
+            ),
+          );
+          controller.error(new Error("aborted"));
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+
+  it.effect("a stream the connection drops is sent again, and the answer it streams is kept", () =>
+    Effect.gen(function* () {
+      const recorder = TestingHttp.recordRequests(() =>
+        recorder.requests.length === 1 ? droppedStream() : doneTurn(),
+      );
+      const fiber = yield* Effect.forkScoped(run(recorder.layer));
+      yield* TestClock.adjust("1 second");
+      const turn = yield* Fiber.join(fiber);
+      expect(turn.content).toBe("Locked.");
+      expect(recorder.requests).toHaveLength(2);
+    }),
+  );
+
+  it.effect(
+    "a stream the connection keeps dropping is sent again twice, then is an unreachable service (unhappy)",
+    () =>
+      Effect.gen(function* () {
+        const recorder = TestingHttp.recordRequests(() => droppedStream());
+        const fiber = yield* Effect.forkScoped(run(recorder.layer));
+        yield* TestClock.adjust("1 minute");
+        const error = yield* Effect.flip(Fiber.join(fiber));
+        expect(error).toMatchObject({
+          _tag: "OpenRouterUnreachable",
+          message: "openrouter: stream dropped",
+        });
+        expect(recorder.requests).toHaveLength(3);
+      }),
   );
 
   it.effect("a header timeout is sent again after the configured default", () =>

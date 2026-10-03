@@ -17,7 +17,10 @@ import * as Errors from "./errors.ts";
 // when that wait would run past the run ceiling. One reported inside the stream, after the 200,
 // is retried the same way after the configured default, and so is either timeout: a completion
 // has no side effect but its cost. A stream that closes before its completion is not, since it
-// ends at once and a provider cutting every answer short would be billed every default.
+// ends at once and a provider cutting every answer short would be billed every default. A
+// connection that drops, before the status line or while the answer streams, is a network blip
+// more often: it is sent again DROPS_RETRIED times after the configured default, the cap bounding
+// what a provider that drops every answer would cost.
 // A 4xx other than 429 refused the request. Anything that never produced a completion left the
 // service unreachable.
 
@@ -119,6 +122,8 @@ const statusOf = (code: unknown): number | undefined => {
   return typeof code === "string" && /^\d+$/.test(code) ? Number(code) : undefined;
 };
 
+const DROPS_RETRIED = 2;
+
 // The statuses a response is retried for: a 429 or a 5xx.
 const retryable = (status: number): boolean =>
   Number.isInteger(status) && (status === 429 || (status >= 500 && status < 600));
@@ -207,6 +212,17 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
 
   const headerTimeout = waitOrGiveUp(options.defaultRetry, "no response within header timeout");
   const chunkTimeout = waitOrGiveUp(options.defaultRetry, "no chunk within chunk timeout");
+
+  // Counted across the attempts of this one completion.
+  let drops = 0;
+  const droppedOrGiveUp = (dropped: Errors.OpenRouterUnreachable) =>
+    Effect.suspend(() => {
+      if (drops >= DROPS_RETRIED) {
+        return Effect.fail(dropped);
+      }
+      drops += 1;
+      return waitOrGiveUp(options.defaultRetry, dropped.message);
+    });
 
   const readEvents = (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
@@ -339,7 +355,8 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
             const step = yield* pull.pipe(
               Effect.map((bytes) => ({ _tag: "chunk" as const, bytes })),
               Pull.catchDone(() => Effect.succeed({ _tag: "end" as const })),
-              Effect.mapError(invalid),
+              Effect.mapError((cause) => unreachable("openrouter: stream dropped", cause)),
+              Effect.catchTag("OpenRouterUnreachable", droppedOrGiveUp),
               Effect.timeoutOrElse({
                 duration: Duration.subtract(options.timeouts.chunk, quiet),
                 orElse: () => chunkTimeout,
@@ -430,6 +447,7 @@ export const complete = Effect.fn("OpenRouter.complete")(function* (options: Opt
     );
     const response = yield* client.execute(request).pipe(
       Effect.mapError(fromTransport),
+      Effect.catchTag("OpenRouterUnreachable", droppedOrGiveUp),
       Effect.timeoutOrElse({
         duration: options.timeouts.header,
         orElse: () => headerTimeout,
