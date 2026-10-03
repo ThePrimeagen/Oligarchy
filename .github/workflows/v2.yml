@@ -28,7 +28,7 @@ jobs:
 
   # scripts/ runs on v2's packages and is checked with the root's tools, so it needs both installs.
   scripts:
-    name: scripts types, lint, format, compile and unit tests
+    name: scripts types, lint, format and compile
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

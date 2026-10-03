@@ -7,8 +7,7 @@
       "sharp": [
         "../v2/packages/screen-grid/node_modules/sharp",
         "../v2/packages/screen-grid/node_modules/sharp/dist/index.mjs"
-      ],
-      "vitest": ["../v2/packages/locator/node_modules/vitest"]
+      ]
     },
     "types": ["node"]
   },
