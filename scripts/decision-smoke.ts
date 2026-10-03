@@ -1,9 +1,9 @@
-// Run from the repository root:
-// bun --no-env-file v2/packages/decision-api/src/smoke.ts
+#!/usr/bin/env -S bun --no-env-file
+// One live Clef decision, to see that the account, token and decision-api work: scripts/decision-smoke.ts
 import * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
 import * as jarl from "jarl";
-import * as DecisionApi from "./main.ts";
+import * as DecisionApi from "@oligarchy/decision-api";
 
 const run = async (): Promise<void> => {
   const loaded = await Env.create(
