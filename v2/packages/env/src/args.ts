@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import * as z from "zod";
+import { LocatorSearch } from "./config.ts";
 
 // Every flag any oligarchy program takes, declared once. A flag's export is named for its key and
 // its key is its spelling: `sessionId` is `--session-id`. Where one spelling means different things
@@ -305,3 +306,81 @@ export const summary = flag({
   schema: words,
   description: "What happened, read from the evidence",
 });
+
+// ---------------------------------------------------------------------------
+// test-apps tile-search
+// ---------------------------------------------------------------------------
+
+// One flag, so a list: a repeated flag keeps its last value.
+const commaList = z.string().transform((text) =>
+  text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== ""),
+);
+
+// test-apps tile-search's --images; ctrl session's is a switch.
+export const screenshots = flag({
+  schema: commaList.pipe(z.array(words).min(1, "must name at least one image")),
+  description: "Screenshots, comma-separated: PNG, JPEG or WebP files, or directories of them",
+});
+
+export const target = flag({
+  schema: words,
+  description:
+    "What to click; each cell is asked: In image 2, does grid cell C3 (column C, row 3) contain it?",
+});
+
+export const question = flag({
+  schema: words,
+  description:
+    'Your own question for each cell: name it with {cell}, {column} and {row}, or say "this cell", or the words cell, column and row',
+});
+
+export const task = flag({
+  schema: words,
+  description:
+    "What the click is for, told to Clef; the target's click or the question when omitted",
+});
+
+// The locator's search for one run; each left out is oligarchy.json's.
+export const grid = flag({
+  schema: number.pipe(LocatorSearch.grid),
+  description: "Cells per side, 2 to 8",
+});
+
+export const rounds = flag({
+  schema: commaList.pipe(LocatorSearch.rounds),
+  description:
+    "One rule per round, comma-separated, as deep as the search goes: highest (the best cell's centre) or pcenter (the weighted centre)",
+});
+
+export const threshold = flag({
+  schema: number.pipe(LocatorSearch.threshold),
+  description: "Round one's best cell below this is not found",
+});
+
+export const power = flag({
+  schema: number.pipe(LocatorSearch.power),
+  description: "The power pcenter raises each cell's probability to",
+});
+
+export const boxScale = flag({
+  schema: number.pipe(LocatorSearch.boxScale),
+  description: "The next round's box, in cells of this round; smaller than the grid",
+});
+
+// Not --model's Cursor model: the Clef models a decision is asked of, each in turn.
+export const decisionModels = flag({
+  schema: commaList
+    .pipe(z.array(z.enum(["clef", "clef-flash"], "a model is clef or clef-flash")).min(1))
+    .default(["clef"]),
+  description: "The Clef models to ask, comma-separated: clef, clef-flash or both",
+});
+
+export const runs = flag({
+  schema: atLeastOne.default(1),
+  description: "How many times to search each image with each model",
+});
+
+export const out = flag({ schema: words, description: "The directory to write into" });

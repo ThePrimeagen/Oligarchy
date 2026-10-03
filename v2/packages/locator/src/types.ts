@@ -4,9 +4,14 @@ import type * as jarl from "jarl";
 import type * as Errors from "./errors.ts";
 
 // Every value comes from oligarchy.json's locator section; packages/env/src/config.ts says what each does.
+// How a round takes its point: "highest" the centre of its best cell, "pcenter" the p^power
+// weighted centre of every cell.
+export type Pick = "highest" | "pcenter";
+
 export type Options = {
   readonly grid: number;
-  readonly rounds: number;
+  // One per round, as deep as the search goes.
+  readonly rounds: ReadonlyArray<Pick>;
   readonly power: number;
   readonly boxScale: number;
   readonly threshold: number;
@@ -37,6 +42,9 @@ export type CellAnswer = {
 
 export type Round = {
   readonly box: ScreenGrid.Box;
+  // Image 2 of this round's ask, as Clef was sent it.
+  readonly image: ScreenGrid.GridImage;
+  readonly pick: Pick;
   readonly cells: ReadonlyArray<CellAnswer>;
   readonly best: number;
   readonly point: ScreenGrid.Point;
@@ -49,6 +57,8 @@ export type Location = {
   readonly x: number;
   readonly y: number;
   readonly pixel: ScreenGrid.Point;
+  // Image 1 of every round's ask.
+  readonly overview: ScreenGrid.Image;
   readonly rounds: ReadonlyArray<Round>;
 };
 

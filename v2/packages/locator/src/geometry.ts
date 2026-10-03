@@ -20,6 +20,20 @@ export const weightedCentre = (
   );
 };
 
+// The centre of the cell with the highest p, the first in reading order on a tie; no other cell
+// pulls it. When every cell answers zero there is no best, and the centre of the cells is kept.
+export const bestCentre = (
+  cells: ReadonlyArray<ScreenGrid.Box>,
+  ps: ReadonlyArray<number>,
+): ScreenGrid.Point => {
+  const best = ps.reduce((at, p, i) => (p > (ps[at] ?? 0) ? i : at), 0);
+  return weightedCentre(
+    cells,
+    ps.map((p, i) => (i === best ? p : 0)),
+    1,
+  );
+};
+
 // The box the next round looks at: scale x a cell of `box`, centred on the point, moved (never
 // shrunk) to stay on the screen, in whole pixels so it can be cut from the screenshot.
 export const nextBox = (

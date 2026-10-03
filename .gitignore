@@ -18,3 +18,4 @@ node_modules/
 /automation-prod-logs
 /.tools/
 /nvim.log
+/v2/test-apps/*/out/

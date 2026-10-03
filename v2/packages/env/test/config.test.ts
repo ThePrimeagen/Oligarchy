@@ -84,7 +84,7 @@ const valid = {
   },
   locator: {
     grid: 4,
-    rounds: 3,
+    rounds: ["highest", "pcenter", "pcenter"],
     power: 4,
     boxScale: 1.5,
     threshold: 0.45,
@@ -146,6 +146,7 @@ describe("load", () => {
     expect(config.reasoning.diagnose).toBe("xhigh");
     expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
     expect(config.reasoning.setup).toBe("minimal");
+    expect(config.locator.rounds).toEqual(["highest", "pcenter", "pcenter"]);
   });
   it("refuses a missing file rather than guessing a default (unhappy)", async () => {
     const result = await Config.load(Io.fake());
@@ -204,6 +205,19 @@ describe("load", () => {
   it("refuses a locator box scale that would not shrink the box each round (unhappy)", async () => {
     expect(await refusal({ ...valid, locator: { ...valid.locator, boxScale: 4 } })).toBe(
       `${Config.PATH}: locator.boxScale: must be smaller than locator.grid`,
+    );
+  });
+
+  it("refuses a locator round that is neither highest nor pcenter (unhappy)", async () => {
+    const locator = { ...valid.locator, rounds: ["highest", "middle"] };
+    expect(await refusal({ ...valid, locator })).toBe(
+      `${Config.PATH}: locator.rounds.1: a round is "highest" or "pcenter"`,
+    );
+  });
+
+  it("refuses locator rounds that name no round (unhappy)", async () => {
+    expect(await refusal({ ...valid, locator: { ...valid.locator, rounds: [] } })).toBe(
+      `${Config.PATH}: locator.rounds: rounds must name at least one round`,
     );
   });
 

@@ -127,7 +127,7 @@ const CONFIG = JSON.stringify({
   },
   locator: {
     grid: 4,
-    rounds: 3,
+    rounds: ["highest", "pcenter", "pcenter"],
     power: 4,
     boxScale: 1.5,
     threshold: 0.45,

@@ -10,7 +10,7 @@ export const RETRY_WAIT_MS = 1_234;
 export const RETRIES = 2;
 export const OPTIONS: Locator.Options = {
   grid: 4,
-  rounds: 3,
+  rounds: ["highest", "pcenter", "pcenter"],
   power: 4,
   boxScale: 1.5,
   threshold: 0.45,
@@ -48,9 +48,25 @@ export const answering =
       usage: { inputTokens: 100, outputTokens: 0 },
     });
 
+// One noul per question: each round's p for the cells it names, `rest` for every other cell.
+export const scoring =
+  (rounds: ReadonlyArray<Readonly<Record<string, number>>>, rest = 0) =>
+  (request: DecisionApi.Request, round: number): Reply =>
+    jarl.ok({
+      model: "clef",
+      answers: Object.fromEntries(
+        Object.keys(request.questions).map((id) => [
+          id,
+          { type: "noul" as const, noul: rounds[round]?.[id] ?? rest },
+        ]),
+      ),
+      usage: { inputTokens: 100, outputTokens: 0 },
+    });
+
 // A decision-api fake whose replies are taken in turn; a function reply is told its round.
 export const decisions = (
   replies: ReadonlyArray<Reply | ((request: DecisionApi.Request, round: number) => Reply)>,
+  options: Locator.Options = OPTIONS,
 ) => {
   let call = 0;
   let round = 0;
@@ -66,7 +82,7 @@ export const decisions = (
       return answered;
     },
   });
-  return { ...fake, locator: Locator.create(fake, OPTIONS) };
+  return { ...fake, locator: Locator.create(fake, options) };
 };
 
 // The event loop's own setImmediate, taken before a test fakes the timers: sharp finishes on its
