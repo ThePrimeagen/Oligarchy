@@ -1146,6 +1146,26 @@ describe("sendKeys", () => {
     }),
   );
 
+  it.effect("refuses a name QEMU has no qcode for without typing the text before it", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      yield* h.run(
+        Effect.gen(function* () {
+          const { sessions, id, live } = yield* start();
+          expect(yield* Effect.flip(sessions.sendKeys(live, "hi<A_L>", undefined))).toMatchObject({
+            _tag: "BadRequest",
+            message: 'qemu: unknown key "A_L"',
+          });
+          expect(h.qemu.calls.filter((call) => call._tag === "sendKeys")).toEqual([]);
+          yield* sessions.sendKeys(live, "hi<ALT_L-ALT_R>", undefined);
+          expect(h.qemu.calls.filter((call) => call._tag === "sendKeys")).toEqual([
+            { _tag: "sendKeys", id, chords: [["h"], ["i"], ["alt", "alt_r"]] },
+          ]);
+        }),
+      );
+    }),
+  );
+
   it.effect(
     "sends the chords, records one action each and numbers follow actions per session",
     () =>

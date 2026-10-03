@@ -342,6 +342,8 @@ Wrap special keys in angle brackets: `<ENTER>`, `<ESC>`, `<TAB>`, `<BS>`, `<DEL>
 
 Modifiers: `<C-c>` control, `<A-x>` alt, `<S-x>` shift, `<M-x>` meta. Combine them: `<C-S-c>`. `<C-A-F3>` switches TTY.
 
+Those are the left keys. The right ones are `<ALT_R>`, `<CTRL_R>` and `<SHIFT_R>`. Keys held together go in one chord: `<A-ALT_R>` presses both Alts at once; `<ALT><ALT_R>` presses one, then the other.
+
 `<` and `>` as characters: `<LT>` and `<GT>`.
 
 The keys you will actually use: literal text, `<ENTER>`, `<ESC>`, `<TAB>`, `<DOWN>`, `<M-...>` for Super chords, `<C-A-F3>` for a TTY, and a bare `<META_L>` tap.
