@@ -159,3 +159,74 @@ describe("a client typed by an app's routes", () => {
     expect(asked).toHaveLength(1);
   });
 });
+
+describe("a client's calls when the server closes an idle socket", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const CLOSED = "The socket connection was closed unexpectedly.";
+
+  // Bun's fetch sends on a pooled socket unless told `keepalive: false`; one the server closed for
+  // idleness ends the request unsent.
+  const pooled: Http.Fetch = async (_url, sent) => {
+    if (sent.keepalive !== false) {
+      throw new TypeError(CLOSED);
+    }
+    return Response.json({});
+  };
+
+  const over = (fetch: Http.Fetch) => {
+    const asked: Array<string> = [];
+    const http = Http.create(
+      {},
+      {
+        fetch: (url, sent) => {
+          asked.push(url);
+          return fetch(url, sent);
+        },
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      },
+    );
+    const options = { http, url: URL_OF_CLIENT, token: { reveal: () => TOKEN } };
+    return {
+      asked,
+      post: () =>
+        HttpClient.create<Routes>()(options, {
+          "/jobs/start": { ok: "started" },
+          "/jobs/wait": { ok: "waited" },
+        }).post("/jobs/start", { job: "j-1" }),
+      request: () =>
+        HttpClient.connect<Routes>(options).request("$post", "/jobs/start", {
+          json: { job: "j-1" },
+        }),
+    };
+  };
+
+  it("a post and a request after the server closed its idle socket still answer (happy)", async () => {
+    const client = over(pooled);
+
+    const started = await client.post();
+    const opened = await client.request();
+
+    expect(started).toEqual(jarl.ok("started"));
+    expect(jarl.is_ok(opened) ? jarl.value(opened).status : opened).toBe(200);
+  });
+
+  it("a socket closed before any answer is HttpUnreachable, asked once (unhappy)", async () => {
+    const client = over(async () => {
+      throw new TypeError(CLOSED);
+    });
+
+    const started = await client.post();
+
+    expect(Fake.failure(started, Http.HttpUnreachable).message).toBe(
+      `POST https://clients.example/v2/jobs/start: ${CLOSED}`,
+    );
+    expect(client.asked).toEqual(["https://clients.example/v2/jobs/start"]);
+  });
+});

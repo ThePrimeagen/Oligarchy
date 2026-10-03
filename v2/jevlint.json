@@ -1,0 +1,61 @@
+{
+  "languages": {
+    "typescript": {
+      "functionQueries": [
+        "(function_declaration name: (identifier) @name) @function",
+        "(generator_function_declaration name: (identifier) @name) @function",
+        "(method_definition name: [(property_identifier) (private_property_identifier)] @name) @function",
+        "(variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)] @function)",
+        "(variable_declarator name: (identifier) @name value: (call_expression arguments: (arguments [(arrow_function) (function_expression)]))) @function",
+        "((call_expression function: [(identifier) @callee (member_expression object: (identifier) @callee) (call_expression function: (member_expression object: (identifier) @callee))] arguments: (arguments (string) @name [(arrow_function) (function_expression)])) @function (#match? @callee \"^(it|test)$\"))"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "id": "no-single-line-if",
+      "description": "Every if statement must use a braced block for its consequent, with the body statements on separate lines from the condition. Fail both an unbraced body such as if (ready) return value; (even when the return is on the next line) and a one-line braced body such as if (ready) { return value; }. This applies to every if, including an else-if. A braced block with its body on following lines passes. Do not apply this rule to conditional expressions, comments, or strings containing example code.",
+      "severity": "error",
+      "kinds": ["function"],
+      "include": [
+        "apps/*/src/**/*.ts",
+        "packages/*/src/**/*.ts",
+        "apps/*/test/**/*.ts",
+        "packages/*/test/**/*.ts"
+      ]
+    },
+    {
+      "id": "no-undefined-return-union",
+      "description": "A function must not expose a return value or success payload that is a union of a useful value and undefined, such as fn(...): Value | undefined. Wrappers do not make this acceptable: follow the returned payload through Promise, Result, jarl.Result, Option and other containers, at any nesting depth. Reject Result<Value | undefined, Error> and Promise<Result<Value | undefined, Error>> as well as Promise<Value | undefined>. This applies to function type aliases, call signatures, methods, and function-valued properties too. Fail an explicit union, a same-file alias that clearly resolves to that union, or an inferred return that visibly mixes a value with undefined or a fallthrough path, including a success payload passed to jarl.ok. void functions and undefined-only return values or success payloads pass because they are not Value | undefined unions. Optional parameters and optional fields within an otherwise defined returned object pass; a success payload of Value | undefined does not. Do not guess about unresolved types or external callees; require evidence in the supplied code.",
+      "severity": "error",
+      "kinds": ["function", "type"],
+      "include": [
+        "apps/*/src/**/*.ts",
+        "packages/*/src/**/*.ts",
+        "apps/*/test/**/*.ts",
+        "packages/*/test/**/*.ts"
+      ]
+    },
+    {
+      "id": "pass-services-through",
+      "description": "Pass an existing services object directly to a function that needs services. Fail when code destructures or copies its service members merely to reconstruct a services object for another call, including a spread used only to narrow the object. Narrow the callee's parameter type instead. Reading a service to use it is fine. Creating the initial services object, adding a newly constructed service, replacing a service intentionally in a test, and building a separate options or request object are fine. Require visible evidence of reconstruction; do not guess about external callees.",
+      "severity": "error",
+      "kinds": ["function"],
+      "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"]
+    },
+    {
+      "id": "test-business-behavior",
+      "description": "Tests must assert behavior owned by the unit: returned data, search results, state changes, error handling, logged failures, or actions a control performs. Fail assertions that only pin fonts, sizes, colors, spacing, CSS, icons, layout position, static configuration, or behavior supplied entirely by a third-party library. Testing this project's own formatting or rendering function's output, a business sort order, and a boundary's response or failure message is valid. Test helpers with no assertions pass. Judge only assertions visible in this unit; do not infer missing tests or demand more happy-path tests.",
+      "severity": "error",
+      "kinds": ["function"],
+      "include": ["apps/*/test/**/*.ts", "packages/*/test/**/*.ts"]
+    },
+    {
+      "id": "fake-external-services",
+      "description": "Tests must use fakes for external HTTP, process IO, and clocks. Fail a test that visibly makes a real external HTTP request, starts a real external process, or waits for real time to pass to drive the behavior under test. In-process HTTP through a fake transport or Hono request/testClient is fine. Promise or event-loop synchronization without an elapsed-time delay is fine. The database exception is a test-owned Postgres started and stopped through @oligarchy/fake-postgres; that package's implementation and its own lifecycle tests may spawn Postgres. Require visible evidence of real external IO; do not assume a helper is live because its implementation is absent.",
+      "severity": "error",
+      "kinds": ["function"],
+      "include": ["apps/*/test/**/*.ts", "packages/*/test/**/*.ts"]
+    }
+  ]
+}
