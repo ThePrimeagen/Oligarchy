@@ -48,6 +48,18 @@ const ModelId = z.string().regex(/^[^\s/]+\/\S+$/, "model must be provider/model
 export const Effort = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
 export type Effort = z.output<typeof Effort>;
 
+// The locator's search, apart from the file's other fields, so a flag that sets one of them for a
+// single run is held to the same rule.
+export const LocatorSearch = {
+  grid: z.int().min(2, "grid must be at least 2").max(8, "grid must be at most 8: 64 questions"),
+  rounds: z
+    .array(z.enum(["highest", "pcenter"], 'a round is "highest" or "pcenter"'))
+    .min(1, "rounds must name at least one round"),
+  power: z.number().positive("power must be greater than zero"),
+  boxScale: z.number().min(1, "boxScale must be at least 1"),
+  threshold: z.number().min(0).max(1, "threshold is a probability"),
+};
+
 const isHttpUrl = (value: string): boolean => {
   if (!URL.canParse(value)) {
     return false;
@@ -162,16 +174,7 @@ const File = z
     // pictures' WebP quality. callTimeout bounds one Clef call; a busy, down or slow one is asked
     // again up to retries times, retryWait apart.
     locator: z.strictObject({
-      grid: z
-        .int()
-        .min(2, "grid must be at least 2")
-        .max(8, "grid must be at most 8: 64 questions"),
-      rounds: z
-        .array(z.enum(["highest", "pcenter"], 'a round is "highest" or "pcenter"'))
-        .min(1, "rounds must name at least one round"),
-      power: z.number().positive("power must be greater than zero"),
-      boxScale: z.number().min(1, "boxScale must be at least 1"),
-      threshold: z.number().min(0).max(1, "threshold is a probability"),
+      ...LocatorSearch,
       overviewScale: z
         .number()
         .positive("overviewScale must be greater than zero")
