@@ -60,7 +60,9 @@ const statusOf = (error: Http.HttpFailure): number | undefined =>
   "status" in error ? error.status : undefined;
 
 // Routes is the app's exported type: create<Routes>()(options, specs). Every call carries the
-// token as its bearer, and nothing is asked again.
+// token as its bearer, and nothing is asked again. Every call here, and connect's, opens its own
+// socket: one taken from the pool can be the one the server is closing for idleness, and the
+// request is then lost unsent.
 export const create =
   <Routes>() =>
   <const A extends Specs<ExtractSchema<Routes>>>(
@@ -92,6 +94,7 @@ export const create =
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
+          keepalive: false,
           ...(spec.timeoutMs === undefined ? {} : { timeoutMs: spec.timeoutMs }),
           ...(options.signal === undefined ? {} : { signal: options.signal }),
         },
@@ -155,6 +158,7 @@ export const connect = <Routes>(options: Options) => {
         },
         ...(json === undefined ? {} : { body: JSON.stringify(json) }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
+        keepalive: false,
         ...init,
       },
     ];

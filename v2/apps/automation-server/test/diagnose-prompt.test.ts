@@ -29,4 +29,17 @@ describe("the diagnosing agent's prompt", () => {
 
     expect(first.filter((file) => second.includes(file))).toEqual([]);
   });
+
+  it("writes every file its example names under /tmp (happy)", () => {
+    const files = written(DiagnosePrompt.render(FIRST, MODEL));
+
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) expect(file).toMatch(/^\/tmp\/[^/]+$/);
+  });
+
+  it("never writes a file into its working directory, the repository (unhappy)", () => {
+    const files = written(DiagnosePrompt.render(FIRST, MODEL));
+
+    expect(files.filter((file) => !file.startsWith("/"))).toEqual([]);
+  });
 });
