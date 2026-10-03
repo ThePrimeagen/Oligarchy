@@ -66,6 +66,36 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         return row;
       });
 
+      // An errored job back in the queue in place: the unique index keeps one row per result and
+      // action, so a second run of it is this row pending again, its last run's client, times and
+      // reason cleared and its place in the queue now. Only an errored row; true when one moved.
+      const requeueErrored = Effect.fn("db.requeueErroredAutomationJob")(function* (
+        resultId: string,
+        action: AutomationAction,
+      ) {
+        const rows = yield* database.run("requeueErroredAutomationJob", (db) =>
+          db
+            .update(DbSchema.automationJobs)
+            .set({
+              status: "pending",
+              reason: null,
+              serverId: null,
+              startedAt: null,
+              finishedAt: null,
+              createdAt: sql`now()`,
+            })
+            .where(
+              and(
+                eq(DbSchema.automationJobs.resultId, resultId),
+                eq(DbSchema.automationJobs.action, action),
+                eq(DbSchema.automationJobs.status, "errored"),
+              ),
+            )
+            .returning({ id: DbSchema.automationJobs.id }),
+        );
+        return rows.length > 0;
+      });
+
       // Queue order: every pending mint oldest first, then every pending diagnose, then every
       // pending drive, each oldest first; id breaks a tie. A mint is the install a resume is
       // waiting on, so it never waits behind that resume. A diagnose closes a result whose
@@ -383,6 +413,7 @@ export class AutomationStore extends Context.Service<AutomationStore>()(
         enqueue,
         nextPending,
         markRunning,
+        requeueErrored,
         hasPending,
         jobStatus,
         findRunning,

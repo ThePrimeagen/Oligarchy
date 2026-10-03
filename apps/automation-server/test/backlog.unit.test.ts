@@ -1248,6 +1248,24 @@ describe("needs review watch happy path", () => {
     }),
   );
 
+  it.effect("a diagnose that errored is queued again once its ticket is back in Needs Review", () =>
+    Effect.gen(function* () {
+      const board = [ticket(TICKET, SEEN)];
+      const { stores, log, moved } = yield* startColumn("listNeedsReview", board);
+      seedResult(stores.tests, TICKET);
+      seedJob(stores.automation, RESULT, "diagnose", "errored");
+      yield* TestClock.adjust("90 seconds");
+      expect(stores.automation.jobs).toEqual([
+        expect.objectContaining({ resultId: RESULT, action: "diagnose", status: "pending" }),
+      ]);
+      expect(moved).toEqual([]);
+      expect(acted(log)).toEqual([
+        "needs review watch processing out of bounds ticket; 3/3 pings; queueing diagnose",
+        "needs review watch queued diagnose",
+      ]);
+    }),
+  );
+
   it.effect(
     "a diagnose that already ran leaves the Needs Review ticket alone, with no line, even after an edit",
     () =>

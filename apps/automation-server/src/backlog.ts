@@ -171,7 +171,8 @@ const processAutomationNeeded = Effect.fn("processAutomationNeeded")(function* (
 // Needs Review stays a diagnose, including for the mint definition. The ticket stays in the
 // column while that job runs, so the caller settles a landed enqueue until the snapshot changes.
 // The result is looked up first for the same reason as the backlog's. A diagnose already queued
-// or run is settled without a line, as a drive is in Automation Needed.
+// or run is settled without a line, as a drive is in Automation Needed; one that errored gave no
+// verdict, and its ticket back in Needs Review queues it again.
 const processNeedsReview = Effect.fn("processNeedsReview")(function* (
   ticket: Linear.LinearBacklogTicket,
   rounds: number,
@@ -187,7 +188,8 @@ const processNeedsReview = Effect.fn("processNeedsReview")(function* (
     }
     return "missing";
   }
-  if (Option.isSome(yield* Find.status(found.value, "diagnose"))) {
+  const diagnosed = yield* Find.status(found.value, "diagnose");
+  if (Option.isSome(diagnosed) && diagnosed.value !== "errored") {
     return "duplicate";
   }
   yield* log.info(

@@ -51,7 +51,9 @@ export const already = (duplicate: Duplicate): string =>
   `${duplicate.action} already ${duplicate.status === "pending" ? "queued" : duplicate.status}`;
 
 // The (result, action) unique index keeps one row, so a second insert is a duplicate, named by
-// the status of the row it hit. Any other failed insert is that failure.
+// the status of the row it hit. A diagnose that errored never gave a verdict, so a ticket moved
+// back to Needs Review queues that row again; a drive runs again only as a new run. Any other
+// failed insert is that failure.
 export const enqueue = Effect.fn("Board.enqueue")(function* (
   job: Find.Job,
   action: Automation.AutomationAction,
@@ -68,6 +70,14 @@ export const enqueue = Effect.fn("Board.enqueue")(function* (
     return queued;
   }
   const kept = yield* Find.status(job, action);
+  if (
+    action === "diagnose" &&
+    Option.contains(kept, "errored") &&
+    (yield* automation.requeueErrored(job.id, action))
+  ) {
+    const requeued: Enqueued = { result: "queued", action };
+    return requeued;
+  }
   const duplicate: Enqueued = {
     result: "duplicate",
     action,

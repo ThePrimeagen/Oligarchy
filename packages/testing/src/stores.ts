@@ -369,6 +369,23 @@ export const fakeAutomationStore = (
               left.id.localeCompare(right.id),
           ),
       ),
+    requeueErrored: (resultId, action) =>
+      Effect.sync(() => {
+        const job = jobs.find(
+          (row) =>
+            sameId(row.resultId, resultId) && row.action === action && row.status === "errored",
+        );
+        if (job === undefined) {
+          return false;
+        }
+        job.status = "pending";
+        job.reason = null;
+        job.serverId = null;
+        job.startedAt = null;
+        job.finishedAt = null;
+        job.createdAt = new Date();
+        return true;
+      }),
     hasPending: (resultId, action) =>
       Effect.sync(() =>
         jobs.some(
