@@ -1,9 +1,10 @@
 import * as jarl from "jarl";
 import sharp, { type Sharp } from "sharp";
 
-// Screenshots for a decision model: a region of the screen enlarged, a lettered and numbered grid
-// drawn over it, encoded as WebP, and the screen box of every cell. Everything is in process; the
-// screen is decoded once by open and every view is cut from those pixels.
+// Pictures of a screenshot for a decision model. An overview is the whole screen, shrunk. A grid
+// image is a box of the screen enlarged, with a lettered and numbered grid drawn over it and the
+// screen box of every cell. Both are WebP. The screen is decoded once by open; every picture is cut
+// from those pixels, in process.
 
 export const ImageInvalid = jarl.error.define("ScreenGridImageInvalid");
 export type ImageInvalid = InstanceType<typeof ImageInvalid>;
@@ -42,7 +43,7 @@ export type Cell = {
 
 // The picture is the box enlarged to `width` with the labels in a band of `margin` pixels above it
 // and to its left. Cells are in screen pixels, not picture pixels.
-export type View = Image & {
+export type GridImage = Image & {
   readonly box: Box;
   readonly columns: number;
   readonly rows: number;
@@ -50,16 +51,16 @@ export type View = Image & {
   readonly cells: ReadonlyArray<Cell>;
 };
 
-export type ViewOptions = {
+// width is the picture's, in pixels; quality is WebP's, from 1 to 100.
+export type OverviewOptions = { readonly width: number; readonly quality: number };
+export type GridImageOptions = OverviewOptions & {
   readonly box: Box;
   readonly columns: number;
   readonly rows: number;
-  readonly width: number;
 };
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const QUALITY = 80;
-// libwebp's fastest method: 69 ms a view against 108 ms for the default, at a size Cloudflare's
+// libwebp's fastest method: 69 ms a grid image against 108 ms for the default, at a size Cloudflare's
 // request limit still allows.
 const EFFORT = 0;
 
@@ -87,19 +88,24 @@ const pixelsOf = (screen: Screen) =>
     raw: { width: screen.width, height: screen.height, channels: screen.channels },
   });
 
-const encode = (image: Sharp, width: number, height: number) =>
+const encode = (image: Sharp, width: number, height: number, quality: number) =>
   jarl.exec(async (): Promise<Image> => {
-    const bytes = await image.webp({ quality: QUALITY, effort: EFFORT }).toBuffer();
+    const bytes = await image.webp({ quality, effort: EFFORT }).toBuffer();
     return { bytes: new Uint8Array(bytes), contentType: "image/webp", width, height };
   }, invalid);
 
 // The whole screen at `width`, its proportions kept.
-export const whole = (screen: Screen, width: number): Promise<jarl.Result<Image, ImageInvalid>> => {
+export const overview = (
+  screen: Screen,
+  options: OverviewOptions,
+): Promise<jarl.Result<Image, ImageInvalid>> => {
+  const { width, quality } = options;
   const height = Math.max(1, Math.round((width * screen.height) / screen.width));
   return encode(
     pixelsOf(screen).resize(width, height, { kernel: "lanczos3", fit: "fill" }),
     width,
     height,
+    quality,
   );
 };
 
@@ -171,11 +177,11 @@ const boxProblem = (screen: Screen, box: Box): string | null => {
   return null;
 };
 
-export const view = async (
+export const gridImage = async (
   screen: Screen,
-  options: ViewOptions,
-): Promise<jarl.Result<View, BoxInvalid | ImageInvalid>> => {
-  const { box, columns, rows, width } = options;
+  options: GridImageOptions,
+): Promise<jarl.Result<GridImage, BoxInvalid | ImageInvalid>> => {
+  const { box, columns, rows, width, quality } = options;
   const problem = boxProblem(screen, box);
   if (problem !== null) {
     return jarl.err(new BoxInvalid(problem));
@@ -198,7 +204,7 @@ export const view = async (
     .resize(width, height, { kernel: "lanczos3", fit: "fill" })
     .extend({ top: margin, left: margin, background: { r: 0, g: 0, b: 0 } })
     .composite([{ input: overlay(width, height, margin, columns, rows), top: 0, left: 0 }]);
-  const encoded = await encode(image, width + margin, height + margin);
+  const encoded = await encode(image, width + margin, height + margin, quality);
   if (jarl.is_err(encoded)) {
     return encoded;
   }

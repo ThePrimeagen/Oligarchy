@@ -7,15 +7,18 @@ import * as Locator from "../src/main.ts";
 
 export const CALL_TIMEOUT_MS = 4_321;
 export const RETRY_WAIT_MS = 1_234;
+export const RETRIES = 2;
 export const OPTIONS: Locator.Options = {
   grid: 4,
   rounds: 3,
   power: 4,
   boxScale: 1.5,
   threshold: 0.45,
-  viewWidth: 640,
-  contextWidth: 320,
+  overviewScale: 0.25,
+  gridImageScale: 0.5,
+  quality: 70,
   callTimeoutMs: CALL_TIMEOUT_MS,
+  retries: RETRIES,
   retryWaitMs: RETRY_WAIT_MS,
 };
 export const TARGET = "the word 'Lock'";

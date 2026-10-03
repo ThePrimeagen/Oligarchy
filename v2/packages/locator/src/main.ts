@@ -16,9 +16,10 @@ declare module "@oligarchy/app" {
   }
 }
 
-// One ask, and one more after retryWait when Clef was busy, down or slow.
-const ATTEMPTS = 2;
 const NEVER = new AbortController().signal;
+
+const widthAt = (screen: ScreenGrid.Screen, scale: number): number =>
+  Math.max(1, Math.round(screen.width * scale));
 
 const passing = (error: DecisionApi.Failure): boolean =>
   jarl.error.is(error, DecisionApi.RateLimited) ||
@@ -29,7 +30,11 @@ const question = (request: Request, cell: ScreenGrid.Cell): string =>
   `In image 2, is ${request.target} in grid cell ${cell.label} (column ${cell.label[0]}, row ${cell.row + 1})?` +
   (request.hint === undefined ? "" : ` ${request.hint}`);
 
-const described = (view: ScreenGrid.View, screen: ScreenGrid.Screen, first: boolean): string => {
+const described = (
+  view: ScreenGrid.GridImage,
+  screen: ScreenGrid.Screen,
+  first: boolean,
+): string => {
   const grid = `${view.columns} lettered columns (A-${view.cells[view.columns - 1]?.label[0]}, along the top) and ${view.rows} numbered rows (1-${view.rows}, down the left)`;
   if (first) {
     return `Image 2 shows the whole screen with a grid of ${grid}. Image 1 is the whole screen without the grid.`;
@@ -42,7 +47,7 @@ const described = (view: ScreenGrid.View, screen: ScreenGrid.Screen, first: bool
 export const create = App.createService<DecisionApi.DecisionApi, Options, Locator>(
   (services, options) => {
     const ask = (request: DecisionApi.Request, signal: AbortSignal) =>
-      Async.repeat(() => services["decision-api"].decide(request), ATTEMPTS, {
+      Async.repeat(() => services["decision-api"].decide(request), 1 + options.retries, {
         retry: (error) =>
           passing(error) ? { retry: true, delay: options.retryWaitMs } : { retry: false },
         signal,
@@ -56,11 +61,12 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
       first: boolean,
       signal: AbortSignal,
     ): Promise<jarl.Result<Round, Failure>> => {
-      const viewed = await ScreenGrid.view(screen, {
+      const viewed = await ScreenGrid.gridImage(screen, {
         box,
         columns: options.grid,
         rows: options.grid,
-        width: options.viewWidth,
+        width: widthAt(screen, options.gridImageScale),
+        quality: options.quality,
       });
       if (jarl.is_err(viewed)) {
         return viewed;
@@ -123,7 +129,10 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
         return opened;
       }
       const screen = jarl.value(opened);
-      const pictured = await ScreenGrid.whole(screen, options.contextWidth);
+      const pictured = await ScreenGrid.overview(screen, {
+        width: widthAt(screen, options.overviewScale),
+        quality: options.quality,
+      });
       if (jarl.is_err(pictured)) {
         return pictured;
       }

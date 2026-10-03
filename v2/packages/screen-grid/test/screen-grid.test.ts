@@ -18,38 +18,38 @@ describe("toScreen", () => {
   });
 });
 
-describe("view", () => {
+describe("gridImage", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
   it("enlarges the box to the asked width, grids it, and names cells that tile the box (happy)", async () => {
     const screen = jarl.unwrap(await ScreenGrid.open(await png()));
     const box = { left: 240, top: 150, right: 720, bottom: 450 };
-    const view = jarl.unwrap(
-      await ScreenGrid.view(screen, { box, columns: 4, rows: 4, width: 1280 }),
+    const picture = jarl.unwrap(
+      await ScreenGrid.gridImage(screen, { box, columns: 4, rows: 4, width: 1280, quality: 80 }),
     );
 
-    expect(view.contentType).toBe("image/webp");
-    const meta = await sharp(view.bytes).metadata();
+    expect(picture.contentType).toBe("image/webp");
+    const meta = await sharp(picture.bytes).metadata();
     expect(meta.format).toBe("webp");
     expect({ width: meta.width, height: meta.height }).toEqual({
-      width: 1280 + view.margin,
-      height: 800 + view.margin,
+      width: 1280 + picture.margin,
+      height: 800 + picture.margin,
     });
-    expect(view.cells.map((cell) => cell.label)).toEqual([
+    expect(picture.cells.map((cell) => cell.label)).toEqual([
       ..."ABCD".split("").map((c) => `${c}1`),
       ..."ABCD".split("").map((c) => `${c}2`),
       ..."ABCD".split("").map((c) => `${c}3`),
       ..."ABCD".split("").map((c) => `${c}4`),
     ]);
-    expect(view.cells[0]).toEqual({
+    expect(picture.cells[0]).toEqual({
       label: "A1",
       column: 0,
       row: 0,
       box: { left: 240, top: 150, right: 360, bottom: 225 },
     });
-    expect(view.cells[15]?.box).toEqual({ left: 600, top: 375, right: 720, bottom: 450 });
-    const area = view.cells.reduce(
+    expect(picture.cells[15]?.box).toEqual({ left: 600, top: 375, right: 720, bottom: 450 });
+    const area = picture.cells.reduce(
       (sum, { box: b }) => sum + (b.right - b.left) * (b.bottom - b.top),
       0,
     );
@@ -66,8 +66,32 @@ describe("view", () => {
     { name: "a box between pixels", box: { left: 0.5, top: 0, right: 100, bottom: 100 } },
   ])("refuses $name with BoxInvalid (unhappy)", async ({ box }) => {
     const screen = jarl.unwrap(await ScreenGrid.open(await png()));
-    const result = await ScreenGrid.view(screen, { box, columns: 4, rows: 4, width: 1280 });
+    const result = await ScreenGrid.gridImage(screen, {
+      box,
+      columns: 4,
+      rows: 4,
+      width: 1280,
+      quality: 80,
+    });
     expect(jarl.error.is(result, ScreenGrid.BoxInvalid)).toBe(true);
+  });
+});
+
+describe("overview", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("compresses harder at a lower quality (happy)", async () => {
+    // Noise, so the encoder has detail to drop.
+    const noise = Uint8Array.from({ length: 1280 * 800 * 3 }, (_, i) => (i * 2654435761) % 251);
+    const bytes = await sharp(noise, { raw: { ...SCREEN, channels: 3 } })
+      .png()
+      .toBuffer();
+    const screen = jarl.unwrap(await ScreenGrid.open(bytes));
+    const fine = jarl.unwrap(await ScreenGrid.overview(screen, { width: 640, quality: 90 }));
+    const coarse = jarl.unwrap(await ScreenGrid.overview(screen, { width: 640, quality: 40 }));
+    expect({ width: fine.width, height: fine.height }).toEqual({ width: 640, height: 400 });
+    expect(coarse.bytes.length).toBeLessThan(fine.bytes.length);
   });
 });
 

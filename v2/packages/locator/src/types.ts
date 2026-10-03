@@ -10,9 +10,11 @@ export type Options = {
   readonly power: number;
   readonly boxScale: number;
   readonly threshold: number;
-  readonly viewWidth: number;
-  readonly contextWidth: number;
+  readonly overviewScale: number;
+  readonly gridImageScale: number;
+  readonly quality: number;
   readonly callTimeoutMs: number;
+  readonly retries: number;
   readonly retryWaitMs: number;
 };
 

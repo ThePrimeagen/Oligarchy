@@ -2,6 +2,7 @@ import * as Async from "@oligarchy/async";
 import * as DecisionApi from "@oligarchy/decision-api";
 import * as ScreenGrid from "@oligarchy/screen-grid";
 import * as jarl from "jarl";
+import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Geometry from "../src/geometry.ts";
 import * as Locator from "../src/main.ts";
@@ -10,6 +11,7 @@ import {
   CALL_TIMEOUT_MS,
   decisions,
   HINT,
+  RETRIES,
   settle,
   screen,
   TARGET,
@@ -118,6 +120,12 @@ describe("locate", () => {
         request.images?.map((image) => ("contentType" in image ? image.contentType : "data url")),
       ).toEqual(["image/webp", "image/webp"]);
       expect(request.timeoutMs).toBe(CALL_TIMEOUT_MS);
+      // overviewScale 0.25 and gridImageScale 0.5 of the 1280-pixel screen.
+      const [overview, gridImage] = (request.images ?? []).map((image) =>
+        "bytes" in image ? image.bytes : new Uint8Array(),
+      );
+      expect((await sharp(overview).metadata()).width).toBe(320);
+      expect((await sharp(gridImage).metadata()).width).toBe(640 + 20);
       expect(request.state).toMatchObject({
         task: TASK,
         screen: "1280x800 pixels, origin top-left",
@@ -160,27 +168,24 @@ describe("locate", () => {
     },
   ];
 
-  it.each(passing)(
-    "asks again once when Clef is $name, and goes on (unhappy)",
-    async ({ error }) => {
-      const { locator, asked } = decisions([jarl.err(error()), answering(["B2", "C3", "A1"])]);
-      const result = await settle(
-        locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
-      );
-      expect(jarl.is_ok(result)).toBe(true);
-      expect(asked).toHaveLength(4);
-    },
-  );
+  it.each(passing)("asks again when Clef is $name, and goes on (unhappy)", async ({ error }) => {
+    const { locator, asked } = decisions([jarl.err(error()), answering(["B2", "C3", "A1"])]);
+    const result = await settle(
+      locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
+    );
+    expect(jarl.is_ok(result)).toBe(true);
+    expect(asked).toHaveLength(4);
+  });
 
   it.each(passing)(
-    "returns $name when it happens on both asks (unhappy)",
+    "returns $name when it happens on the first ask and every retry (unhappy)",
     async ({ error, is }) => {
       const { locator, asked } = decisions([jarl.err(error())]);
       const result = await settle(
         locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
       );
       expect(is(result)).toBe(true);
-      expect(asked).toHaveLength(2);
+      expect(asked).toHaveLength(1 + RETRIES);
     },
   );
 

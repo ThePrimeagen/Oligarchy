@@ -17,14 +17,32 @@ const locator = Locator.create({ "decision-api": decisionApi }, {
   power: config.locator.power,
   boxScale: config.locator.boxScale,
   threshold: config.locator.threshold,
-  viewWidth: config.locator.viewWidth,
-  contextWidth: config.locator.contextWidth,
+  overviewScale: config.locator.overviewScale,
+  gridImageScale: config.locator.gridImageScale,
+  quality: config.locator.quality,
   callTimeoutMs: config.locator.callTimeout,
+  retries: config.locator.retries,
   retryWaitMs: config.locator.retryWait,
 });
 ```
 
 Every option comes from `oligarchy.json`'s `locator` section. Creation does no work.
+
+| Setting | Checked in | What it does |
+| --- | --- | --- |
+| `grid` | 4 | cells per side: 4 is a 4x4 grid, 16 questions a round (8 at most: 64) |
+| `rounds` | 3 | how many times the box shrinks; the last round's point is the click |
+| `power` | 4 | each cell's weight is `p ^ power` |
+| `boxScale` | 1.5 | the next round's box is this many cells across, around the point; below `grid` |
+| `threshold` | 0.45 | round one's best cell below this is `NotFound` |
+| `overviewScale` | 0.5 | the whole screen, no grid, shrunk to this share of its size (0.5 of 1280x800 is 640x400) |
+| `gridImageScale` | 1 | the gridded picture is this share of the screen's width: round one's is the screen, later rounds' the box enlarged to it |
+| `quality` | 80 | WebP quality of both pictures, 1 to 100: lower is smaller and faster to send |
+| `callTimeout` | 5 seconds | one Clef call |
+| `retries` | 1 | how many more times a busy, down or slow Clef call is asked |
+| `retryWait` | 1 second | the wait before each of those |
+
+Clef appears to scale every picture to about a megapixel, so neither scale is above 1.
 
 ## Locate
 
@@ -46,7 +64,8 @@ Asking about the entry aimed at its icon, outside the clickable row.
 Each round:
 
 1. Draws a `grid` x `grid` lettered and numbered grid over the box (round one: the whole screen),
-   `viewWidth` pixels wide, and sends it with the whole screen at `contextWidth`.
+   enlarged to `gridImageScale` of the screen's width, and sends it after the overview: the whole
+   screen at `overviewScale`. Both are WebP at `quality`.
 2. Asks one noul per cell: `In image 2, is <target> in grid cell C3 (column C, row 3)? <hint>`.
 3. Weights each cell's centre by `p ^ power` over the sum of every cell's, and takes that point.
    A high power keeps the many cells that answer a small yes from pulling the point off the
@@ -62,7 +81,7 @@ input tokens, for a log or a picture of what was asked.
 | --- | --- |
 | `NotFound` | round one's best cell scored below `threshold`; carries `best` and `threshold` |
 | `ScreenGrid.ImageInvalid` | the screen bytes are not an image; nothing is asked |
-| `DecisionApi.RateLimited`, `Unavailable`, `TimedOut` | still failing after one more ask, `retryWait` later |
+| `DecisionApi.RateLimited`, `Unavailable`, `TimedOut` | still failing after `retries` more asks, `retryWait` apart |
 | `DecisionApi.InvalidRequest`, `Refused`, `InvalidResponse` | returned at once, not asked again |
 | `Async.Aborted` | the signal aborted, before an ask or while waiting to ask again |
 | `ScreenGrid.BoxInvalid` | never for a box the locator cuts; there for the type |

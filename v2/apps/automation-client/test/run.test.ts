@@ -58,9 +58,11 @@ const CONFIG = JSON.stringify({
     power: 4,
     boxScale: 1.5,
     threshold: 0.45,
-    viewWidth: 1280,
-    contextWidth: 640,
+    overviewScale: 0.5,
+    gridImageScale: 1,
+    quality: 80,
     callTimeout: "5 seconds",
+    retries: 1,
     retryWait: "1 second",
   },
 });
