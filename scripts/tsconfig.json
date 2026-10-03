@@ -1,0 +1,13 @@
+{
+  "extends": "../v2/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@oligarchy/*": ["../v2/packages/*/src/main.ts"],
+      "jarl": ["../v2/packages/locator/node_modules/jarl/index.ts"],
+      "sharp": ["../v2/packages/screen-grid/node_modules/sharp"],
+      "vitest": ["../v2/packages/locator/node_modules/vitest"]
+    },
+    "types": ["node"]
+  },
+  "include": ["*.ts", "lib/**/*.ts"]
+}

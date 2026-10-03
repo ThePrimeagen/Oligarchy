@@ -326,8 +326,6 @@
         "jarl": "catalog:",
       },
       "devDependencies": {
-        "@oligarchy/env": "workspace:*",
-        "@oligarchy/http": "workspace:*",
         "@types/node": "catalog:",
         "sharp": "^0.35.5",
         "typescript": "catalog:",
