@@ -3,7 +3,7 @@ import type * as ScreenGrid from "@oligarchy/screen-grid";
 import type * as jarl from "jarl";
 import type * as Errors from "./errors.ts";
 
-// Every value comes from oligarchy.json's locator section; see the README for what each does.
+// Every value comes from oligarchy.json's locator section; packages/env/src/config.ts says what each does.
 export type Options = {
   readonly grid: number;
   readonly rounds: number;
