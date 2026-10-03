@@ -126,6 +126,40 @@ describe("fetch", () => {
     expect(missing.message).toBe(`${WHERE}: 404: no guest for job-1`);
   });
 
+  // Bun's fetch ends a request it has no answer for within its own idle limit, whatever the
+  // caller's deadline, unless it is told `timeout: false`.
+  const runtime: Http.Fetch = async (_url, sent) => {
+    if (sent.timeout !== false) {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }
+    return Response.json({ team: { id: "team-1" } });
+  };
+
+  it("a call that waits past the runtime's own fetch limit still answers (happy)", async () => {
+    const http = Http.create({}, { fetch: runtime, timeoutMs: 2 ** 31 - 1 });
+
+    const team = await http.fetch(URL, init, { decode: decodeTeam });
+
+    expect(team).toEqual(jarl.ok({ id: "team-1" }));
+  });
+
+  it("a call no one answers within its own timeoutMs is still HttpTimedOut (sad)", async () => {
+    const http = Http.create(
+      {},
+      {
+        fetch: (_url, { signal }) =>
+          new Promise((_, reject) =>
+            signal?.addEventListener("abort", () => reject(signal.reason)),
+          ),
+        timeoutMs: 5,
+      },
+    );
+
+    const team = await http.fetch(URL, init, { decode: decodeTeam });
+
+    expect(Fake.failure(team, Http.HttpTimedOut).message).toBe(`${WHERE}: no answer within 5 ms`);
+  });
+
   type Case = {
     readonly name: string;
     readonly reply: Fake.Reply;

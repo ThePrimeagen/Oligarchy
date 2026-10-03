@@ -50,7 +50,7 @@ export const opening =
     if (failure !== undefined) return jarl.err(failure);
     const sent = jarl.exec(
       async () => {
-        const response = await fetch(url, { ...rest, signal: controller.signal });
+        const response = await fetch(url, { ...rest, timeout: false, signal: controller.signal });
         reader = response.body?.getReader();
         if (ended) await reader?.cancel(failure);
         return response;

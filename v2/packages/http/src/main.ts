@@ -5,7 +5,12 @@ import { opening } from "./stream.ts";
 export { body } from "./stream.ts";
 export type { HttpResponse } from "./stream.ts";
 
-export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+// `timeout: false` turns off Bun's own fetch limit, which ends any request unanswered after about
+// six minutes whatever its timeoutMs; every deadline here is timeoutMs's.
+export type Fetch = (
+  url: string,
+  init: RequestInit & { readonly timeout?: false },
+) => Promise<Response>;
 
 export * from "./failure.ts";
 import {
@@ -129,7 +134,7 @@ export const create = App.createService<never, Options, Http>((_, options) => {
     > =>
       jarl.exec(
         async () => {
-          const response = await send(url, { ...rest, signal: inner });
+          const response = await send(url, { ...rest, timeout: false, signal: inner });
           return {
             status: response.status,
             bytes: new Uint8Array(await response.arrayBuffer()),

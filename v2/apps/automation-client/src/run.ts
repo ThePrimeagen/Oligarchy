@@ -82,7 +82,8 @@ export const create = (
   });
 
   // opencode reads the first segment of --model as its provider, so the OpenRouter id goes under
-  // openrouter whatever it starts with. The agent's ./ctrl is V2's.
+  // openrouter whatever it starts with. The agent's ./ctrl is V2's: opencode takes its directory
+  // from PWD rather than the one it was spawned in, so PWD names it too.
   const opencode = (prompt: string): Command => ({
     name: "opencode",
     command: "opencode",
@@ -96,7 +97,11 @@ export const create = (
       "--",
       prompt,
     ],
-    env: { ...secrets(), OPENCODE_CONFIG_CONTENT: opencodeConfig(config.diagnose) },
+    env: {
+      ...secrets(),
+      OPENCODE_CONFIG_CONTENT: opencodeConfig(config.diagnose),
+      PWD: `${Env.ROOT}v2`,
+    },
     cwd: `${Env.ROOT}v2`,
     ceilingMs: config.diagnose.runCeiling,
   });

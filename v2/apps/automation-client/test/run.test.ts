@@ -205,7 +205,7 @@ const fakeSpawn = (refusal?: Error) => {
   return { spawn, calls, child };
 };
 
-const running = async (refusal?: Error) => {
+const running = async (refusal?: Error, parent: Record<string, string> = PARENT) => {
   const env = jarl.unwrap(
     await Env.create(
       Env.cli({ name: "run-test", description: "" })
@@ -238,7 +238,7 @@ const running = async (refusal?: Error) => {
     {
       reservations,
       spawn: spawned.spawn,
-      env: PARENT,
+      env: parent,
       serverUrl: PROXY,
       config: env.config,
       vars: env.vars,
@@ -273,7 +273,7 @@ describe("an automation client's run", () => {
         {
           stdio: STDIO,
           cwd: `${Env.ROOT}v2`,
-          env: { ...CHILD_ENV, OPENCODE_CONFIG_CONTENT: OPENCODE_CONFIG },
+          env: { ...CHILD_ENV, OPENCODE_CONFIG_CONTENT: OPENCODE_CONFIG, PWD: `${Env.ROOT}v2` },
         },
       ],
     ]);
@@ -291,6 +291,27 @@ describe("an automation client's run", () => {
       `[INFO] [${OTHER}] automation-client: opencode exited 0`,
     ]);
   });
+
+  // opencode takes its directory from PWD, not from the directory it was spawned in, so a stale
+  // PWD would have its agent run the repo root's ./ctrl.
+  it.each([
+    { parent: { ...PARENT, PWD: "/srv/started-here" }, named: "a stale PWD" },
+    { parent: PARENT, named: "no PWD" },
+  ])(
+    "opencode is told PWD is v2, where it runs, when the client had $named (unhappy)",
+    async ({ parent }) => {
+      const at = await running(undefined, parent);
+      jarl.unwrap(await at.reservations.reserve(DIAGNOSE));
+
+      const diagnose = at.run({ jobId: OTHER, prompt: PROMPT });
+
+      const [, , spawned] = at.spawned.calls[0] ?? [];
+      expect(spawned?.cwd).toBe(`${Env.ROOT}v2`);
+      expect(spawned?.env?.["PWD"]).toBe(`${Env.ROOT}v2`);
+      at.spawned.child(0).end(0);
+      expect(await diagnose).toEqual(jarl.ok("ended"));
+    },
+  );
 
   it("a job with no reservation is RunFailed, spawns nothing and says nothing (unhappy)", async () => {
     const at = await running();

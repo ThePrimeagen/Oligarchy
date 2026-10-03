@@ -77,6 +77,38 @@ it("reports a broken body and clears its deadline", async () => {
   expect(jarl.error.is(await response.read(), Http.HttpUnreachable)).toBe(true);
   expect(vi.getTimerCount()).toBe(0);
 });
+it("opens a response that waits past the runtime's own fetch limit", async () => {
+  // Bun's fetch ends a request within its own idle limit unless it is told `timeout: false`.
+  const http = Http.create(
+    {},
+    {
+      fetch: async (_url, init) => {
+        if (init.timeout !== false) {
+          throw new DOMException("The operation timed out.", "TimeoutError");
+        }
+        return new Response("started");
+      },
+      timeoutMs: 2 ** 31 - 1,
+    },
+  );
+  const response = jarl.unwrap(await http.open("http://runner/start", { method: "POST" }));
+  expect(response.status).toBe(200);
+  await response.close();
+});
+it("times out a response whose headers never come within its own timeoutMs", async () => {
+  const http = Http.create(
+    {},
+    {
+      fetch: (_url, { signal }) =>
+        new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason))),
+      timeoutMs: 100,
+    },
+  );
+  const opening = http.open("http://runner/start", { method: "POST" });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(jarl.error.is(await opening, Http.HttpTimedOut)).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+});
 it("closes an unread body and cancels the transport", async () => {
   const cancel = vi.fn();
   const http = Http.create(

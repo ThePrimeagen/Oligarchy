@@ -524,8 +524,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       proxy or the model could not be reached. That failure is the failing step's own error,
       returned as it came, logged with itself as the cause so Sentry gets its stack, printed with
       its stack, and the reason the guest is stopped with. The OpenRouter client has
-      `driver.askTimeout` as its timeout and three attempts, waiting
-      `driver.harness.defaultRetry` between them when OpenRouter names no wait. The step limit is
+      `driver.askTimeout` as its timeout and asks again until a wait would reach the run
+      ceiling, waiting `driver.harness.defaultRetry` between asks when OpenRouter names no wait. The step limit is
       `driver.stepLimit`. V1's
       `--prompt` and `--debug-log` do not come over: the harness renders its own prompt, and
       every line goes to the logs table under the job id.
