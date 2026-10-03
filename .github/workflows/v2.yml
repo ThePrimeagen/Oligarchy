@@ -26,6 +26,21 @@ jobs:
       - run: bun run check:types
       - run: bun run test:unit
 
+  # scripts/ runs on v2's packages and is checked with the root's tools, so it needs both installs.
+  scripts:
+    name: scripts types, lint, format, compile and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: v2
+      - run: bun run check:scripts
+
   migrations-append-only:
     name: v2 migrations are append-only
     if: github.event_name == 'pull_request'
