@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Result, Schedule, Scope } from "effect";
+import { Cause, Clock, Effect, Option, Result, Schedule, Scope } from "effect";
 import * as Automation from "@oligarchy/db/automation";
 import * as Servers from "@oligarchy/db/servers";
 import * as SetupRequests from "@oligarchy/db/setup-requests";
@@ -64,6 +64,20 @@ type PlaceResult =
     }
   | { readonly _tag: "unavailable"; readonly continueTick: boolean };
 
+// A client whose reserve fails for another reason than capacity or setup (the tunnel to its proxy
+// down, the client gone) is asked again after a pause that doubles from one tick to half a
+// minute, not every tick. The first failure of a streak is the error Sentry sees; the rest are
+// warnings, and the first answer after it says how long it lasted.
+const PAUSE_FIRST_MS = 5_000;
+const PAUSE_MAX_MS = 30_000;
+
+type Streak = { readonly count: number; readonly since: number; readonly until: number };
+
+type Streaks = Map<string, Streak>;
+
+const paused = (streaks: Streaks, url: string, now: number): boolean =>
+  (streaks.get(url)?.until ?? 0) > now;
+
 // Build the prompt and take a client slot, the client reserving a guest too when the job is a
 // drive. The row stays pending. /run is not waited here: a reserved job starts in its own fiber
 // so the next pending row can reserve on this tick. A full client or one whose guest is not
@@ -76,6 +90,7 @@ const place = Effect.fn("place")(function* (
     readonly diagnose: string;
     readonly mint: string;
   },
+  streaks: Streaks,
 ) {
   const tests = yield* Tests.TestStore;
   const setups = yield* SetupRequests.SetupRequestStore;
@@ -138,6 +153,19 @@ const place = Effect.fn("place")(function* (
         Option.getOrUndefined(pinned),
       ),
     );
+    const now = yield* Clock.currentTimeMillis;
+    const prior = streaks.get(client.url);
+    const unexpected =
+      Result.isFailure(reserved) &&
+      reserved.failure.status !== 409 &&
+      reserved.failure.status !== 503;
+    if (!unexpected && prior !== undefined) {
+      streaks.delete(client.url);
+      yield* log.info(
+        `reserve answered again; ${client.url}; after ${String(prior.count)} failures in ${String(Math.round((now - prior.since) / 1000))}s`,
+        { location: Log.Locations.automation, agentId: ticket },
+      );
+    }
     if (Result.isSuccess(reserved)) {
       const placed: PlaceResult = {
         _tag: "placed",
@@ -154,11 +182,24 @@ const place = Effect.fn("place")(function* (
       continue;
     }
     sawUnexpected = true;
-    yield* log.error(`reserve failed; ${client.url}`, {
-      location: Log.Locations.automation,
-      agentId: ticket,
-      cause: reserved.failure.cause ?? reserved.failure,
+    const count = (prior?.count ?? 0) + 1;
+    streaks.set(client.url, {
+      count,
+      since: prior?.since ?? now,
+      until: now + Math.min(PAUSE_FIRST_MS * 2 ** (count - 1), PAUSE_MAX_MS),
     });
+    if (count === 1) {
+      yield* log.error(`reserve failed; ${client.url}`, {
+        location: Log.Locations.automation,
+        agentId: ticket,
+        cause: reserved.failure.cause ?? reserved.failure,
+      });
+    } else {
+      yield* log.warning(`reserve failed again; ${client.url}; ${String(count)} in a row`, {
+        location: Log.Locations.automation,
+        agentId: ticket,
+      });
+    }
   }
   // A mint stays first in the queue. Its own refusal must not end the tick, or a drive
   // behind it never gets a turn. Setup needed stops the tick: the guest is not ready.
@@ -272,9 +313,13 @@ export const dispatch = Effect.fn("dispatch")(function* (models: {
   const runs = yield* Scope.fork(yield* Scope.Scope, "parallel");
   // The client the next tick offers a job to first. A client that left the fleet is skipped.
   let nextUrl: string | undefined;
+  const streaks: Streaks = new Map();
 
   const tick = Effect.fn("tick")(function* () {
-    const live = yield* servers.listLiveServers("automation-client");
+    const now = yield* Clock.currentTimeMillis;
+    const live = (yield* servers.listLiveServers("automation-client")).filter(
+      (server) => !paused(streaks, server.url, now),
+    );
     const chosen = live[0];
     if (chosen === undefined) {
       return;
@@ -295,7 +340,7 @@ export const dispatch = Effect.fn("dispatch")(function* (models: {
           const at = start < 0 ? 0 : start;
           // place awaits each reservation before the next, including the next job.
           const candidates = live.slice(at).concat(live.slice(0, at));
-          const placed = yield* restore(place(job, candidates, models)).pipe(
+          const placed = yield* restore(place(job, candidates, models, streaks)).pipe(
             Effect.matchCause({
               onSuccess: (result) => result,
               onFailure: (cause) =>
