@@ -45,6 +45,17 @@ const CONFIG = JSON.stringify({
     forgetAfter: "1 minute",
     abortTimeout: "15 seconds",
   },
+  locator: {
+    grid: 4,
+    rounds: 3,
+    power: 4,
+    boxScale: 1.5,
+    threshold: 0.45,
+    viewWidth: 1280,
+    contextWidth: 640,
+    callTimeout: "5 seconds",
+    retryWait: "1 second",
+  },
 });
 
 const unexpected = (): never => {

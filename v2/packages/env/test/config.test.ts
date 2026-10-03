@@ -34,6 +34,17 @@ const valid = {
     forgetAfter: "10 minutes",
     abortTimeout: "15 seconds",
   },
+  locator: {
+    grid: 4,
+    rounds: 3,
+    power: 4,
+    boxScale: 1.5,
+    threshold: 0.45,
+    viewWidth: 1280,
+    contextWidth: 640,
+    callTimeout: "5 seconds",
+    retryWait: "1 second",
+  },
 };
 
 const loadText = (text: string) => Config.load(Io.fake({ files: { [Config.PATH]: text } }));
@@ -128,6 +139,12 @@ describe("load", () => {
     const automationServer = { ...valid.automationServer, abortTimeout: "7 seconds" };
     expect(await refusal({ ...valid, automationServer })).toBe(
       `${Config.PATH}: automationServer.abortTimeout: must be longer than automationClient.killGrace plus automationClient.stderrGrace, and than httpTimeout`,
+    );
+  });
+
+  it("refuses a locator box scale that would not shrink the box each round (unhappy)", async () => {
+    expect(await refusal({ ...valid, locator: { ...valid.locator, boxScale: 4 } })).toBe(
+      `${Config.PATH}: locator.boxScale: must be smaller than locator.grid`,
     );
   });
 

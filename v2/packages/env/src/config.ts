@@ -99,9 +99,36 @@ const File = z
       forgetAfter: Duration,
       abortTimeout: Duration,
     }),
+    // Finding where to click on a screenshot. Each of `rounds` asks Clef one noul per cell of a
+    // grid x grid view (64 questions at most), clicks the p^power weighted centre of the cells,
+    // and the next round looks at a box boxScale x a cell around it. A round-one best cell below
+    // threshold is not found. Views are viewWidth pixels wide, the whole-screen picture beside
+    // them contextWidth. callTimeout bounds one Clef call; a passing failure is asked again once,
+    // retryWait later.
+    locator: z.strictObject({
+      grid: z
+        .int()
+        .min(2, "grid must be at least 2")
+        .max(8, "grid must be at most 8: 64 questions"),
+      rounds: z.int().min(1, "rounds must be at least 1"),
+      power: z.number().positive("power must be greater than zero"),
+      boxScale: z.number().min(1, "boxScale must be at least 1"),
+      threshold: z.number().min(0).max(1, "threshold is a probability"),
+      viewWidth: z.int().min(64, "viewWidth must be at least 64"),
+      contextWidth: z.int().min(64, "contextWidth must be at least 64"),
+      callTimeout: Duration,
+      retryWait: Duration,
+    }),
   })
   .superRefine((config, ctx) => {
-    const { driver, diagnose, automationClient, automationServer } = config;
+    const { driver, diagnose, automationClient, automationServer, locator } = config;
+    if (locator.boxScale >= locator.grid) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["locator", "boxScale"],
+        message: "must be smaller than locator.grid",
+      });
+    }
     // In the order the file writes them.
     const waits = [
       { path: ["driver", "askTimeout"], ms: driver.askTimeout, ceiling: "driver" },
