@@ -443,6 +443,23 @@
         "vitest": "catalog:",
       },
     },
+    "test-apps/tile-search": {
+      "name": "@oligarchy/tile-search",
+      "dependencies": {
+        "@oligarchy/app": "workspace:*",
+        "@oligarchy/decision-api": "workspace:*",
+        "@oligarchy/env": "workspace:*",
+        "@oligarchy/http": "workspace:*",
+        "@oligarchy/locator": "workspace:*",
+        "@oligarchy/screen-grid": "workspace:*",
+        "jarl": "catalog:",
+        "sharp": "^0.35.5",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@hono/node-server": "^2.1.3",
@@ -648,6 +665,8 @@
     "@oligarchy/stores": ["@oligarchy/stores@workspace:packages/stores"],
 
     "@oligarchy/tester": ["@oligarchy/tester@workspace:apps/tester"],
+
+    "@oligarchy/tile-search": ["@oligarchy/tile-search@workspace:test-apps/tile-search"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 

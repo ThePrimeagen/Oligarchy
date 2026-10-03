@@ -82,14 +82,6 @@
     {
       "files": ["v2/**/test/**"],
       "rules": { "oligarchy/unwrap-inside-jarl-fn": "off" }
-    },
-    {
-      "files": ["test-apps/**"],
-      "jsPlugins": ["./v2/lint/plugin.js"],
-      "rules": {
-        "oligarchy/result-through-jarl": "error",
-        "oligarchy/unwrap-inside-jarl-fn": "error"
-      }
     }
   ],
   "env": { "builtin": true, "node": true, "es2022": true },

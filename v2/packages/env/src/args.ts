@@ -308,7 +308,7 @@ export const summary = flag({
 });
 
 // ---------------------------------------------------------------------------
-// test-apps locate
+// test-apps tile-search
 // ---------------------------------------------------------------------------
 
 // One flag, so a list: a repeated flag keeps its last value.
@@ -319,7 +319,7 @@ const commaList = z.string().transform((text) =>
     .filter((part) => part !== ""),
 );
 
-// test-apps locate's --images; ctrl session's is a switch.
+// test-apps tile-search's --images; ctrl session's is a switch.
 export const screenshots = flag({
   schema: commaList.pipe(z.array(words).min(1, "must name at least one image")),
   description: "Screenshots, comma-separated: PNG, JPEG or WebP files, or directories of them",
@@ -370,10 +370,17 @@ export const boxScale = flag({
   description: "The next round's box, in cells of this round; smaller than the grid",
 });
 
-// Not --model's Cursor model: the Clef model a decision is asked of.
-export const decisionModel = flag({
-  schema: z.enum(["clef", "clef-flash"]).default("clef"),
-  description: "The Clef model to ask: clef or clef-flash",
+// Not --model's Cursor model: the Clef models a decision is asked of, each in turn.
+export const decisionModels = flag({
+  schema: commaList
+    .pipe(z.array(z.enum(["clef", "clef-flash"], "a model is clef or clef-flash")).min(1))
+    .default(["clef"]),
+  description: "The Clef models to ask, comma-separated: clef, clef-flash or both",
+});
+
+export const runs = flag({
+  schema: atLeastOne.default(1),
+  description: "How many times to search each image with each model",
 });
 
 export const out = flag({ schema: words, description: "The directory to write into" });

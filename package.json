@@ -46,7 +46,6 @@
     "test:unit": "bun --bun vitest run --project unit && bun run --workspaces --if-present test:unit",
     "test:integration": "bun run --workspaces --if-present test:integration",
     "check:fast": "bun run check:lint && bun run check:format && bun run check:types && bun run test:unit",
-    "check:test-apps": "tsc --noEmit -p test-apps/tsconfig.json && oxlint --deny-warnings test-apps && oxfmt --check test-apps && bun build test-apps/*/main.ts --target bun --outdir node_modules/.cache/test-apps-build",
     "db:generate": "bun run --cwd packages/db db:generate",
     "db:migrate": "bun --no-env-file packages/db/src/migrate.ts",
     "prod:db:migrate": "env -u DATABASE_MIGRATION_URL bun --no-env-file packages/db/src/migrate.ts --env-file .prod-env",

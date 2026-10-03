@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | app | a process you start. It has a `start` script. | `apps/<name>` |
 | package | a library apps import. It never starts itself. | `packages/<name>` |
+| test app | a tool a person runs by hand to try a package live. No tests; type checked and compiled. | `test-apps/<name>` |
 | main | production wiring: real services, real process. No logic. | `src/main.ts` |
 | application | the app's own `main`, run on whatever services it is handed | `src/application.ts` |
 | world | everything outside the process a service reaches, except the database | `World` in `src/services.ts` |

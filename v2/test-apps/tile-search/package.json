@@ -1,0 +1,24 @@
+{
+  "name": "@oligarchy/tile-search",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun --no-env-file src/main.ts",
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "check:compile": "bun build src/main.ts --target bun --outdir node_modules/.cache/compiled"
+  },
+  "dependencies": {
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/decision-api": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/http": "workspace:*",
+    "@oligarchy/locator": "workspace:*",
+    "@oligarchy/screen-grid": "workspace:*",
+    "jarl": "catalog:",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

@@ -11,7 +11,7 @@ permissions:
 # The root's checks lint and format v2 too; these are what only v2's own install can run.
 jobs:
   checks:
-    name: v2 types and unit tests
+    name: v2 types, compile and unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -24,22 +24,8 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run check:types
+      - run: bun run check:compile
       - run: bun run test:unit
-
-  # test-apps/ runs on v2's packages and is checked with the root's tools, so it needs both installs.
-  test-apps:
-    name: test-apps types, lint, format and compile
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile
-      - run: bun install --frozen-lockfile
-        working-directory: v2
-      - run: bun run check:test-apps
 
   migrations-append-only:
     name: v2 migrations are append-only

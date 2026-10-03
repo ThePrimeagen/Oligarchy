@@ -80,7 +80,33 @@ const finalOut = async (screen: Uint8Array, trace: Trace): Promise<Buffer> => {
     .toBuffer();
 };
 
-// Each round's in beside its out, top to bottom, with the final picture across the bottom.
+const ZOOM_WIDTH = 140;
+const ZOOM_HEIGHT = 70;
+const ZOOM_SCALE = 6;
+
+// The screen around the click, blown up with square pixels, so a few pixels off a target show.
+const zoomOut = async (screen: Uint8Array, pixel: ScreenGrid.Point): Promise<Buffer> => {
+  const { width, height } = await sharp(screen).metadata();
+  const w = Math.min(ZOOM_WIDTH, width);
+  const h = Math.min(ZOOM_HEIGHT, height);
+  const left = Math.max(0, Math.min(width - w, Math.round(pixel.x - w / 2)));
+  const top = Math.max(0, Math.min(height - h, Math.round(pixel.y - h / 2)));
+  const x = (pixel.x - left) * ZOOM_SCALE;
+  const y = (pixel.y - top) * ZOOM_SCALE;
+  const mark = svg(w * ZOOM_SCALE, h * ZOOM_SCALE, [
+    `<circle cx="${x}" cy="${y}" r="6" fill="#ff0000" stroke="white" stroke-width="2"/>`,
+    `<line x1="${x - 30}" y1="${y}" x2="${x + 30}" y2="${y}" stroke="#ff0000" stroke-width="2"/>`,
+    `<line x1="${x}" y1="${y - 30}" x2="${x}" y2="${y + 30}" stroke="#ff0000" stroke-width="2"/>`,
+  ]);
+  return sharp(screen)
+    .extract({ left, top, width: w, height: h })
+    .resize(w * ZOOM_SCALE, h * ZOOM_SCALE, { kernel: "nearest" })
+    .composite([{ input: mark, top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+};
+
+// Each round's in beside its out, top to bottom, then the final picture across the bottom.
 const sheet = async (
   pictures: ReadonlyArray<readonly [Buffer | Uint8Array, Buffer]>,
   final: Buffer,
@@ -90,6 +116,7 @@ const sheet = async (
     const { height } = await sharp(resized).metadata();
     return { input: resized, height };
   };
+  const width = 2 * SHEET_TILE + SHEET_GAP;
   const tiles: { input: Buffer; top: number; left: number }[] = [];
   let top = 0;
   for (const [sent, answered] of pictures) {
@@ -101,19 +128,17 @@ const sheet = async (
     );
     top += Math.max(a.height, b.height) + SHEET_GAP;
   }
-  const width = 2 * SHEET_TILE + SHEET_GAP;
   const bottom = await fit(final, width);
   tiles.push({ input: bottom.input, top, left: 0 });
-  return sharp({
-    create: { width, height: top + bottom.height, channels: 3, background: "#000000" },
-  })
+  top += bottom.height;
+  return sharp({ create: { width, height: top, channels: 3, background: "#000000" } })
     .composite(tiles)
     .png()
     .toBuffer();
 };
 
-// overview.webp, round-<n>-in.webp (as Clef was sent it), round-<n>-out.png, final.png and
-// sheet.png, all in `out`.
+// overview.webp, round-<n>-in.webp (as Clef was sent it), round-<n>-out.png (its answer drawn on
+// it), final.png, zoom.png (when there was a click) and sheet.png, all in `out`.
 export const writeTrace = async (out: string, screen: Uint8Array, trace: Trace): Promise<void> => {
   await writeFile(join(out, "overview.webp"), trace.overview.bytes);
   const pictures: Array<readonly [Uint8Array, Buffer]> = [];
@@ -125,5 +150,8 @@ export const writeTrace = async (out: string, screen: Uint8Array, trace: Trace):
   }
   const final = await finalOut(screen, trace);
   await writeFile(join(out, "final.png"), final);
+  if (trace.pixel !== null) {
+    await writeFile(join(out, "zoom.png"), await zoomOut(screen, trace.pixel));
+  }
   await writeFile(join(out, "sheet.png"), await sheet(pictures, final));
 };
