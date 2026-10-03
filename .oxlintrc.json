@@ -12,7 +12,6 @@
     "style": "off"
   },
   "rules": {
-    "typescript/no-unnecessary-type-parameters": "error",
     "id-denylist": ["error", "isRecord"],
     "no-underscore-dangle": ["error", { "allow": ["_tag", "__dirname", "__filename"] }],
     "no-nested-ternary": "error",
@@ -37,6 +36,10 @@
     "effecttsgo/strict-effect-provide": "error"
   },
   "overrides": [
+    {
+      "files": ["apps/**", "packages/**", "src/**", "test/**", "vitest.config.ts"],
+      "rules": { "typescript/no-unnecessary-type-parameters": "error" }
+    },
     {
       "files": [
         "src/**/main.ts",
@@ -71,6 +74,8 @@
         "oligarchy/service-cycle": "error",
         "oligarchy/unwrap-inside-jarl-fn": "error",
         "typescript/no-redundant-type-constituents": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/no-unnecessary-type-parameters": "off",
         "import/namespace": "off"
       }
     },

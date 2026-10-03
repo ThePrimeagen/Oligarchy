@@ -151,9 +151,47 @@ const File = z
       forgetAfter: Duration,
       abortTimeout: Duration,
     }),
+    // Finding where to click on a screenshot. Each of `rounds` asks Clef one noul per cell of a
+    // grid x grid view (64 questions at most), clicks the p^power weighted centre of the cells,
+    // and the next round looks at a box boxScale x a cell around it. A round-one best cell below
+    // threshold is not found. Each round sends two pictures: an overview, the whole screen shrunk to
+    // overviewScale of its size, and a grid image as wide as gridImageScale x the screen's width:
+    // round one's is the screen, later rounds' the box enlarged to that width. Clef sees about a
+    // megapixel at most, so neither is above 1. quality is both pictures' WebP quality. callTimeout
+    // bounds one Clef call; a busy, down or slow one is asked again up to retries times, retryWait
+    // apart.
+    locator: z.strictObject({
+      grid: z
+        .int()
+        .min(2, "grid must be at least 2")
+        .max(8, "grid must be at most 8: 64 questions"),
+      rounds: z.int().min(1, "rounds must be at least 1"),
+      power: z.number().positive("power must be greater than zero"),
+      boxScale: z.number().min(1, "boxScale must be at least 1"),
+      threshold: z.number().min(0).max(1, "threshold is a probability"),
+      overviewScale: z
+        .number()
+        .positive("overviewScale must be greater than zero")
+        .max(1, "overviewScale is at most 1"),
+      gridImageScale: z
+        .number()
+        .positive("gridImageScale must be greater than zero")
+        .max(1, "gridImageScale is at most 1"),
+      quality: z.int().min(1, "quality is from 1 to 100").max(100, "quality is from 1 to 100"),
+      retries: z.int().min(0, "retries must be zero or more"),
+      callTimeout: Duration,
+      retryWait: Duration,
+    }),
   })
   .superRefine((config, ctx) => {
-    const { driver, diagnose, automationClient, automationServer } = config;
+    const { driver, diagnose, automationClient, automationServer, locator } = config;
+    if (locator.boxScale >= locator.grid) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["locator", "boxScale"],
+        message: "must be smaller than locator.grid",
+      });
+    }
     // In the order the file writes them.
     const waits = [
       { path: ["driver", "askTimeout"], ms: driver.askTimeout, ceiling: "driver" },

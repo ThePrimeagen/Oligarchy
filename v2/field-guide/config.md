@@ -12,6 +12,7 @@ Every timeout, grace, interval and limit an app runs on lives in `v2/oligarchy.j
 | `diagnose` | opencode's `runCeiling`, and its stream's `headerTimeout` and `chunkTimeout` |
 | `automationClient` | `driverGrace` past `driver.runCeiling`, `killGrace`, `stderrGrace`, `reserveTimeout`, `reservationTimeout` |
 | `automationServer` | `dispatchInterval`, `forgetInterval`, `forgetAfter`, `abortTimeout` |
+| `locator` | `callTimeout`, `retries`, `retryWait`; and the search itself: `grid`, `rounds`, `power`, `boxScale`, `threshold`, `overviewScale`, `gridImageScale`, `quality` |
 
 - A duration is a string, `"3 minutes"`. The program sees milliseconds.
 - A service takes its timeout as a create option (`timeoutMs`, `reserveTimeoutMs`, `abortTimeoutMs`). It never exports a constant for it.

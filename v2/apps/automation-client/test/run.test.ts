@@ -100,6 +100,19 @@ const CONFIG = JSON.stringify({
     forgetAfter: "1 minute",
     abortTimeout: "45 seconds",
   },
+  locator: {
+    grid: 4,
+    rounds: 3,
+    power: 4,
+    boxScale: 1.5,
+    threshold: 0.45,
+    overviewScale: 0.5,
+    gridImageScale: 1,
+    quality: 80,
+    callTimeout: "5 seconds",
+    retries: 1,
+    retryWait: "1 second",
+  },
 });
 
 // The parent's own environment, and the client's resolved variables, which may have come from an
