@@ -339,7 +339,8 @@ export const question = flag({
 
 export const task = flag({
   schema: words,
-  description: "What the click is for, told to Clef; the target's click or the question when omitted",
+  description:
+    "What the click is for, told to Clef; the target's click or the question when omitted",
 });
 
 // The locator's search for one run; each left out is oligarchy.json's.
