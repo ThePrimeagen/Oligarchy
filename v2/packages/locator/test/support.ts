@@ -48,6 +48,21 @@ export const answering =
       usage: { inputTokens: 100, outputTokens: 0 },
     });
 
+// One noul per question: each round's p for the cells it names, `rest` for every other cell.
+export const scoring =
+  (rounds: ReadonlyArray<Readonly<Record<string, number>>>, rest = 0) =>
+  (request: DecisionApi.Request, round: number): Reply =>
+    jarl.ok({
+      model: "clef",
+      answers: Object.fromEntries(
+        Object.keys(request.questions).map((id) => [
+          id,
+          { type: "noul" as const, noul: rounds[round]?.[id] ?? rest },
+        ]),
+      ),
+      usage: { inputTokens: 100, outputTokens: 0 },
+    });
+
 // A decision-api fake whose replies are taken in turn; a function reply is told its round.
 export const decisions = (
   replies: ReadonlyArray<Reply | ((request: DecisionApi.Request, round: number) => Reply)>,

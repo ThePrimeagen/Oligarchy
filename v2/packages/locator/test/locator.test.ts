@@ -11,6 +11,7 @@ import {
   CALL_TIMEOUT_MS,
   decisions,
   RETRIES,
+  scoring,
   settle,
   screen,
   QUESTION,
@@ -50,6 +51,29 @@ describe("weightedCentre", () => {
   });
 });
 
+describe("bestCentre", () => {
+  it("is the centre of the highest cell, however strong the others are (happy)", () => {
+    // B2 at p 0.8 beats D4 at 0.79; B2's centre is (480, 300).
+    const ps = Array(16).fill(0.3);
+    ps[5] = 0.8;
+    ps[15] = 0.79;
+    expect(Geometry.bestCentre(cells(SCREEN, 4), ps)).toEqual({ x: 480, y: 300 });
+  });
+
+  it("takes the first in reading order when two cells tie (edge)", () => {
+    // C1 and A3 both at p 0.9; C1's centre is (800, 100).
+    const ps = Array(16).fill(0);
+    ps[2] = 0.9;
+    ps[8] = 0.9;
+    expect(Geometry.bestCentre(cells(SCREEN, 4), ps)).toEqual({ x: 800, y: 100 });
+  });
+
+  it("keeps the centre of the box when every cell answers no (edge)", () => {
+    const box = { left: 240, top: 150, right: 720, bottom: 450 };
+    expect(Geometry.bestCentre(cells(box, 4), Array(16).fill(0))).toEqual({ x: 480, y: 300 });
+  });
+});
+
 describe("nextBox", () => {
   it("is boxScale x a cell, centred on the point, in whole pixels (happy)", () => {
     expect(
@@ -82,26 +106,29 @@ describe("locate", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("asks one noul per cell each round and clicks the last round's weighted centre (happy)", async () => {
-    const { locator, asked } = decisions([answering(["B2", "C3", "A1"])]);
+  it("looks around round one's best cell, then clicks the later rounds' weighted centre (happy)", async () => {
+    const { locator, asked } = decisions([
+      scoring([{ B2: 1, C4: 0.9 }, { C3: 1, D3: 1 }, { A1: 1 }]),
+    ]);
     const found = jarl.unwrap(
       await settle(locator.locate({ screen: await screen(), question: QUESTION, task: TASK })),
     );
 
-    // B2's centre (480, 300); C3's in 240-720 x 150-450 is (540, 337.5); A1's in 450-630 x 281-394
-    // is (472.5, 295.125).
+    // Round one keeps B2's centre (480, 300) and C4 does not pull it. In 240-720 x 150-450, C3's
+    // centre (540, 337.5) and D3's (660, 337.5) weigh the same: (600, 337.5). A1's in 510-690 x
+    // 281-394 is (532.5, 295.125).
     expect(found.rounds.map((round) => round.box)).toEqual([
       SCREEN,
       { left: 240, top: 150, right: 720, bottom: 450 },
-      { left: 450, top: 281, right: 630, bottom: 394 },
+      { left: 510, top: 281, right: 690, bottom: 394 },
     ]);
     expect(found.rounds.map((round) => round.point)).toEqual([
       { x: 480, y: 300 },
-      { x: 540, y: 337.5 },
-      { x: 472.5, y: 295.125 },
+      { x: 600, y: 337.5 },
+      { x: 532.5, y: 295.125 },
     ]);
-    expect(found.pixel).toEqual({ x: 472.5, y: 295.125 });
-    expect(found.x).toBeCloseTo(472.5 / 1280, 12);
+    expect(found.pixel).toEqual({ x: 532.5, y: 295.125 });
+    expect(found.x).toBeCloseTo(532.5 / 1280, 12);
     expect(found.y).toBeCloseTo(295.125 / 800, 12);
 
     expect(asked).toHaveLength(3);

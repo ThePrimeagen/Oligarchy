@@ -109,11 +109,18 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
         image: view,
         cells,
         best: Math.max(...cells.map((cell) => cell.p)),
-        point: Geometry.weightedCentre(
-          cells.map((cell) => cell.box),
-          cells.map((cell) => cell.p),
-          options.power,
-        ),
+        // Round one commits to its best cell, so weaker cells elsewhere on the screen cannot drag
+        // the next box off the target; later rounds look inside that box and weigh every cell.
+        point: first
+          ? Geometry.bestCentre(
+              cells.map((cell) => cell.box),
+              cells.map((cell) => cell.p),
+            )
+          : Geometry.weightedCentre(
+              cells.map((cell) => cell.box),
+              cells.map((cell) => cell.p),
+              options.power,
+            ),
         inputTokens: decision.usage.inputTokens,
       });
     };

@@ -152,8 +152,9 @@ const File = z
       abortTimeout: Duration,
     }),
     // Finding where to click on a screenshot. Each of `rounds` asks Clef one noul per cell of a
-    // grid x grid view (64 questions at most), clicks the p^power weighted centre of the cells,
-    // and the next round looks at a box boxScale x a cell around it. A round-one best cell below
+    // grid x grid view (64 questions at most) and the next round looks at a box boxScale x a cell
+    // around a point: round one's best cell's centre, every later round's p^power weighted centre
+    // of the cells, the last of which is clicked. A round-one best cell below
     // threshold is not found. Each round sends two pictures: an overview, the whole screen shrunk to
     // overviewScale of its size, and a grid image as wide as gridImageScale x the screen's width:
     // round one's is the screen, later rounds' the box enlarged to that width. Clef sees about a
