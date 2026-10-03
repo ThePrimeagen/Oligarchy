@@ -1,12 +1,14 @@
 import * as Fake from "@oligarchy/http/testing";
 import * as FakeLogger from "@oligarchy/logger/testing";
 import * as jarl from "jarl";
-import { describe, expect, it } from "vitest";
+import { beforeEach, afterEach, vi, describe, expect, it } from "vitest";
 import * as Jobs from "../src/jobs.ts";
 import * as Proxy from "../src/proxy.ts";
 import * as Reserve from "../src/reserve.ts";
 import { AtCapacity, ReserveFailed, SetupNeeded } from "../src/routes.ts";
 
+beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+afterEach(() => vi.useRealTimers());
 const TOKEN = "oligarchy-token";
 const PROXY = "http://127.0.0.1:42069";
 const JOB = "6f1c2c1e-0b7a-4d43-9f6e-2b8f3f0f9a11";
@@ -61,13 +63,17 @@ const reserving = (options: {
     url: PROXY,
     token: { reveal: () => TOKEN },
     reserveTimeoutMs: 60_000,
+    releaseTimeoutMs: 10_000,
   });
-  const reservations = Reserve.create({
-    maxJobs: options.maxJobs ?? 2,
-    jobs,
-    proxy,
-    logger: log.logger,
-  });
+  const reservations = Reserve.create(
+    { logger: log.logger },
+    {
+      reservationTimeoutMs: 120_000,
+      maxJobs: options.maxJobs ?? 2,
+      jobs,
+      proxy,
+    },
+  );
   const asked = () => fake.asked.map((one) => [new URL(one.url).pathname, one.body]);
   return { jobs, reservations, asked, said: log.said };
 };
@@ -236,18 +242,16 @@ describe("an automation client's reserve", () => {
 
     expect(aborted).toBe("stopped");
     expect(jobs.count()).toBe(0);
-    expect(
-      said.map(({ level, text, report }) => ({ level, text, agentId: report.agentId })),
-    ).toEqual([
+    expect(said.map(({ level, text, report }) => ({ level, text, jobId: report.jobId }))).toEqual([
       {
         level: "error",
         text: `relinquish failed: POST ${PROXY}/relinquish: 502: {"error":"server down"}`,
-        agentId: JOB,
+        jobId: JOB,
       },
     ]);
   });
 
-  it("a reservation a run has taken is the run's: an abort aborts the run's signal, gives nothing back, and waits on the run's release (unhappy)", async () => {
+  it("a taken reservation waits for the run to release its remote guest after abort (unhappy)", async () => {
     const { jobs, reservations, asked } = reserving({ reserve: [Fake.json({})] });
     jarl.unwrap(await reservations.reserve(DRIVE));
 
@@ -259,8 +263,15 @@ describe("an automation client's reserve", () => {
     const aborting = jobs.abort({ jobId: JOB });
     expect(taken?.signal.aborted).toBe(true);
     expect(await settled(aborting)).toBe(false);
-    taken?.release();
+    await taken?.release();
     expect(await aborting).toBe("stopped");
-    expect(asked().map(([path]) => path)).toEqual(["/reserve"]);
+    expect(asked().map(([path]) => path)).toEqual(["/reserve", "/relinquish"]);
   });
+});
+
+it("expires a reservation that no run takes and relinquishes its guest", async () => {
+  const h = reserving({ reserve: [Fake.json({})], relinquish: [Fake.json({})] });
+  await h.reservations.reserve(DRIVE);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(h.jobs.count()).toBe(0);
 });

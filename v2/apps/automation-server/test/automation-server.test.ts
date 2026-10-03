@@ -57,12 +57,19 @@ const CONFIG = JSON.stringify({
   reasoning: { drive: "high", diagnose: "high", setup: "high" },
   openRouterBaseUrl: "https://openrouter.test",
   httpTimeout: "10 seconds",
+  fleet: {
+    heartbeatInterval: "15 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "1 minute",
     stepLimit: 10,
     askTimeout: "1 second",
     harness: { defaultRetry: "1 second", recentActions: 10 },
-    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute", sendKeysTimeout: "30 seconds" },
   },
   diagnose: { runCeiling: "1 minute", headerTimeout: "1 second", chunkTimeout: "1 second" },
   automationClient: {
@@ -70,12 +77,53 @@ const CONFIG = JSON.stringify({
     killGrace: "5 seconds",
     stderrGrace: "2 seconds",
     reserveTimeout: "1 minute",
+    reservationTimeout: "2 minutes",
+  },
+  qemuServer: {
+    probeTimeout: "3 seconds",
+    reserveTimeout: "45 seconds",
+    releaseTimeout: "30 seconds",
+    setupInterval: "10 seconds",
+    forgetInterval: "30 seconds",
+    forgetAfter: "10 minutes",
+    followTimeout: "1 hour",
+  },
+  qemuRunner: {
+    reservationTimeout: "2 minutes",
+    idleTimeout: "10 minutes",
+    sweepInterval: "10 seconds",
+    poweroffTimeout: "10 seconds",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    downloadTimeout: "10 seconds",
+    cachePoll: "1 second",
+    cacheStale: "2 minutes",
+    cacheHeartbeat: "10 seconds",
+    cacheProgress: "30 seconds",
+    handshakeTimeout: "1 second",
+    commandTimeout: "15 seconds",
+    keyGap: "100 millis",
+    clickGap: "100 millis",
+    dragGap: "20 millis",
+    dragSteps: 20,
+    maxKeys: 10000,
+    maxTicks: 100,
+    followBacklog: 256,
+    maxFrame: 1048576,
+    stderrLimit: 1048576,
+    cpus: 4,
+    diskSize: "64G",
+    memory: "4G",
+    firmwareCode: "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    firmwareVars: "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+    binary: "qemu-system-x86_64",
+    imageBinary: "qemu-img",
   },
   automationServer: {
     dispatchInterval: "10 seconds",
     forgetInterval: "30 seconds",
     forgetAfter: "10 minutes",
-    abortTimeout: "15 seconds",
+    abortTimeout: "45 seconds",
   },
   locator: {
     grid: 4,
@@ -114,6 +162,7 @@ const started = async (
     readonly completing?: Promise<void>;
     // An operator's abort of the pending drive is written only once this settles.
     readonly aborting?: Promise<void>;
+    readonly recovering?: Promise<void>;
   } = {},
 ) => {
   const { completing, aborting } = options;
@@ -162,6 +211,7 @@ const started = async (
   }))({});
   const tests = App.createService<never, App.NoOptions, Stores.Tests.Tests>(() => ({
     service: "tests",
+    ensureSetup: unexpected,
     listTestDefinitions: unexpected,
     findTestDefinition: unexpected,
     listTestDefinitionHistory: unexpected,
@@ -203,7 +253,13 @@ const started = async (
           createdAt: AT,
         },
       }),
-    listJobs: unexpected,
+    listJobs: async () => jarl.ok({ running: [], pending: [] }),
+    listRunningJobs: async () => {
+      await options.recovering;
+      return jarl.ok([]);
+    },
+    completeDiagnosis: unexpected,
+    timeoutJobAndRun: unexpected,
     latestJob: unexpected,
     nextPendingJob: async () => {
       const [next] = pending;
@@ -211,10 +267,11 @@ const started = async (
       return jarl.ok(next);
     },
     runJob: async (jobId) => jarl.ok({ ...job(jobId, "drive"), status: "running" }),
-    completeJob: async (jobId) => {
+    completeJob: unexpected,
+    completeDrive: async () => {
       await completing;
       order.push("drive completed");
-      return jarl.ok({ ...job(jobId, "drive"), status: "completed" });
+      return jarl.ok(job(DIAGNOSE, "diagnose"));
     },
     finalizeJob: unexpected,
     errorJob: unexpected,
@@ -337,6 +394,21 @@ const started = async (
 };
 
 describe("the automation server lifecycle", () => {
+  it("finishes shutdown when stopped during recovery before dispatch could start", async () => {
+    let release!: () => void;
+    const recovering = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const at = await started({ recovering });
+    const stopped = at.stop();
+    release();
+    await stopped;
+    expect(at.dispatches).toEqual([]);
+    expect(at.order).toEqual(["close listener", "listener closed", "exit handler"]);
+    expect(at.codes).toEqual([0]);
+    expect(at.errors).toEqual([]);
+  });
+
   it("starts dispatch and cleanup at their intervals, then stops both on SIGTERM and awaits listener closure before exit (happy)", async () => {
     let release: () => void = () => undefined;
     const closed = new Promise<void>((resolve) => {
@@ -428,7 +500,7 @@ describe("the automation server lifecycle", () => {
         "drive completed",
         "exit handler",
       ]);
-      expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED, STOPPED, QUEUED]);
+      expect(at.lines).toEqual([STARTED, FORGOTTEN, RESERVED, QUEUED, STOPPED]);
       expect(at.codes).toEqual([0]);
       expect(at.errors).toEqual([]);
     } finally {

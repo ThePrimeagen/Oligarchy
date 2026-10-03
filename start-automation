@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# start-automation <max-jobs>
+#
+# The automation half of the fleet on this machine: one automation server on 127.0.0.1:54321 (what
+# the tunnel's automation hostname points at) and one automation client on 127.0.0.1:54322 that
+# carries <max-jobs> runs at once, both in the foreground of this shell. Ctrl-C or a TERM asks
+# both to stop; another one kills them. One of them exiting stops the other. Exit 0 when both
+# ended cleanly, 1 otherwise.
+#
+# Models and timings come from v2/oligarchy.json. This script does not take a model.
+# Runs from the current directory, as the V2 applications do: its .env fills what the
+# environment lacks. SERVER_URL must name the QemuServer the client reserves guests from.
+set -u
+
+LAUNCH_ROOT=$(dirname "$0")
+SERVER_PORT=54321
+CLIENT_PORT=54322
+
+usage() {
+  echo "usage: start-automation <max-jobs>" >&2
+  echo "  max-jobs  how many runs the client carries at once, a positive integer" >&2
+  exit 1
+}
+
+[ $# -eq 1 ] || usage
+case "$1" in
+  '' | *[!0-9]* | 0*) usage ;;
+esac
+MAX_JOBS=$1
+
+# Require a configured QemuServer before starting either process. Leave parsing and validation
+# of a supplied value to the applications' normal environment loader.
+if [ -z "${SERVER_URL:-}" ] && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?SERVER_URL[[:space:]]*=' .env 2>/dev/null; then
+  echo "SERVER_URL is not set; the automation client reserves guests from the QemuServer (https://oligarchy-server.trm.sh, or http://127.0.0.1:55555 on the proxy's own machine)" >&2
+  exit 1
+fi
+
+bun --no-env-file "$LAUNCH_ROOT/v2/apps/automation-server/src/main.ts" --port "$SERVER_PORT" &
+SERVER=$!
+bun --no-env-file "$LAUNCH_ROOT/v2/apps/automation-client/src/main.ts" --name "automation-client-$(uname -n)" --max-jobs "$MAX_JOBS" \
+  --port "$CLIENT_PORT" --url "http://127.0.0.1:$CLIENT_PORT" &
+CLIENT=$!
+
+# The first signal asks. A second one kills: a child waiting on a response must not hold this
+# shell, and ignoring the signal would make that second Ctrl-C do nothing.
+asked=0
+request_stop() {
+  asked=1
+  kill -TERM "$SERVER" "$CLIENT" 2>/dev/null || true
+}
+on_signal() {
+  if [ "$asked" -eq 0 ]; then
+    request_stop
+  else
+    kill -KILL "$SERVER" "$CLIENT" 2>/dev/null || true
+  fi
+}
+trap on_signal INT TERM
+# Returns when the first of the two exits, or at once when a signal arrives (its trap has run).
+wait -n "$SERVER" "$CLIENT" || true
+if [ "$asked" -eq 0 ]; then
+  request_stop
+fi
+# Wait out each child. A signal interrupts wait while it is still alive; the trap has run, and
+# the loop collects the status once the process is gone.
+reap() {
+  local code=0
+  while kill -0 "$1" 2>/dev/null; do
+    wait "$1"
+    code=$?
+  done
+  wait "$1" 2>/dev/null
+  local reaped=$?
+  if [ "$reaped" -ne 127 ]; then
+    code=$reaped
+  fi
+  return "$code"
+}
+reap "$SERVER"
+SERVER_CODE=$?
+reap "$CLIENT"
+CLIENT_CODE=$?
+[ "$SERVER_CODE" -eq 0 ] && [ "$CLIENT_CODE" -eq 0 ]

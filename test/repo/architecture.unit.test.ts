@@ -64,11 +64,10 @@ const TOP = 7;
 // above testing, whose fakes they may use.
 const SYSTEM = 8;
 
-// The layer each package sits on, numbered as in monorepo-plan.md's picture (shared 0, log 1,
+// The layer each package sits on (shared 0, log 1,
 // env 2, db and linear 3, jobs and observability 4, http and fleet 5, the apps 6, the dev-only
 // testing on top). A package's dependencies name only packages on a strictly lower layer, so the
-// graph reads one way and a loop cannot hide in it. A package joins the list in the phase that
-// creates it.
+// graph reads one way and a loop cannot hide in it.
 const LAYERS: Readonly<Record<string, number>> = {
   "@oligarchy/shared": 0,
   "@oligarchy/log": 1,

@@ -36,7 +36,7 @@ const clientIdOf = async (at: At, url: string) => {
 };
 
 const said = (at: At, jobId: string) =>
-  at.said.filter((one) => one.report.agentId === jobId).map((one) => [one.level, one.text]);
+  at.said.filter((one) => one.report.jobId === jobId).map((one) => [one.level, one.text]);
 
 const ABORTED = { status: "aborted", reason: Abort.REASON };
 
@@ -64,6 +64,11 @@ describe("aborting by job id or by suite id", () => {
     for (const job of [first, second, third]) {
       expect(await at.job(job.id)).toEqual(ABORTED);
       expect(await at.run(job.runId)).toMatchObject(ABORTED);
+      const lines = at.said.filter((line) => line.report.jobId === job.id);
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line.report).toMatchObject({ jobId: job.id, runId: job.runId });
+      }
     }
     const { status, reason } = jarl.unwrap(await at.tests.getTestSuite(suite.suite.id));
     expect({ status, reason }).toEqual(ABORTED);

@@ -31,6 +31,7 @@ export type Options = {
   readonly token: { readonly reveal: () => string };
   readonly aborting: Aborting;
   readonly abortTimeoutMs: number;
+  readonly reason?: string;
 };
 
 type Failure = Db.DatabaseError | Stores.Tests.NotFound | NothingToAbort | NotStopped;
@@ -50,9 +51,14 @@ const OPEN: ReadonlyArray<Stores.Tests.JobStatus> = ["pending", "running"];
 export const create = (services: Services, options: Options): Aborter => {
   const { http, tests, servers, logger } = services;
   const { token, aborting, abortTimeoutMs } = options;
+  const reason = options.reason ?? REASON;
   const inFlight = new Set<Promise<unknown>>();
 
-  const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, agentId: job.id });
+  const at = (job: Stores.Tests.JobRow) => ({
+    location: LOCATION,
+    jobId: job.id,
+    runId: job.runId,
+  });
 
   // A client that holds the job is asked to stop it. One that is forgotten, or holds nothing for
   // it, has nothing to stop, which is said under the job once it is aborted.
@@ -100,7 +106,7 @@ export const create = (services: Services, options: Options): Aborter => {
     job: Stores.Tests.JobRow,
     during: string,
   ): Promise<jarl.Result<void, Failure>> => {
-    const aborted = await tests.abortJob(job.id, REASON);
+    const aborted = await tests.abortJob(job.id, reason);
     if (!jarl.error.is(aborted, Stores.Tests.InvalidState)) {
       return jarl.is_err(aborted) ? aborted : jarl.ok(undefined);
     }
@@ -116,7 +122,7 @@ export const create = (services: Services, options: Options): Aborter => {
 
   const abortJob = async (job: Stores.Tests.JobRow): Promise<jarl.Result<void, Failure>> => {
     if (job.status === "pending") {
-      const aborted = await tests.abortJob(job.id, REASON);
+      const aborted = await tests.abortJob(job.id, reason);
       if (jarl.error.is(aborted, Stores.Tests.InvalidState)) {
         // Dispatch moved it to running meanwhile: stop it where it went.
         const now = await tests.getJob(job.id);
@@ -155,7 +161,7 @@ export const create = (services: Services, options: Options): Aborter => {
 
   // A run whose job was aborted has nothing open, so it is aborted too; one already closed stays.
   const abortRun = async (runId: string): Promise<jarl.Result<void, Failure>> => {
-    const aborted = await tests.abortRun(runId, REASON);
+    const aborted = await tests.abortRun(runId, reason);
     if (jarl.error.is(aborted, Stores.Tests.InvalidState)) {
       return jarl.ok(undefined);
     }
@@ -211,7 +217,7 @@ export const create = (services: Services, options: Options): Aborter => {
     if (failed !== undefined) {
       return failed;
     }
-    const aborted = await tests.abortSuite(suiteId, REASON);
+    const aborted = await tests.abortSuite(suiteId, reason);
     if (jarl.error.is(aborted, Stores.Tests.InvalidState)) {
       return jarl.ok(undefined);
     }

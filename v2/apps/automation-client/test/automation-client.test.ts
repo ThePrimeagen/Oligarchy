@@ -25,12 +25,19 @@ const CONFIG = JSON.stringify({
   reasoning: { drive: "high", diagnose: "high", setup: "high" },
   openRouterBaseUrl: "https://openrouter.test",
   httpTimeout: "10 seconds",
+  fleet: {
+    heartbeatInterval: "7 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "1 minute",
     stepLimit: 10,
     askTimeout: "1 second",
     harness: { defaultRetry: "1 second", recentActions: 10 },
-    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute", sendKeysTimeout: "30 seconds" },
   },
   diagnose: { runCeiling: "1 minute", headerTimeout: "1 second", chunkTimeout: "1 second" },
   automationClient: {
@@ -38,12 +45,53 @@ const CONFIG = JSON.stringify({
     killGrace: "5 seconds",
     stderrGrace: "2 seconds",
     reserveTimeout: "1 minute",
+    reservationTimeout: "2 minutes",
+  },
+  qemuServer: {
+    probeTimeout: "3 seconds",
+    reserveTimeout: "45 seconds",
+    releaseTimeout: "30 seconds",
+    setupInterval: "10 seconds",
+    forgetInterval: "30 seconds",
+    forgetAfter: "10 minutes",
+    followTimeout: "1 hour",
+  },
+  qemuRunner: {
+    reservationTimeout: "2 minutes",
+    idleTimeout: "10 minutes",
+    sweepInterval: "10 seconds",
+    poweroffTimeout: "10 seconds",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    downloadTimeout: "10 seconds",
+    cachePoll: "1 second",
+    cacheStale: "2 minutes",
+    cacheHeartbeat: "10 seconds",
+    cacheProgress: "30 seconds",
+    handshakeTimeout: "1 second",
+    commandTimeout: "15 seconds",
+    keyGap: "100 millis",
+    clickGap: "100 millis",
+    dragGap: "20 millis",
+    dragSteps: 20,
+    maxKeys: 10000,
+    maxTicks: 100,
+    followBacklog: 256,
+    maxFrame: 1048576,
+    stderrLimit: 1048576,
+    cpus: 4,
+    diskSize: "64G",
+    memory: "4G",
+    firmwareCode: "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    firmwareVars: "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+    binary: "qemu-system-x86_64",
+    imageBinary: "qemu-img",
   },
   automationServer: {
     dispatchInterval: "1 second",
     forgetInterval: "1 second",
     forgetAfter: "1 minute",
-    abortTimeout: "15 seconds",
+    abortTimeout: "45 seconds",
   },
   locator: {
     grid: 4,
@@ -253,7 +301,10 @@ describe("the automation client lifecycle", () => {
         [NAME, "automation-client", { jobs: 0, memoryBytes: 5, cpuPercent: 1.5 }],
       ]);
       expect((await at.reserve()).status).toBe(200);
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(6_999);
+      expect(at.heartbeats).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(at.heartbeats).toHaveLength(2);
       expect(at.readings.at(-1)).toEqual([
         NAME,
         "automation-client",

@@ -1,3 +1,5 @@
+import * as StoreTesting from "@oligarchy/stores/testing";
+import * as FleetTesting from "../src/testing.ts";
 import * as Db from "@oligarchy/db";
 import * as jarl from "jarl";
 import { describe, expect, it, vi } from "vitest";
@@ -30,12 +32,13 @@ const refusedWrite = (reason: string) => {
 
 // Every need faked and recording what was asked of it, with the parts a test replaces.
 const faked = (overrides: Partial<Omit<Needs, "logger">> = {}) => {
+  vi.useFakeTimers();
   const { lines, logger } = logging();
   const calls: Array<string> = [];
   const needs: Needs = {
-    host: { collect: () => STATS },
-    usage: { collect: async () => jarl.ok(USAGE) },
-    servers: {
+    host: FleetTesting.host({ collect: () => STATS }),
+    usage: FleetTesting.usage({ collect: async () => jarl.ok(USAGE) }),
+    servers: StoreTesting.servers({
       heartbeat: async () => {
         calls.push("heartbeat");
         return jarl.ok(undefined);
@@ -44,13 +47,13 @@ const faked = (overrides: Partial<Omit<Needs, "logger">> = {}) => {
         calls.push("remove");
         return jarl.ok(true);
       },
-    },
-    processStats: {
+    }),
+    processStats: StoreTesting.processStats({
       report: async () => {
         calls.push("process stats");
         return jarl.ok(undefined);
       },
-    },
+    }),
     logger,
     ...overrides,
   };
@@ -78,13 +81,14 @@ describe("announcing a member", () => {
         },
       },
       {
-        host: { collect: () => STATS },
-        usage: { collect: async () => jarl.ok(USAGE) },
+        host: FleetTesting.host({ collect: () => STATS }),
+        usage: FleetTesting.usage({ collect: async () => jarl.ok(USAGE) }),
         servers,
         processStats,
         logger,
       },
       stop.signal,
+      { every: 15_000 },
     );
     await vi.waitFor(async () => {
       expect(jarl.unwrap(await processStats.listSeries(10))).toHaveLength(1);
@@ -122,8 +126,8 @@ describe("announcing a member", () => {
     const announced = announce(
       MEMBER,
       {
-        host: { collect: () => STATS },
-        usage: { collect: async () => jarl.ok(USAGE) },
+        host: FleetTesting.host({ collect: () => STATS }),
+        usage: FleetTesting.usage({ collect: async () => jarl.ok(USAGE) }),
         servers,
         processStats,
         logger,
@@ -187,10 +191,10 @@ describe("announcing a member", () => {
 
   it("usage that cannot be read is one process stats line, and the heartbeat is still written (error)", async () => {
     const { calls, lines, needs } = faked({
-      usage: {
+      usage: FleetTesting.usage({
         collect: async () =>
           jarl.err(new Usage.UsageUnreadable("ps did not list this process (pid 42)")),
-      },
+      }),
     });
     const stop = new AbortController();
     const announced = announce(MEMBER, needs, stop.signal, EVERY);

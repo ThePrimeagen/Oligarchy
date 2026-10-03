@@ -79,12 +79,10 @@ Completed in the timing and isolation pass:
 These fake lifecycle and listener tests check application behavior; they do not prove OS signal
 delivery, executable startup or port release. Production entrypoints still use real IO.
 
-Two proposed changes were dropped from this pass, leaving these tests unchanged:
-
-- `packages/tester/test/tester.test.ts` still launches the tester executable and captures its
-  output. It points its HTTP proxies at `127.0.0.1:1` to attempt to block Sentry requests.
-- `packages/db/test/db.test.ts` still uses `127.0.0.1:1` for its connection-refusal test, assuming
-  nothing is listening there.
+The tester now lives in `apps/tester`. Its tests run `application.ts` with fake HTTP and
+process IO over a test-owned database; they no longer spawn the executable or use proxy
+settings to block Sentry. Every workspace loads the shared fake wall-clock setup, with timer
+APIs also faked in deadline tests.
 
 ## 1. Services to write
 
@@ -136,8 +134,9 @@ Two proposed changes were dropped from this pass, leaving these tests unchanged:
       and that of the qemu server holding its guest. V1's also listed the newest finished jobs, which
       viz's tickets tab and `ctrl automation --list` showed, and each job's instruction, open intent
       and the database's clock. V2 lists only the live queue; the instruction is
-      `tests.getJobDetails`, intents are `logs.listIntents` (keyed by test run, so a job keeps only
-      the lines since it was queued) and actions are `actions.listActions`.
+      `tests.getJobDetails`, intents are `logs.listIntents({ jobId })` and actions are
+      `actions.listActions`. Stored logs carry both job and run IDs; run-level queries keep the
+      full history across attempts.
 - [x] **Where a job's guest state lives.** In `vm_status`, one row per change to a job's VM, never
       updated: its status is its newest row, and when it started or ended is when that row was
       written. `downloading` and `running` are live; `shutdown` (the guest powered itself off),
@@ -219,7 +218,7 @@ record, and the automation server acts on it directly.
       one refusal rolls the suite back. A setup and a drive cannot share a suite, a setup suite
       needs one server per run, and a drive suite names no servers. `ctrl test suite` and the
       dashboard pass every definition but `setup`, with no `setupServers`.
-- [ ] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
+- [x] **Dispatch.** The automation server's loop: `nextPendingJob`, then a reserve on a live
       automation client, round robin (a setup only on the server its setup lock names). Only once
       that client has reserved the job does `runJob` move it to running, naming the client, and
       `/run` go, a diagnose's with its prompt. A reserve that is refused or fails leaves the job pending, and the
@@ -230,7 +229,7 @@ record, and the automation server acts on it directly.
       the proxy's to set up, and the drive stays pending until a reserve lands. A setup that fails
       releases its lock, so the drive's next reserve sets up again; decide when a drive whose ISO
       keeps failing to set up is errored instead. V1: `dispatch` in `worker.ts`.
-- [ ] **The drive harness.** V1's driving prompt names only the agent's Linear ticket; the task
+- [x] **The drive harness.** V1's driving prompt names only the agent's Linear ticket; the task
       was the ticket's body, and V1's driver looks it up with `findResultByLinearId`. In V2 the
       agent is its job id, and the driving prompt takes the job id where V1 takes
       `{{LINEAR_TICKET}}`. V2 has one driving prompt, the driver's system prompt, embedded in
@@ -239,7 +238,7 @@ record, and the automation server acts on it directly.
       `client.md` and describes its `client` tool.
       V1's `prompts/linear-issue.html` and `prompts/mint-issue.html` were ticket bodies and go at cutover.
       `@oligarchy/drive-harness` is not a service: its `create({ tests, openRouter, http },
-      signal, { job, baseUrl, token, recentActions, startTimeoutMs, saveTimeoutMs })` builds a
+      signal, { job, baseUrl, token, recentActions, startTimeoutMs, saveTimeoutMs, sendKeysTimeoutMs })` builds a
       `DriveHarness`, a class the package does not export, which builds the job's
       `QemuHttpTools` over `http` itself, with `driver.harness.recentActions` (10) and
       `driver.guest` from `v2/oligarchy.json`. The signal ends every guest call but
@@ -272,11 +271,11 @@ record, and the automation server acts on it directly.
       - `finish(end)` saves a setup that succeeded and stops the guest otherwise.
       The loop and its limits are the driver's (section 4). V1's root templates and ticket
       bodies remain until V1 is retired.
-- [x] **Close a drive or setup** (the automation server's `src/close.ts`). `completeJob` when the
-      driver ran to its end, then queue a diagnose job on the same test run; `errorJob` with the
+- [x] **Close a drive or setup** (the automation server's `src/close.ts`). `completeDrive` atomically marks the job completed and queues a diagnosis when the
+      driver ran to its end; `errorJob` with the
       reason when the system failed it, which queues no diagnose and leaves its test run running
       for Try again. A run its client answers timed out (504), a drive, setup or diagnose, is
-      `timeoutJob`ed with the reason, its test run `timeoutRun`s, nothing is queued, and its
+      `timeoutJobAndRun` marks the job and its test run timed out together, nothing is queued, and its
       suite closes once none of its runs is open; a warning under the job says so. A run its
       client answers `aborted` is `abortJob`ed, unless an operator's abort closed the job first,
       which stands. A write that fails stops the close where it is, with one error line.
@@ -306,63 +305,42 @@ record, and the automation server acts on it directly.
       closes once none of its runs is open. A suite has each open run's job aborted, and each
       run with it, all at once; when one fails, the rest still go, the first failure is the
       answer, and the suite stays open. Otherwise the suite is aborted.
-- [ ] **Restart and shutdown.** At startup, each job the last automation server left running is
-      stopped at its client and errored, except a drive or setup whose driver had already finished,
-      which is closed as it would have been. At shutdown, each running job is stopped at its client
-      and aborted. V1: `packages/jobs/src/reclaim.ts`, and `stopInherited` and `stopAtShutdown` in
-      `worker.ts`.
+- [x] **Restart and shutdown.** At startup, each job the last automation server left running is
+      stopped at its client and aborted, along with its test run. At shutdown, each running job
+      is stopped at its client and aborted. A driver finishing without its result being recorded
+      does not change this rule: unreported outcomes are unknown and are not recovered. Pending
+      jobs remain queued, and outcomes already committed to the database remain final.
 - [ ] **Try again.** An operator's retry, from `ctrl` or the dashboard, is a new job on the same test
       run.
 
 ## 4. Apps
 
-The automation server and client have partial implementations; their remaining work is listed
-below. Each becomes a V2 app under `v2/apps/`: its entrypoint reads its environment with
+The automation server and client implement the lifecycle below. Operator retry and the
+remaining cutover work are tracked separately. Each becomes a V2 app under `v2/apps/`: its entrypoint reads its environment with
 `@oligarchy/env`, builds its services with a `createServices` (Sentry among them, handed to its
 logger and waited for on exit, as the tester's are), serves Hono behind the `OLIGARCHY_TOKEN`
 bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecycle in
 `src/application.ts`; `src/main.ts` supplies the real listener and closes services on exit.
 
-- [ ] **qemu-server** (`apps/qemu-server`). Services: `Qemu` (starts a guest; keys, mouse,
-      screendump, powerdown), `Iso` (downloads and caches ISOs in the data dir), `SetupDisks`
-      (finds and saves setup disks), `QmpListen` (the QMP socket) and `Sessions` (slots against
-      `--max-jobs`, each guest's life, stats). Serves `/reserve`, `/relinquish`, `/start`,
-      `/stop`, `/save`, `/image`, `/serial`, `/follow`, `/stats`, `/setup-disks`, `/send-keys`,
-      `/mouse/*`, `/intent/start` and `/intent/end`. Announces itself with `fleet.announce`.
-      Saves a failed guest's debug log with `debugLogs.saveDebugLog`; V1 has the store but
-      nothing calls it.
-      Answers as `@oligarchy/qemu-http-tools` reads it: each call names its `job`, not an agent
-      and a session; `/image` and `/serial` answer bytes; and a 409 is a guest that is off on
-      `/image`, `/send-keys` and `/mouse/*`, an intent already open on `/intent/start` (V1
-      answered that one 400) and a guest that did not power off on `/save`. A call naming a job it
-      holds no guest for is a 404, job not found: a restarted server holds none, so its lost
-      guests' drivers fail, their automation clients answer `/run` with the failure, and the
-      automation server errors the jobs. Nothing errors them at startup, as V1's
-      `failRoutedSessions` did. At boot it calls `vmStatus.clearPastRunningVms` on its url, and
-      kills any QEMU its last process left running, which V1 never did. Starts
-      QEMU with a pvpanic device and without `-no-reboot`, since a setup's installer reboots. Writes
-      each VM's `vmStatus` as it changes, and reads how one ended from QEMU's `SHUTDOWN` reason
-      over QMP, which V1 ignored: `guest-shutdown` is `shutdown`, `host-signal` and
-      `host-qmp-quit` are `stopped`, `guest-panic` is `panicked`, and QEMU exiting with no
-      `SHUTDOWN` is `crashed`, with its exit code or signal and the end of its stderr. pvpanic
-      carries no detail: a panic's trace reaches the serial only once the installed system's
-      kernel writes its console to `ttyS0`, which the setup does not set yet.
-- [ ] **qemu-reverse-proxy** (`apps/qemu-reverse-proxy`). Services: `Router` (registers and lists
-      qemu servers, reserves and starts a job's guest on one, and forwards each later call to it by
-      `servers.serverForJob`) and `Setup` (the setup lock watcher on `setup_requests`). Serves
-      `/servers`, `/setup-disks` (asking every qemu server) and the qemu-server calls except
-      `/stats`. Forgets silent servers with `fleet.forget`, in a loop of its own as the
-      automation server does. Its `/reserve` and `/relinquish` answer as the automation
-      client's `src/proxy.ts` reads them: `/reserve` takes `{ job, resume? }` for a drive or
-      `{ job, setupServer }` for a setup, and answers 200 reserved, 503 at capacity, 409 setup
-      needed, and a 4xx only when it reserved nothing; `/relinquish` takes `{ job }`, and 404 is
-      a job it holds no guest for. Once it serves `Routes`, the client's calls move onto
-      `@oligarchy/http/client`. A resume reserve that no server can
-      take, because those with room hold no setup disk for its ISO, takes each such server's setup
-      lock with `setupRequests.insert`, files a setup for each (section 3's File), and answers
-      setup needed. One setup per ISO and server: a reserve while that setup is in flight files
-      none, and one that ended without passing releases the lock (V1: `setup.ts`).
-- [ ] **automation-server** (`v2/apps/automation-server`). Section 3's dispatch, close, abort,
+- [x] **QemuRunner** (`v2/apps/qemu-runner`, formerly V1 qemu-server). `main.ts`
+      loads the environment and services; `application.ts` recovers old guests before binding
+      or announcing. The four services in `@oligarchy/qemu` are `qemu`, `iso`, `setupDisks`,
+      and `qmpListen`. Guest ownership, controls, evidence, expiry, save and shutdown are
+      application logic. QMP protocol state lives in a class; the guest map is a plain module.
+      Every guest operation names its job. Shutdown and panic events are preserved across
+      process cleanup. Setup publication uses immutable version directories and an atomic
+      pointer; legacy V1 disk pairs remain readable. Both successful and failed guest stops
+      capture evidence before disposal. V1 already captured debug logs and omitted `-no-reboot`.
+- [x] **QemuServer** (`v2/apps/qemu-server`, formerly V1 qemu-reverse-proxy). Serves
+      authenticated guest routes and GET/POST/DELETE `/servers`. Routes through a typed
+      QemuRunner client, forwarding streams, content type, image metadata and operation
+      deadlines. Placement, setup scheduling and setup watching are ordinary modules.
+      The existing job-to-runner assignment stays fixed; no ownership token, started flag,
+      or reservation table was added. A retry uses that assignment. A runner removed after missed heartbeats has its routing assignments removed atomically,
+      allowing a pending job to be placed again.
+      `tests.ensureSetup` files the existing setup lock and job in one transaction, including
+      recovery of an old null-job lock. Required setup and fleet loops run as sub-apps.
+- [x] **automation-server** (`v2/apps/automation-server`). Section 3's dispatch, close, abort,
       restart and shutdown, and `/abort`. `/linear`, the board watch (`backlog.ts`) and the
       webhook signature (`signature.ts`) go. Done when every task below is ticked, roughly in
       their order.
@@ -372,8 +350,9 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             stopped, and closes its services. The dispatch sub-app's main is a loop that runs
             until the server is killed, waiting `automationServer.dispatchInterval` when no job
             starts; the kill ends the wait at once. A database that cannot be reached does not
-            stop it. The loop reserves jobs as described below; `restart` and `shutdown` still
-            do nothing.
+            stop it. The loop reserves jobs as described below. Restart stops inherited running
+            jobs and marks missing outcomes errored; shutdown stops and aborts remaining running
+            jobs after dispatch has settled.
       - [x] **Forget silent clients.** A sub-app beside dispatch forgets the automation clients
             silent for longer than `automationServer.forgetAfter` (10 minutes), as V1's
             `Sweep.forget` did, so dispatch never reserves on a client that died without deleting
@@ -425,12 +404,11 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             its job is Shutdown's. The dispatch sub-app's main returns only once every `/run` in
             flight has answered and its job is closed (`waitForRuns`), so no close writes after
             the services are closed.
-      - [ ] **Restart** (section 3's Restart and shutdown, at startup) in `restart`.
-      - [ ] **Shutdown** (section 3's Restart and shutdown, at shutdown) in `shutdown`. Today
-            it runs as soon as the signal lands, beside a dispatch pass still in flight, and
-            before the dispatch sub-app has waited out its runs; decide whether it moves to an
-            exit handler of the dispatch sub-app, which runs only once the loop has ended and
-            before the services close.
+      - [x] **Restart** (`restart.ts`) stops and aborts every job still recorded as running
+            before dispatch starts. Unreported outcomes remain unknown.
+      - [x] **Shutdown** (`shutdown.ts`) runs after the listener closes, operator aborts settle,
+            and dispatch has waited for its in-flight runs. It stops and aborts remaining
+            running jobs before services close.
       - [x] **Serve.** `routes.ts` is one chained Hono app behind the `OLIGARCHY_TOKEN` bearer,
             exported as `Routes`; `@oligarchy/http/serve`'s `listen` serves it on 127.0.0.1 at a
             required `--port` through `@hono/node-server`. `main` listens before anything else starts: the started line names
@@ -443,7 +421,7 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
             know, 409 for one already ended, 502 when a running job's client could not stop it,
             and 500 for a database error; each refusal is `{ error }` naming why. On a signal,
             the aborts it has taken finish writing before `shutdown`.
-- [ ] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
+- [x] **automation-client** (`v2/apps/automation-client`). `Sessions` (reserve, run, abort and
       shutdown against `--max-jobs`); spawns `./driver` for a drive or setup and opencode for a
       diagnose (`run.ts`); announces itself. Serves `/reserve`, `/run` and `/abort`. Done
       when every task below is ticked, roughly in their order.
@@ -546,8 +524,8 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       proxy or the model could not be reached. That failure is the failing step's own error,
       returned as it came, logged with itself as the cause so Sentry gets its stack, printed with
       its stack, and the reason the guest is stopped with. The OpenRouter client has
-      `driver.askTimeout` as its timeout and three attempts, waiting
-      `driver.harness.defaultRetry` between them when OpenRouter names no wait. The step limit is
+      `driver.askTimeout` as its timeout and asks again until a wait would reach the run
+      ceiling, waiting `driver.harness.defaultRetry` between asks when OpenRouter names no wait. The step limit is
       `driver.stepLimit`. V1's
       `--prompt` and `--debug-log` do not come over: the harness renders its own prompt, and
       every line goes to the logs table under the job id.
@@ -568,7 +546,7 @@ bearer, and runs under `@oligarchy/app`. Both automation apps keep their lifecyc
       passes and `db:generate` writes nothing new. Each package carries the types it builds
       against, since a clean `v2/` install has no root `@types/node`.
 - [ ] **Docs and skills.** The root `AGENTS.md`, `client.md`, `ctrl.md`, `ctrl-linear.md`,
-      `ctrl-diagnose.md`, `minted-disks.md`, `SUPER_RUN.md` and the skills in `.cursor/skills`
+      `ctrl-diagnose.md` and the skills in `.cursor/skills`
       describe V1 and its Linear board: a driving agent takes its task from a ticket, and a run is
       watched on the board. Rewrite them for V2 as its apps land; `client.md` and `ctrl-linear.md`
       go.

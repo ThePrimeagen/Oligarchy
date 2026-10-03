@@ -30,14 +30,17 @@ export type World = App.Needs<App.Made<Http.Http> | App.Made<Fleet.Usage.Usage>>
   readonly host: Fleet.Host.Source;
 };
 
-const live = (config: Pick<Env.Config, "httpTimeout">): World => ({
+const live = (config: Pick<Env.Config, "httpTimeout" | "fleet">): World => ({
   terminal: {
     write: (line) => process.stdout.write(`${line}\n`),
     colors: process.stdout.isTTY,
   },
   http: Http.create({}, { timeoutMs: config.httpTimeout }),
   host: Fleet.Host.osSource,
-  usage: Fleet.Usage.forThisProcess(),
+  usage: Fleet.Usage.forThisProcess({
+    timeoutMs: config.fleet.processTimeout,
+    killGraceMs: config.fleet.processKillGrace,
+  }),
 });
 
 // Every line is printed and stored in the logs table; an error or fatal line, and a line that
@@ -45,7 +48,7 @@ const live = (config: Pick<Env.Config, "httpTimeout">): World => ({
 export const createServices = (
   env: {
     readonly vars: { readonly databaseUrl: Env.Secret };
-    readonly config: Pick<Env.Config, "httpTimeout">;
+    readonly config: Pick<Env.Config, "httpTimeout" | "fleet">;
   },
   world: World = live(env.config),
 ) => {
@@ -55,10 +58,18 @@ export const createServices = (
   const logger = Logger.create({ sentry, db }, { write: terminal.write, colors: terminal.colors });
   const host = Fleet.Host.create(
     { logger },
-    { source: world.host, attribution: { location: "automation-client" } },
+    {
+      source: world.host,
+      sampleInterval: env.config.fleet.sampleInterval,
+      sampleLimit: env.config.fleet.sampleLimit,
+      attribution: { location: "automation-client" },
+    },
   );
   const servers = Stores.Servers.create({ db });
-  const processStats = Stores.ProcessStats.create({ db });
+  const processStats = Stores.ProcessStats.create(
+    { db },
+    { heartbeatInterval: env.config.fleet.heartbeatInterval },
+  );
   return { http, sentry, db, logger, host, usage, servers, processStats } satisfies Services;
 };
 

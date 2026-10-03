@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import * as ClientRoutes from "@oligarchy/automation-client/routes";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FIRST, MODELS, SECOND, cleanUp, dispatching, errors, gate } from "./dispatching.ts";
 
-afterEach(cleanUp);
+beforeEach(() => vi.useFakeTimers({ toFake: ["Date"] }));
+afterEach(async () => {
+  await cleanUp();
+  vi.useRealTimers();
+});
 
 const ended: ClientRoutes.Sessions["run"] = async () => jarl.ok("ended");
 
@@ -26,13 +30,15 @@ const diagnoseOf = async (at: At, runId: string) => {
 };
 
 const drives = (suite: Stores.Tests.TestSuiteDetails) =>
-  suite.runs.map(({ jobs }) => {
-    const [filed] = jobs;
-    if (filed === undefined) {
-      throw new Error("a test run filed with no job");
-    }
-    return filed;
-  });
+  suite.runs
+    .map(({ jobs }) => {
+      const [filed] = jobs;
+      if (filed === undefined) {
+        throw new Error("a test run filed with no job");
+      }
+      return filed;
+    })
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
 
 const record = async (
   at: At,
@@ -88,24 +94,32 @@ describe("closing a job once its /run answers", () => {
     expect(await at.run(second.runId)).toMatchObject({ status: "failed", reason: failed });
     const { status, reason } = jarl.unwrap(await at.tests.getTestSuite(suite.suite.id));
     expect({ status, reason }).toEqual({ status: "failed", reason: null });
+    const secondDiagnose = await diagnoseOf(at, second.runId);
+    for (const job of [first, firstDiagnose, second, secondDiagnose]) {
+      const lines = at.said.filter((line) => line.report.jobId === job.id);
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line.report).toMatchObject({ jobId: job.id, runId: job.runId });
+      }
+    }
     expect(errors(at.said)).toEqual([]);
   });
 
-  it("the last two runs of a suite closing at once each find nothing open, and the one that completes the suite second is refused with no error line (unhappy)", async () => {
-    // Each close reads its suite only once both have closed their runs.
+  it("the last two diagnoses completing together close their suite without leaving it open", async () => {
+    // Let both diagnoses reach the atomic completion before either proceeds.
     const bothClosed = gate();
     let reads = 0;
     const at = await dispatching(
       { [FIRST]: { run: ended }, [SECOND]: { run: ended } },
       (tests) => ({
         ...tests,
-        getTestSuite: async (suiteId) => {
+        completeDiagnosis: async (...args) => {
           reads += 1;
           if (reads === 2) {
             bothClosed.release();
           }
           await bothClosed.opened;
-          return tests.getTestSuite(suiteId);
+          return tests.completeDiagnosis(...args);
         },
       }),
     );
@@ -150,7 +164,7 @@ describe("closing a job once its /run answers", () => {
     expect(await at.run(run.id)).toMatchObject({ status: "running", reason: null });
     const failed = at.said.filter((one) => one.level === "error");
     expect(failed.map((one) => one.text)).toEqual([`diagnose errored: ${reason}`]);
-    expect(failed[0]?.report.agentId).toBe(diagnose.id);
+    expect(failed[0]?.report).toMatchObject({ jobId: diagnose.id, runId: diagnose.runId });
   });
 
   it("a /run that failed at its client is errored with why and an error line under it; no diagnose is queued and its test run is left running for a try again (unhappy)", async () => {
@@ -171,7 +185,7 @@ describe("closing a job once its /run answers", () => {
     expect(await at.run(run.id)).toMatchObject({ status: "running", reason: null });
     const failed = at.said.filter((one) => one.level === "error");
     expect(failed.map((one) => one.text)).toEqual([`run failed: ${reason}`]);
-    expect(failed[0]?.report.agentId).toBe(job.id);
+    expect(failed[0]?.report).toMatchObject({ jobId: job.id, runId: job.runId });
   });
 
   it("a /run that timed out at its client is timed out with why, and so is its test run, with a warning under it; no diagnose is queued, a diagnose's drive is left completed, and the suite closes failed (unhappy)", async () => {
@@ -207,7 +221,7 @@ describe("closing a job once its /run answers", () => {
     expect(await at.run(second.runId)).toMatchObject({ status: "timed_out", reason });
     expect(jarl.unwrap(await at.tests.getTestSuite(suite.suite.id)).status).toBe("failed");
     const warned = at.said.filter((one) => one.level === "warning");
-    expect(warned.map((one) => [one.text, one.report.agentId])).toEqual([
+    expect(warned.map((one) => [one.text, one.report.jobId])).toEqual([
       [`drive timed out: ${reason}`, first.id],
       [`diagnose timed out: ${reason}`, diagnose.id],
     ]);
@@ -226,6 +240,7 @@ describe("closing a job once its /run answers", () => {
     }));
     await at.live(FIRST, SECOND);
     const atClient = await at.drive();
+    vi.setSystemTime(Date.now() + 1);
     const byOperator = await at.drive();
 
     await closeNext(at);
@@ -240,7 +255,7 @@ describe("closing a job once its /run answers", () => {
       reason: "an operator aborted it",
     });
     expect(
-      at.said.filter((one) => one.report.agentId === byOperator.job.id).map((one) => one.text),
+      at.said.filter((one) => one.report.jobId === byOperator.job.id).map((one) => one.text),
     ).toEqual([`reserved drive; ${SECOND}`]);
     expect(errors(at.said)).toEqual([]);
   });
@@ -270,6 +285,6 @@ describe("closing a job once its /run answers", () => {
     const failed = at.said.filter((one) => one.level === "error");
     expect(failed).toHaveLength(1);
     expect(failed[0]?.text).toMatch(/^close failed: Failed query: /);
-    expect(failed[0]?.report.agentId).toBe(diagnose.id);
+    expect(failed[0]?.report).toMatchObject({ jobId: diagnose.id, runId: diagnose.runId });
   });
 });

@@ -14,12 +14,19 @@ const valid = {
   reasoning: { drive: "minimal", diagnose: "xhigh", setup: "minimal" },
   openRouterBaseUrl: "https://openrouter.ai/api/v1",
   httpTimeout: "10 seconds",
+  fleet: {
+    heartbeatInterval: "15 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "1.5 hours",
     stepLimit: 200,
     askTimeout: "3 minutes",
     harness: { defaultRetry: "1 second", recentActions: 10 },
-    guest: { startTimeout: "45 minutes", saveTimeout: "5 minutes" },
+    guest: { startTimeout: "45 minutes", saveTimeout: "5 minutes", sendKeysTimeout: "30 seconds" },
   },
   diagnose: { runCeiling: "1.5 hours", headerTimeout: "3 minutes", chunkTimeout: "3 minutes" },
   automationClient: {
@@ -27,12 +34,53 @@ const valid = {
     killGrace: "5 seconds",
     stderrGrace: "2 seconds",
     reserveTimeout: "1 minute",
+    reservationTimeout: "2 minutes",
+  },
+  qemuServer: {
+    probeTimeout: "3 seconds",
+    reserveTimeout: "45 seconds",
+    releaseTimeout: "30 seconds",
+    setupInterval: "10 seconds",
+    forgetInterval: "30 seconds",
+    forgetAfter: "10 minutes",
+    followTimeout: "1 hour",
+  },
+  qemuRunner: {
+    reservationTimeout: "2 minutes",
+    idleTimeout: "10 minutes",
+    sweepInterval: "10 seconds",
+    poweroffTimeout: "2 minutes",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    downloadTimeout: "40 minutes",
+    cachePoll: "1 second",
+    cacheStale: "2 minutes",
+    cacheHeartbeat: "10 seconds",
+    cacheProgress: "30 seconds",
+    handshakeTimeout: "30 seconds",
+    commandTimeout: "15 seconds",
+    keyGap: "100 millis",
+    clickGap: "100 millis",
+    dragGap: "20 millis",
+    dragSteps: 20,
+    maxKeys: 10000,
+    maxTicks: 100,
+    followBacklog: 256,
+    maxFrame: 1048576,
+    stderrLimit: 1048576,
+    cpus: 4,
+    diskSize: "64G",
+    memory: "4G",
+    firmwareCode: "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    firmwareVars: "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+    binary: "qemu-system-x86_64",
+    imageBinary: "qemu-img",
   },
   automationServer: {
     dispatchInterval: "30 seconds",
     forgetInterval: "30 seconds",
     forgetAfter: "10 minutes",
-    abortTimeout: "15 seconds",
+    abortTimeout: "45 seconds",
   },
   locator: {
     grid: 4,
@@ -60,6 +108,14 @@ const refusal = async (file: object): Promise<string> => {
 };
 
 describe("load", () => {
+  it("refuses a heartbeat interval that reaches the runner expiry deadline", async () => {
+    expect(
+      await refusal({
+        ...valid,
+        fleet: { ...valid.fleet, heartbeatInterval: valid.qemuServer.forgetAfter },
+      }),
+    ).toContain("fleet.heartbeatInterval");
+  });
   it("loads the checked-in oligarchy.json (happy)", async () => {
     expect(jarl.is_ok(await loadText(readFileSync(Config.PATH, "utf8")))).toBe(true);
   });
@@ -72,7 +128,7 @@ describe("load", () => {
       stepLimit: 200,
       askTimeout: 180_000,
       harness: { defaultRetry: 1_000, recentActions: 10 },
-      guest: { startTimeout: 2_700_000, saveTimeout: 300_000 },
+      guest: { startTimeout: 2_700_000, saveTimeout: 300_000, sendKeysTimeout: 30_000 },
     });
     expect(config.diagnose).toEqual({
       runCeiling: 5_400_000,
@@ -84,8 +140,9 @@ describe("load", () => {
       killGrace: 5_000,
       stderrGrace: 2_000,
       reserveTimeout: 60_000,
+      reservationTimeout: 120_000,
     });
-    expect(config.automationServer.abortTimeout).toBe(15_000);
+    expect(config.automationServer.abortTimeout).toBe(45_000);
     expect(config.reasoning.diagnose).toBe("xhigh");
     expect(config.models.setup).toBe("meta/muse-spark-1.3-contributor");
     expect(config.reasoning.setup).toBe("minimal");
@@ -171,4 +228,23 @@ describe("load", () => {
     };
     expect(jarl.error.is(await Config.load(io), Errors.Unexpected)).toBe(true);
   });
+});
+
+it.each([
+  ["qemuServer", "reserveTimeout", "2 minutes"],
+  ["qemuRunner", "downloadTimeout", "45 minutes"],
+  ["qemuRunner", "poweroffTimeout", "5 minutes"],
+  ["qemuRunner", "cacheHeartbeat", "3 minutes"],
+  ["qemuRunner", "killGrace", "1 minute"],
+])("refuses %s.%s when it exceeds the enclosing deadline", async (section, key, duration) => {
+  const values = valid as Record<string, unknown>;
+  expect(
+    await refusal({
+      ...valid,
+      [section]: {
+        ...(typeof values[section] === "object" && values[section] !== null ? values[section] : {}),
+        [key]: duration,
+      },
+    }),
+  ).toContain("must");
 });

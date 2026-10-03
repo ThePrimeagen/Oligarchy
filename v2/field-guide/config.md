@@ -6,9 +6,11 @@ Every timeout, grace, interval and limit an app runs on lives in `v2/oligarchy.j
 | Section | Holds |
 | --- | --- |
 | `httpTimeout` | any HTTP call that names no deadline of its own |
-| `driver` | `runCeiling`, `stepLimit`, `askTimeout`; `harness` (`defaultRetry`, `recentActions`); `guest` (`startTimeout`, `saveTimeout`) |
+| `fleet` | `heartbeatInterval`: announcements and process-stat sampling; `sampleInterval` and `sampleLimit`: host CPU history; `processTimeout` and `processKillGrace`: process listing deadlines |
+| `qemuServer` | `forgetAfter`: runner expiry (45 seconds); `forgetInterval`: expiry checks (30 seconds) |
+| `driver` | `runCeiling`, `stepLimit`, `askTimeout`; `harness` (`defaultRetry`, `recentActions`); `guest` (`startTimeout`, `saveTimeout`, `sendKeysTimeout`) |
 | `diagnose` | opencode's `runCeiling`, and its stream's `headerTimeout` and `chunkTimeout` |
-| `automationClient` | `driverGrace` past `driver.runCeiling`, `killGrace`, `stderrGrace`, `reserveTimeout` |
+| `automationClient` | `driverGrace` past `driver.runCeiling`, `killGrace`, `stderrGrace`, `reserveTimeout`, `reservationTimeout` |
 | `automationServer` | `dispatchInterval`, `forgetInterval`, `forgetAfter`, `abortTimeout` |
 | `locator` | `callTimeout`, `retries`, `retryWait`; and the search itself: `grid`, `rounds`, `power`, `boxScale`, `threshold`, `overviewScale`, `gridImageScale`, `quality` |
 
@@ -22,7 +24,7 @@ Every timeout, grace, interval and limit an app runs on lives in `v2/oligarchy.j
 | --- | --- |
 | `RUN_TIMEOUT_MS` (`2 ** 31 - 1`) | "no deadline": only an abort ends `/run` |
 | OpenRouter `ATTEMPTS` | a count, not a time |
-| fleet `HEARTBEAT_MS` (30 s), the stores' live window (45 s) | they move together, and the window is written in SQL (`packages/stores/src/servers.ts`) |
+| stores' live window (45 s) | automation-client availability filter in SQL (`packages/stores/src/servers.ts`) |
 
 ## Tests
 
@@ -38,3 +40,11 @@ Proxy.create({
   reserveTimeoutMs: config.automationClient.reserveTimeout,
 }),
 ```
+
+QEMU app configuration lives in `qemuServer` (placement, forwarding, setup/fleet intervals) and
+`qemuRunner` (guest lifecycle, cache, QMP, process and input limits). The schema checks nested
+operation deadlines. Setup code passes the chosen values into service options.
+
+Runner expiry is checked on each sweep after `forgetAfter` without a heartbeat. The sweep
+interval controls detection delay; it does not extend the heartbeat deadline. Announcement
+and process-stat services receive `fleet.heartbeatInterval` from application wiring.

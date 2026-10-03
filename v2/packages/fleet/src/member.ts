@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
@@ -5,9 +6,6 @@ import * as jarl from "jarl";
 import { attempt } from "./failure.ts";
 import type * as Host from "./host.ts";
 import type * as Usage from "./usage.ts";
-
-// The dashboard polls as often, so a row is never more than one poll behind.
-export const HEARTBEAT_MS = 30_000;
 
 type Refusal = { readonly message: string };
 
@@ -23,13 +21,13 @@ export type Member = {
   readonly onLeave?: () => Promise<jarl.Result<void, Refusal>>;
 };
 
-export type Needs = {
-  readonly host: Pick<Host.Host, "collect">;
-  readonly usage: Pick<Usage.Usage, "collect">;
-  readonly servers: Pick<Stores.Servers.Servers, "heartbeat" | "removeServer">;
-  readonly processStats: Pick<Stores.ProcessStats.ProcessStats, "report">;
-  readonly logger: Logger.Logger;
-};
+export type Needs = App.Needs<
+  | Host.Host
+  | Usage.Usage
+  | Stores.Servers.Servers
+  | Stores.ProcessStats.ProcessStats
+  | Logger.Logger
+>;
 
 // Announces member: its servers row is written now and every heartbeat with its guests and the
 // host's stats, and each tick adds a process_stats row of its jobs and this process's usage. Each
@@ -41,7 +39,7 @@ export const announce = async (
   member: Member,
   needs: Needs,
   signal: AbortSignal,
-  options: { readonly every?: number } = {},
+  options: { readonly every: number },
 ): Promise<void> => {
   const { host, usage, servers, processStats } = needs;
   const log = { logger: needs.logger, attribution: member.attribution };
@@ -75,7 +73,7 @@ export const announce = async (
   };
 
   await tick(signal);
-  await Async.tick(tick, options.every ?? HEARTBEAT_MS, signal);
+  await Async.tick(tick, options.every, signal);
   if (onLeave !== undefined) {
     await attempt(log, "leave failed", onLeave);
   }

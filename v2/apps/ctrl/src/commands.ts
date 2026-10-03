@@ -52,7 +52,7 @@ export const logs = async (
   if (jarl.is_err(vmStatus)) {
     return vmStatus;
   }
-  const intents = await services.logs.listIntents(run.id);
+  const intents = await services.logs.listIntents({ jobId });
   if (jarl.is_err(intents)) {
     return intents;
   }

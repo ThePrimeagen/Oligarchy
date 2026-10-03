@@ -9,6 +9,7 @@ const ELSEWHERE = "http://qemu-2";
 
 const routed = async (setup: Setup, url: string) => {
   const job = await newJob(setup.tests);
+  jarl.unwrap(await setup.servers.addServer(url, "qemu"));
   jarl.unwrap(await setup.servers.routeJob(job.id, url));
   return job.id;
 };

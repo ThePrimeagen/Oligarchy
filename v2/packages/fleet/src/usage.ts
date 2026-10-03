@@ -217,11 +217,6 @@ export const psSource =
 
 // An empty header on every column prints no header line; rss is in KiB, as VmRSS is.
 const PS_ARGS = ["-A", "-o", "pid=", "-o", "ppid=", "-o", "rss="];
-// ps answers in milliseconds; one that wedges must not hold every later heartbeat with it.
-const PS_TIMEOUT_MS = 10_000;
-// It has nothing to flush, so SIGTERM gets a second before SIGKILL.
-const PS_FORCE_KILL_MS = 1_000;
-
 export type Spawn = (
   command: string,
   args: ReadonlyArray<string>,
@@ -242,16 +237,15 @@ export type Spawn = (
 };
 
 // Every process with its parent and rss, as ps lists them.
-export const listProcesses = (
-  options: {
-    readonly command?: string;
-    readonly args?: ReadonlyArray<string>;
-    readonly timeoutMs?: number;
-    readonly spawn?: Spawn;
-  } = {},
-): Promise<jarl.Result<Listing, UsageUnreadable>> =>
+export const listProcesses = (options: {
+  readonly command?: string;
+  readonly args?: ReadonlyArray<string>;
+  readonly timeoutMs: number;
+  readonly killGraceMs: number;
+  readonly spawn?: Spawn;
+}): Promise<jarl.Result<Listing, UsageUnreadable>> =>
   new Promise((resolve) => {
-    const { command = "/bin/ps", args = PS_ARGS, timeoutMs = PS_TIMEOUT_MS } = options;
+    const { command = "/bin/ps", args = PS_ARGS, timeoutMs, killGraceMs } = options;
     const start: Spawn = options.spawn ?? spawn;
     const child = start(command, args, { stdio: ["ignore", "pipe", "ignore"] });
     let text = "";
@@ -275,7 +269,7 @@ export const listProcesses = (
         if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");
         }
-      }, PS_FORCE_KILL_MS).unref();
+      }, killGraceMs).unref();
     }, timeoutMs);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -303,7 +297,10 @@ const nodeFs: Fs = {
 };
 
 // This process's usage: ps on macOS, /proc everywhere else.
-export const forThisProcess = (): App.Made<Usage> =>
+export const forThisProcess = (options: {
+  readonly timeoutMs: number;
+  readonly killGraceMs: number;
+}): App.Made<Usage> =>
   create(
     {},
     {
@@ -312,7 +309,7 @@ export const forThisProcess = (): App.Made<Usage> =>
           ? psSource({
               pid: process.pid,
               cpuUsage: () => process.cpuUsage(),
-              list: () => listProcesses(),
+              list: () => listProcesses(options),
             })
           : procSource(nodeFs),
     },

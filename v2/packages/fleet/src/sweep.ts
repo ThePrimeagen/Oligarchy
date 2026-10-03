@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import type * as Logger from "@oligarchy/logger";
 import type * as Stores from "@oligarchy/stores";
 import * as jarl from "jarl";
@@ -8,17 +9,14 @@ import { attempt } from "./failure.ts";
 // (the qemu reverse proxy its fleet, the automation server its clients), as often as it decides.
 export const forget = async (
   type: Stores.Servers.ServerType,
-  needs: {
-    readonly servers: Pick<Stores.Servers.Servers, "removeStaleServers">;
-    readonly logger: Logger.Logger;
-    readonly attribution: Logger.Attribution;
-  },
-  options: { readonly silentFor: number },
+  services: App.Needs<Stores.Servers.Servers | Logger.Logger>,
+  options: { readonly silentFor: number; readonly attribution: Logger.Attribution },
 ): Promise<void> => {
-  const { servers, logger, attribution } = needs;
+  const { servers, logger } = services;
+  const { attribution } = options;
   const { silentFor } = options;
   const forgotten = await jarl.or_else(
-    attempt(needs, "stale server cleanup failed", () =>
+    attempt({ logger, attribution }, "stale server cleanup failed", () =>
       servers.removeStaleServers(type, silentFor),
     ),
     [],

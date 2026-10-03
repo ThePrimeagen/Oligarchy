@@ -8,8 +8,9 @@ import * as Sentry from "@oligarchy/sentry";
 import * as Stores from "@oligarchy/stores";
 import type * as jarl from "jarl";
 
-// The most asks of one completion, the first included.
-const ATTEMPTS = 3;
+// No count of its own: an ask is made again until a wait would reach the run's deadline, so a
+// provider overloaded for minutes is waited out rather than failing the drive.
+const ATTEMPTS = Number.MAX_SAFE_INTEGER;
 
 export type Services = App.Needs<
   | Http.Http
@@ -19,6 +20,21 @@ export type Services = App.Needs<
   | Stores.Tests.Tests
   | OpenRouter.OpenRouter
 >;
+
+export const openRouterOptions = (env: {
+  readonly vars: { readonly openRouterToken: Env.Secret };
+  readonly config: Pick<Env.Config, "openRouterBaseUrl"> & {
+    readonly driver: Pick<Env.Config["driver"], "askTimeout"> & {
+      readonly harness: Pick<Env.Config["driver"]["harness"], "defaultRetry">;
+    };
+  };
+}): OpenRouter.Options => ({
+  token: env.vars.openRouterToken,
+  baseUrl: env.config.openRouterBaseUrl,
+  timeoutMs: env.config.driver.askTimeout,
+  defaultRetry: env.config.driver.harness.defaultRetry,
+  attempts: ATTEMPTS,
+});
 
 // Every line is printed and stored in the logs table; an error or fatal line, and a line that
 // could not be stored, also go to the project's Sentry.
@@ -38,16 +54,7 @@ export const createServices = (env: {
     { write: (line) => process.stdout.write(`${line}\n`), colors: process.stdout.isTTY },
   );
   const tests = Stores.Tests.create({ db });
-  const openRouter = OpenRouter.create(
-    { http },
-    {
-      token: vars.openRouterToken,
-      baseUrl: config.openRouterBaseUrl,
-      timeoutMs: config.driver.askTimeout,
-      defaultRetry: config.driver.harness.defaultRetry,
-      attempts: ATTEMPTS,
-    },
-  );
+  const openRouter = OpenRouter.create({ http }, openRouterOptions(env));
   return { http, sentry, db, logger, tests, openRouter } satisfies Services;
 };
 

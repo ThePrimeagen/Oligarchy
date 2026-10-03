@@ -13,7 +13,7 @@ export const ROSE_PINE_MAIN = {
   muted: "#6e6a86",
 } as const;
 
-export const AGENT_COLORS: ReadonlyArray<string> = Object.values(ROSE_PINE_MAIN);
+export const JOB_COLORS: ReadonlyArray<string> = Object.values(ROSE_PINE_MAIN);
 
 // The 24-bit foreground sequence for a `#rrggbb` colour; `\x1b[39m` puts the default back.
 const foreground = (hex: string): string => {
@@ -28,7 +28,7 @@ export type Line = {
   readonly text: string;
   readonly level: Logger.Level;
   readonly location?: string;
-  readonly agentId?: string;
+  readonly jobId?: string;
   readonly color?: string;
 };
 
@@ -47,7 +47,7 @@ export const renderLine = (line: Line, colors: boolean): string => {
   const pieces: ReadonlyArray<readonly [string, string]> = [
     [level.label, level.color],
     [" [", ROSE_PINE_MAIN.text],
-    [line.agentId ?? "global", line.color ?? ROSE_PINE_MAIN.muted],
+    [line.jobId ?? "global", line.color ?? ROSE_PINE_MAIN.muted],
     ["] ", ROSE_PINE_MAIN.text],
     ...(line.location === undefined
       ? []

@@ -21,6 +21,16 @@
 - V2 names: the qemu reverse proxy is QemuServer; the qemu server is QemuRunner.
 - A service is where a test decides the outcome: one fake gives the failing case, another the passing one.
 
+For a route that returns bytes, headers, or a stream, use `HttpClient.connect<Routes>()`.
+Its `request(method, path, input, init)` checks the method, path, JSON and query against the
+callee's routes. It returns an open HTTP response: consume its body or close it. Use
+`Http.body(response)` to forward the stream; cancellation closes the upstream response.
+The configured timeout covers reading the body, including a stalled stream.
+For a decoded response, use the same client's `prepare(method, path, input, init)` and pass
+its `[url, init]` tuple to `http.fetch` with the decoder and status handlers. Preparation checks
+the request against the callee's routes and adds authentication; callers do not rebuild URLs
+or JSON bodies.
+
 ## Write
 
 ```ts
@@ -80,6 +90,17 @@ export const create = (
 | registered | never in `Services`; no `service` field |
 | test | fake the service it reaches, `http`; prove `act` and `ask` make their calls through it |
 
+## Database transitions
+
+- When several writes represent one state transition, expose one store operation that commits
+  them in one transaction. A completed row must not become visible before the work it queues.
+- Throw a domain refusal inside the transaction when it must roll back earlier writes, then
+  translate that refusal to a result outside the transaction.
+- Lock ancestors before descendants in compound transitions. Lock a shared parent before
+  changing its last children, so concurrent completions cannot both leave the parent open.
+- Lifecycle cleanup must enumerate every applicable row. A bounded query for a queue display
+  is not a complete inventory for shutdown or recovery.
+
 ## Wire
 
 ```ts
@@ -98,3 +119,21 @@ export const createServices = (env: Env) => {
 app.onExit(() => closeServices(services));
 await app.run(services, onClose);
 ```
+
+## Log attribution
+
+- `jobId` identifies the job in stored logs, terminal output, color grouping, and Sentry reports.
+- `runId` identifies its parent test run for stored logs. Supply both when both are known;
+  a drive or setup and its diagnosis have separate job IDs within the same run.
+- Pass known IDs through helpers. Before a job loads, report its known job ID without
+  inventing a run ID or doing a second database lookup just to log an error.
+- Process-wide messages may omit both IDs. `location` names the component emitting the line.
+- Query evidence for one attempt by `jobId`; query the full run's history by `runId`.
+  Do not infer a log's job from its timestamp. Older rows without a job ID remain run-level logs.
+
+## Removing a runner
+
+- Delete a removed runner's routing assignments in the same transaction as its registry row.
+  Keep the jobs themselves; pending jobs can then be placed on an available runner.
+- Assignment writes must lock and validate the registry row so a reservation finishing late
+  cannot recreate a route to a runner that cleanup already removed.

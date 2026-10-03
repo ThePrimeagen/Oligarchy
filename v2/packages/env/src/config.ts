@@ -63,6 +63,13 @@ const File = z
     openRouterBaseUrl: z.string().refine(isHttpUrl, "must be an http or https url"),
     // Any HTTP call that names no deadline of its own.
     httpTimeout: Duration,
+    fleet: z.strictObject({
+      heartbeatInterval: Duration,
+      sampleInterval: Duration,
+      sampleLimit: z.int().positive(),
+      processTimeout: Duration,
+      processKillGrace: Duration,
+    }),
     // A drive's or setup's driver. askTimeout bounds each OpenRouter ask; recentActions is the
     // lines of a step the driving prompt shows, its intent among them. A guest's first start
     // downloads its ISO before it answers, and a save gives it time to power off.
@@ -74,7 +81,11 @@ const File = z
         defaultRetry: Duration,
         recentActions: z.int().min(1, "recentActions must be at least 1"),
       }),
-      guest: z.strictObject({ startTimeout: Duration, saveTimeout: Duration }),
+      guest: z.strictObject({
+        startTimeout: Duration,
+        saveTimeout: Duration,
+        sendKeysTimeout: Duration,
+      }),
     }),
     // A diagnose's opencode: killed at runCeiling, and an OpenRouter stream with no first byte,
     // or no next chunk, for its timeout is asked again.
@@ -91,6 +102,47 @@ const File = z
       killGrace: Duration,
       stderrGrace: Duration,
       reserveTimeout: Duration,
+      reservationTimeout: Duration,
+    }),
+    qemuServer: z.strictObject({
+      probeTimeout: Duration,
+      reserveTimeout: Duration,
+      releaseTimeout: Duration,
+      setupInterval: Duration,
+      forgetInterval: Duration,
+      forgetAfter: Duration,
+      followTimeout: Duration,
+    }),
+    qemuRunner: z.strictObject({
+      reservationTimeout: Duration,
+      idleTimeout: Duration,
+      sweepInterval: Duration,
+      poweroffTimeout: Duration,
+      killGrace: Duration,
+      stderrGrace: Duration,
+      downloadTimeout: Duration,
+      cachePoll: Duration,
+      cacheStale: Duration,
+      cacheHeartbeat: Duration,
+      cacheProgress: Duration,
+      handshakeTimeout: Duration,
+      commandTimeout: Duration,
+      keyGap: Duration,
+      clickGap: Duration,
+      dragGap: Duration,
+      dragSteps: z.int().positive(),
+      maxKeys: z.int().positive(),
+      maxTicks: z.int().positive(),
+      followBacklog: z.int().positive(),
+      maxFrame: z.int().positive(),
+      stderrLimit: z.int().positive(),
+      cpus: z.int().positive(),
+      diskSize: z.string().min(1),
+      memory: z.string().min(1),
+      firmwareCode: z.string().min(1),
+      firmwareVars: z.string().min(1),
+      binary: z.string().min(1),
+      imageBinary: z.string().min(1),
     }),
     // abortTimeout bounds a client's /abort, which answers once its job is let go.
     automationServer: z.strictObject({
@@ -163,7 +215,7 @@ const File = z
     // A client's abort kills its child and drains its stderr, or gives a reserved guest back
     // with one HTTP call, before it answers.
     const stopping = Math.max(
-      automationClient.killGrace + automationClient.stderrGrace,
+      automationClient.killGrace + automationClient.stderrGrace + config.qemuServer.releaseTimeout,
       config.httpTimeout,
     );
     if (automationServer.abortTimeout <= stopping) {
@@ -173,6 +225,49 @@ const File = z
         message:
           "must be longer than automationClient.killGrace plus automationClient.stderrGrace, and than httpTimeout",
       });
+    }
+    const relationships = [
+      ["fleet", "heartbeatInterval", config.fleet.heartbeatInterval, config.qemuServer.forgetAfter],
+      [
+        "qemuServer",
+        "reserveTimeout",
+        config.qemuServer.reserveTimeout,
+        automationClient.reserveTimeout,
+      ],
+      [
+        "qemuRunner",
+        "downloadTimeout",
+        config.qemuRunner.downloadTimeout + config.qemuRunner.handshakeTimeout,
+        driver.guest.startTimeout,
+      ],
+      [
+        "qemuRunner",
+        "poweroffTimeout",
+        config.qemuRunner.poweroffTimeout +
+          config.qemuRunner.killGrace +
+          config.qemuRunner.stderrGrace,
+        driver.guest.saveTimeout,
+      ],
+      [
+        "qemuRunner",
+        "cacheHeartbeat",
+        config.qemuRunner.cacheHeartbeat,
+        config.qemuRunner.cacheStale,
+      ],
+      [
+        "qemuRunner",
+        "killGrace",
+        config.qemuRunner.killGrace + config.qemuRunner.stderrGrace,
+        config.qemuServer.releaseTimeout,
+      ],
+    ] as const;
+    for (const [section, key, inner, outer] of relationships) {
+      if (inner >= outer)
+        ctx.addIssue({
+          code: "custom",
+          path: [section, key],
+          message: "must fit within the enclosing deadline",
+        });
     }
   });
 

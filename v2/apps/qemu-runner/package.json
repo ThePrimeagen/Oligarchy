@@ -1,0 +1,37 @@
+{
+  "name": "@oligarchy/qemu-runner",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./routes": "./src/routes.ts"
+  },
+  "scripts": {
+    "start": "bun --no-env-file src/main.ts",
+    "check:types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "catalog:",
+    "@oligarchy/app": "workspace:*",
+    "@oligarchy/async": "workspace:*",
+    "@oligarchy/db": "workspace:*",
+    "@oligarchy/env": "workspace:*",
+    "@oligarchy/fleet": "workspace:*",
+    "@oligarchy/http": "workspace:*",
+    "@oligarchy/logger": "workspace:*",
+    "@oligarchy/qemu": "workspace:*",
+    "@oligarchy/sentry": "workspace:*",
+    "@oligarchy/stores": "workspace:*",
+    "hono": "catalog:",
+    "jarl": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@oligarchy/fake-postgres": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

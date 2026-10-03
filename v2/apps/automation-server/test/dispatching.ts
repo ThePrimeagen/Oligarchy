@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as Async from "@oligarchy/async";
@@ -150,19 +151,23 @@ export const dispatching = async (
   });
   const log = FakeLogger.logger();
   const aborting: Abort.Aborting = new Set();
-  const dispatcher = Dispatch.create({
-    http: http.http,
-    token: { reveal: () => TOKEN },
-    tests: seen(tests),
-    servers,
-    setupRequests,
-    diagnosis,
-    logger: log.logger,
-    models,
-    abortTimeoutMs,
-    aborting,
-    signal: shutdown.signal,
-  });
+  const dispatcher = Dispatch.create(
+    {
+      http: http.http,
+      tests: seen(tests),
+      servers,
+      setupRequests,
+      diagnosis,
+      logger: log.logger,
+    },
+    {
+      token: { reveal: () => TOKEN },
+      models,
+      abortTimeoutMs,
+      aborting,
+      signal: shutdown.signal,
+    },
+  );
   const aborter = Abort.create(
     { http: http.http, tests: seen(tests), servers, logger: log.logger },
     { token: { reveal: () => TOKEN }, aborting, abortTimeoutMs },
@@ -177,6 +182,7 @@ export const dispatching = async (
 
   const live = async (...urls: ReadonlyArray<string>) => {
     for (const url of urls) {
+      vi.setSystemTime(Date.now() + 1);
       jarl.unwrap(await servers.heartbeat(url, "automation-client", url, STATS));
     }
   };
@@ -199,14 +205,16 @@ export const dispatching = async (
         resume,
       }),
     ).id;
-  const drive = async (resume = true) =>
-    jarl.unwrap(
+  const drive = async (resume = true) => {
+    vi.setSystemTime(Date.now() + 1);
+    return jarl.unwrap(
       await tests.createTestRun({
         definitionId: await define(resume ? "lock-screen" : "first-boot", resume),
         iso: ISO,
         serverUrl: PROXY,
       }),
     );
+  };
   const setup = async () => {
     jarl.unwrap(await setupRequests.insert(ISO, QEMU_SERVER));
     return jarl.unwrap(
@@ -229,13 +237,18 @@ export const dispatching = async (
   // A suite of count runs of one drive definition, each with its pending drive.
   const suite = async (count: number) => {
     const definitionId = await define("lock-screen");
-    return jarl.unwrap(
+    const filed = jarl.unwrap(
       await tests.createTestSuite({
         iso: ISO,
         serverUrl: PROXY,
         definitionIds: Array.from({ length: count }, () => definitionId),
       }),
     );
+    // A frozen database clock ties all jobs in this transaction; the queue breaks ties by id.
+    return {
+      ...filed,
+      runs: [...filed.runs].sort((a, b) => a.jobs[0]!.id.localeCompare(b.jobs[0]!.id)),
+    };
   };
   const job = async (jobId: string) => {
     const { status, reason } = jarl.unwrap(await tests.getJob(jobId));
@@ -253,6 +266,8 @@ export const dispatching = async (
       .map((one) => [new URL(one.url).origin, one.body]);
 
   return {
+    services: { http: http.http, tests, servers, logger: log.logger },
+    lifecycleOptions: { token: { reveal: () => TOKEN }, aborting, abortTimeoutMs },
     fake,
     tests,
     setupRequests,

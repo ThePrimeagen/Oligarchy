@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import * as Exits from "@oligarchy/driver/exits";
 import * as Env from "@oligarchy/env";
 import type * as Logger from "@oligarchy/logger";
@@ -40,7 +41,6 @@ export type Options = {
     readonly oligarchyToken: Env.Secret;
     readonly openRouterToken: Env.Secret;
   };
-  readonly logger: Logger.Logger;
 };
 
 type Command = {
@@ -58,8 +58,12 @@ const failed = (message: string) => jarl.err(new Routes.RunFailed(message));
 
 // A run spawns the driver for a drive or setup, which renders its own prompt, and opencode for a
 // diagnose, and answers once the child has ended; only then is the job let go.
-export const create = (options: Options): Routes.Sessions["run"] => {
-  const { reservations, spawn, env, serverUrl, config, vars, logger } = options;
+export const create = (
+  services: App.Needs<Logger.Logger>,
+  options: Options,
+): Routes.Sessions["run"] => {
+  const { reservations, spawn, env, serverUrl, config, vars } = options;
+  const { logger } = services;
 
   // The variables may have come from an --env-file, which a child does not read.
   const secrets = () => ({
@@ -78,7 +82,8 @@ export const create = (options: Options): Routes.Sessions["run"] => {
   });
 
   // opencode reads the first segment of --model as its provider, so the OpenRouter id goes under
-  // openrouter whatever it starts with. The agent's ./ctrl is V2's.
+  // openrouter whatever it starts with. The agent's ./ctrl is V2's: opencode takes its directory
+  // from PWD rather than the one it was spawned in, so PWD names it too.
   const opencode = (prompt: string): Command => ({
     name: "opencode",
     command: "opencode",
@@ -92,7 +97,11 @@ export const create = (options: Options): Routes.Sessions["run"] => {
       "--",
       prompt,
     ],
-    env: { ...secrets(), OPENCODE_CONFIG_CONTENT: opencodeConfig(config.diagnose) },
+    env: {
+      ...secrets(),
+      OPENCODE_CONFIG_CONTENT: opencodeConfig(config.diagnose),
+      PWD: `${Env.ROOT}v2`,
+    },
     cwd: `${Env.ROOT}v2`,
     ceilingMs: config.diagnose.runCeiling,
   });
@@ -104,7 +113,7 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     taken: Reserve.Taken,
     command: Command,
   ): ReturnType<Routes.Sessions["run"]> => {
-    const report = { location: LOCATION, agentId: jobId };
+    const report = { location: LOCATION, jobId };
     logger.info(`starting ${command.name} for a ${taken.action}`, report);
     const child = Child.start(spawn, command.command, command.args, {
       env: { ...env, ...command.env },
@@ -127,14 +136,15 @@ export const create = (options: Options): Routes.Sessions["run"] => {
     const ended = await child.ended;
     clearTimeout(ceiling);
     taken.signal.removeEventListener("abort", onAbort);
-    taken.release();
     if (jarl.is_err(ended)) {
       logger.info(`${command.name} could not start`, report);
+      await taken.release();
       return failed(`could not start ${command.name}: ${ended.error.message}`);
     }
     const exit = jarl.value(ended);
     const exited = `${command.name} exited ${String(exit.code ?? exit.signal)}`;
     logger.info(exited, report);
+    await taken.release();
     if (stopped === "aborted") {
       return jarl.ok("aborted");
     }
@@ -167,7 +177,7 @@ export const create = (options: Options): Routes.Sessions["run"] => {
       return runChild(jobId, taken, driver(jobId));
     }
     if (prompt === undefined) {
-      taken.release();
+      await taken.release();
       return failed(`job ${jobId} is a diagnose, which needs its prompt`);
     }
     return runChild(jobId, taken, opencode(prompt));

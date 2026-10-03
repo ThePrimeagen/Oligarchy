@@ -4,7 +4,15 @@ import * as Fake from "@oligarchy/http/testing";
 import * as jarl from "jarl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as QemuHttpTools from "../src/main.ts";
-import { got, OK, posted, SAVE_TIMEOUT_MS, START_TIMEOUT_MS, tools } from "./support.ts";
+import {
+  got,
+  OK,
+  posted,
+  SAVE_TIMEOUT_MS,
+  SEND_KEYS_TIMEOUT_MS,
+  START_TIMEOUT_MS,
+  tools,
+} from "./support.ts";
 
 type Call = (qemu: QemuHttpTools.QemuHttpTools) => Promise<jarl.Result<unknown, unknown>>;
 
@@ -126,6 +134,11 @@ describe("calls", () => {
       name: "save, which gives the guest time to power off,",
       call: (qemu: QemuHttpTools.QemuHttpTools) => qemu.save(),
       ms: SAVE_TIMEOUT_MS,
+    },
+    {
+      name: "sendKeys, which waits for typing to finish,",
+      call: (qemu: QemuHttpTools.QemuHttpTools) => qemu.sendKeys("hello"),
+      ms: SEND_KEYS_TIMEOUT_MS,
     },
   ])("$name waits $ms ms for an answer, then is HttpTimedOut (unhappy)", async ({ call, ms }) => {
     const { qemu } = await tools("hang");

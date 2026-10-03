@@ -109,3 +109,63 @@ export const create =
 
     return { post };
   };
+
+// A payload/stream client for a selected method on an app's routes. The route remains the
+// contract; callers never import the remote handler implementation.
+type Methods<S> = { [P in keyof S]: keyof S[P] }[keyof S] & string;
+type Paths<S, M extends string> = { [P in keyof S]: M extends keyof S[P] ? P : never }[keyof S] &
+  string;
+type Input<S, M extends string, P extends keyof S> = M extends keyof S[P]
+  ? S[P][M] extends { input: infer I }
+    ? I
+    : never
+  : never;
+
+export const connect = <Routes>(options: Options) => {
+  type S = ExtractSchema<Routes>;
+  const prepare = <M extends Methods<S>, P extends Paths<S, M>>(
+    method: M,
+    path: P,
+    input: Input<S, M, P>,
+    init: Pick<Http.Init, "timeoutMs" | "signal"> = {},
+  ): [string, Http.Init] => {
+    const supplied: unknown = input;
+    const json =
+      typeof supplied === "object" && supplied !== null && "json" in supplied
+        ? supplied.json
+        : undefined;
+    const query =
+      typeof supplied === "object" && supplied !== null && "query" in supplied
+        ? supplied.query
+        : undefined;
+    const url = new URL(
+      path.replace(/^\//, ""),
+      options.url.endsWith("/") ? options.url : `${options.url}/`,
+    );
+    if (typeof query === "object" && query !== null) {
+      for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value));
+    }
+    return [
+      url.toString(),
+      {
+        method: method.slice(1).toUpperCase(),
+        headers: {
+          Authorization: `Bearer ${options.token.reveal()}`,
+          ...(method === "$get" ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...init,
+      },
+    ];
+  };
+  return {
+    prepare,
+    request: <M extends Methods<S>, P extends Paths<S, M>>(
+      method: M,
+      path: P,
+      input: Input<S, M, P>,
+      init: Pick<Http.Init, "timeoutMs" | "signal"> = {},
+    ): ReturnType<Http.Http["open"]> => options.http.open(...prepare(method, path, input, init)),
+  };
+};

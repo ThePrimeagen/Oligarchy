@@ -86,7 +86,9 @@ const callOf = (asked: Fake.Asked): Call => {
   return Object.keys(fields).length === 0 ? [path] : [path, fields];
 };
 
-export type Services = App.Needs<Stores.Tests.Tests | OpenRouter.OpenRouter | Http.Http>;
+export type Services = App.Needs<
+  App.Made<Stores.Tests.Tests> | App.Made<OpenRouter.OpenRouter> | App.Made<Http.Http>
+>;
 
 export type World = {
   readonly calls: ReadonlyArray<Call>;
@@ -134,6 +136,9 @@ export const world = (
 
   const tests = App.createService<never, App.NoOptions, Stores.Tests.Tests>(() => ({
     service: "tests",
+    ensureSetup: () => {
+      throw new Error("unexpected ensureSetup");
+    },
     getJobDetails: script.getJobDetails ?? (async () => jarl.ok(details("drive", true))),
     listTestDefinitions: unused,
     findTestDefinition: unused,
@@ -159,6 +164,10 @@ export const world = (
     createJob: unused,
     getJob: unused,
     listJobs: unused,
+    listRunningJobs: unused,
+    completeDrive: unused,
+    completeDiagnosis: unused,
+    timeoutJobAndRun: unused,
     latestJob: unused,
     nextPendingJob: unused,
     runJob: unused,
@@ -192,6 +201,7 @@ export const world = (
       token: { reveal: () => TOKEN },
       startTimeoutMs: 90_000,
       saveTimeoutMs: 30_000,
+      sendKeysTimeoutMs: 20_000,
     },
   );
   return { calls, asked: fake.asked, requests, services, driveHarness };

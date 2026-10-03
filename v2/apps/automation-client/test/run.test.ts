@@ -32,12 +32,19 @@ const CONFIG = JSON.stringify({
   reasoning: { drive: "high", diagnose: "medium", setup: "low" },
   openRouterBaseUrl: "https://openrouter.test",
   httpTimeout: "10 seconds",
+  fleet: {
+    heartbeatInterval: "15 seconds",
+    sampleInterval: "5 seconds",
+    sampleLimit: 60,
+    processTimeout: "10 seconds",
+    processKillGrace: "1 second",
+  },
   driver: {
     runCeiling: "2 minutes",
     stepLimit: 10,
     askTimeout: "1 second",
     harness: { defaultRetry: "1 second", recentActions: 10 },
-    guest: { startTimeout: "1 minute", saveTimeout: "1 minute" },
+    guest: { startTimeout: "1 minute", saveTimeout: "1 minute", sendKeysTimeout: "30 seconds" },
   },
   diagnose: { runCeiling: "1 minute", headerTimeout: "20 seconds", chunkTimeout: "30 seconds" },
   automationClient: {
@@ -45,12 +52,53 @@ const CONFIG = JSON.stringify({
     killGrace: "3 seconds",
     stderrGrace: "1 second",
     reserveTimeout: "1 minute",
+    reservationTimeout: "2 minutes",
+  },
+  qemuServer: {
+    probeTimeout: "3 seconds",
+    reserveTimeout: "45 seconds",
+    releaseTimeout: "30 seconds",
+    setupInterval: "10 seconds",
+    forgetInterval: "30 seconds",
+    forgetAfter: "10 minutes",
+    followTimeout: "1 hour",
+  },
+  qemuRunner: {
+    reservationTimeout: "2 minutes",
+    idleTimeout: "10 minutes",
+    sweepInterval: "10 seconds",
+    poweroffTimeout: "10 seconds",
+    killGrace: "5 seconds",
+    stderrGrace: "2 seconds",
+    downloadTimeout: "10 seconds",
+    cachePoll: "1 second",
+    cacheStale: "2 minutes",
+    cacheHeartbeat: "10 seconds",
+    cacheProgress: "30 seconds",
+    handshakeTimeout: "1 second",
+    commandTimeout: "15 seconds",
+    keyGap: "100 millis",
+    clickGap: "100 millis",
+    dragGap: "20 millis",
+    dragSteps: 20,
+    maxKeys: 10000,
+    maxTicks: 100,
+    followBacklog: 256,
+    maxFrame: 1048576,
+    stderrLimit: 1048576,
+    cpus: 4,
+    diskSize: "64G",
+    memory: "4G",
+    firmwareCode: "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    firmwareVars: "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+    binary: "qemu-system-x86_64",
+    imageBinary: "qemu-img",
   },
   automationServer: {
     dispatchInterval: "1 second",
     forgetInterval: "1 second",
     forgetAfter: "1 minute",
-    abortTimeout: "15 seconds",
+    abortTimeout: "45 seconds",
   },
   locator: {
     grid: 4,
@@ -170,7 +218,7 @@ const fakeSpawn = (refusal?: Error) => {
   return { spawn, calls, child };
 };
 
-const running = async (refusal?: Error) => {
+const running = async (refusal?: Error, parent: Record<string, string> = PARENT) => {
   const env = jarl.unwrap(
     await Env.create(
       Env.cli({ name: "run-test", description: "" })
@@ -182,27 +230,33 @@ const running = async (refusal?: Error) => {
   const proxy = Fake.http({ replies: () => Fake.json({}) });
   const jobs = Jobs.create();
   const log = FakeLogger.logger();
-  const reservations = Reserve.create({
-    maxJobs: 2,
-    jobs,
-    proxy: Proxy.create({
-      http: proxy.http,
-      url: PROXY,
-      token: { reveal: () => TOKEN },
-      reserveTimeoutMs: 60_000,
-    }),
-    logger: log.logger,
-  });
+  const reservations = Reserve.create(
+    { logger: log.logger },
+    {
+      reservationTimeoutMs: 120_000,
+      maxJobs: 2,
+      jobs,
+      proxy: Proxy.create({
+        http: proxy.http,
+        url: PROXY,
+        token: { reveal: () => TOKEN },
+        reserveTimeoutMs: 60_000,
+        releaseTimeoutMs: 10_000,
+      }),
+    },
+  );
   const spawned = fakeSpawn(refusal);
-  const run = Run.create({
-    reservations,
-    spawn: spawned.spawn,
-    env: PARENT,
-    serverUrl: PROXY,
-    config: env.config,
-    vars: env.vars,
-    logger: log.logger,
-  });
+  const run = Run.create(
+    { logger: log.logger },
+    {
+      reservations,
+      spawn: spawned.spawn,
+      env: parent,
+      serverUrl: PROXY,
+      config: env.config,
+      vars: env.vars,
+    },
+  );
   return { jobs, reservations, run, spawned, lines: log.lines };
 };
 
@@ -232,7 +286,7 @@ describe("an automation client's run", () => {
         {
           stdio: STDIO,
           cwd: `${Env.ROOT}v2`,
-          env: { ...CHILD_ENV, OPENCODE_CONFIG_CONTENT: OPENCODE_CONFIG },
+          env: { ...CHILD_ENV, OPENCODE_CONFIG_CONTENT: OPENCODE_CONFIG, PWD: `${Env.ROOT}v2` },
         },
       ],
     ]);
@@ -250,6 +304,27 @@ describe("an automation client's run", () => {
       `[INFO] [${OTHER}] automation-client: opencode exited 0`,
     ]);
   });
+
+  // opencode takes its directory from PWD, not from the directory it was spawned in, so a stale
+  // PWD would have its agent run the repo root's ./ctrl.
+  it.each([
+    { parent: { ...PARENT, PWD: "/srv/started-here" }, named: "a stale PWD" },
+    { parent: PARENT, named: "no PWD" },
+  ])(
+    "opencode is told PWD is v2, where it runs, when the client had $named (unhappy)",
+    async ({ parent }) => {
+      const at = await running(undefined, parent);
+      jarl.unwrap(await at.reservations.reserve(DIAGNOSE));
+
+      const diagnose = at.run({ jobId: OTHER, prompt: PROMPT });
+
+      const [, , spawned] = at.spawned.calls[0] ?? [];
+      expect(spawned?.cwd).toBe(`${Env.ROOT}v2`);
+      expect(spawned?.env?.["PWD"]).toBe(`${Env.ROOT}v2`);
+      at.spawned.child(0).end(0);
+      expect(await diagnose).toEqual(jarl.ok("ended"));
+    },
+  );
 
   it("a job with no reservation is RunFailed, spawns nothing and says nothing (unhappy)", async () => {
     const at = await running();

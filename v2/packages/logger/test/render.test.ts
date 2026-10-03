@@ -12,26 +12,26 @@ describe("a log line", () => {
     ["warning", "[WARN]"],
     ["error", "[ERROR]"],
     ["fatal", "[FATAL]"],
-  ])("a %s line opens with %s, then its agent, then the text (happy)", (level, label) => {
-    expect(Render.renderLine({ text: "booted", level, agentId: "OLI-1" }, false)).toBe(
+  ])("a %s line opens with %s, then its job, then the text (happy)", (level, label) => {
+    expect(Render.renderLine({ text: "booted", level, jobId: "OLI-1" }, false)).toBe(
       `${label} [OLI-1] booted`,
     );
   });
 
-  it("puts the location between the agent and the text (happy)", () => {
-    const line = { text: "booted", level: "warning", agentId: "OLI-1", location: "s-1" } as const;
+  it("puts the location between the job and the text (happy)", () => {
+    const line = { text: "booted", level: "warning", jobId: "OLI-1", location: "s-1" } as const;
 
     expect(Render.renderLine(line, false)).toBe("[WARN] [OLI-1] s-1: booted");
   });
 
-  it("a line with no agent and no location is global and says only its text (unhappy)", () => {
+  it("a line with no job and no location is global and says only its text (unhappy)", () => {
     expect(Render.renderLine({ text: "booted", level: "info" }, false)).toBe(
       "[INFO] [global] booted",
     );
   });
 
   it("says the same words with colours as without (happy)", () => {
-    const line = { text: "booted", level: "error", agentId: "OLI-1", location: "s-1" } as const;
+    const line = { text: "booted", level: "error", jobId: "OLI-1", location: "s-1" } as const;
     const painted = Render.renderLine({ ...line, color: Render.ROSE_PINE_MAIN.iris }, true);
 
     expect(painted).not.toBe(Render.renderLine(line, false));

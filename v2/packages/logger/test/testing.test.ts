@@ -9,32 +9,32 @@ describe("the fake logger", () => {
     const { lines, said, logger } = LoggerTesting.logger();
     expectTypeOf(logger).toEqualTypeOf<App.Made<Logger.Logger>>();
 
-    logger.info("booted", { agentId: "OLI-1", location: "s-1" });
+    logger.info("booted", { jobId: "OLI-1", location: "s-1" });
     expect(lines).toEqual(["[INFO] [OLI-1] s-1: booted"]);
     logger.warning("slow");
     await logger.flush();
 
     expect(lines).toEqual(["[INFO] [OLI-1] s-1: booted", "[WARN] [global] slow"]);
     expect(said).toEqual([
-      { level: "info", text: "booted", report: { agentId: "OLI-1", location: "s-1" } },
+      { level: "info", text: "booted", report: { jobId: "OLI-1", location: "s-1" } },
       { level: "warning", text: "slow", report: {} },
     ]);
   });
 
-  it("keeps an error's cause and skipSentry as given, and paints an agent when asked (unhappy)", () => {
+  it("keeps an error's cause and skipSentry as given, and paints a job when asked (unhappy)", () => {
     const { lines, said, logger } = LoggerTesting.logger({ colors: true, now: () => 0 });
     const cause = new Error("connect ECONNREFUSED");
 
-    logger.error("stop failed", { agentId: "A", cause });
+    logger.error("stop failed", { jobId: "A", cause });
     logger.fatal("shutting down", { skipSentry: true });
 
-    const color = Render.AGENT_COLORS[0];
+    const color = Render.JOB_COLORS[0];
     expect(lines).toEqual([
       Render.renderLine(
         {
           text: "stop failed",
           level: "error",
-          agentId: "A",
+          jobId: "A",
           ...(color === undefined ? {} : { color }),
         },
         true,
@@ -42,7 +42,7 @@ describe("the fake logger", () => {
       Render.renderLine({ text: "shutting down", level: "fatal" }, true),
     ]);
     expect(said).toEqual([
-      { level: "error", text: "stop failed", report: { agentId: "A", cause } },
+      { level: "error", text: "stop failed", report: { jobId: "A", cause } },
       { level: "fatal", text: "shutting down", report: { skipSentry: true } },
     ]);
   });

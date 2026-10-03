@@ -8,3 +8,4 @@ particular file or package handles something specific, but instead describe the 
 [Services](./services.md) When to create a service, a class or a plain module, and how
 
 [Timeouts and limits](./config.md) Where every timeout lives, and how it reaches a service
+[Package structure](./package-structure.md) Apps and packages: main for production, application for your own services

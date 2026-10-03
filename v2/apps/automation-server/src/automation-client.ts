@@ -12,9 +12,19 @@ const RUN_TIMEOUT_MS = 2 ** 31 - 1;
 // run an abort ended is the abort's to close; an abort of a job it does not hold has nothing to
 // stop. A run answers once the driver or opencode has ended, unless the signal aborts first; an
 // abort, once the job is let go, within abortTimeoutMs.
-export const create = (options: HttpClient.Options & { readonly abortTimeoutMs: number }) =>
+export const create = (
+  options: HttpClient.Options & {
+    readonly abortTimeoutMs: number;
+    readonly reserveTimeoutMs?: number;
+  },
+) =>
   HttpClient.create<ClientRoutes.Routes>()(options, {
-    "/reserve": { ok: "reserved", 503: "at-capacity", 409: "setup-needed" },
+    "/reserve": {
+      ok: "reserved",
+      503: "at-capacity",
+      409: "setup-needed",
+      ...(options.reserveTimeoutMs === undefined ? {} : { timeoutMs: options.reserveTimeoutMs }),
+    },
     "/run": { ok: "ended", 409: "aborted", timeoutMs: RUN_TIMEOUT_MS },
     "/abort": { ok: "stopped", 404: "not-held", timeoutMs: options.abortTimeoutMs },
   });

@@ -1,3 +1,4 @@
+import type * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import type * as ClientRoutes from "@oligarchy/automation-client/routes";
 import type * as Db from "@oligarchy/db";
@@ -11,6 +12,7 @@ import * as Close from "./close.ts";
 import * as DiagnosePrompt from "./diagnose-prompt.ts";
 
 const LOCATION = "automation-server";
+const at = (job: Stores.Tests.JobRow) => ({ location: LOCATION, jobId: job.id, runId: job.runId });
 
 // A setup is filed holding the setup lock of the qemu server it installs on, but a qemu server
 // that restarts clears its locks. Such a setup can never be reserved, and setups head the queue,
@@ -29,16 +31,19 @@ type NoClientsAvailable = InstanceType<typeof NoClientsAvailable>;
 
 type LiveClient = Stores.Servers.LiveServer;
 
+type Wants =
+  | Http.Http
+  | Stores.Tests.Tests
+  | Stores.Servers.Servers
+  | Stores.SetupRequests.SetupRequests
+  | Stores.Diagnosis.Diagnosis
+  | Logger.Logger;
+
 export type Options = {
-  readonly http: Http.Http;
   readonly token: { readonly reveal: () => string };
-  readonly tests: Stores.Tests.Tests;
-  readonly servers: Stores.Servers.Servers;
-  readonly setupRequests: Stores.SetupRequests.SetupRequests;
-  readonly diagnosis: Stores.Diagnosis.Diagnosis;
-  readonly logger: Logger.Logger;
   readonly models: Env.Config["models"];
   readonly abortTimeoutMs: number;
+  readonly reserveTimeoutMs?: number;
   readonly aborting: Close.Options["aborting"];
   // Ends a reserve or a run in flight, so a shutdown does not wait on a client.
   readonly signal: AbortSignal;
@@ -61,15 +66,18 @@ type Requests = {
   readonly judgedJobId: string | undefined;
 };
 
-export const create = (options: Options): Dispatcher => {
-  const { http, token, tests, servers, setupRequests, logger, models, abortTimeoutMs, signal } =
-    options;
+export const create = (services: App.Needs<Wants>, options: Options): Dispatcher => {
+  const { http, tests, servers, setupRequests, logger } = services;
+  const { token, models, abortTimeoutMs, signal } = options;
   // The client the next job is offered to first: the one after the client that took the last.
   let nextClientUrl: string | undefined;
   const runs = new Set<Promise<void>>();
 
-  const logFailure = (error: Error): false => {
-    logger.error(`dispatch failed: ${error.message}`, { location: LOCATION, cause: error });
+  const logFailure = (error: Error, job?: Stores.Tests.JobRow): false => {
+    logger.error(`dispatch failed: ${error.message}`, {
+      ...(job === undefined ? { location: LOCATION } : at(job)),
+      cause: error,
+    });
     return false;
   };
 
@@ -143,6 +151,7 @@ export const create = (options: Options): Dispatcher => {
   // and the next client is asked too.
   const reserveOnFirstClientWithRoom = async (
     request: ClientRoutes.ReserveRequest,
+    job: Stores.Tests.JobRow,
     clients: ReadonlyArray<LiveClient>,
   ): Promise<jarl.Result<LiveClient, Async.Aborted | NoClientsAvailable>> => {
     for (const client of clients) {
@@ -152,14 +161,16 @@ export const create = (options: Options): Dispatcher => {
         token,
         signal,
         abortTimeoutMs,
+        ...(options.reserveTimeoutMs === undefined
+          ? {}
+          : { reserveTimeoutMs: options.reserveTimeoutMs }),
       }).post("/reserve", request);
       if (jarl.is_err(reserved)) {
         if (signal.aborted) {
           return jarl.err(new Async.Aborted(`reserve on ${client.url} ended: shutting down`));
         }
         logger.error(`reserve failed; ${client.url}: ${reserved.error.message}`, {
-          location: LOCATION,
-          agentId: request.jobId,
+          ...at(job),
           cause: reserved.error,
         });
         continue;
@@ -177,12 +188,11 @@ export const create = (options: Options): Dispatcher => {
   const markRunning = async (job: Stores.Tests.JobRow, client: LiveClient): Promise<boolean> => {
     const running = await tests.runJob(job.id, client.id);
     if (jarl.is_ok(running)) {
-      logger.info(`reserved ${job.action}; ${client.url}`, { location: LOCATION, agentId: job.id });
+      logger.info(`reserved ${job.action}; ${client.url}`, at(job));
       return true;
     }
     logger.error(`running write failed; ${client.url}: ${running.error.message}`, {
-      location: LOCATION,
-      agentId: job.id,
+      ...at(job),
       cause: running.error,
     });
     const given = await AutomationClient.create({
@@ -194,8 +204,7 @@ export const create = (options: Options): Dispatcher => {
     }).post("/abort", { jobId: job.id });
     if (jarl.is_err(given)) {
       logger.error(`reserve release failed; ${client.url}: ${given.error.message}`, {
-        location: LOCATION,
-        agentId: job.id,
+        ...at(job),
         cause: given.error,
       });
     }
@@ -209,9 +218,9 @@ export const create = (options: Options): Dispatcher => {
   ): Promise<boolean> => {
     const aborted = await tests.abortJob(job.id, why.message);
     if (jarl.is_err(aborted)) {
-      return logFailure(aborted.error);
+      return logFailure(aborted.error, job);
     }
-    logger.error(`${job.action} aborted: ${why.message}`, { location: LOCATION, agentId: job.id });
+    logger.error(`${job.action} aborted: ${why.message}`, at(job));
     return true;
   };
 
@@ -230,8 +239,7 @@ export const create = (options: Options): Dispatcher => {
       : await tests.startRun(job.runId, models[job.action]);
     if (jarl.is_err(started)) {
       logger.error(`test run start failed: ${started.error.message}`, {
-        location: LOCATION,
-        agentId: job.id,
+        ...at(job),
         cause: started.error,
       });
     }
@@ -251,7 +259,7 @@ export const create = (options: Options): Dispatcher => {
       if (jarl.error.is(ran, Async.Aborted)) {
         return;
       }
-      await Close.close(options, options, { job, judgedJobId: requests.judgedJobId }, ran);
+      await Close.close(services, options, { job, judgedJobId: requests.judgedJobId }, ran);
     })();
     runs.add(running);
     void running.finally(() => runs.delete(running));
@@ -285,11 +293,15 @@ export const create = (options: Options): Dispatcher => {
         return abortUnrunnable(job, built.error);
       }
       if (jarl.is_err(built)) {
-        return logFailure(built.error);
+        return logFailure(built.error, job);
       }
       const requests = jarl.value(built);
 
-      const reserved = await reserveOnFirstClientWithRoom(requests.reserve, clientsInTurn(live));
+      const reserved = await reserveOnFirstClientWithRoom(
+        requests.reserve,
+        job,
+        clientsInTurn(live),
+      );
       // Neither is a failure: a shutdown ends the loop, and the job waits for a client with room.
       if (jarl.error.is(reserved, Async.Aborted) || jarl.error.is(reserved, NoClientsAvailable)) {
         return false;

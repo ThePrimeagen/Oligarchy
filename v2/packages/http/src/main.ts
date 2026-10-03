@@ -1,96 +1,32 @@
 import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import * as jarl from "jarl";
+import { opening } from "./stream.ts";
+export { body } from "./stream.ts";
+export type { HttpResponse } from "./stream.ts";
 
-export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+// `timeout: false` turns off Bun's own fetch limit, which ends any request unanswered after about
+// six minutes whatever its timeoutMs; every deadline here is timeoutMs's.
+export type Fetch = (
+  url: string,
+  init: RequestInit & { readonly timeout?: false },
+) => Promise<Response>;
 
-// What a printed error names. The query and fragment are dropped, as either can carry a secret.
-export type Asked = { readonly method: string; readonly url: string };
-
+export * from "./failure.ts";
+import {
+  HttpUnreachable,
+  HttpTimedOut,
+  HttpBadRequest,
+  HttpNotFound,
+  HttpServerError,
+  HttpUnhandled,
+  HttpInvalid,
+  type HttpFailure,
+  type Asked,
+} from "./failure.ts";
 const TIMEOUT_MS = 10_000;
-// The most of a reply's body an error keeps, so one line can still be logged and reported.
-const BODY_LIMIT = 1024;
-
 const messageOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
-
-const where = (asked: Asked): string => `${asked.method} ${asked.url}`;
-
-export class HttpUnreachable extends jarl.error.define("HttpUnreachable") {
-  readonly asked: Asked;
-  override readonly cause: unknown;
-  constructor(asked: Asked, cause: unknown) {
-    super(`${where(asked)}: ${messageOf(cause)}`);
-    this.asked = asked;
-    this.cause = cause;
-  }
-}
-
-export class HttpTimedOut extends jarl.error.define("HttpTimedOut") {
-  readonly asked: Asked;
-  constructor(asked: Asked, ms: number) {
-    super(`${where(asked)}: no answer within ${String(ms)} ms`);
-    this.asked = asked;
-  }
-}
-
-const statusError = <const Name extends string>(name: Name) =>
-  class extends jarl.error.define(name) {
-    readonly asked: Asked;
-    readonly status: number;
-    readonly body: string;
-    readonly headers: Headers;
-    constructor(asked: Asked, status: number, body: string, headers: Headers) {
-      const kept = body.slice(0, BODY_LIMIT);
-      super(`${where(asked)}: ${String(status)}${kept === "" ? "" : `: ${kept}`}`);
-      this.asked = asked;
-      this.status = status;
-      this.body = kept;
-      this.headers = headers;
-    }
-  };
-
-export const HttpBadRequest = statusError("HttpBadRequest");
-export type HttpBadRequest = InstanceType<typeof HttpBadRequest>;
-export const HttpNotFound = statusError("HttpNotFound");
-export type HttpNotFound = InstanceType<typeof HttpNotFound>;
-// Any 5xx.
-export const HttpServerError = statusError("HttpServerError");
-export type HttpServerError = InstanceType<typeof HttpServerError>;
-// A status the call did not name and no default covers.
-export const HttpUnhandled = statusError("HttpUnhandled");
-export type HttpUnhandled = InstanceType<typeof HttpUnhandled>;
-
-// A 2xx body that is not JSON, or that decode refused. A decode builds one with its reason
-// alone; fetch hands it back naming what was asked.
-export class HttpInvalid extends jarl.error.define("HttpInvalid") {
-  readonly reason: string;
-  readonly asked: Asked | undefined;
-  override readonly cause: unknown;
-  constructor(reason: string, options: { readonly asked?: Asked; readonly cause?: unknown } = {}) {
-    super(options.asked === undefined ? reason : `${where(options.asked)}: ${reason}`);
-    this.reason = reason;
-    this.asked = options.asked;
-    this.cause = options.cause;
-  }
-}
-
-export type HttpFailure =
-  | HttpUnreachable
-  | HttpTimedOut
-  | HttpBadRequest
-  | HttpNotFound
-  | HttpServerError
-  | HttpUnhandled
-  | HttpInvalid
-  | Async.Aborted;
-
-// Asking again could answer.
-export const retryable = (error: HttpFailure): boolean =>
-  jarl.error.is(error, HttpUnreachable) ||
-  jarl.error.is(error, HttpTimedOut) ||
-  jarl.error.is(error, HttpServerError) ||
-  (jarl.error.is(error, HttpUnhandled) && error.status === 429);
 
 type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 // The statuses every call already answers: a 2xx goes to decode, the rest have their own error.
@@ -122,6 +58,7 @@ type Failed<D extends (body: never) => jarl.Result<unknown, unknown>, S extends 
 // bytes, a 2xx body goes to decode as it came, not parsed: an image, a console's output.
 export type Http = {
   readonly service: "http";
+  readonly open: ReturnType<typeof opening>;
   readonly fetch: <
     D extends Decode<R>,
     S extends Statuses = Record<never, never>,
@@ -197,7 +134,7 @@ export const create = App.createService<never, Options, Http>((_, options) => {
     > =>
       jarl.exec(
         async () => {
-          const response = await send(url, { ...rest, signal: inner });
+          const response = await send(url, { ...rest, timeout: false, signal: inner });
           return {
             status: response.status,
             bytes: new Uint8Array(await response.arrayBuffer()),
@@ -249,5 +186,5 @@ export const create = App.createService<never, Options, Http>((_, options) => {
     );
   }
 
-  return { service: "http", fetch: request };
+  return { service: "http", fetch: request, open: opening(send, defaultMs) };
 });

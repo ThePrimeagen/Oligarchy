@@ -3,12 +3,6 @@ import * as App from "@oligarchy/app";
 import * as Async from "@oligarchy/async";
 import type * as Logger from "@oligarchy/logger";
 
-export const SAMPLE_INTERVAL_MS = 5_000;
-// 60 samples of 5 s: a five minute window.
-const MAX_SAMPLES = 60;
-// The newest 12, 24 and 36 samples are the one, two and three minute means.
-const SAMPLES_PER_MINUTE = 60_000 / SAMPLE_INTERVAL_MS;
-
 export type CpuTimes = {
   readonly cores: number;
   readonly idleMs: number;
@@ -101,13 +95,19 @@ const percentile = (sorted: ReadonlyArray<number>, p: number): number => {
 const messageOf = (thrown: unknown): string =>
   thrown instanceof Error ? thrown.message : String(thrown);
 
-export type Options = { readonly source: Source; readonly attribution?: Logger.Attribution };
+export type Options = {
+  readonly source: Source;
+  readonly attribution?: Logger.Attribution;
+  readonly sampleInterval: number;
+  readonly sampleLimit: number;
+};
 
 // Each sample is the cpu busy since the last reading. A reading that throws is one error line and
 // is not the next one's baseline; a reading after a core count change, or with no cpu time
 // passed, is not comparable to the last, so it only becomes the next one's baseline.
 export const create = App.createService<Logger.Logger, Options, Host>(({ logger }, options) => {
-  const { source, attribution } = options;
+  const { source, attribution, sampleInterval, sampleLimit } = options;
+  const samplesPerMinute = 60_000 / sampleInterval;
   const samples: Array<number> = [];
   let previous: CpuTimes | undefined;
 
@@ -138,7 +138,7 @@ export const create = App.createService<Logger.Logger, Options, Host>(({ logger 
     }
     const busyDelta = totalDelta - (next.idleMs - before.idleMs);
     samples.push((busyDelta / totalDelta) * 100);
-    if (samples.length > MAX_SAMPLES) {
+    if (samples.length > sampleLimit) {
       samples.shift();
     }
   };
@@ -156,9 +156,9 @@ export const create = App.createService<Logger.Logger, Options, Host>(({ logger 
         cores: source.cores(),
         mean: mean(sorted),
         // samples is oldest first, so the tail is the newest minutes.
-        mean1m: mean(samples.slice(-SAMPLES_PER_MINUTE)),
-        mean2m: mean(samples.slice(-2 * SAMPLES_PER_MINUTE)),
-        mean3m: mean(samples.slice(-3 * SAMPLES_PER_MINUTE)),
+        mean1m: mean(samples.slice(-Math.ceil(samplesPerMinute))),
+        mean2m: mean(samples.slice(-Math.ceil(2 * samplesPerMinute))),
+        mean3m: mean(samples.slice(-Math.ceil(3 * samplesPerMinute))),
         p10: percentile(sorted, 10),
         p25: percentile(sorted, 25),
         p75: percentile(sorted, 75),
@@ -170,6 +170,9 @@ export const create = App.createService<Logger.Logger, Options, Host>(({ logger 
   return { service: "host", sample, collect };
 });
 
-// Samples every SAMPLE_INTERVAL_MS until signal aborts.
-export const sampling = (host: Pick<Host, "sample">, signal: AbortSignal): Promise<void> =>
-  Async.tick(() => host.sample(), SAMPLE_INTERVAL_MS, signal);
+// Samples at the configured interval until signal aborts.
+export const sampling = (
+  services: App.Needs<Host>,
+  signal: AbortSignal,
+  options: { readonly every: number },
+): Promise<void> => Async.tick(() => services.host.sample(), options.every, signal);

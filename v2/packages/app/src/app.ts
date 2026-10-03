@@ -75,6 +75,16 @@ const report = (state: State, error: unknown): void => {
   topOf(state).errors.push(error);
 };
 
+// Keep the original error once, and stop the whole tree so its mains can finish and its
+// normal child-first cleanup can run. The abort reason is cancellation, not another failure.
+const failMain = (state: State, error: unknown): void => {
+  report(state, error);
+  const top = topOf(state);
+  if (top !== state && !top.aborter.signal.aborted) {
+    top.aborter.abort(new Aborted("sub-application failed"));
+  }
+};
+
 // A handler may hand back nothing; only a returned Err is a failure.
 const failure = (
   returned: void | Outcome,
@@ -122,11 +132,11 @@ const runMain = async (state: State): Promise<void> => {
   try {
     const result = await state.main();
     if (jarl.is_err(result) && !stopped(signal, result.error)) {
-      report(state, result.error);
+      failMain(state, result.error);
     }
   } catch (caught) {
     if (!stopped(signal, caught)) {
-      report(state, caught);
+      failMain(state, caught);
     }
   }
   state.aborter.abort(new Aborted("main returned"));

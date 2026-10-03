@@ -36,8 +36,14 @@
 | main returns `Aborted` with no stop | an error. The process exits 1. |
 | second process signal | `exit(1)` at once. Exit handlers are skipped. |
 | main returns or throws | `app.signal` aborts, every sub-app stops, and the process exits 1 if errors were reported |
+| sub-app main fails | preserve its error once, abort the root and the rest of the tree, await mains and child-first cleanup, then exit 1 |
 | `onExit` handler | runs after `app.signal` aborted. Never hand `app.signal` to its calls. Give them their own deadline. |
 | work that must stop with the app | build it in main and hand it `app.signal` (driver) |
+
+A child that returns an error or throws must not leave its ancestors serving without that child.
+Cancellation errors caused by the resulting stop are not additional failures. A child that
+finishes successfully retains its normal completion behavior. If shutdown arrives during
+startup, do not await a completion callback belonging to a child whose main never started.
 
 ```ts
 // apps/automation-client/src/application.ts
@@ -78,7 +84,7 @@ const ended = await Drive.drive(app.services, app.signal, {
 | signal for every call | optional `signal?` in the create options: `HttpClient.create({ http, url, token, signal })` |
 | a class that reacts to aborts | signal is the required second argument: `Qemu.create({ http }, signal, { job, baseUrl, token })`, `DriveHarness.create(services, signal, options)` |
 | no signal given | use a signal that never aborts: `const NEVER = new AbortController().signal` |
-| a long-running helper | signal is a required positional, last before options: `Async.sleep(ms, signal)`, `Async.tick(fn, ms, signal)`, `Fleet.announce(member, needs, signal, options)`, `Fleet.Host.sampling(host, signal)` |
+| a long-running helper | signal is a required positional, last before options: `Async.sleep(ms, signal)`, `Async.tick(fn, ms, signal)`, `Fleet.announce(member, needs, signal, options)`, `Fleet.Host.sampling(services, signal, options)` |
 | failure union | put `Async.Aborted` in it (`Http.HttpFailure`, `OpenRouter.Failure`) |
 | mapping errors | return `Aborted` unchanged: `if (jarl.error.is(error, Async.Aborted)) return error;` |
 | retrying | never retry `Aborted`. `Http.retryable` leaves it out. `Async.repeat` stops once its `signal` aborts. |
@@ -138,7 +144,7 @@ if (jarl.is_err(reserved)) {
 | --- | --- | --- |
 | automation-client | `z.strictObject({ jobId: z.uuid() })` | 200 `stopped`, 404 `not-held`, 400 bad body, 501 not written |
 | automation-server | `{ jobId }` or `{ suiteId }`, never both | 200 `{}` aborted, 404 unknown, 409 `NothingToAbort` (already ended), 502 `NotStopped` (its client could not stop it), 500 database, 400 `name a jobId or a suiteId` |
-| qemu-server | `z.strictObject({ job: z.uuid() })` | 501 not written |
+| qemu-server / qemu-runner | `z.strictObject({ job: z.uuid() })` | 200 cleaned up, 404 not held; failures retain ownership |
 
 - The route hands off to `Sessions["abort"]` (client) or `Aborter["abort"]` (server). The route holds no logic; it maps each error to its status.
 - `abort` answers only once the job's holder has let it go.
@@ -267,7 +273,7 @@ setTimeout(() => {
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
   }
-}, PS_FORCE_KILL_MS).unref();
+}, options.killGraceMs).unref();
 ```
 
 ## Status abort (database)
@@ -284,6 +290,14 @@ setTimeout(() => {
 - `runJob` refused because an abort landed during the reserve: give the job back at the client with `/abort` (`dispatch.ts` `markRunning`).
 - Only the automation server writes status. The automation client has no `tests` store.
 
+### Loss of the coordinator
+
+- Stopping the coordinator aborts its running jobs and their runs. After a crash, startup
+  performs that cleanup for every job still recorded as running before dispatching new work.
+- An unreported outcome is unknown, even if the worker finished. Do not infer success from
+  a worker having exited or released its job, and do not recover unreported outcomes.
+- Pending jobs stay queued. Outcomes already committed to the database remain final.
+
 ## Scope
 
 | Abort | Who | How | Built |
@@ -291,9 +305,9 @@ setTimeout(() => {
 | one call | caller | `Async.timeout(fn, { ms, signal })`, or `signal` / `timeoutMs` on the call | yes |
 | one job at a client | automation server | `AutomationClient.create(...).post("/abort", { jobId })`, then `jobs.abort` | yes |
 | one job, one suite (operator) | an operator; not ctrl. The caller is open. | automation server `/abort` `{ jobId }` or `{ suiteId }` | yes |
-| one job at a qemu server | | qemu-server `/abort` `{ job }` | no: 501 |
+| one guest job | QemuServer routes to QemuRunner | `/abort` `{ job }`, including startup and save | yes |
 | every job at a client | the client on stop | `jobs.shutdown()` after closing the listener | yes |
-| every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | no: no-op |
+| every running job (server stop) | automation server | `shutdown()`: `/abort` at each client, then `abortJob` | yes |
 | one host, server or location | | none exists. Abort each job on it. | no |
 | one app and its sub-apps | process signal, or main returning | `app.signal` | yes |
 | a driver run | `app.signal`, handed to `drive` and its harness | `drive` ends `{ status: "aborted" }`, exit 0 | yes |
@@ -328,3 +342,10 @@ await vi.advanceTimersByTimeAsync(0);
 expect(result.value).toEqual(jarl.err(reason));
 expect(vi.getTimerCount()).toBe(0);
 ```
+
+### Test clocks
+
+Every workspace loads `v2/vitest.setup.ts`, which fakes the wall clock and restores it after
+each test. Tests that exercise delays, intervals, deadlines or cancellation enable timer APIs
+with `vi.useFakeTimers()` and advance them explicitly. Database transport tests keep I/O
+scheduling real while their application clock stays controlled.

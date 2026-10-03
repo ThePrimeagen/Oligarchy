@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# start-qemu <max-jobs>
+#
+# The V2 QEMU half: QemuServer on 127.0.0.1:55555 and QemuRunner on
+# 127.0.0.1:42069, carrying <max-jobs> guests. Ctrl-C or TERM asks both to stop;
+# another signal kills them. Either process exiting stops the other. Exit 0 only
+# when both end cleanly.
+#
+# The current directory's .env fills what the environment lacks. SERVER_URL names
+# QemuServer's reachable URL for setup jobs; absent, use http://127.0.0.1:55555.
+# Guests, ISO cache and setup disks live under OLIGARCHY_DATA_DIR or ~/.oligarchy.
+# Models, resource sizes and timings come from v2/oligarchy.json.
+set -u
+
+LAUNCH_ROOT=$(dirname "$0")
+SERVER_PORT=55555
+RUNNER_PORT=42069
+
+usage() {
+  echo "usage: start-qemu <max-jobs>" >&2
+  echo "  max-jobs  how many guests QemuRunner runs at once, a positive integer" >&2
+  exit 1
+}
+
+[ $# -eq 1 ] || usage
+case "$1" in
+  '' | *[!0-9]* | 0*) usage ;;
+esac
+MAX_JOBS=$1
+
+# Let the app read SERVER_URL through its normal env/.env parser when supplied.
+# The runner is local to this QemuServer, even when SERVER_URL names a tunnel.
+server_url=()
+if [ -z "${SERVER_URL:-}" ] && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?SERVER_URL[[:space:]]*=' .env 2>/dev/null; then
+  server_url=(--url "http://127.0.0.1:$SERVER_PORT")
+fi
+
+"$LAUNCH_ROOT/v2/qemu-server" --port "$SERVER_PORT" "${server_url[@]}" &
+SERVER=$!
+"$LAUNCH_ROOT/v2/qemu-runner" --name "qemu-runner-$(uname -n)" --max-jobs "$MAX_JOBS" \
+  --port "$RUNNER_PORT" --url "http://127.0.0.1:$RUNNER_PORT" --display none &
+RUNNER=$!
+
+# The first signal asks. A second one kills: a child waiting on a response must not hold this
+# shell, and ignoring the signal would make that second Ctrl-C do nothing.
+asked=0
+request_stop() {
+  asked=1
+  kill -TERM "$SERVER" "$RUNNER" 2>/dev/null || true
+}
+on_signal() {
+  if [ "$asked" -eq 0 ]; then
+    request_stop
+  else
+    kill -KILL "$SERVER" "$RUNNER" 2>/dev/null || true
+  fi
+}
+trap on_signal INT TERM
+# Returns when the first of the two exits, or at once when a signal arrives (its trap has run).
+wait -n "$SERVER" "$RUNNER" || true
+if [ "$asked" -eq 0 ]; then
+  request_stop
+fi
+reap() {
+  local code=0
+  while kill -0 "$1" 2>/dev/null; do
+    wait "$1"
+    code=$?
+  done
+  wait "$1" 2>/dev/null
+  local reaped=$?
+  if [ "$reaped" -ne 127 ]; then
+    code=$reaped
+  fi
+  return "$code"
+}
+reap "$SERVER"
+SERVER_CODE=$?
+reap "$RUNNER"
+RUNNER_CODE=$?
+[ "$SERVER_CODE" -eq 0 ] && [ "$RUNNER_CODE" -eq 0 ]

@@ -1,4 +1,8 @@
 import * as Http from "@oligarchy/http";
+import * as Client from "@oligarchy/http/client";
+import type { Routes as ServerRoutes } from "@oligarchy/qemu-server/routes";
+import type { Hono } from "hono";
+import type { ExtractSchema } from "hono/types";
 import * as jarl from "jarl";
 import * as Routes from "./routes.ts";
 
@@ -12,6 +16,7 @@ export type Options = {
   // The proxy probes every qemu server before it asks them one at a time, so a reserve waits
   // longer than any one call.
   readonly reserveTimeoutMs: number;
+  readonly releaseTimeoutMs: number;
 };
 
 export type Proxy = {
@@ -27,25 +32,19 @@ export type Proxy = {
 // The qemu reverse proxy at url, as the automation client calls it: each call names its job and
 // carries the token as the bearer, and nothing is asked again.
 export const create = (options: Options): Proxy => {
-  const base = options.url.endsWith("/") ? options.url : `${options.url}/`;
-
-  const post = (
-    path: string,
-    body: Readonly<Record<string, string>>,
-    extra: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
-  ) =>
-    options.http.fetch(
-      new URL(path, base).toString(),
+  type SelectedRoutes = Hono<{}, Pick<ExtractSchema<ServerRoutes>, "/reserve" | "/relinquish">>;
+  const client = (signal?: AbortSignal) =>
+    Client.create<SelectedRoutes>()(
       {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${options.token.reveal()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        ...extra,
+        http: options.http,
+        url: options.url,
+        token: options.token,
+        ...(signal === undefined ? {} : { signal }),
       },
-      { decode: () => jarl.ok(undefined) },
+      {
+        "/reserve": { ok: "reserved", timeoutMs: options.reserveTimeoutMs },
+        "/relinquish": { ok: "released", timeoutMs: options.releaseTimeoutMs },
+      },
     );
 
   return {
@@ -57,22 +56,22 @@ export const create = (options: Options): Proxy => {
               job: request.jobId,
               ...(request.resume === undefined ? {} : { resume: request.resume }),
             };
-      const answered = await post("reserve", body, { timeoutMs: options.reserveTimeoutMs, signal });
+      const answered = await client(signal).post("/reserve", body);
       if (jarl.error.is(answered, Http.HttpServerError) && answered.error.status === 503) {
         return jarl.err(new Routes.AtCapacity(answered.error.message));
       }
       if (jarl.error.is(answered, Http.HttpUnhandled) && answered.error.status === 409) {
         return jarl.err(new Routes.SetupNeeded(answered.error.message));
       }
-      return answered;
+      return jarl.is_err(answered) ? answered : jarl.ok(undefined);
     },
     relinquish: async (jobId) => {
-      const answered = await post("relinquish", { job: jobId }, {});
+      const answered = await client().post("/relinquish", { job: jobId });
       // The proxy holds no guest for the job: it is already gone.
       if (jarl.error.is(answered, Http.HttpNotFound)) {
         return jarl.ok(undefined);
       }
-      return answered;
+      return jarl.is_err(answered) ? answered : jarl.ok(undefined);
     },
   };
 };

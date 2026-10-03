@@ -149,6 +149,11 @@ export type Tests = {
   ) => Moved<SuiteRow>;
   readonly abortSuite: (suiteId: string, reason: string) => Moved<SuiteRow>;
 
+  readonly ensureSetup: (input: {
+    readonly iso: string;
+    readonly serverUrl: string;
+    readonly setupServer: string;
+  }) => Found<NewTestRun | undefined>;
   readonly createTestRun: (input: RunInput) => Moved<NewTestRun>;
   readonly getTestRun: (runId: string) => Found<TestRunSummary>;
   readonly getTestRunDetails: (runId: string) => Found<TestRunDetails>;
@@ -163,10 +168,21 @@ export type Tests = {
   readonly getJob: (jobId: string) => Found<JobSummary>;
   readonly getJobDetails: (jobId: string) => Found<JobDetails>;
   readonly listJobs: (limit?: number) => Answer<Queue>;
+  // Lifecycle cleanup must visit every running job, independently of the queue view's limit.
+  readonly listRunningJobs: () => Answer<ReadonlyArray<JobRow>>;
   readonly latestJob: (runId: string, action: JobAction) => Answer<JobRow | undefined>;
   readonly nextPendingJob: () => Answer<JobRow | undefined>;
   readonly runJob: (jobId: string, serverId: string) => Moved<JobRow>;
   readonly completeJob: (jobId: string) => Moved<JobRow>;
+  // Each closes the whole database transition in one transaction.
+  readonly completeDrive: (jobId: string) => Moved<JobRow>;
+  readonly completeDiagnosis: (
+    jobId: string,
+    judgedJobId: string,
+    verdict: RunVerdict,
+    summary: string,
+  ) => Moved<void>;
+  readonly timeoutJobAndRun: (jobId: string, reason: string) => Moved<void>;
   readonly finalizeJob: (jobId: string, status: JobVerdict, reason: string | null) => Moved<JobRow>;
   readonly errorJob: (jobId: string, reason: string) => Moved<JobRow>;
   readonly timeoutJob: (jobId: string, reason: string) => Moved<JobRow>;
@@ -378,6 +394,75 @@ const openRunOf =
 // Each transition locks its row, checks the state it is in and whatever holds it, and only
 // then writes: a refused call changes nothing, and two calls cannot both pass one check.
 export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db }) => {
+  // Lock ancestors before descendants. In particular, two final diagnoses in a suite must
+  // serialize before either changes its run, so the last one sees the other's committed result.
+  const closing = <T>(
+    fn: string,
+    jobId: string,
+    work: (tx: Tx, current: JobRow, parent: RunRow) => Promise<T>,
+  ): Moved<T> =>
+    db
+      .run(async (d): Promise<jarl.Result<T, Refusal>> => {
+        try {
+          const result = await d.transaction(async (tx) => {
+            const [found] = await tx
+              .select({ runId: DbSchema.jobs.runId, suiteId: DbSchema.testRuns.suiteId })
+              .from(DbSchema.jobs)
+              .innerJoin(DbSchema.testRuns, eq(DbSchema.testRuns.id, DbSchema.jobs.runId))
+              .where(eq(DbSchema.jobs.id, jobId));
+            if (found === undefined) throw new NotFound(`${fn}: no job ${jobId}`);
+            if (found.suiteId !== null) {
+              await tx
+                .select({ id: DbSchema.testSuites.id })
+                .from(DbSchema.testSuites)
+                .where(eq(DbSchema.testSuites.id, found.suiteId))
+                .for("update");
+            }
+            const [parent] = await tx
+              .select()
+              .from(DbSchema.testRuns)
+              .where(eq(DbSchema.testRuns.id, found.runId))
+              .for("update");
+            const [current] = await tx
+              .select()
+              .from(DbSchema.jobs)
+              .where(eq(DbSchema.jobs.id, jobId))
+              .for("update");
+            if (parent === undefined || current === undefined)
+              throw new NotFound(`${fn}: no job ${jobId}`);
+            if (!job.running.accepts(current)) {
+              throw new InvalidState(`${fn}: job ${jobId} is ${current.status}; needs running`);
+            }
+            return work(tx, current, parent);
+          });
+          return jarl.ok(result);
+        } catch (error) {
+          const refusal = caught(error);
+          if (refusal !== undefined) return jarl.err(refusal);
+          throw error;
+        }
+      })
+      .then(settle);
+
+  // Called while closing holds the suite lock. Updating the final run and its suite commits
+  // together; a failed suite write cannot leave the run closed outside an open suite.
+  const finishSuite = async (tx: Tx, suiteId: string | null) => {
+    if (suiteId === null) return;
+    const rows = await tx
+      .select({ status: DbSchema.testRuns.status })
+      .from(DbSchema.testRuns)
+      .where(eq(DbSchema.testRuns.suiteId, suiteId));
+    if (rows.some((row) => row.status === "pending" || row.status === "running")) return;
+    await tx
+      .update(DbSchema.testSuites)
+      .set({
+        status: rows.every((row) => row.status === "passed") ? "passed" : "failed",
+        reason: null,
+        endedAt: now,
+      })
+      .where(and(eq(DbSchema.testSuites.id, suiteId), eq(DbSchema.testSuites.status, "running")));
+  };
+
   const moveJob = (
     fn: string,
     id: string,
@@ -496,6 +581,61 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
 
   return {
     service: "tests",
+
+    // Insert the lock and job in one transaction. The unique pair serializes different proxies;
+    // an old null lock can be completed without guessing whether another creator is alive.
+    ensureSetup: ({ iso, serverUrl, setupServer }) =>
+      db
+        .run(async (d) => {
+          try {
+            return await d.transaction(async (tx) => {
+              const pair = and(
+                eq(DbSchema.setupRequests.iso, iso),
+                eq(DbSchema.setupRequests.serverUrl, setupServer),
+              );
+              await tx
+                .insert(DbSchema.setupRequests)
+                .values({ iso, serverUrl: setupServer })
+                .onConflictDoNothing();
+              const [lock] = await tx
+                .select()
+                .from(DbSchema.setupRequests)
+                .where(pair)
+                .for("update");
+              if (lock === undefined) throw new Error("setup lock disappeared");
+              if (lock.jobId !== null) {
+                const [previousJob] = await tx
+                  .select()
+                  .from(DbSchema.jobs)
+                  .where(eq(DbSchema.jobs.id, lock.jobId));
+                if (
+                  previousJob === undefined ||
+                  !["failed", "errored", "aborted", "timed_out"].includes(previousJob.status)
+                )
+                  return jarl.ok(undefined);
+              }
+              const [definition] = await tx
+                .select()
+                .from(DbSchema.testDefinitions)
+                .where(eq(DbSchema.testDefinitions.name, SETUP))
+                .orderBy(desc(DbSchema.testDefinitions.id))
+                .limit(1);
+              if (definition === undefined) throw new NotFound("no setup definition");
+              const filed = await fileRun(
+                tx,
+                "ensureSetup",
+                { suiteId: null, iso, serverUrl, definitionId: definition.id },
+                "setup",
+              );
+              await tx.update(DbSchema.setupRequests).set({ jobId: filed.job.id }).where(pair);
+              return jarl.ok(filed);
+            });
+          } catch (error) {
+            if (error instanceof NotFound) return jarl.err(error);
+            throw error;
+          }
+        })
+        .then(settle),
 
     listTestDefinitions: () =>
       db.run((d) =>
@@ -1045,6 +1185,86 @@ export const create = App.createService<Db.Database, App.NoOptions, Tests>(({ db
 
     completeJob: (jobId) =>
       moveJob("completeJob", jobId, job.running, { status: "completed", finishedAt: now }),
+
+    completeDrive: (jobId) =>
+      closing("completeDrive", jobId, async (tx, current, parent) => {
+        if (current.action === "diagnose" || !run.open.accepts(parent)) {
+          throw new InvalidState("completeDrive: needs a running drive or setup on an open run");
+        }
+        await tx
+          .update(DbSchema.jobs)
+          .set({ status: "completed", finishedAt: now })
+          .where(eq(DbSchema.jobs.id, jobId));
+        const held = await openJobOf("completeDrive")(tx, parent.id);
+        if (held !== undefined) throw new InvalidState(held);
+        return only(
+          await tx
+            .insert(DbSchema.jobs)
+            .values({ runId: parent.id, action: "diagnose", createdAt: clock })
+            .returning(),
+          "completeDrive",
+        );
+      }),
+
+    completeDiagnosis: (jobId, judgedJobId, verdict, summary) =>
+      closing("completeDiagnosis", jobId, async (tx, current, parent) => {
+        if (current.action !== "diagnose" || !run.running.accepts(parent)) {
+          throw new InvalidState("completeDiagnosis: needs a running diagnosis on a running run");
+        }
+        const [judged] = await tx
+          .select()
+          .from(DbSchema.jobs)
+          .where(eq(DbSchema.jobs.id, judgedJobId))
+          .for("update");
+        if (judged === undefined) throw new NotFound(`completeDiagnosis: no job ${judgedJobId}`);
+        if (judged.runId !== parent.id || !job.completedJudged.accepts(judged)) {
+          throw new InvalidState(
+            "completeDiagnosis: needs a completed drive or setup on the same run",
+          );
+        }
+        await tx
+          .update(DbSchema.jobs)
+          .set({ status: "completed", finishedAt: now })
+          .where(eq(DbSchema.jobs.id, jobId));
+        const held = await openJobOf("completeDiagnosis")(tx, parent.id);
+        if (held !== undefined) throw new InvalidState(held);
+        await tx
+          .update(DbSchema.jobs)
+          .set({ status: verdict === "passed" ? "succeeded" : "failed", reason: summary })
+          .where(eq(DbSchema.jobs.id, judgedJobId));
+        await tx
+          .update(DbSchema.testRuns)
+          .set({ status: verdict, reason: summary, finishedAt: now })
+          .where(eq(DbSchema.testRuns.id, parent.id));
+        await finishSuite(tx, parent.suiteId);
+      }),
+
+    timeoutJobAndRun: (jobId, reason) =>
+      closing("timeoutJobAndRun", jobId, async (tx, current, parent) => {
+        if (!run.running.accepts(parent)) {
+          throw new InvalidState("timeoutJobAndRun: needs a running run");
+        }
+        await tx
+          .update(DbSchema.jobs)
+          .set({ status: "timed_out", reason, finishedAt: now })
+          .where(eq(DbSchema.jobs.id, current.id));
+        const held = await openJobOf("timeoutJobAndRun")(tx, parent.id);
+        if (held !== undefined) throw new InvalidState(held);
+        await tx
+          .update(DbSchema.testRuns)
+          .set({ status: "timed_out", reason, finishedAt: now })
+          .where(eq(DbSchema.testRuns.id, parent.id));
+        await finishSuite(tx, parent.suiteId);
+      }),
+
+    listRunningJobs: () =>
+      db.run((d) =>
+        d
+          .select()
+          .from(DbSchema.jobs)
+          .where(eq(DbSchema.jobs.status, "running"))
+          .orderBy(queueRank, asc(DbSchema.jobs.createdAt), asc(DbSchema.jobs.id)),
+      ),
 
     finalizeJob: (jobId, status, reason) =>
       moveJob("finalizeJob", jobId, job.completedJudged, { status, reason }),

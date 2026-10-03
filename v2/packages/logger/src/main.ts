@@ -8,8 +8,13 @@ import * as Render from "./render.ts";
 
 export type Level = "info" | "warning" | "error" | "fatal";
 
-// location is a text bucket: a session id, or the process's own name.
-export type Attribution = { readonly location?: string; readonly agentId?: string };
+// jobId identifies the job in stored logs, terminal output and Sentry; runId associates logs
+// with its parent test run. location names the process or another text bucket.
+export type Attribution = {
+  readonly location?: string;
+  readonly jobId?: string;
+  readonly runId?: string;
+};
 
 // What an error or fatal line hands Sentry besides its text: the cause Sentry is sent in the
 // text's place, or skipSentry to send nothing.
@@ -37,12 +42,17 @@ const sentryReport = (
   level: "error" | "fatal",
   text: string,
   attribution: Attribution,
-): Sentry.Report => {
+): Sentry.JobReport => {
   const tags = {
     ...(attribution.location === undefined ? {} : { location: attribution.location }),
-    ...(attribution.agentId === undefined ? {} : { agent_id: attribution.agentId }),
+    ...(attribution.jobId === undefined ? {} : { job_id: attribution.jobId }),
   };
-  return { level, tags, extra: { log: text, ...tags } };
+  return {
+    level,
+    tags,
+    extra: { log: text, ...tags },
+    ...(attribution.jobId === undefined ? {} : { jobId: attribution.jobId }),
+  };
 };
 
 export type Options = {
@@ -66,9 +76,15 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
       write(Render.renderLine(line, colors));
     };
 
-    const keep = async (line: Render.Line, location: string | null) => {
+    const keep = async (line: Render.Line, location: string | null, runId: string | null) => {
       const stored = await db.run(async (d) => {
-        await d.insert(DbSchema.logs).values({ text: line.text, level: line.level, location });
+        await d.insert(DbSchema.logs).values({
+          text: line.text,
+          level: line.level,
+          location,
+          runId,
+          jobId: line.jobId ?? null,
+        });
       });
       print(line);
       if (jarl.is_err(stored)) {
@@ -81,10 +97,10 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
     const emit =
       (level: Level): Reported =>
       (text, report = {}) => {
-        const { agentId, location } = report;
+        const { jobId, location } = report;
         let color: string | undefined;
-        if (colors && agentId !== undefined) {
-          const touched = Palette.touch(palette, agentId, now());
+        if (colors && jobId !== undefined) {
+          const touched = Palette.touch(palette, jobId, now());
           palette = touched.palette;
           color = touched.color;
         }
@@ -94,11 +110,11 @@ export const create = App.createService<Sentry.Sentry | Db.Database, Options, Lo
         const line: Render.Line = {
           text,
           level,
-          ...(agentId === undefined ? {} : { agentId }),
+          ...(jobId === undefined ? {} : { jobId }),
           ...(location === undefined ? {} : { location }),
           ...(color === undefined ? {} : { color }),
         };
-        landed = landed.then(() => keep(line, location ?? null));
+        landed = landed.then(() => keep(line, location ?? null, report.runId ?? null));
       };
 
     const error = emit("error");
