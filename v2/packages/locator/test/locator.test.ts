@@ -132,9 +132,21 @@ describe("locate", () => {
     expect(asked[1]?.state).toMatchObject({
       view: expect.stringContaining("x 240-720, y 150-450"),
     });
+
+    // Each round hands back the pictures exactly as Clef was sent them.
+    const sent = asked.map((request) =>
+      (request.images ?? []).map((image) => ("bytes" in image ? image.bytes : new Uint8Array())),
+    );
+    expect(found.overview.bytes).toEqual(sent[0]?.[0]);
+    expect(found.rounds.map((round) => round.image.bytes)).toEqual(
+      sent.map((images) => images[1]),
+    );
+    expect(found.rounds.map((round) => round.image.box)).toEqual(
+      found.rounds.map((round) => round.box),
+    );
   });
 
-  it("returns NotFound when round one's best cell is below the threshold, and asks no more (unhappy)", async () => {
+  it("returns NotFound with round one when its best cell is below the threshold, and asks no more (unhappy)", async () => {
     const { locator, asked } = decisions([answering(["B2"], 0.3, 0.1)]);
     const result = await settle(
       locator.locate({ screen: await screen(), question: QUESTION, task: TASK }),
@@ -143,7 +155,23 @@ describe("locate", () => {
     if (!jarl.is_err(result)) {
       throw new Error("expected NotFound");
     }
-    expect(result.error).toMatchObject({ best: expect.closeTo(0.3, 9), threshold: 0.45 });
+    const [overview, gridImage] = (asked[0]?.images ?? []).map((image) =>
+      "bytes" in image ? image.bytes : new Uint8Array(),
+    );
+    expect(result.error).toMatchObject({
+      best: expect.closeTo(0.3, 9),
+      threshold: 0.45,
+      overview: { bytes: overview },
+      round: {
+        box: SCREEN,
+        image: { bytes: gridImage },
+        best: expect.closeTo(0.3, 9),
+        cells: expect.arrayContaining([
+          expect.objectContaining({ label: "B2", p: expect.closeTo(0.3, 9) }),
+          expect.objectContaining({ label: "A1", p: expect.closeTo(0.1, 9) }),
+        ]),
+      },
+    });
     expect(asked).toHaveLength(1);
   });
 

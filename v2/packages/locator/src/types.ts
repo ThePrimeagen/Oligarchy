@@ -37,6 +37,8 @@ export type CellAnswer = {
 
 export type Round = {
   readonly box: ScreenGrid.Box;
+  // Image 2 of this round's ask, as Clef was sent it.
+  readonly image: ScreenGrid.GridImage;
   readonly cells: ReadonlyArray<CellAnswer>;
   readonly best: number;
   readonly point: ScreenGrid.Point;
@@ -49,6 +51,8 @@ export type Location = {
   readonly x: number;
   readonly y: number;
   readonly pixel: ScreenGrid.Point;
+  // Image 1 of every round's ask.
+  readonly overview: ScreenGrid.Image;
   readonly rounds: ReadonlyArray<Round>;
 };
 

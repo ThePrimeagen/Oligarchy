@@ -106,6 +106,7 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
       });
       return jarl.ok({
         box,
+        image: view,
         cells,
         best: Math.max(...cells.map((cell) => cell.p)),
         point: Geometry.weightedCentre(
@@ -151,7 +152,7 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
         }
         const done = jarl.value(looked);
         if (k === 0 && done.best < options.threshold) {
-          return jarl.err(Errors.notFound(done.best, options.threshold));
+          return jarl.err(Errors.notFound(done, context, options.threshold));
         }
         rounds.push(done);
         box = Geometry.nextBox(done.point, box, options.grid, options.boxScale, screen);
@@ -160,7 +161,13 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
         x: screen.width / 2,
         y: screen.height / 2,
       };
-      return jarl.ok({ x: pixel.x / screen.width, y: pixel.y / screen.height, pixel, rounds });
+      return jarl.ok({
+        x: pixel.x / screen.width,
+        y: pixel.y / screen.height,
+        pixel,
+        overview: context,
+        rounds,
+      });
     };
 
     return { service: "locator", locate };
