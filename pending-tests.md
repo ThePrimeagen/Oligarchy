@@ -1,0 +1,504 @@
+# Pending tests
+
+468 Omarchy acceptance tests, grouped by domain. Each line is the plan name and a short description.
+
+## Lock, idle and session
+
+- `lock-screen` — Lock from the System menu with the mouse, then unlock with the password.
+- `lock-hotkey-wrong-then-right-password` — Super+Ctrl+L locks; a wrong password is rejected and the right one restores the desktop.
+- `lock-blanks-after-five-seconds-and-wakes` — The lock screen goes black after five seconds and wakes on a mouse move or typed password.
+- `lock-empty-submit-and-escape-clear` — Enter on an empty lock field does nothing; Escape and Ctrl+U clear typed text.
+- `lock-long-password-dots-fit` — A very long password shrinks its masking dots so they stay inside the box.
+- `lock-faillock-lockout-after-ten-failures` — Ten wrong passwords lock the account for two minutes; a root `faillock --reset` clears it.
+- `lock-shows-current-wallpaper-blurred` — The lock background is a blurred copy of the wallpaper in use at lock time.
+- `lock-closes-running-screensaver` — Locking while the screensaver runs kills it first so only the lock screen shows.
+- `restart-shell-refuses-while-locked` — `omarchy-restart-shell` refuses to tear down a live lock screen.
+- `lock-survives-shell-crash-stranded-recovery` — If the shell dies while locked, the desktop stays hidden and the password box comes back.
+- `lock-status-ipc-and-journal-trail` — The lock can be driven and inspected from a terminal, and every transition is journaled.
+- `lock-preview-overlay-never-locks` — The lock preview is non-interactive and never locks the session.
+- `lock-pam-wiring-and-fingerprint-absence` — With no fingerprint reader there is no fingerprint hint, and a missing password PAM file refuses to lock.
+- `screensaver-system-menu-start-and-dismiss` — System → Screensaver starts the fullscreen ASCII screensaver and a key ends it.
+- `screensaver-toggle-off-menu-forces-idle-skips-to-lock` — Turning the screensaver off makes idle skip straight to the lock; force still starts it.
+- `screensaver-direct-run-exits-immediately` — `omarchy screensaver` in an ordinary terminal paints black and exits at once.
+- `screensaver-text-edit-and-restore-default` — Editing the screensaver text shows it immediately, and Restore Default brings the logo back.
+- `screensaver-ascii-wordmark-and-reject` — `omarchy ascii` renders wordmark text and refuses text with nothing drawable.
+- `screensaver-set-from-image-and-cancel` — Set From Image converts a PNG or SVG to ASCII; cancelling the chooser changes nothing.
+- `idle-chain-screensaver-lock-and-dismiss-cancels` — Shortened idle runs screensaver then lock, and dismissing the screensaver cancels the pending lock.
+- `idle-config-invalid-values-fall-back` — Bad idle numbers fall back to 150/300, and a shorter lock deadline skips the screensaver.
+- `stay-awake-toggle-indicator-and-status` — Stay Awake flips the coffee-cup inhibitor and survives a shell restart.
+- `stay-awake-blocks-idle-screensaver-and-lock` — While Stay Awake is on, the idle screensaver and lock never fire.
+- `debug-idle-report-tracks-toggles` — `omarchy debug idle` prints all eleven sections and tracks the Stay Awake and screensaver toggles.
+- `shell-json-idle-hot-reload-and-invalid-fallback` — `shell.json` is read live; bad JSON keeps the defaults, and a minimal file replaces the bar wholesale.
+- `logout-to-sddm-greeter-wrong-empty-then-right-password` — Logout lands on the SDDM greeter, which rejects empty and wrong passwords and admits the right one.
+- `console-tty-login-wrong-then-right-and-back` — A spare console rejects a wrong password, accepts the right one, and the desktop survives the switch.
+- `suspend-toggle-hides-system-menu-row` — Toggling suspend hides and restores the System menu row without ever suspending.
+- `hibernation-setup-adds-menu-row-and-remove` — Hibernation setup adds the Hibernate row, and remove takes the machine back to stock.
+- `sleep-lock-secures-session-before-suspend` — The pre-suspend helper locks within its budget and warns when the budget is impossibly small.
+- `suspend-from-system-menu-locks-first` — Suspend from the System menu locks first, then sleeps, and is the last action of the session.
+- `lid-close-absence-noop-and-hardware-binds-present` — With no lid, lid-close does not lock, while the missing-hardware binds still exist.
+- `session-desktop-health-after-boot` — A resumed desktop has the bar and wallpaper, a working shell, btrfs, PipeWire, and no failed units.
+
+## Power, boot chain and snapshots
+
+- `system-menu-power-entries-listed` — Super+Escape lists Screensaver, Lock, Suspend, Logout, Reboot, and Shutdown, and not Hibernate.
+- `reboot-from-system-menu-full-boot-chain` — Reboot walks Limine, one wrong LUKS try, and autologin back to a clean desktop.
+- `shutdown-powers-off` — Shutdown shows its OSD and powers the machine off.
+- `fast-shutdown-stuck-unit-reboots-quickly` — A reboot with a stuck user process still finishes within seconds.
+- `post-boot-hook-fires-after-reboot` — A user post-boot hook runs on the next login and shows as a toast.
+- `passwordless-sudo-grant-cleared-by-reboot` — A passwordless sudo grant is gone after reboot; Omarchy's other sudoers files stay.
+- `snapshot-create-list-retention-and-unknown-action` — Snapshot create keeps at most five, and an unknown action must be refused.
+- `snapshot-create-fails-loudly-without-config` — Without a Snapper config, create fails with a message instead of passing silently.
+- `snapshot-boot-from-limine-menu-read-only` — A snapshot boots read-only from the Limine Snapshots menu, then a normal boot returns to the live system.
+- `snapshot-restore-from-booted-snapshot` — Restoring from a snapshot boot rolls root back and leaves `/home` alone.
+- `snapshot-restore-picker-cancel-from-normal-boot` — Cancelling restore, or naming a missing snapshot, never rewrites root.
+- `direct-boot-toggle-skips-limine-and-back` — Direct Boot skips Limine, and removing the entry brings the menu back.
+- `refresh-limine-bootloader` — Refreshing Limine resets the menu, keeps a backup, and the machine still boots.
+- `limine-scan-on-single-os-finds-nothing` — On a single-OS machine, `limine-scan` finds no foreign bootloader.
+- `drive-password-change-and-back-at-boot` — Drive Encryption changes the LUKS passphrase and the test puts it back to `prime`.
+- `drive-password-rejects-bad-input` — Empty, mismatched, wrong, and escaped passphrase changes leave the LUKS key alone.
+- `user-password-change-keeps-disk-password` — Changing the user password updates login and sudo, not the disk passphrase.
+- `factory-reset-confirm-cancel-and-wrong-passphrase` — Reset Computer refuses to stage a wipe without the word `reset` and the disk passphrase.
+- `factory-reset-full-cycle-new-owner` — A full reset returns the machine to first-boot setup for a new owner.
+- `factory-reset-first-boot-form-validation` — The first-boot form rejects bad usernames, passwords, and hostnames.
+- `factory-snapshot-present-and-reset-refuses-without-it` — Every install has a read-only `@factory` snapshot, and reset refuses to wipe when it is gone.
+- `boot-chain-and-snapper-config-invariants` — Limine, the UKI, EFI order, and Snapper's timeline-off config still match the installer.
+- `shipped-system-defaults-in-place` — The packaged defaults the maintainers pin as contracts are present.
+- `locate-indexes-and-prunes-snapshots` — After `updatedb`, `locate` finds a new file and skips `/.snapshots`.
+- `hardware-gated-entries-hidden-in-vm` — Battery, lid, touchpad, fingerprint, webcam, and hibernate controls are absent in this guest.
+
+## Menu and launch
+
+- `menu-open-close-hotkey-and-bar-logo` — The menu opens from Super+Space and the bar logo, and closes from Escape, a second click, or the scrim.
+- `menu-system-super-escape-cancels` — Super+Escape opens System, and Escape will not run Shutdown even if it is highlighted.
+- `menu-search-filter-and-two-stage-escape` — Typing searches the tree, and Escape clears the filter before it closes.
+- `menu-submenu-navigation-keyboard-and-mouse` — Submenus drill in and back from the keyboard and the mouse.
+- `menu-overlays-keep-keys-from-window-behind` — Keys typed into the menu, emoji picker, or clipboard never reach the window behind.
+- `menu-route-hotkeys-aliases-and-summon` — The dedicated chords land on their submenu or picker, and `summon` always opens the menu.
+- `menu-guards-hide-hardware-rows-on-vm` — Rows for hardware this guest lacks are hidden, and an empty submenu says so.
+- `menu-guards-dim-installed-hide-absent-tick-current` — Installed software is dimmed, absent software is hidden under Remove, and the current choice is ticked.
+- `menu-catalogue-rows-match-documented-layout` — Trigger, Style, Setup, and Update keep their documented rows on this VM.
+- `menu-toggle-rows-flip-desktop-state` — Every Trigger → Toggle row acts and can be reversed from the menu.
+- `menu-extension-jsonc-hot-reload-and-broken-file` — A user menu extension is live, and one inline `//` drops every user entry.
+- `menu-select-and-input-dmenu-contract` — The menu-as-dmenu prints the choice or typed text, and prints nothing on cancel.
+- `menu-file-and-image-pickers` — The file picker lists newest first, the image picker shows thumbnails, and both refuse a missing path.
+- `menu-timezone-set-filter-and-cancel` — The timezone picker sets a zone without a password, and Escape leaves the clock alone.
+- `keybindings-viewer-opens-filters-and-variants` — Super+K opens the searchable keybindings sheet and hides the Copilot row.
+- `keybindings-viewer-runs-selected-binding` — Selecting a row in the keybindings viewer runs that binding.
+- `keybindings-viewer-merges-alternative-chords` — Actions bound twice share one row, such as Super+W / Super+Q to close a window.
+- `about-window-fastfetch-sheen-and-focus` — About opens a fitted fastfetch window and focuses the existing one on a second launch.
+- `menu-learn-rows-open-docs-webapps` — Learn's nine rows open the matching docs, cheatsheet, or tmux sheet.
+- `apps-launcher-search-rank-and-launch` — Super+Alt+Space lists apps, ranks search hits, and launches the top one.
+- `apps-launcher-delete-key-removes-entry` — Delete in the Apps menu removes an entry after confirmation.
+- `launch-terminal-files-calculator-chords` — The launch chords open foot, Files, tmux, herdr, and the calculator.
+- `launch-browser-chords-url-follow-and-private` — The browser chords open Chromium, including the private window, and a URL follows an existing window.
+- `launch-editor-chord-and-config-rows-open-right-file` — Super+Shift+N opens Neovim, and each config row opens its own file.
+- `xdg-open-lands-in-default-apps` — `xdg-open` sends text to Neovim, images to imv, folders to Files, and URLs to Chromium.
+- `floating-presentation-terminal-logo-done-failed` — Menu commands run in the centred logo terminal and end green Done or red Failed.
+- `share-menu-localsend-clipboard-file-folder-receive` — Trigger → Share hands clipboard, file, or folder to LocalSend, and Receive opens LocalSend.
+- `transcode-picker-hotkey-menu-and-cli` — Transcode picks a file, format, and resolution, and cancel does nothing.
+- `nautilus-context-menu-transcode-and-localsend` — Right-click in Files offers Transcode and LocalSend for the selection.
+- `browser-screen-share-preview-picker` — A browser screen-share request opens the preview picker, and cancel denies it.
+- `nightlight-toggle-hotkey-menu-and-status` — Night light is one shared state from the hotkey, menu, indicator, and IPC.
+- `shell-restart-from-menu-and-supervisor-relaunch` — Restarting the shell restores the desktop, and a crash loop stops after six relaunches.
+- `launch-docker-tui-polkit-gate` — lazydocker opens only after polkit, because the user is not in the docker group.
+- `launch-tui-chords-btop-cliamp-and-focus-existing` — btop, the calculator, and cliamp open with their documented window rules.
+- `webapp-install-launch-and-remove-from-menu` — Install → Web App takes a name and URL, and Remove deletes the chosen app.
+
+## Hyprland windows, workspaces, config, input and capture
+
+- `window-close-and-close-all` — Super+W or Super+Q closes one window, and Ctrl+Alt+Delete closes every window.
+- `window-float-pseudo-split` — Super+T floats, Super+P makes a tile pseudo, and Super+J flips the split.
+- `window-focus-swap-and-alt-tab` — Super+Arrow moves focus, Super+Shift+Arrow swaps, and Alt+Tab cycles.
+- `window-fullscreen-three-modes` — The three fullscreen chords cover the screen, keep the bar, or only tell the app.
+- `window-pop-pinned-follows-workspaces` — Super+O pops a pinned floater that follows workspaces, and a second press tiles it back.
+- `window-resize-chords-and-width-memory` — The twelve resize chords change a tile, and Home remembers and restores a width.
+- `window-super-drag-move-and-resize` — Super plus left drag moves a window, and Super plus right drag resizes it.
+- `window-groups-tabs-join-eject-dissolve` — Super+G makes a tabbed group, switches tabs, and dissolves it.
+- `workspace-switch-move-and-silent-move` — Super+number switches workspace, and Shift moves the window with or without following.
+- `workspace-tab-scroll-and-former` — Tab steps through workspaces, and Ctrl+Tab returns to the previous one.
+- `workspace-layout-toggle-scrolling-and-default` — Super+L switches dwindle and scrolling per workspace, and the choice survives a reload.
+- `scratchpad-quake-console` — Super+S drops the scratchpad over the current workspace and hides it on a workspace change.
+- `desktop-style-toggles-transparency-gaps-square-fullscreen` — Transparency, gaps, the bar, fullscreen desktop, and the single-window square all toggle and reverse.
+- `zoom-and-alt-tab-cycle` — Alt+Tab cycles windows, and Super+Ctrl+Z zooms around the pointer.
+- `activity-btop-floats-and-tiles` — Super+Ctrl+T opens themed btop floating, and Super+T tiles it.
+- `window-rules-helper-windows-float-centred` — Presentation terminals and helper windows open centred and floating.
+- `window-rules-browser-opaque-tiled-no-self-maximize` — Browser windows are forced tiled and nearly opaque, and cannot self-maximize.
+- `window-rule-pip-pinned-top-right` — A Picture-in-Picture window stays pinned in the top-right at 600×338.
+- `file-select-portal-dialog-pick-and-cancel` — The file chooser prints the picked path and exits 1 on cancel.
+- `focus-app-by-class-across-workspaces` — Focusing by window class works across workspaces and fails when nothing matches.
+- `monitor-scaling-hotkeys-cli-and-panel` — Super+/ steps the 1280×800 display through the scale presets.
+- `monitor-state-report-single-display` — `omarchy monitor state` names the one virtual output and leaves laptop fields empty.
+- `display-text-size-set-reset-reject` — Text size scales shell, GTK, and terminal together between 9 and 20 px, and rejects bad values.
+- `monitors-lua-scale-edit-and-gdk-scale` — Editing the scale variables in `monitors.lua` applies as soon as the file is saved.
+- `monitors-lua-bogus-mode-falls-back` — A mode the display lacks falls back instead of blanking the screen.
+- `hypr-config-syntax-error-banner-and-menu-restore` — A Hyprland syntax error shows a red banner and does not take the desktop down.
+- `hypr-tty-recovery-disabled-output-and-no-default-bindings` — Turning default bindings off still leaves a console path back to the desktop.
+- `bindings-lua-override-add-rebind-unbind` — `o.bind`, `o.rebind`, and `o.unbind` add, replace, and remove chords.
+- `keybindings-print-readable-and-refreshes-cache` — `--print` lists every binding in readable keys and refreshes when the set changes.
+- `default-bindings-no-duplicate-chords` — No two default bindings share a chord except the intentional Alt+Tab pair.
+- `reload-guard-pause-resume` — Auto-reload pauses for a package transaction, then reloads once.
+- `keyboard-layout-switch-both-alts` — Two layouts show the bar pill and switch when both Alts are pressed.
+- `input-lua-repeat-rate-and-compose-override` — The input defaults are live, and a user `input.lua` override replaces them.
+- `xcompose-compose-key-sequences-restart-and-legacy-repair` — CapsLock is compose, not shift, and the stock emoji sequences work.
+- `looknfeel-lua-overrides-rounding-gaps-animations` — The commented rounding, gaps, and animation examples work when enabled.
+- `hyprsunset-config-edit-and-process-restart` — Saving hyprsunset.conf restarts hyprsunset.
+- `hypr-session-environment-and-autostart` — Apps started from a chord inherit the Hyprland Wayland environment.
+- `autostart-lua-user-entry-runs-on-login` — An `o.launch_on_start` line runs at the next login, not on a reload.
+- `hyprland-lua-preinstalled-bindings-flag` — Setting preinstalled bindings false removes app chords and keeps the essentials.
+- `multi-monitor-and-laptop-display-chords-single-display` — On one display, monitor-move chords are no-ops and laptop-display chords refuse.
+- `media-keys-via-wtype-dummy-sink-no-backlight-touchpad` — Media and brightness binds fire from `wtype` because the driver cannot send XF86 keys.
+- `screenshot-print-region-keyboard-picker-and-cancel` — Print saves a dragged region to Pictures and the clipboard, and cancel leaves nothing.
+- `capture-cli-screenshot-modes-copy-save-and-dir` — The capture CLI writes a non-blank fullscreen PNG and refuses a missing mode.
+- `screenshot-dir-override-uwsm-env` — `OMARCHY_SCREENSHOT_DIR` redirects screenshots after a re-login if the directory exists.
+- `screenrecording-alt-print-start-stop-cpu-encode` — Alt+Print records a window with no audio, shows the bar indicator, and stops.
+- `screenrecording-refusals-and-webcam-absent` — A missing record directory and a bad webcam size are refused, and there is no webcam here.
+- `color-picker-and-ocr-print-chords` — Super+Print copies a pixel colour, and Super+Ctrl+Print OCRs a region.
+- `qr-code-capture-decode-and-none-found` — QR capture copies a decoded code as a sensitive clipboard entry, or says none was found.
+
+## Bar, panels, OSD, notifications, reminders, clipboard, emoji, polkit
+
+- `bar-default-widgets-on-vm` — The top bar shows logo, workspaces, clock, wired network, and monitor, and hides hardware widgets.
+- `bar-indicators-reveal-and-toggle` — The status indicators hide until the bar centre is hovered, then light in a fixed order.
+- `workspaces-indicator-follows-super-number` — The workspace widget tracks focus, occupancy, and clicks.
+- `bar-toggle-hide-and-show` — The bar hides and returns from the hotkey, the menu, and `omarchy-toggle-bar`.
+- `bar-drag-to-edge-and-widget-reorder` — Dragging the bar to another edge moves it, and dragging a widget reorders it.
+- `bar-custom-command-module` — A user command module shows script output and runs its click command.
+- `bar-widget-enable-disable-and-placement` — Bar widgets can be listed, enabled, disabled, and moved with the plugin commands.
+- `shell-ipc-and-bar-cli-with-shell-down` — `omarchy-shell` reaches the running shell and fails clearly when the shell is down.
+- `keyboard-layout-pill-two-layouts` — The layout pill stays hidden with one layout and shows a language code with two.
+- `tray-icon-drawer-menu-and-manage` — A status-notifier app makes the tray chevron appear, and its menu can be opened.
+- `calendar-week-start-and-month-stepping` — The clock opens a Monday-first calendar that steps months.
+- `calendar-memento-mori-life-bar` — The life bar stays hidden until a birth year is entered, and a future year is rejected.
+- `agents-widget-hidden-without-usage` — With no agent usage records, the Agents pill is absent.
+- `bar-panels-open-switch-close-and-numbers` — Every bar panel opens from its letter, its icon, and Super+Ctrl plus a digit.
+- `bluetooth-power-wifi-absent-paths` — With no Bluetooth, battery, or Wi-Fi, those icons and hotkeys do nothing.
+- `network-panel-wired-only` — The wired NAT panel shows Ethernet details, and Ping Timeout is expected.
+- `network-speed-test-overlay-and-cli` — The network speed test shows download then upload from the panel and the CLI.
+- `disk-speed-test-overlay-and-cli` — The disk speed test shows live read then write MB/s and finishes on its own.
+- `audio-panel-on-dummy-output` — With no sound card, the audio panel still opens on the Dummy Output.
+- `display-panel-fixed-brightness-scale-text-size` — A display with no backlight says FIXED BRIGHTNESS and hides the slider.
+- `weather-widget-panel-and-location-search` — The weather pill appears after the forecast fetch and its panel can search cities.
+- `weather-location-cli-set-status-clear` — Weather location can be pinned, reported, and cleared from the CLI.
+- `weather-panel-offline-keeps-state` — Turning networking off keeps the last weather data and offers no new cities.
+- `osd-cards-render-hide-and-click-through` — Progress and message OSD cards render, hide, and let clicks through.
+- `media-keys-osd-on-dummy-output` — Media keys injected with `wtype` drive the volume OSD on the dummy sink.
+- `notification-send-lifetimes-and-urgency` — Toasts live five seconds at low urgency and longer at higher urgency.
+- `notification-send-rejects-bad-options` — The sender refuses a bad urgency, timeout, replace id, or a quoted whole `--exec`.
+- `notification-dismiss-hotkeys-and-mouse` — Toasts dismiss by right-click, the close button, and Super+comma.
+- `notification-history-replay-trim-and-clear` — Expired toasts land in history, can be replayed, trimmed, and cleared.
+- `notification-click-runs-literal-argv` — Clicking a toast runs its click command as a literal argument vector.
+- `notification-do-not-disturb-rules` — Do-not-disturb suppresses ordinary toasts and still shows critical ones.
+- `notification-survives-shell-restart` — A live critical toast comes back after the shell restarts and still runs its click.
+- `notification-markup-sanitised-titles-plain` — Toast bodies keep simple bold and never render an img tag.
+- `notification-position-follows-bar-edge` — Toasts sit below a top bar and move when the bar changes edge.
+- `notification-time-and-battery-notices-without-battery` — The time notice shows, and the battery chord must not toast an empty headline.
+- `crash-capture-toast-needs-agent-and-toggle` — A core dump raises a crash toast only when a default agent and the toggle are on.
+- `reminder-set-fires-and-clears` — A reminder confirms, lights the bell, fires, and can be cleared.
+- `reminder-show-clear-and-prompt-rejects-bad-input` — Show lists pending reminders, and the prompt rejects bad input.
+- `clipboard-history-pick-paste-and-filter` — Super+Ctrl+V lists copies newest first and pastes the chosen one.
+- `clipboard-history-delete-open-and-clear` — Delete removes one entry, Alt+Return opens it, and Shift+Delete clears after asking.
+- `clipboard-history-capture-rules` — Duplicates move to the front, UTF-16 is decoded, and sensitive copies stay out.
+- `clipboard-watchers-survive-shell-restart` — Exactly two clipboard watchers restart with the shell.
+- `universal-clipboard-super-c-v-terminal-and-gui` — Super+C and Super+V copy and paste in the terminal and in GUI apps.
+- `emoji-picker-search-inserts-and-cancels` — Super+Ctrl+E searches emoji, inserts the chosen one, and Escape inserts nothing.
+- `polkit-dialog-accepts-rejects-and-cancels` — The graphical polkit dialog accepts the right password and rejects or cancels cleanly.
+- `clock-format-ring-bar-set-and-timezone` — Right-clicking the clock walks its format ring, which persists.
+- `bar-cli-position-transparent-set-move-and-rejections` — `omarchy bar` sets position and transparency and refuses bad values.
+- `plugin-validate-rejects-bad-manifests` — Plugin validate refuses every manifest shape the shell would reject.
+- `notification-icon-slot-image-themed-glyph` — The toast icon shows an image, then a themed icon, then a glyph.
+- `dev-gallery-controls-walk-and-dropdowns` — The dev gallery opens every shared control, including dropdowns.
+- `agent-invitation-toast-once` — The default-agent invitation toast fires once and opens the agent picker.
+
+## Theme and style
+
+- `theme-switch-menu-and-hotkey` — Switching theme from the menu or the hotkey picker re-skins the whole desktop.
+- `theme-concurrent-switch-serialises` — Three theme switches at once end in one consistent theme, and the next switch still works.
+- `theme-switch-cli-list-renders-and-rejects` — The CLI lists all 22 themes, switches by name, and refuses unknown names.
+- `theme-cycle-all-22` — Every shipped theme applies cleanly in a terminal loop.
+- `theme-reset-current-advances-background` — Re-applying the active theme advances its wallpaper.
+- `theme-light-dark-gtk-settings` — A light theme flips GTK apps to light chrome, and a dark theme flips them back.
+- `theme-user-theme-directory-applies` — A theme written into the user themes directory shows in the picker and applies.
+- `theme-user-overlay-on-stock-theme` — A user folder named like a stock theme overlays only the files it contains.
+- `theme-legacy-alacritty-only-theme` — An old theme with only an alacritty file still applies, and an incomplete one warns.
+- `theme-install-git-url-drops-code-files` — Installing a theme from a git URL names it from the repo and drops code files.
+- `theme-install-community-via-menu` — Install → Style → Theme installs a community theme from an HTTPS git URL.
+- `theme-install-refuses-hostile-urls-and-names` — Theme install refuses URLs git would treat as options or remote helpers.
+- `theme-remove-menu-and-cli-guards` — Remove lists only user themes, and says so when none are installed.
+- `theme-remove-active-user-theme-unguarded` — Removing the active user theme must be refused or must switch away first.
+- `theme-user-templates-render-on-switch` — A user `.tpl` renders with the theme palette on every switch.
+- `theme-refresh-repairs-rendered-file` — Theme refresh regenerates a broken rendered file without moving the wallpaper.
+- `theme-terminal-and-tmux-retint-live` — A theme switch repaints terminals that are already open.
+- `restart-helpers-quiet-when-target-absent` — Restart helpers stay quiet when their terminal, tmux, or fcitx target is absent.
+- `theme-btop-retint` — btop draws in the current theme and repaints when the theme changes.
+- `theme-neovim-colorscheme-follows-theme` — Neovim's colourscheme follows the theme, using a generated palette when the theme has no scheme.
+- `theme-lumon-fetches-lumon-nvim` — Switching to Lumon makes Neovim fetch and activate the Lumon colourscheme.
+- `theme-hyprland-border-and-overrides` — The focused window border takes the theme accent.
+- `theme-shell-section-override-lock-screen` — Tokyo Night's lock screen uses its own muted colours.
+- `theme-chromium-policy-colour-follows-theme` — A theme switch recolours Chromium's toolbar without a password prompt.
+- `theme-obsidian-sync` — An Obsidian vault gets an Omarchy theme that follows the system theme.
+- `theme-hooks-absent-apps-and-hardware-stay-silent` — Theme hooks for apps and RGB hardware that are not installed exit quietly.
+- `theme-preview-palette-in-terminal` — Theme preview shows a palette in the terminal and recolours only that terminal.
+- `theme-sync-chromium-extension` — The theme-sync extension exposes the current Omarchy theme name to web pages.
+- `install-t3-code-themed-and-remove` — Installing T3 Code hands it the current palette before first launch, then removes it.
+- `aether-theme-from-wallpaper` — Aether turns a wallpaper into a palette and applies it as a new theme.
+- `background-picker-select-and-cancel` — The wallpaper picker marks the current image, and Escape changes nothing.
+- `background-desktop-double-click-pickers` — Double-clicking the desktop opens the background picker, and right-click opens themes.
+- `background-picker-filter-and-empty-result` — Typing in the background picker narrows the list and shows an empty state.
+- `background-picker-thumbnails-cache` — The picker shows one thumbnail per background and caches them.
+- `background-next-cycles-and-set-rejects-bad-path` — Next cycles backgrounds in order, and set refuses a bad path.
+- `background-user-folder-joins-picker-and-cycle` — A picture added to the theme's personal folder joins the picker and the cycle.
+- `background-video-wallpaper` — A video in the background folder plays as the wallpaper and darkens on the lock screen.
+- `owe-aur-install-video-wallpaper` — The README install command for owe fails, and an AUR build is the real path.
+- `font-set-menu-and-cli` — Style → Font lists installed monospace fonts and applies the one clicked.
+- `font-install-nerd-font-from-menu` — Installing Cascadia Mono switches the bar and new terminals to it.
+- `font-set-and-text-size-edit-kitty-conf` — Font set and text size edit kitty.conf with a single override, never a duplicated one.
+- `fontconfig-defaults-and-icon-font-glyphs` — Generic families resolve to JetBrains Mono, Liberation, and Noto, and the icon font has its glyphs.
+- `branding-about-text-edit-and-reset` — About shows the logo with a sheen, and editing its text can be reset.
+- `branding-about-from-image-and-cancel` — Set From Image turns a PNG into About's text art, and cancel changes nothing.
+- `plymouth-preview-render-and-reject` — Plymouth preview composes a boot-screen mock-up and refuses bad input.
+- `plymouth-list-current-and-unlock-picker` — Every theme is offered as a boot style, and the stock disk reports `default`.
+- `plymouth-set-rejects-bad-input-and-wrong-sudo-password` — The boot-screen setter refuses bad colours, a symlink logo, sudo, and an unknown theme.
+- `plymouth-set-by-theme-reboot-and-reset` — Style → Unlock applies a theme's unlock image, visible after reboot, then resets.
+- `refresh-config-hyprland-restores-with-backup` — Refreshing Hyprland config restores the seven files and keeps `.bak` copies.
+- `refresh-config-shell-tmux-hyprsunset-restart` — Refreshing Shell puts the bar back on top and restarts the matching services.
+- `refresh-applications-and-chromium-flags` — Refreshing applications puts deleted stock launchers back.
+- `bar-position-menu-and-cli` — The bar moves to any edge from the menu or the CLI, and an invalid position is refused.
+- `bar-transparency-doubleclick-menu-cli` — Double-clicking empty bar space toggles transparency with the text still readable.
+- `bar-transparent-text-colour-follows-wallpaper` — Transparent bar text turns dark over a light wallpaper strip.
+
+## Install and remove machinery
+
+- `menu-install-dims-installed-remove-hides-uninstalled` — Install dims what is already installed, and Remove hides what is not.
+- `pkg-add-drop-present-missing-cli` — `pkg add` installs idempotently, and `pkg drop` fails clearly for a missing package.
+- `pkg-install-remove-picker-round-trip` — The package pickers install and remove a chosen entry, and Escape cancels.
+- `pkg-aur-picker-browse-cancel-and-bogus-name` — The AUR picker shows a PKGBUILD preview, and Escape builds nothing.
+- `install-app-generic-usage-quoting-and-failure-banner` — Generic installers refuse missing arguments and show a Failed banner.
+- `install-editor-vim-set-default-and-uninstall` — Installing Vim dims its row, can make it the default editor, and uninstalls.
+- `defaults-missing-app-opens-installer-installed-applies-at-once` — Defaults lists browsers, editors, and terminals whether or not they are installed.
+- `install-editor-vscode-defaults-and-launcher-uninstall` — VS Code installs with Omarchy's keyring and theme defaults, then uninstalls.
+- `install-and-launch-sublime-text-then-uninstall` — Sublime installs and opens itself, then uninstalls.
+- `install-editor-emacs-aur-build` — Emacs is the editor row that builds from the AUR and runs follow-up setup.
+- `install-terminal-kitty-switch-and-restore-foot` — Installing Kitty repoints Super+Return, and switching back restores foot.
+- `install-browser-firefox-default-policies-and-remove` — Firefox installs with Omarchy's policies and can be removed.
+- `dev-env-go-mise-install-remove-and-unknown-name` — The Go dev env installs through mise, and an unknown name must be refused.
+- `dev-env-python-with-uv-install-and-remove` — Python installs a mise CPython plus `uv`, then removes both.
+- `dev-env-rust-rustup-install-and-remove` — Rust installs through rustup rather than mise, and remove cleans `~/.rustup`.
+- `mise-install-wrapper-and-name-guard` — The mise install wrapper writes a lazy shim and refuses a bad name.
+- `install-docker-db-redis-and-escape-cancels-quietly` — Docker DB installs Redis bound to localhost, and Escape cancels quietly.
+- `tui-install-launch-and-remove` — A TUI command can be turned into a floating or tiled launcher entry and removed.
+- `webapp-install-cli-refuses-bad-input-escapes-and-overwrites` — The web-app CLI refuses bad URLs and names before fetching an icon.
+- `apps-launcher-delete-key-uninstall-confirm-and-cancel` — Delete in the Apps launcher asks before uninstalling, and cancel keeps the app.
+- `launch-chords-missing-apps-open-installer-abort` — Chords for missing Music, Signal, and 1Password open the installer, and abort leaves nothing.
+- `install-service-1password-hotkey-and-remove` — Super+Shift+/ installs 1Password when missing, and remove takes it away.
+- `install-service-signal-hotkey-and-uninstall` — Super+Shift+G starts the Signal installer immediately rather than only offering it.
+- `install-service-tailscale-blocks-at-login-then-remove` — Tailscale waits at the login URL, and aborting leaves the Install row dim.
+- `install-service-dropbox-without-account-and-remove` — Dropbox installs and starts its daemon without requiring a signed-in account.
+- `install-service-sunshine-and-remove` — Sunshine installs, opens Moonlight ports, and remove undoes that.
+- `install-chromium-account-and-claude-extension-idempotent` — The Chromium account and Claude extension installers only write config and can be rerun.
+- `install-ai-ollama-cpu-and-remove` — On a machine without a GPU, Ollama installs the CPU package and removes cleanly.
+- `install-ai-claude-desktop-and-remove` — Claude Desktop installs, opens, and then removes.
+- `remove-ai-perplexity-claude-keep-user-and-cli-state` — Removing Perplexity or Claude deletes the app and keeps user and CLI state.
+- `default-agent-pick-installs-pi-via-mise-and-abort` — With no default agent, the picker installs Pi through mise, and abort leaves none selected.
+- `install-ai-dictation-voxtype-without-microphone` — With no microphone, dictation status stays idle and the chords are inert.
+- `voxtype-invitation-hook-runs-once` — The dictation invitation sends exactly one clickable notification.
+- `install-gaming-xbox-cloud-webapp-and-remove` — Xbox Cloud Gaming creates a web app and remove deletes it.
+- `gaming-launchers-refuse-without-install` — Battle.net and similar launchers say they are not installed instead of doing nothing.
+- `gaming-gpu-lib32-without-gpu-and-steam-install-remove` — The GPU helper should no-op without a real GPU; HEAD's exit 1 is the defect.
+- `windows-vm-install-refused-and-unconfigured-commands` — Before a Windows VM exists, every Windows VM subcommand exits 1.
+- `security-fido2-without-device-and-removers-on-stock` — Security removers are safe on a stock disk where nothing was set up.
+- `plugin-add-local-repo-enable-disable-remove` — A local git plugin can be added, enabled onto the bar, disabled, and removed.
+- `plugin-clone-builtin-edit-and-remove-restores` — Cloning a built-in widget replaces it in place, and remove restores the original.
+- `pkg-add-omarchy-zsh-setup-and-restore` — The org zsh package installs and setup makes new terminals start zsh, then restores.
+- `pkg-add-omarchy-fish-setup-and-restore` — The org fish package installs and setup makes new terminals start fish, then restores.
+- `preinstalls-base-package-set-installed-audit` — Every package in the shipped base manifest is installed on the minted disk.
+- `dev-env-php-pacman-install-and-remove` — PHP installs from pacman with composer and xdebug, then removes.
+- `install-editor-helix-theme-alias-and-cleanup` — Helix installs wired to the live theme with an `hx` alias, then cleans up.
+- `install-service-nordvpn-decline-reboot-and-drop` — NordVPN installs, declining the reboot leaves it, and drop removes it.
+- `install-gaming-xbox-controllers-xpadneo-and-remove` — Xbox Controllers builds xpadneo and blacklists xpad, then remove undoes it.
+- `hermes-cli-stub-owned-remove-restore-and-foreign` — The `hermes` command is an Omarchy-owned stub until Hermes Desktop is installed.
+- `plugin-update-local-origin-fast-forward-and-rollback` — Plugin update fast-forwards from origin and can roll back.
+- `plugin-add-from-public-git-url-and-unreachable` — Adding a public plugin URL works, and an unreachable host fails cleanly.
+
+## Apps in use
+
+- `webapp-hotkeys-open-app-windows-and-focus-reuse` — Web-app chords open frameless Chromium windows and reuse the existing one.
+- `webapp-launch-cli-chromeless-and-or-focus` — The webapp CLI opens a chromeless window, and or-focus reuses it.
+- `webapp-launcher-entries-open-app-windows` — The seeded launchers for YouTube, Maps, Discord, and the rest open as app windows.
+- `webapp-handlers-mailto-zoommtg-and-unknown-scheme` — HEY and Zoom register mailto and zoommtg, and an unknown scheme fails.
+- `webapp-copy-url-and-download-shortcuts-listed` — Copy URL and Download Video are listed in the keybindings viewer and send to the focused web app.
+- `launch-chords-neovim-tmux-herdr-and-cheatsheets` — The editor, tmux, and herdr chords open their apps, and the cheatsheets match.
+- `obsidian-launch-or-focus-single-window` — Super+Shift+O opens Obsidian, and a second press focuses the same window.
+- `disk-usage-dua-floating-tui` — Disk Usage opens dua on `/` in a floating terminal.
+- `shell-tools-rg-fd-bat` — rg, fd, and bat behave as the manual says, including their failure modes.
+- `shell-tools-tldr-and-yt-dlp` — `tldr` fetches its page cache, and `yt-dlp` rejects a non-URL.
+- `try-experiment-directories` — `try` creates date-stamped directories under `~/Work/tries`.
+- `herdr-launch-detach-reattach-and-stop` — Super+Ctrl+Return opens Herdr's persistent session, which can detach, reattach, and stop.
+- `herdr-keybindings-menu-and-cli-help` — Super+Ctrl+K shows Herdr's keybinding menu from the shipped config.
+- `herdr-split-tabs-with-omarchy-prefix` — Herdr's prefix splits, opens tabs, and closes panes the way tmux does.
+- `herdr-shell-layouts-hdl-hds-hsl` — The Herdr layout helpers refuse to run outside Herdr.
+- `omacalc-floating-calculator` — Omacalc on Super+Ctrl+Q computes from the mouse keypad and the keyboard.
+- `omawrite-open-write-and-save` — Omawrite opens an empty Markdown editor, accepts text, and saves.
+- `omawrite-external-change-warning` — Omawrite warns when a file changes on disk while the editor has unsaved edits.
+- `omacut-trim-and-export` — Omacut sets a trim range, asks before quitting unexported, and exports a shorter MP4.
+- `ttfx-terminal-effect` — ttfx animates piped text and lists its effects.
+- `omasnap-region-capture-annotate-save` — omasnap captures a region, annotates it, and saves.
+- `omasnap-toggle-quick-save-and-clipboard-refusal` — Launching omasnap while it is open dismisses it, and a clipboard refusal is explicit.
+- `omasnap-pin-capture` — Pinning a capture leaves an always-on-top image, and closing it leaves no process.
+- `omareel-record-and-export` — omareel degrades gracefully with no camera and still exports.
+- `plugin-add-elsewhen-from-menu` — Add Plugin clones a third-party plugin from a pasted URL after a warning.
+- `plugin-add-port-forward-error-path` — The port-forward widget installs and reports a bad forward instead of crashing.
+- `openclaw-launch-and-onboard-without-openclaw` — Without OpenClaw, onboard fails fast with command not found.
+- `powerprofiles-set-remember-and-reject` — Power profiles list, set, and remember a profile, and reject an unknown one.
+- `system-stats-cli-output` — System stats prints the CPU and memory lines the power panel uses.
+- `toggle-generic-flag-and-bad-action` — The generic toggle creates and removes a flag file and rejects an unknown action.
+- `cliamp-music-tui-without-audio` — Cliamp opens from its chord, and a second press focuses it.
+- `launcher-gui-apps-open-and-close` — The preinstalled GUI apps open from the launcher and close again.
+- `pdf-open-evince-and-fill-xournalpp` — A PDF opens in Document Viewer, and Open With offers Xournal++.
+- `imv-rotate-edit-trash-keybindings` — In imv, Ctrl+R rotates, Ctrl+E edits, and Ctrl+X trashes.
+- `chromium-whatsapp-slim-extension` — The WhatsApp web app forces system-theme mode through the bundled extension.
+- `plugin-add-notification-center-and-dnd` — The notification-center plugin shows a sent notification and honours do-not-disturb.
+- `omarchy-audio-tuner-probe-without-device` — The speaker-tuning tool prints usage and generates its probe with no device.
+
+## Update, migrations and channels
+
+- `update-menu-omarchy` — Update → Omarchy carries the 4.0.2 disk to the current stable release.
+- `update-terminal-run` — `omarchy update -y` runs the same pipeline without the confirm box and still asks about reboot.
+- `post-update-second-run-nothing-to-do` — A second update on an already updated disk has nothing to do.
+- `post-update-kernel-omarchy` — After the stable update the machine runs the `linux-omarchy` kernel.
+- `post-update-kitty-config-refreshed` — The Kitty migration replaces the stock config, keeps a backup, and asks to restart Kitty.
+- `post-update-mise-and-agent-wrappers` — The small user-state migrations land: mise stops auto-pruning and the agent commands appear.
+- `update-indicator-click-and-cancel` — The bar update icon names the newer package, and cancel starts nothing.
+- `update-refuses-overlapping-run-and-notifier-stays-quiet` — A second update while one is open is refused, and the notifier stays quiet.
+- `update-refuses-low-disk-space` — With less than 10 GiB free, the update stops before asking anything.
+- `update-keyring-passes-and-fails-cleanly` — The keyring step prints that keys are correct only after a verifying check.
+- `update-heals-unowned-file-conflict` — An unowned file conflict does not kill the update on pacman's exists-in-filesystem error.
+- `update-stops-on-failed-migration` — A failed migration stops the queue and ends with the red banner.
+- `update-orphan-pkgs-defaults-to-keeping` — The orphan review defaults to keeping packages.
+- `pacman-direct-upgrade-guard` — A direct `pacman -Syu` is stopped by Omarchy's pre-transaction hook.
+- `migrate-idempotent-and-login-notifier` — `omarchy-migrate` is safe to run any number of times, and the login notifier fires once.
+- `migrations-hand-rerun-small-scripts` — Re-running the small migrations by hand is safe and leaves a broken file untouched.
+- `migration-legacy-udev-rules-quarantine` — The udev migration removes the generated rules and quarantines a modified variant.
+- `migration-security-groups-flag-reboot` — Migrations drop blanket input and docker group grants and flag a reboot instead of forcing one.
+- `migration-copy-url-defers-while-chromium-open` — The Copy URL repair waits until Chromium is closed.
+- `channel-current-menu-check-and-refusals` — Channel current reports the installed channel, and the menu marks it with the only tick.
+- `channel-switch-edge-and-update` — Switching to Edge repoints pacman and swaps in the edge packages.
+- `channel-switch-dev-and-back` — Switching to Dev clones and links the repo, and switching back restores stable.
+- `post-update-edge-wrappers-packages-and-sysctl` — On the edge channel the HEAD-only migrations leave visible state.
+- `post-update-edge-work-mise-toml-removed` — On edge, the mise-trust migration deletes the stock `~/Work/.mise.toml`.
+- `version-commands-and-channel-detection` — About and `omarchy-version` match the installed package, and the channel is detected.
+- `upgrade-to-quattro-refusals-and-decline` — On a healthy 4.x system, the Quattro upgrade fails its checks before changing anything, and No is the answer.
+- `reinstall-declined-and-configs-reset` — Declining reinstall changes nothing, and a config reset has its own confirm.
+- `update-menu-rows-and-process-restart-shell` — The Update submenu lists the maintenance rows and Restart Shell brings the desktop back.
+- `update-config-shell-resets-bar-position` — Update → Config → Shell restores `shell.json` and puts the bar back on top.
+- `update-hardware-rows-without-hardware` — The hardware restart rows finish Done even when the device is absent.
+- `update-firmware-no-devices` — Firmware reports that nothing is updatable on this machine.
+- `update-time-restarts-timesyncd` — Update → Time restarts timesyncd after one sudo prompt.
+- `update-extra-themes-row-appears-with-git-theme` — Extra Themes appears only once a git-installed theme exists.
+- `update-hook-post-update-invitations-once` — The post-update invitations for dictation and a default agent fire once.
+- `preinstalls-remove-decline-and-confirm` — Remove → Preinstalls asks first, and declining changes nothing.
+- `preinstalls-restore-after-remove` — Install → Preinstalls puts the shipped launchers and stubs back after a confirmed remove.
+
+## CLI router, dev tools and debug
+
+- `cli-discover-commands-and-groups` — The bare `omarchy` banner and `omarchy commands` list what the CLI can do.
+- `cli-help-never-executes` — `--help` on any command prints help and never runs it.
+- `cli-unknown-command-typos-and-aliases` — Typos exit 127 with a suggestion, and partial routes stay help.
+- `cli-alias-omarchy-up` — `omarchy up` is an alias for update and does not start an update from help.
+- `cli-hidden-commands-route-but-stay-unlisted` — Hidden plumbing stays out of listings and still routes.
+- `agent-skill-command-contract` — Every command the shipped agent skill tells an agent to run answers `--help`.
+- `state-done-markers-and-name-guards` — `state` and `done` persist toggles and once-only markers, and refuse bad names.
+- `hooks-install-run-theme-set-and-reject` — User hooks can be installed and run, and a bad hook type is refused.
+- `debug-report-print-view-save-no-upload` — `omarchy debug` prints and saves a report and does not upload unless asked.
+- `upload-log-cli-installed-and-rejects` — Upload log posts a support bundle and refuses a bad type.
+- `dev-link-scratch-status-and-unlink` — Dev link points Omarchy at a scratch checkout with `--no-reboot`, then unlink restores it.
+- `dev-link-rejects-bad-input` — Dev link refuses a missing path, a wrong flag, and running under sudo.
+- `dev-benchmarks-cli-and-theme-switcher` — The CLI and theme-switcher benchmarks run and print timing tables.
+- `dev-theme-preview` — Dev theme preview renders a palette and falls back to hash swatches without colour.
+- `dev-font-list-and-add-glyph` — Dev font lists brand glyphs and refuses a bad SVG.
+- `dev-pkg-test-without-checkout` — `dev pkg test` says it needs a PKGBUILD tree this disk does not have.
+- `dev-ui-preview-gallery` — Dev UI preview opens the component gallery or fails visibly if the plugin is absent.
+- `dev-install-ydoo` — Dev install ydoo adds the user to `input`, writes the udev rule, and is idempotent.
+- `transcode-picture-cli-and-rejects` — Transcode writes a resized file beside the input and refuses a missing file.
+- `transcode-ascii-cli-and-rejects` — Transcode ascii converts an image to braille and rejects a bad image.
+- `disk-speedtest-cli-and-panel` — The disk speed test streams read then write and refuses a non-directory.
+- `reminder-cli-set-show-clear-and-rejects` — The reminder CLI sets, shows, and clears, and rejects a bad duration.
+- `menu-cli-summon-toggle-close-and-rejects` — `omarchy menu` summons, toggles, and closes the shell menu from a terminal.
+- `ascii-wordmark-render-skip-and-rejects` — `omarchy ascii` draws letters, skips missing glyphs, and refuses empty text.
+- `dev-add-migration-in-temp-repo` — Dev add migration scaffolds a timestamped script in a temp checkout.
+- `agent-usage-update-without-login` — Usage collectors fail per agent with a clear line when nobody is logged in.
+- `cli-tab-completion-discoverability` — Tab completes `omarchy` groups and flags, and not the raw `omarchy-*` binaries.
+- `plans-unshipped-commands-absent` — Backup, dots, server, and remote-desktop commands are not routed.
+
+## System, shell and security
+
+- `terminal-hotkey-opens-foot-in-cwd` — Super+Enter opens foot in the focused terminal's directory.
+- `foot-ini-padding-edit-applies-to-new-window` — A foot.ini padding change shows in the next window and not in one already open.
+- `tmux-work-session-config-and-reattach` — Super+Alt+Enter attaches the Work tmux session with Omarchy's config.
+- `tmux-dev-square-tds-and-tdl` — `tds` lays out the four-way development square.
+- `editor-hotkey-and-sudoedit-open-neovim` — Super+Shift+N and sudoedit open Neovim.
+- `neovim-lazyvim-basics` — The LazyVim keys the manual teaches open the tree, finder, and buffers.
+- `fzf-ff-eff-history-and-man-through-bat` — `ff` and `eff` fuzzy-find with a bat preview, and man pages go through bat.
+- `zoxide-cd-jump-miss-and-dotdot` — `cd` jumps by a fragment of a visited name and rejects an unknown target.
+- `eza-listing-aliases` — `ls`, `lsa`, `lt`, and `lta` are the eza views, and a bad path fails.
+- `compress-decompress-roundtrip` — `compress` and `decompress` round-trip a directory through a `.tar.gz`.
+- `drive-helpers-usage-and-declined-format` — `iso2sd` and `format-drive` show usage and find no removable drive.
+- `git-worktree-ga-gd` — `ga` creates a sibling worktree, and `gd` asks before removing it.
+- `git-aliases-and-config-defaults` — Git uses master, explains a missing identity, and sets upstream on push.
+- `ssh-helpers-fail-fast-without-server` — With no SSH server, the wrapper passes a fast failure straight through.
+- `ssh-wrapper-reconnects-after-drop` — The ssh wrapper reconnects a session that drops after it was established.
+- `rsync-watchers-rsw-lsw-dsw` — `rsw` watches and syncs, `lsw` lists it, and `dsw` stops it.
+- `readline-history-prefix-and-tab-cycling` — Up and Down search history by prefix, and Tab cycles completions.
+- `starship-prompt-path-git-and-error-state` — The prompt shows a truncated path, the git branch, and an error state.
+- `shell-env-defaults-and-bashrc-additions` — Every interactive shell carries Omarchy's environment and bashrc additions.
+- `lazygit-launch-stage-and-commit` — lazygit stages with Space and commits with `c`.
+- `btop-omarchy-config` — btop starts with Omarchy's theme, vim keys, and four boxes.
+- `terminal-toolchain-runnable` — git, tmux, mise, fastfetch, and headless Neovim run, and a bad mise command fails.
+- `default-apps-show-set-and-reject` — Defaults report chromium, nvim, and foot, and reject an unknown name.
+- `default-editor-switch-to-vim-installs` — Switching the default editor to Vim installs it if it is missing.
+- `files-hotkeys-cwd-preview-and-text-opens-neovim` — Files opens at home or in the terminal's directory, and a text file opens in Neovim.
+- `video-double-click-opens-mpv` — Double-clicking a video opens mpv, and a missing file errors.
+- `agent-hotkey-and-cli-with-no-default` — With no default agent, the hotkey opens the picker instead of failing silently.
+- `agent-usage-collectors-without-accounts` — Usage collectors return valid records when no account is signed in.
+- `agent-skills-linked-into-harnesses` — Provisioning links the omarchy and diagnose-crash skills into every agent harness.
+- `crash-capture-toast-and-mute-one-program` — Once an agent is named, a crash raises a toast, and muting one program hides only that one.
+- `crash-mute-cli-list-toggle-and-refusals` — Crash mute lists, sets, clears, and refuses a bad name.
+- `chromium-bundled-extensions-and-copy-url` — Chromium starts with Copy URL, Download Video, and WhatsApp Slim.
+- `chromium-download-video-ytdlp` — Alt+Shift+D hands the current page to yt-dlp and notifies on completion.
+- `browser-policy-colour-helper-rejects-bad-input` — The browser-colour writer accepts only six lowercase hex digits.
+- `cups-admin-forbidden-and-browsed-absent` — CUPS is running, and the desktop user cannot administer printers.
+- `docker-requires-sudo-polkit-tui-and-predicate` — Docker commands without sudo hit polkit because the user is not in the group.
+- `sudoless-docker-enable-and-revert` — Sudoless Docker warns, does nothing when declined, and can be reverted.
+- `firewall-ufw-defaults-no-ssh` — UFW denies inbound except LocalSend and Docker DNS, with no SSH rule.
+- `system-services-enabled-and-running` — The shipped system services are enabled and running.
+- `user-units-running-and-hardware-gated-units-inert` — User units that need hardware stay inert, and the others are running.
+- `fcitx5-supervised-and-hidden-entries` — fcitx5 runs with no tray icon and comes back if killed.
+- `kernel-linux-omarchy-headers-and-tuning` — The guest boots `linux-omarchy` with matching headers and Omarchy's tuning.
+- `stock-system-policy-invariants` — NetworkManager, oomd, Snapper, Tokyo Night, and the group policy match the installer.
+- `gpg-keyserver-defaults` — GnuPG uses hkps keyservers and fails fast on a bad server.
+- `first-run-artefacts-and-user-state-present` — First-run markers, theme links, XDG dirs, and the About wordmark are present.
+- `provision-rerun-guards-force-replay-and-hooks-once` — Re-running first-login setup reports completion and does not replay it.
+- `hardware-detectors-and-commands-report-absence` — Detectors say this is not the hardware, except the virtual output and host CPU.
+- `hardware-quirks-inert-on-virtio` — Vendor and GPU quirk scripts leave nothing behind on virtio.
+- `hardware-restart-entries-run-without-devices` — Wi-Fi, Bluetooth, audio, and trackpad reloads finish Done with no device.
+- `audio-tuning-no-matching-hardware` — With no matching speaker, the tuning step says so and changes nothing.
+- `wifi-helpers-and-qr-absent-on-wired` — Without Wi-Fi, the QR entry is hidden and Ping Timeout on the wired link is expected.
+- `sudo-wrong-password-retries-and-narrow-nopasswd-rules` — Sudo allows up to ten tries, and the NOPASSWD rules stay narrow.
+- `passwordless-sudo-toggle-expiry-and-guards` — Passwordless sudo warns, expires, and refuses to grant itself a second time wrongly.
+- `timezone-menu-change-passwordless-and-rule-variants` — The timezone change needs no password, and the bar clock follows at once.
+- `privileged-command-without-terminal-fails-cleanly` — A sudo command with no terminal fails with a clear message and does nothing.
+- `git-url-check-refuses-hostile-urls` — The git URL guard accepts normal clone URLs and refuses hostile ones.
+- `sshd-setup-key-hardens-login-and-removes` — SSHD starts from a pasted key, opens port 22 rate-limited, and remove closes it.
+- `sshd-setup-rejects-bad-arguments-and-bad-key-before-opening-port` — A bad key is rejected before sshd is enabled or port 22 is opened.
+- `sshd-setup-github-keys` — Grab key from GitHub authorizes that user's keys and hardens the server.
+- `fido2-setup-without-device` — Without a token, the Fido2 wizard installs packages and stops with a plug-it-in message.
+- `dns-preset-switch-no-password-menu-panel-terminal` — DNS switches among DHCP, Cloudflare, and Google with no password.
+- `dns-custom-asks-password-and-rejects-empty` — Custom DNS asks for sudo and refuses an empty server list.
+- `tmux-dev-layouts-tdl-tsl-tdlm` — The dev layouts build the editor, agent, and terminal panes and name the window.
+- `fingerprint-setup-hidden-and-refused-without-reader` — Without a reader, the Fingerprint row is hidden and setup refuses.
+- `pacman-repos-and-signing-key` — Packages come from Arch plus the Omarchy repo, signed by the published key.
+- `zram-swap-active-and-oomd-kills-runaway-app` — zram swap is active, and oomd kills a runaway app instead of the compositor.
+- `plugin-registry-rejects-reserved-id-broken-manifest-and-duplicate` — A reserved plugin id, a broken manifest, and a duplicate are rejected.
+- `plugin-third-party-api-boundary` — A third-party plugin can reach its own service and not the lock service.
+- `plocate-index-excludes-snapshots` — plocate finds system files and never `/.snapshots` paths.
+- `install-log-and-phase-timing-clean` — The install log shows every phase ok and a failed count of zero.
+- `mise-node-offline-bundle-and-stubs` — The bundled Node works offline, and the agent CLI stubs are laid down.
