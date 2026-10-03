@@ -138,9 +138,7 @@ describe("locate", () => {
       (request.images ?? []).map((image) => ("bytes" in image ? image.bytes : new Uint8Array())),
     );
     expect(found.overview.bytes).toEqual(sent[0]?.[0]);
-    expect(found.rounds.map((round) => round.image.bytes)).toEqual(
-      sent.map((images) => images[1]),
-    );
+    expect(found.rounds.map((round) => round.image.bytes)).toEqual(sent.map((images) => images[1]));
     expect(found.rounds.map((round) => round.image.box)).toEqual(
       found.rounds.map((round) => round.box),
     );
