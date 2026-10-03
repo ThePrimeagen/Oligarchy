@@ -710,15 +710,17 @@ describeWithDatabase("automation client shutdown", () => {
         { SERVER_URL: qemu.url },
         `echo $$ > "${pidFile}"; touch "${started}"; exec sleep 120`,
       );
-      const running = request(port, "/run", AUTH_JSON, runJson("do the work")).then(
-        () => undefined,
-        () => undefined,
-      );
+      // /run spawns the driver only for a reservation, so it waits for the client and the reserve.
+      let running: Promise<void> = Promise.resolve();
       try {
         await process.waitFor(
           new RegExp(`automation client listening on 127.0.0.1:${String(port)}`),
         );
         expect((await request(port, "/reserve", AUTH_JSON, DRIVE_RESERVE)).status).toBe(200);
+        running = request(port, "/run", AUTH_JSON, runJson("do the work")).then(
+          () => undefined,
+          () => undefined,
+        );
         const began = Date.now();
         while (!existsSync(started)) {
           if (Date.now() - began > 10_000) {

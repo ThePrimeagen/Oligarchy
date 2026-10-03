@@ -294,15 +294,17 @@ const db = drizzle(client);
 const [v1] = await db.insert(schema.testDefinitions).values({ name: "lock-results", description: "d", instruction: "first", proof: "p" }).returning({ id: schema.testDefinitions.id });
 const [v2] = await db.insert(schema.testDefinitions).values({ name: "lock-results", description: "d", instruction: "second", proof: "p" }).returning({ id: schema.testDefinitions.id });
 const [other] = await db.insert(schema.testDefinitions).values({ name: "install-results", description: "d", instruction: "i", proof: "p" }).returning({ id: schema.testDefinitions.id });
-const [run] = await db.insert(schema.testRuns).values({ name: "results", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" }).returning({ id: schema.testRuns.id });
+// One result per definition per run is the unique index, so each result is its own run's.
+const run = () => ({ name: "results", iso: "https://example.com/omarchy.iso", serverUrl: "http://127.0.0.1:42069" });
+const runs = await db.insert(schema.testRuns).values([run(), run(), run(), run(), run(), run()]).returning({ id: schema.testRuns.id });
 const at = (minute) => new Date(Date.UTC(2026, 8, 1, 0, minute));
 await db.insert(schema.testResults).values([
-  { runId: run.id, definitionId: v1.id, status: "failed", model: "grok-4.6", createdAt: at(0), finishedAt: at(1) },
-  { runId: run.id, definitionId: v2.id, status: "passed", model: "grok-4.6", createdAt: at(10), finishedAt: at(14) },
-  { runId: run.id, definitionId: v2.id, status: "failed", model: "grok-4.6", createdAt: at(20), finishedAt: at(22) },
-  { runId: run.id, definitionId: v2.id, status: "passed", model: "grok-4.6", createdAt: at(30) },
-  { runId: run.id, definitionId: v2.id, status: "pending", model: "grok-4.6" },
-  { runId: run.id, definitionId: other.id, status: "passed", model: "grok-4.6", createdAt: at(40), finishedAt: at(49) },
+  { runId: runs[0].id, definitionId: v1.id, status: "failed", model: "grok-4.6", createdAt: at(0), finishedAt: at(1) },
+  { runId: runs[1].id, definitionId: v2.id, status: "passed", model: "grok-4.6", createdAt: at(10), finishedAt: at(14) },
+  { runId: runs[2].id, definitionId: v2.id, status: "failed", model: "grok-4.6", createdAt: at(20), finishedAt: at(22) },
+  { runId: runs[3].id, definitionId: v2.id, status: "passed", model: "grok-4.6", createdAt: at(30) },
+  { runId: runs[4].id, definitionId: v2.id, status: "pending", model: "grok-4.6" },
+  { runId: runs[5].id, definitionId: other.id, status: "passed", model: "grok-4.6", createdAt: at(40), finishedAt: at(49) },
 ]);
 await client.end();
 const results = await query.listDefinitionRuns(url, "lock-results");
