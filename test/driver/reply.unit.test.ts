@@ -260,6 +260,76 @@ describe("reply", () => {
     expect(Result.isFailure(nan)).toBe(true);
   });
 
+  describe("a flag written as a key inside args", () => {
+    // Captured: two of the replies that ended production sessions after three in a row.
+    const CAPTURED_MOVE =
+      '{"name": "client", "arguments": {"step": 4, "reason": "Open a page that can share the screen. A share picker appears.", "args": ["mouse", "move", "--x": "0.69", "--y": "0.307"]}}';
+    const CAPTURED_HALF =
+      '{"name":"client","arguments":{"step":28,"reason":"Click Toggle.","args":["mouse","move","--x","0.46","--y":"0.603"]}}';
+
+    it("reads as the flag and then its value", () => {
+      expect(parsedClient(CAPTURED_MOVE)).toEqual({
+        _tag: "client",
+        step: 4,
+        reason: "Open a page that can share the screen. A share picker appears.",
+        args: ["mouse", "move", "--x", "0.69", "--y", "0.307"],
+      });
+      expect(parsedClient(CAPTURED_HALF).args).toEqual([
+        "mouse",
+        "move",
+        "--x",
+        "0.46",
+        "--y",
+        "0.603",
+      ]);
+    });
+
+    it("reads a key-style flag whose value is a key string or a JSON number", () => {
+      expect(
+        parsedClient(
+          '{"name":"client","arguments":{"step":1,"reason":"terminal","args":["send-keys","--keys":"<M-RETURN>"]}}',
+        ).args,
+      ).toEqual(["send-keys", "--keys", "<M-RETURN>"]);
+      expect(
+        parsedClient(
+          '{"name":"client","arguments":{"step":1,"reason":"point","args":["mouse","move","--x": 0.5,"--y": 1]}}',
+        ).args,
+      ).toEqual(["mouse", "move", "--x", "0.5", "--y", "1"]);
+    });
+
+    it("leaves a reply that is valid JSON as written, a quoted flag and colon in its reason too (unhappy)", () => {
+      const quoted = parsedClient(
+        client('write "--x": 0.5 in the file', ["send-keys", "--keys", '"--x": 0.5']),
+      );
+      expect(quoted.reason).toBe('write "--x": 0.5 in the file');
+      expect(quoted.args).toEqual(["send-keys", "--keys", '"--x": 0.5']);
+    });
+
+    it("still refuses a reply that is not JSON for another reason, with the same message (unhappy)", () => {
+      const unclosed =
+        '{"name":"client","arguments":{"step":2,"reason":"Click Install.","args":["mouse","move","--x",0.46,"--y",0.614]}';
+      const parsed = Reply.parse(unclosed);
+      if (Result.isSuccess(parsed)) {
+        expect.fail("a reply missing its closing brace parsed");
+      }
+      expect(parsed.failure.message).toContain("valid JSON");
+    });
+
+    it("refuses a flag written as a key whose value the tool still does not take (unhappy)", () => {
+      const repairedBad =
+        '{"name":"client","arguments":{"step":1,"reason":"point","args":["mouse","move","--x": true]}}';
+      const plain =
+        '{"name":"client","arguments":{"step":1,"reason":"point","args":["mouse","move","--x"= true]}}';
+      const refused = Reply.parse(repairedBad);
+      const unrepaired = Reply.parse(plain);
+      if (Result.isSuccess(refused) || Result.isSuccess(unrepaired)) {
+        expect.fail("a boolean flag value parsed");
+      }
+      expect(refused.failure.message).toBe(unrepaired.failure.message);
+      expect(refused.failure.message).toContain("valid JSON");
+    });
+  });
+
   it("refuses an intent action", () => {
     const intent = Reply.command(
       parsedClient(client("lock", ["intent", "start", "--message", "lock"])),

@@ -43,14 +43,23 @@ const decodeCall = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.toCodec
 const schemaFailure = (cause: Cause.Cause<unknown>): Result.Result<never, Errors.ToolError> =>
   fail(`reply: ${Render.headline(Cause.squash(cause))}`);
 
+// Models write a flag and its value inside args as an object's key, `"--x": "0.69"`, and repeat it
+// until three bad replies end the run. A reply that is not JSON is read once more with each unescaped
+// `"--flag":` as `"--flag",`; the tool's shape still decides, and the refusal stays the first one.
+const FLAG_AS_KEY = /(?<!\\)"(--[A-Za-z][A-Za-z0-9-]*)"\s*:/g;
+
 export const parse = (text: string): Result.Result<Reply, Errors.ToolError> => {
   const line = text.trim();
   if (line === "" || line.includes("\n")) {
     return fail("reply: expected 1 line");
   }
-  const decoded = decodeCall(line);
+  let decoded = decodeCall(line);
   if (Exit.isFailure(decoded)) {
-    return schemaFailure(decoded.cause);
+    const repaired = decodeCall(line.replace(FLAG_AS_KEY, '"$1",'));
+    if (Exit.isFailure(repaired)) {
+      return schemaFailure(decoded.cause);
+    }
+    decoded = repaired;
   }
   if (decoded.value.name === "Done") {
     // Struct({}) compiles to a not-nullish check, so excess keys are not rejected.
