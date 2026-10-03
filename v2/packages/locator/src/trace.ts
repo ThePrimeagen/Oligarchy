@@ -5,7 +5,8 @@
 // round-<n>-in.webp (image 2, as Clef was sent it) and round-<n>-out.png (that picture with each
 // cell's p, the weighted point and the box the next round looks at), final.png (the screenshot with
 // every round's box and the point), sheet.png (each round's in beside its out, final.png below) and
-// result.json. Rounds and the rest come from oligarchy.json.
+// result.json. Rounds and the rest come from oligarchy.json; a job's optional "locator" overrides any
+// of them for that job alone, as { "grid": 5 }.
 import * as DecisionApi from "@oligarchy/decision-api";
 import * as Env from "@oligarchy/env";
 import * as Http from "@oligarchy/http";
@@ -22,6 +23,7 @@ type Job = {
   readonly question: string;
   readonly task: string;
   readonly out: string;
+  readonly locator?: Partial<Locator.Options>;
 };
 
 const COLOURS = ["#ff3b30", "#ff9500", "#34c759", "#00c7ff", "#af52de", "#ffffff"];
@@ -153,16 +155,27 @@ const writeRounds = async (
 };
 
 const traceOne = async (
-  locator: ReturnType<typeof Locator.create>,
+  decisionApi: ReturnType<typeof DecisionApi.create>,
   options: Locator.Options,
   job: Job,
 ): Promise<string> => {
+  if (options.boxScale >= options.grid) {
+    return `refused: boxScale ${options.boxScale} must be smaller than grid ${options.grid}`;
+  }
+  const locator = Locator.create({ "decision-api": decisionApi }, options);
   await mkdir(job.out, { recursive: true });
   const bytes = new Uint8Array(await readFile(job.screen));
   const started = Date.now();
   const result = await locator.locate({ screen: bytes, question: job.question, task: job.task });
   const ms = Date.now() - started;
-  const base = { screen: resolve(job.screen), question: job.question, task: job.task, ms };
+  const base = {
+    screen: resolve(job.screen),
+    question: job.question,
+    task: job.task,
+    grid: options.grid,
+    rounds: options.rounds,
+    ms,
+  };
   if (jarl.is_ok(result)) {
     const found = jarl.value(result);
     await writeFile(join(job.out, "overview.webp"), found.overview.bytes);
@@ -256,15 +269,14 @@ const run = async (): Promise<void> => {
     accountId: env.vars.cloudflareAccountId,
     token: env.vars.cloudflareApiToken,
   });
-  const locator = Locator.create({ "decision-api": decisionApi }, options);
 
   const input: unknown = JSON.parse(await readFile("/dev/stdin", "utf8"));
   const jobs = (Array.isArray(input) ? input : [input]) as ReadonlyArray<Job>;
-  console.log(
-    `${jobs.length} job(s); ${options.rounds} rounds of a ${options.grid}x${options.grid} grid`,
-  );
+  console.log(`${jobs.length} job(s)`);
   for (const job of jobs) {
-    console.log(`${job.out}: ${await traceOne(locator, options, job)}`);
+    const jobOptions = { ...options, ...job.locator };
+    const shape = `${jobOptions.rounds} rounds of ${jobOptions.grid}x${jobOptions.grid}`;
+    console.log(`${job.out} (${shape}): ${await traceOne(decisionApi, jobOptions, job)}`);
   }
 };
 
