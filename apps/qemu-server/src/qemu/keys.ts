@@ -42,6 +42,24 @@ const NAMED: Readonly<Record<string, string>> = {
   ALT: "alt",
   SHIFT: "shift",
   META_L: "meta_l",
+  // Driving models name the Super key every way a keyboard does. QEMU has no super_l or win_l
+  // qcode, so those must not pass through as raw qcodes either.
+  META: "meta_l",
+  SUPER: "meta_l",
+  SUPER_L: "meta_l",
+  WIN: "meta_l",
+  WIN_L: "meta_l",
+  WINDOWS: "meta_l",
+  LOGO: "meta_l",
+  CMD: "meta_l",
+};
+
+// Punctuation as driving models name it inside brackets, read as the character itself.
+const SYMBOLS: Readonly<Record<string, string>> = {
+  COMMA: ",",
+  DOLLAR: "$",
+  AMPERSAND: "&",
+  AMP: "&",
 };
 
 const SHIFTED: Readonly<Record<string, string>> = {
@@ -96,6 +114,12 @@ const MODIFIERS: Readonly<Record<string, string>> = {
   SHIFT: "shift",
   M: "meta_l",
   META: "meta_l",
+  META_L: "meta_l",
+  SUPER: "meta_l",
+  WIN: "meta_l",
+  WINDOWS: "meta_l",
+  LOGO: "meta_l",
+  CMD: "meta_l",
 };
 
 const fail = (message: string): Result.Result<never, Errors.KeysError> =>
@@ -127,6 +151,10 @@ const keyName = (name: string): Result.Result<Chord, Errors.KeysError> => {
   if (named !== undefined) {
     return Result.succeed([named]);
   }
+  const symbol = SYMBOLS[name.toUpperCase()];
+  if (symbol !== undefined) {
+    return charChord(symbol);
+  }
   if (Array.from(name).length === 1) {
     return charChord(name);
   }
@@ -143,10 +171,15 @@ const keyName = (name: string): Result.Result<Chord, Errors.KeysError> => {
   return fail(`qemu: unknown key "${name}"`);
 };
 
-const angleChord = (inner: string): Result.Result<Chord, Errors.KeysError> => {
-  if (inner === "") {
+// Models join a chord with + as a keyboard legend does, `<META_L+RET>`. A + with a name on each side
+// and no - anywhere is that join; a lone + and a + after a modifier's - stay the plus key.
+const JOINED = /^[^+-]+(\+[^+-]+)+$/;
+
+const angleChord = (written: string): Result.Result<Chord, Errors.KeysError> => {
+  if (written === "") {
     return fail("qemu: empty key sequence");
   }
+  const inner = JOINED.test(written) ? written.replaceAll("+", "-") : written;
   const parts = inner.split("-");
   // The minus key is itself the separator: "C--" splits to ["C", "", ""], so a trailing pair of
   // empty parts is the "-" key, not an empty modifier and an empty key.
@@ -182,8 +215,17 @@ export const parseKeys = (keys: string, encoding = "oligarchy"): Parsed => {
       if (end < 0) {
         return fail("qemu: unterminated key sequence");
       }
-      chord = angleChord(chars.slice(i + 1, end).join(""));
-      i = end;
+      let inner = chars.slice(i + 1, end).join("");
+      let close = end;
+      // Models write a Super chord as `<M-<SPACE>>`, the key's own brackets inside the chord's. A <
+      // right after a modifier's - and closed by >> is that, and reads as `<M-SPACE>`.
+      const nested = inner.lastIndexOf("<");
+      if (nested > 0 && inner[nested - 1] === "-" && chars[end + 1] === ">") {
+        inner = `${inner.slice(0, nested)}${inner.slice(nested + 1)}`;
+        close = end + 1;
+      }
+      chord = angleChord(inner);
+      i = close;
     } else {
       chord = charChord(char);
     }
