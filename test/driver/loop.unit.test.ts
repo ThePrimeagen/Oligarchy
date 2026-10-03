@@ -19,6 +19,7 @@ import * as DbSchema from "@oligarchy/db/schema";
 import * as Tests from "@oligarchy/db/tests";
 import * as Config from "@oligarchy/env/config";
 import * as Oligarchy from "@oligarchy/env/oligarchy";
+import * as Render from "@oligarchy/log/render";
 import * as SharedErrors from "@oligarchy/shared/errors";
 import * as TestingHttp from "@oligarchy/testing/http-client";
 import * as TestingStores from "@oligarchy/testing/stores";
@@ -2104,6 +2105,71 @@ describe("driver loop", () => {
         expect(past(recorder.requests, 1)).toContain("IMAGE HAS FAILED, MACHINE IS SHUT DOWN");
       }),
   );
+
+  describe("a guest that powered off before the run's stop", () => {
+    // The qemu server ends a session whose QEMU exits: the image says so, and a stop after it
+    // finds the session gone. shutdown-powers-off does this on purpose.
+    const poweredOff = (url: URL): Response => {
+      if (url.pathname === "/start") {
+        return TestingHttp.json({ id: SESSION });
+      }
+      if (url.pathname === "/image") {
+        return TestingHttp.json({ error: "qemu: closed" }, 502);
+      }
+      if (url.pathname === "/stop" || url.pathname === "/save") {
+        return TestingHttp.json({ error: `unknown session "${SESSION}"` }, 404);
+      }
+      return TestingHttp.json({ ok: "true" });
+    };
+
+    it.effect("stops as already stopped, and the result closes as the run ended", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), done()), poweredOff);
+        const log: Array<string> = [];
+        const { stopped, spawner } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          log,
+        );
+        expect(stopped).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests).at(-1)).toBe("/stop");
+        const closed = spawner.spawned.at(-1)?.args ?? [];
+        expect(closed).toEqual(expect.arrayContaining(["test-results", "--status", "success"]));
+        expect(closed.join(" ")).not.toContain("unknown session");
+        expect(events(log).some((event) => event.kind === "failure")).toBe(false);
+      }),
+    );
+
+    it.effect(
+      "a mint whose save finds the session gone still fails: nothing was saved (unhappy)",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(answers(getImage(), done()), poweredOff);
+          const error = yield* Effect.flip(
+            run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+              seed: { name: "mint", serverUrl: "" },
+            }),
+          );
+          expect(Render.headline(error)).toContain("unknown session");
+          expect(guestPaths(recorder.requests).at(-1)).toBe("/save");
+        }),
+    );
+
+    it.effect("a stop refused for another reason still fails the run with it (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(getImage(), done()), (url) =>
+          url.pathname === "/stop"
+            ? TestingHttp.json({ error: "stop refused: disk busy" }, 409)
+            : poweredOff(url),
+        );
+        const error = yield* Effect.flip(
+          run(config(), recorder.layer, () => ({ exitCode: 0 }), []),
+        );
+        expect(Render.headline(error)).toContain("stop refused: disk busy");
+      }),
+    );
+  });
 
   it.effect("a successful get-image does not say the machine is shut down", () =>
     Effect.gen(function* () {

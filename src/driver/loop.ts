@@ -627,6 +627,12 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           yield* log(input, 0, "command", `${shown(command)} exit ${String(ran.exitCode)}`);
           if (ran.exitCode !== 0) {
             const printed = Tools.toolContent(ran);
+            // The qemu server ends a session whose guest powered off, so a stop after that finds
+            // nothing to stop. A save finding it gone saved nothing and still fails.
+            const gone = sessionGone(printed);
+            if (!save && gone !== undefined) {
+              return yield* log(input, 0, "stop", `already stopped: ${gone}`);
+            }
             return yield* Effect.fail(commandError(printed === "" ? "stop failed" : printed));
           }
           return yield* Effect.void;
