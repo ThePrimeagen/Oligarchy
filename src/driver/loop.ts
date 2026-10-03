@@ -185,8 +185,16 @@ const INTENT_HELD = "Cannot start one intent when one's already running";
 // the run. A command that reaches the guest, even one the guest refuses, starts the count again.
 const BAD_REPLY_LIMIT = 3;
 // Each bad reply is quoted in the failure, which is the result's reason: a model can answer
-// with a page of prose.
+// with a page of prose. A long one keeps its start and its end, since a tool call's args, where
+// the mistake usually is, come after a reason that can fill the whole quote.
 const QUOTED_REPLY = 200;
+
+const quoted = (reply: string): string => {
+  const text = brief(reply);
+  return text.length <= QUOTED_REPLY
+    ? text
+    : `${text.slice(0, QUOTED_REPLY / 2)}…${text.slice(-QUOTED_REPLY / 2)}`;
+};
 
 const decision = (did: string, outcome: string): string => {
   const rest = brief(outcome);
@@ -393,7 +401,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
         // The third bad reply in a row is the model spending its chances, as a limit is: the
         // loop ends the test failed with it.
         const miss = Effect.fn("Driver.miss")(function* (turn: number, why: string, reply: string) {
-          misses.push(`${why} (replied ${brief(reply).slice(0, QUOTED_REPLY)})`);
+          misses.push(`${why} (replied ${quoted(reply)})`);
           if (misses.length < BAD_REPLY_LIMIT) {
             return undefined;
           }
