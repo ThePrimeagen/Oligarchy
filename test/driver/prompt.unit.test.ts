@@ -92,6 +92,35 @@ describe("custom-harness-driving-agent.html", () => {
     expect(text).toContain("IMAGE HAS FAILED, MACHINE IS SHUT DOWN");
   });
 
+  it("tells the model to unlock the booting guest and wait for the desktop before step 1's own action", () => {
+    const text = file();
+    expect(text).toMatch(/still booting[^*]*Limine[^*]*disk passphrase prompt[^*]*desktop/i);
+    expect(text).toMatch(/passphrase prompt type the disk_passphrase and <ENTER>/);
+    expect(text).toMatch(/until the desktop shows/);
+    expect(text).toMatch(/Keys sent before the desktop shows are lost/);
+    expect(text).toMatch(/unlocking the disk is not step 1/i);
+  });
+
+  it("warns that a Ctrl chord at the passphrase prompt or while the disk unlocks aborts the boot", () => {
+    const text = file();
+    expect(text).toMatch(
+      /chord with Ctrl in it \(Ctrl\+C, Ctrl\+D\) sent at the passphrase prompt or while the disk unlocks aborts the boot/,
+    );
+  });
+
+  it("does not forbid Ctrl chords once the desktop shows (unhappy)", () => {
+    const text = file();
+    expect(text).not.toMatch(/never (press|send|use) (a )?Ctrl/i);
+    expect(text).not.toMatch(/Ctrl[^.]*is not allowed/i);
+  });
+
+  it("keeps a step that is about the boot menu or the passphrase prompt on that screen (unhappy)", () => {
+    const text = file();
+    expect(text).toMatch(
+      /step is about the Limine menu or the passphrase prompt itself, do it there/,
+    );
+  });
+
   it("names no tool the reply parser refuses (unhappy)", () => {
     const text = file();
     expect(text).not.toContain("update_screenshot");
