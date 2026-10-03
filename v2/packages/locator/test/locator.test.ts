@@ -10,11 +10,10 @@ import {
   answering,
   CALL_TIMEOUT_MS,
   decisions,
-  HINT,
   RETRIES,
   settle,
   screen,
-  TARGET,
+  QUESTION,
   TASK,
 } from "./support.ts";
 
@@ -86,9 +85,7 @@ describe("locate", () => {
   it("asks one noul per cell each round and clicks the last round's weighted centre (happy)", async () => {
     const { locator, asked } = decisions([answering(["B2", "C3", "A1"])]);
     const found = jarl.unwrap(
-      await settle(
-        locator.locate({ screen: await screen(), target: TARGET, hint: HINT, task: TASK }),
-      ),
+      await settle(locator.locate({ screen: await screen(), question: QUESTION, task: TASK })),
     );
 
     // B2's centre (480, 300); C3's in 240-720 x 150-450 is (540, 337.5); A1's in 450-630 x 281-394
@@ -114,7 +111,8 @@ describe("locate", () => {
       );
       expect(request.questions["C3"]).toEqual({
         type: "noul",
-        instructions: `In image 2, is ${TARGET} in grid cell C3 (column C, row 3)? ${HINT}`,
+        instructions:
+          "In image 2, is the word 'Lock' in grid cell C3 (column C, row 3)? 'Lock' is the label of the second entry of the System menu, written just right of a padlock icon.",
       });
       expect(
         request.images?.map((image) => ("contentType" in image ? image.contentType : "data url")),
@@ -139,7 +137,7 @@ describe("locate", () => {
   it("returns NotFound when round one's best cell is below the threshold, and asks no more (unhappy)", async () => {
     const { locator, asked } = decisions([answering(["B2"], 0.3, 0.1)]);
     const result = await settle(
-      locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
+      locator.locate({ screen: await screen(), question: QUESTION, task: TASK }),
     );
     expect(jarl.error.is(result, Locator.NotFound)).toBe(true);
     if (!jarl.is_err(result)) {
@@ -171,7 +169,7 @@ describe("locate", () => {
   it.each(passing)("asks again when Clef is $name, and goes on (unhappy)", async ({ error }) => {
     const { locator, asked } = decisions([jarl.err(error()), answering(["B2", "C3", "A1"])]);
     const result = await settle(
-      locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
+      locator.locate({ screen: await screen(), question: QUESTION, task: TASK }),
     );
     expect(jarl.is_ok(result)).toBe(true);
     expect(asked).toHaveLength(4);
@@ -182,7 +180,7 @@ describe("locate", () => {
     async ({ error, is }) => {
       const { locator, asked } = decisions([jarl.err(error())]);
       const result = await settle(
-        locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
+        locator.locate({ screen: await screen(), question: QUESTION, task: TASK }),
       );
       expect(is(result)).toBe(true);
       expect(asked).toHaveLength(1 + RETRIES);
@@ -208,7 +206,7 @@ describe("locate", () => {
   ])("returns $name at once, without asking again (unhappy)", async ({ error, is }) => {
     const { locator, asked } = decisions([jarl.err(error())]);
     const result = await settle(
-      locator.locate({ screen: await screen(), target: TARGET, task: TASK }),
+      locator.locate({ screen: await screen(), question: QUESTION, task: TASK }),
     );
     expect(is(result)).toBe(true);
     expect(asked).toHaveLength(1);
@@ -221,7 +219,7 @@ describe("locate", () => {
     const result = await settle(
       locator.locate({
         screen: await screen(),
-        target: TARGET,
+        question: QUESTION,
         task: TASK,
         signal: controller.signal,
       }),
@@ -238,7 +236,7 @@ describe("locate", () => {
     const controller = new AbortController();
     const located = locator.locate({
       screen: await screen(),
-      target: TARGET,
+      question: QUESTION,
       task: TASK,
       signal: controller.signal,
     });
@@ -249,10 +247,23 @@ describe("locate", () => {
     expect(asked).toHaveLength(1);
   });
 
+  it("returns QuestionInvalid without asking when the question does not name {cell} (unhappy)", async () => {
+    const { locator, asked } = decisions([answering(["B2", "C3", "A1"])]);
+    const result = await settle(
+      locator.locate({ screen: await screen(), question: "Is the word 'Lock' here?", task: TASK }),
+    );
+    expect(jarl.error.is(result, Locator.QuestionInvalid)).toBe(true);
+    expect(asked).toHaveLength(0);
+  });
+
   it("returns ImageInvalid without asking when the screen is not an image (unhappy)", async () => {
     const { locator, asked } = decisions([answering(["B2", "C3", "A1"])]);
     const result = await settle(
-      locator.locate({ screen: new TextEncoder().encode("not a png"), target: TARGET, task: TASK }),
+      locator.locate({
+        screen: new TextEncoder().encode("not a png"),
+        question: QUESTION,
+        task: TASK,
+      }),
     );
     expect(jarl.error.is(result, ScreenGrid.ImageInvalid)).toBe(true);
     expect(asked).toHaveLength(0);

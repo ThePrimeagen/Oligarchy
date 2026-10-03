@@ -21,10 +21,9 @@ export type Options = {
 export type Request = {
   // A PNG, JPEG or WebP screenshot.
   readonly screen: Uint8Array;
-  // What is visibly there, as the question names it: "the word 'Lock'".
-  readonly target: string;
-  // Said after every question, to tell the target from look-alikes.
-  readonly hint?: string;
+  // Asked of every cell, each round. {cell} becomes the cell's label (C3), {column} its letter
+  // and {row} its number; {cell} is required, or every cell would be asked the same thing.
+  readonly question: string;
   // What the click is for, given to Clef as state.
   readonly task: string;
   readonly signal?: AbortSignal;
@@ -56,6 +55,7 @@ export type Location = {
 // DecisionApi.Failure includes Async.Aborted.
 export type Failure =
   | Errors.NotFound
+  | Errors.QuestionInvalid
   | ScreenGrid.ImageInvalid
   | ScreenGrid.BoxInvalid
   | DecisionApi.Failure;

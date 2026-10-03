@@ -21,9 +21,8 @@ export const OPTIONS: Locator.Options = {
   retries: RETRIES,
   retryWaitMs: RETRY_WAIT_MS,
 };
-export const TARGET = "the word 'Lock'";
-export const HINT =
-  "'Lock' is the label of the second entry of the System menu, written just right of a padlock icon.";
+export const QUESTION =
+  "In image 2, is the word 'Lock' in grid cell {cell} (column {column}, row {row})? 'Lock' is the label of the second entry of the System menu, written just right of a padlock icon.";
 export const TASK = "Lock the session using the mouse.";
 
 export const screen = () =>

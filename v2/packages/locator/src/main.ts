@@ -8,7 +8,7 @@ import * as Geometry from "./geometry.ts";
 import type { CellAnswer, Failure, Locator, Location, Options, Request, Round } from "./types.ts";
 
 export type { CellAnswer, Failure, Locator, Location, Options, Request, Round } from "./types.ts";
-export { NotFound, notFound } from "./errors.ts";
+export { NotFound, notFound, QuestionInvalid } from "./errors.ts";
 
 declare module "@oligarchy/app" {
   interface Services {
@@ -27,8 +27,10 @@ const passing = (error: DecisionApi.Failure): boolean =>
   jarl.error.is(error, DecisionApi.TimedOut);
 
 const question = (request: Request, cell: ScreenGrid.Cell): string =>
-  `In image 2, is ${request.target} in grid cell ${cell.label} (column ${cell.label[0]}, row ${cell.row + 1})?` +
-  (request.hint === undefined ? "" : ` ${request.hint}`);
+  request.question
+    .replaceAll("{cell}", cell.label)
+    .replaceAll("{column}", cell.label.slice(0, 1))
+    .replaceAll("{row}", String(cell.row + 1));
 
 const described = (
   view: ScreenGrid.GridImage,
@@ -123,6 +125,9 @@ export const create = App.createService<DecisionApi.DecisionApi, Options, Locato
             ? signal.reason
             : new Async.Aborted("aborted"),
         );
+      }
+      if (!request.question.includes("{cell}")) {
+        return jarl.err(new Errors.QuestionInvalid("the question must name {cell}"));
       }
       const opened = await ScreenGrid.open(request.screen);
       if (jarl.is_err(opened)) {

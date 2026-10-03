@@ -7,6 +7,10 @@ export type NotFound = InstanceType<typeof NotFound> & {
   readonly threshold: number;
 };
 
+// The question never names {cell}: every cell would be asked the same thing.
+export const QuestionInvalid = jarl.error.define("LocatorQuestionInvalid");
+export type QuestionInvalid = InstanceType<typeof QuestionInvalid>;
+
 export const notFound = (best: number, threshold: number): NotFound =>
   Object.assign(
     new NotFound(`best cell scored ${best.toFixed(3)}, below the threshold ${threshold}`),
