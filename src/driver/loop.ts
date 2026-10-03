@@ -61,7 +61,12 @@ type Limited = { readonly reason: "limit-reached"; readonly why: string };
 
 // How the loop itself ends. A limit is only ever a Limited, carrying its reason, so the release
 // can never read a bare limit as a clean end and save a half-minted disk.
-type Ended = { readonly reason: "model-stopped" | "machine-off" };
+type Ended = { readonly reason: "model-stopped" | "machine-off" | "restarted" };
+
+// A model that has worked the last ActionList line and names step 1 again is starting the mission
+// over instead of calling Done. Left to it, it walks the list again and again until the step limit
+// fails a run whose proof may already be on screen, so the harness ends it as Done and says why.
+const RESTARTED = "restarted at step 1 after the last step; ended as Done";
 
 export type Failure =
   | SharedErrors.CommandError
@@ -261,6 +266,11 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
   // naming another step ends it and opens that one; the stop or save closes the last.
   const steps = Steps.stepsOf(facts.instruction);
   let step = 1;
+  // A one-line list has no step to go back to, and a mint ends with its save, which only a guest
+  // that powered off passes.
+  const watchesRestart = !facts.mint && steps.length > 1;
+  // A guest action ran under the last ActionList line, or a step past it.
+  let lastWorked = false;
   // Not while that step's intent start has failed.
   let intentOpen = false;
   // A run with no stored server leaves --server-url off its commands, so the client uses
@@ -488,6 +498,10 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
             yield* log(input, turn, "stop", "machine-off");
             return { reason: "machine-off" } satisfies Ended;
           }
+          if (lastWorked && reply.step === 1) {
+            yield* log(input, turn, "stop", RESTARTED);
+            return { reason: "restarted" } satisfies Ended;
+          }
 
           // The model is asked fresh each turn, so the past steps carry the number it repeats.
           const said = `step ${String(reply.step)}: ${reply.reason}`;
@@ -555,6 +569,9 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
 
           const ran = yield* Client.run(guest);
           yield* log(input, turn, "command", `${shown(guest)} exit ${String(ran.exitCode)}`);
+          if (watchesRestart && step >= steps.length) {
+            lastWorked = true;
+          }
           const imaging = guest.args[0] === "get-image";
           if (ran.exitCode === 0) {
             pointer = Pointer.after(guest.args, pointer);
@@ -600,7 +617,9 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           Exit.isSuccess(exit) && exit.value.reason === "limit-reached"
             ? exit.value.why
             : undefined;
-        const reason = failed ? Render.headline(Cause.squash(exit.cause)) : limited;
+        const restarted =
+          Exit.isSuccess(exit) && exit.value.reason === "restarted" ? RESTARTED : undefined;
+        const reason = failed ? Render.headline(Cause.squash(exit.cause)) : (limited ?? restarted);
         const save = !failed && limited === undefined && facts.mint;
         const endArgs = save
           ? ["save"]
@@ -701,7 +720,7 @@ export const run = Effect.fn("Driver.run")(function* (input: Input) {
           );
           return yield* Effect.failCause(ended.cause);
         }
-        yield* closeResult(limited === undefined, limited);
+        yield* closeResult(limited === undefined, limited ?? restarted);
         return yield* log(
           input,
           0,

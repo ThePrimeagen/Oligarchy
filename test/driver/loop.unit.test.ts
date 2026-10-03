@@ -988,6 +988,137 @@ describe("driver loop", () => {
     }),
   );
 
+  describe("a return to step 1 after the last step", () => {
+    const THREE_STEPS =
+      "<ActionList>\n* Open a terminal.\n* Type the command.\n* Close the terminal.\n* any crashes or erroneous behavior must be reported\n</ActionList>";
+    const RESTARTED = "restarted at step 1 after the last step; ended as Done";
+
+    const closes = (spawned: ReadonlyArray<{ readonly args: ReadonlyArray<string> }>) =>
+      spawned.filter((child) => child.args[0] === "test-results").map((child) => child.args);
+
+    it.effect(
+      "ends the run as Done: the restarted action reaches no guest, and the stop and result say why",
+      () =>
+        Effect.gen(function* () {
+          const recorder = routed(
+            answers(
+              sendKeys("open it", 1),
+              sendKeys("type it", 2),
+              sendKeys("close it", 3),
+              sendKeys("open it again", 1),
+              sendKeys("type it again", 2),
+              done(),
+            ),
+          );
+          const log: Array<string> = [];
+          const { stopped, spawner } = yield* run(
+            config(),
+            recorder.layer,
+            () => ({ exitCode: 0 }),
+            log,
+            { seed: { instruction: THREE_STEPS } },
+          );
+          expect(stopped).toEqual({ reason: "result-closed" });
+          expect(modelRequests(recorder.requests)).toHaveLength(4);
+          const paths = guestPaths(recorder.requests);
+          expect(paths.filter((path) => path === "/send-keys")).toHaveLength(3);
+          expect(paths.at(-1)).toBe("/stop");
+          expect(JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}")).toMatchObject({
+            status: "succeeded",
+            reason: RESTARTED,
+          });
+          expect(closes(spawner.spawned)).toEqual([
+            expect.arrayContaining(["--status", "success", "--reason", RESTARTED]),
+          ]);
+          expect(
+            events(log).some((event) => event.kind === "stop" && event.text === RESTARTED),
+          ).toBe(true);
+        }),
+    );
+
+    it.effect("a return to step 1 before the last step was worked keeps driving (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            sendKeys("open it", 1),
+            sendKeys("type it", 2),
+            sendKeys("open it again", 1),
+            done(),
+          ),
+        );
+        const { stopped, spawner } = yield* run(
+          config(),
+          recorder.layer,
+          () => ({ exitCode: 0 }),
+          [],
+          { seed: { instruction: THREE_STEPS } },
+        );
+        expect(stopped).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests).filter((path) => path === "/send-keys")).toHaveLength(
+          3,
+        );
+        const stop = JSON.parse(guestRequests(recorder.requests).at(-1)?.body ?? "{}");
+        expect(stop).toMatchObject({ status: "succeeded" });
+        expect(stop).not.toHaveProperty("reason");
+        expect(closes(spawner.spawned)[0]).not.toContain("--reason");
+      }),
+    );
+
+    it.effect("a return to a middle step after the last step keeps driving (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            sendKeys("open it", 1),
+            sendKeys("type it", 2),
+            sendKeys("close it", 3),
+            sendKeys("type it again", 2),
+            done(),
+          ),
+        );
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+          seed: { instruction: THREE_STEPS },
+        });
+        expect(stopped).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests).filter((path) => path === "/send-keys")).toHaveLength(
+          4,
+        );
+      }),
+    );
+
+    it.effect("a one-line ActionList stays on step 1 and never ends early (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(answers(sendKeys("open it", 1), sendKeys("look again", 1), done()));
+        const { stopped } = yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+          seed: { instruction: "<ActionList>\n* Open a terminal.\n</ActionList>" },
+        });
+        expect(stopped).toEqual({ reason: "result-closed" });
+        expect(guestPaths(recorder.requests).filter((path) => path === "/send-keys")).toHaveLength(
+          2,
+        );
+      }),
+    );
+
+    it.effect("a mint that returns to step 1 keeps driving; only its save ends it (unhappy)", () =>
+      Effect.gen(function* () {
+        const recorder = routed(
+          answers(
+            sendKeys("open it", 1),
+            sendKeys("type it", 2),
+            sendKeys("close it", 3),
+            sendKeys("open it again", 1),
+            done(),
+          ),
+        );
+        yield* run(config(), recorder.layer, () => ({ exitCode: 0 }), [], {
+          seed: { name: "mint", serverUrl: "", instruction: THREE_STEPS },
+        });
+        const paths = guestPaths(recorder.requests);
+        expect(paths.filter((path) => path === "/send-keys")).toHaveLength(4);
+        expect(paths.at(-1)).toBe("/save");
+      }),
+    );
+  });
+
   it.effect(
     "opens and ends step intents by calling the client's intent functions; no ./client line is built for them",
     () =>
